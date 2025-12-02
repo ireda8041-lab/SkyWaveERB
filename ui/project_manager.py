@@ -1003,7 +1003,7 @@ class ProjectManagerTab(QWidget):
         self.profit_button.setEnabled(False)
 
         # زرار طباعة الفاتورة
-        self.print_button = QPushButton("🖨️ طباعة فاتورة")
+        self.print_button = QPushButton("🖨️ طباعة")
         self.print_button.setStyleSheet(BUTTON_STYLES["secondary"])
         self.print_button.clicked.connect(self.print_invoice)
         self.print_button.setEnabled(False)
@@ -1351,7 +1351,7 @@ class ProjectManagerTab(QWidget):
         dialog.exec()
     
     def print_invoice(self):
-        """طباعة فاتورة المشروع المحدد باستخدام القالب الحديث"""
+        """🖨️ طباعة فاتورة المشروع المحدد باستخدام القالب الحديث (Modern Blue Design)"""
         if not self.selected_project:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مشروع أولاً")
             return
@@ -1366,7 +1366,10 @@ class ProjectManagerTab(QWidget):
                 QMessageBox.warning(self, "خطأ", "لم يتم العثور على معلومات العميل")
                 return
             
-            # Step C: Prepare the data dictionary for modern_invoice.html
+            # Step C: Get profitability data for paid/remaining amounts
+            profit_data = self.project_service.get_project_profitability(project.name)
+            
+            # Step D: Prepare the complete data dictionary
             invoice_data = {
                 "invoice_number": f"INV-{project.id if hasattr(project, 'id') else project.name}",
                 "client_name": client.name,
@@ -1381,84 +1384,46 @@ class ProjectManagerTab(QWidget):
                     }
                     for item in project.items
                 ],
-                "grand_total": f"{project.total_price:,.2f}",
-                "total_paid": f"{project.paid_amount:,.2f}",
-                "remaining": f"{project.remaining_amount:,.2f}",
-                "logo_path": "logo.png",
-                "company_name": "Sky Wave",
-                "company_tagline": "حلول تسويقية متكاملة",
-                "company_address": "القاهرة - مصر",
-                "company_phone": "+20 XXX XXX XXXX"
+                "grand_total": f"{project.total_amount:,.2f}",
+                "total_paid": f"{profit_data.get('total_paid', 0):,.2f}",
+                "remaining": f"{profit_data.get('balance_due', 0):,.2f}"
             }
             
-            # Get company settings if available
-            if self.service_service and hasattr(self.service_service, 'settings_service'):
-                try:
-                    settings = self.service_service.settings_service.get_settings()
-                    invoice_data['company_name'] = settings.get('company_name', 'Sky Wave')
-                    invoice_data['company_address'] = settings.get('company_address', 'القاهرة - مصر')
-                    invoice_data['company_phone'] = settings.get('company_phone', '+20 XXX XXX XXXX')
-                    invoice_data['logo_path'] = settings.get('company_logo_path', 'logo.png')
-                except Exception as e:
-                    print(f"WARNING: Failed to load company settings: {e}")
+            # Step E: Use InvoicePrintingService to generate and open PDF
+            from services.invoice_printing_service import InvoicePrintingService
             
-            # Step D: Call the PDF Generator with template="modern_invoice.html"
-            if self.printing_service and hasattr(self.printing_service, 'pdf_service'):
-                pdf_service = self.printing_service.pdf_service
-                
-                # Generate output filename
-                safe_client_name = "".join(c for c in client.name if c.isalnum() or c in (' ', '_')).strip()
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_filename = f"invoice_{safe_client_name}_{timestamp}.pdf"
-                output_path = os.path.join("exports", output_filename)
-                
-                # Ensure exports directory exists
-                os.makedirs("exports", exist_ok=True)
-                
-                # Generate PDF using modern_invoice.html template
-                success = pdf_service.generate_invoice_pdf(
-                    invoice_data=invoice_data,
-                    output_path=output_path,
-                    template_name="modern_invoice.html"
-                )
-                
-                if success and os.path.exists(output_path):
-                    # Step E: Open the PDF immediately
-                    try:
-                        os.startfile(output_path)
-                        QMessageBox.information(
-                            self,
-                            "✅ تم إنشاء الفاتورة",
-                            f"تم إنشاء فاتورة PDF بنجاح!\n\n📄 {output_filename}"
-                        )
-                    except Exception as e:
-                        print(f"WARNING: Failed to open PDF: {e}")
-                        QMessageBox.information(
-                            self,
-                            "✅ تم إنشاء الفاتورة",
-                            f"تم إنشاء الفاتورة بنجاح!\n\n📄 {output_path}"
-                        )
+            # Get settings service for company data
+            settings_service = None
+            if self.service_service and hasattr(self.service_service, 'settings_service'):
+                settings_service = self.service_service.settings_service
+            
+            # Initialize printing service
+            printing_service = InvoicePrintingService(settings_service=settings_service)
+            
+            # Print invoice (generates PDF and opens it automatically)
+            pdf_path = printing_service.print_invoice(invoice_data)
+            
+            if pdf_path:
+                if pdf_path.endswith('.pdf'):
+                    QMessageBox.information(
+                        self,
+                        "✅ تم إنشاء الفاتورة",
+                        f"تم إنشاء فاتورة PDF بنجاح!\n\n📄 {os.path.basename(pdf_path)}\n\n"
+                        f"تم فتح الملف تلقائياً للطباعة."
+                    )
                 else:
-                    # Check if HTML was saved instead
-                    html_path = output_path.replace('.pdf', '.html')
-                    if os.path.exists(html_path):
-                        try:
-                            os.startfile(html_path)
-                            QMessageBox.warning(
-                                self,
-                                "⚠️ تم حفظ HTML",
-                                f"تم حفظ الفاتورة كملف HTML.\n\n"
-                                f"📄 {os.path.basename(html_path)}\n\n"
-                                f"💡 لإنشاء PDF، قم بتثبيت:\n"
-                                f"   • wkhtmltopdf أو\n"
-                                f"   • Google Chrome/Edge"
-                            )
-                        except:
-                            QMessageBox.warning(self, "⚠️ تم حفظ HTML", f"تم حفظ الفاتورة في:\n{html_path}")
-                    else:
-                        QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
+                    # HTML file was created instead
+                    QMessageBox.warning(
+                        self,
+                        "⚠️ تم حفظ HTML",
+                        f"تم حفظ الفاتورة كملف HTML.\n\n"
+                        f"📄 {os.path.basename(pdf_path)}\n\n"
+                        f"💡 لإنشاء PDF، قم بتثبيت:\n"
+                        f"   pip install weasyprint\n"
+                        f"أو استخدم Google Chrome/Edge"
+                    )
             else:
-                QMessageBox.warning(self, "خطأ", "خدمة الطباعة غير متوفرة")
+                QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
                 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في طباعة الفاتورة:\n{str(e)}")
@@ -1469,66 +1434,83 @@ class ProjectManagerTab(QWidget):
     
 
     def preview_invoice_template(self):
-        """معاينة قالب الفاتورة للمشروع المحدد"""
+        """معاينة قالب الفاتورة الحديث (Modern Blue Design) في المتصفح"""
         if not self.selected_project:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مشروع أولاً")
             return
         
-        if not self.template_service:
-            QMessageBox.warning(self, "خطأ", "خدمة القوالب غير متوفرة")
-            return
-        
         try:
-            # جلب معلومات العميل
-            client = self.client_service.get_client_by_id(self.selected_project.client_id)
+            # Step A: Get the Selected Project
+            project = self.selected_project
+            
+            # Step B: Fetch Client Data
+            client = self.client_service.get_client_by_id(project.client_id)
             if not client:
                 QMessageBox.warning(self, "خطأ", "لم يتم العثور على معلومات العميل")
                 return
             
-            # تحضير معلومات العميل
-            client_info = {
-                'name': client.name,
-                'phone': client.phone or '',
-                'email': client.email or '',
-                'address': client.address or ''
+            # Step C: Get profitability data for paid/remaining amounts
+            profit_data = self.project_service.get_project_profitability(project.name)
+            
+            # Step D: Prepare the complete data dictionary (same as print_invoice)
+            invoice_data = {
+                "invoice_number": f"INV-{project.id if hasattr(project, 'id') else project.name}",
+                "client_name": client.name,
+                "client_phone": client.phone or "---",
+                "client_address": client.address or "---",
+                "project_name": project.name,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "items": [
+                    {
+                        "name": item.description,
+                        "price": f"{item.total:,.2f}"
+                    }
+                    for item in project.items
+                ],
+                "grand_total": f"{project.total_amount:,.2f}",
+                "total_paid": f"{profit_data.get('total_paid', 0):,.2f}",
+                "remaining": f"{profit_data.get('balance_due', 0):,.2f}"
             }
             
-            # جلب الدفعات مع اسم الحساب
-            payments = []
-            try:
-                # استخدام اسم المشروع بدلاً من ID
-                project_payments = self.project_service.get_payments_for_project(self.selected_project.name)
-                print(f"INFO: [ProjectManager] تم جلب {len(project_payments)} دفعة للمشروع: {self.selected_project.name}")
-                for payment in project_payments:
-                    # جلب اسم الحساب
-                    account_name = "نقدي"
-                    try:
-                        account = self.accounting_service.repo.get_account_by_code(payment.account_id)
-                        if account:
-                            account_name = account.name
-                    except:
-                        pass
-                    payments.append({
-                        'date': payment.date,
-                        'amount': payment.amount,
-                        'method': account_name,
-                        'account_name': account_name
-                    })
-                    print(f"  - دفعة: تاريخ={payment.date}, مبلغ={payment.amount}, حساب={account_name}")
-            except Exception as e:
-                print(f"WARNING: فشل في جلب الدفعات: {e}")
+            # Step E: Use InvoicePrintingService to generate HTML preview
+            from services.invoice_printing_service import InvoicePrintingService
             
-            print(f"INFO: [ProjectManager] إرسال {len(payments)} دفعة للمعاينة")
+            # Get settings service for company data
+            settings_service = None
+            if self.service_service and hasattr(self.service_service, 'settings_service'):
+                settings_service = self.service_service.settings_service
             
-            # معاينة القالب
-            success = self.template_service.preview_template(
-                self.selected_project, client_info, payments=payments
+            # Initialize printing service
+            printing_service = InvoicePrintingService(settings_service=settings_service)
+            
+            # Generate HTML content
+            context = printing_service._prepare_context(invoice_data)
+            template = printing_service.env.get_template("final_invoice.html")
+            html_content = template.render(**context)
+            
+            # Save to temporary file and open in browser
+            import tempfile
+            import webbrowser
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+                f.write(html_content)
+                temp_file = f.name
+            
+            # Open in default browser
+            webbrowser.open(f'file:///{temp_file}')
+            
+            print(f"INFO: [ProjectManager] تم فتح معاينة الفاتورة في المتصفح: {temp_file}")
+            
+            QMessageBox.information(
+                self,
+                "✅ معاينة الفاتورة",
+                "تم فتح معاينة الفاتورة في المتصفح الافتراضي.\n\n"
+                "يمكنك طباعتها مباشرة من المتصفح (Ctrl+P)"
             )
-            
-            if not success:
-                QMessageBox.warning(self, "خطأ", "فشل في معاينة قالب الفاتورة")
         
         except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء معاينة القالب:\n{str(e)}")
+            QMessageBox.critical(self, "خطأ", f"فشل في معاينة الفاتورة:\n{str(e)}")
+            import traceback
+            traceback.print_exc()
 
     # WhatsApp function removed - feature disabled

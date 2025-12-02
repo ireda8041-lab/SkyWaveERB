@@ -1471,23 +1471,40 @@ class SettingsTab(QWidget):
         self.check_update_btn.setText("🔍 التحقق من التحديثات")
 
     def on_update_error(self, error_message):
-        """عند حدوث خطأ في الفحص"""
-        self.update_status_label.setText(
-            f"❌ حدث خطأ أثناء التحقق من التحديثات:\n\n{error_message}"
-        )
-        self.update_status_label.setStyleSheet("""
-            background-color: #ef4444;
-            color: white;
+        """عند حدوث خطأ في الفحص - عرض تحذير بسيط بدلاً من رسالة خطأ"""
+        # Handle 404 and connection errors gracefully
+        if "404" in error_message or "فشل الاتصال" in error_message:
+            self.update_status_label.setText(
+                f"⚠️ لا توجد تحديثات متاحة حالياً\n\n"
+                f"سيتم التحقق مرة أخرى لاحقاً"
+            )
+            self.update_status_label.setStyleSheet("""
+                background-color: #f59e0b;
+                color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
         """)
+        else:
+            # For other errors, show the original error message
+            self.update_status_label.setText(
+                f"❌ حدث خطأ أثناء التحقق من التحديثات:\n\n{error_message}"
+            )
+            self.update_status_label.setStyleSheet("""
+                background-color: #ef4444;
+                color: white;
+                padding: 15px;
+                border-radius: 8px;
+                font-size: 13px;
+            """)
         
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
         self.check_update_btn.setText("🔍 التحقق من التحديثات")
         
-        QMessageBox.warning(self, "خطأ", f"فشل التحقق من التحديثات:\n{error_message}")
+        # Don't show popup for 404 errors - just the subtle warning above
+        if not ("404" in error_message or "فشل الاتصال" in error_message):
+            QMessageBox.warning(self, "خطأ", f"فشل التحقق من التحديثات:\n{error_message}")
 
     def download_update(self):
         """تنزيل التحديث"""
