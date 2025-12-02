@@ -38,6 +38,9 @@ class TemplateService(BaseService):
             autoescape=True
         )
         
+        # إضافة فلاتر مخصصة
+        self.jinja_env.filters['format_currency'] = self._format_currency
+        
         print(f"INFO: [TemplateService] Templates directory: {self.templates_dir}")
         
         # إنشاء جدول القوالب
@@ -67,6 +70,16 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في إنشاء جدول القوالب: {e}")
     
+    @staticmethod
+    def _format_currency(value):
+        """تنسيق الأرقام بفواصل الآلاف"""
+        try:
+            if isinstance(value, str):
+                value = float(value.replace(',', ''))
+            return f"{value:,.2f}"
+        except:
+            return str(value)
+    
     def _add_default_template(self):
         """إضافة القالب الافتراضي"""
         try:
@@ -77,12 +90,12 @@ class TemplateService(BaseService):
             
             if count == 0:
                 # التحقق من وجود القالب في المجلد
-                template_file = "skywave_ads_invoice_template.html"
+                template_file = "final_invoice.html"
                 template_path = os.path.join(self.templates_dir, template_file)
                 
                 if not os.path.exists(template_path):
                     # جرب القوالب الأخرى
-                    for alt_template in ["skywave_ads_invoice_template.html"]:
+                    for alt_template in ["final_invoice.html", "skywave_ads_invoice_template.html"]:
                         alt_path = os.path.join(self.templates_dir, alt_template)
                         if os.path.exists(alt_path):
                             template_file = alt_template

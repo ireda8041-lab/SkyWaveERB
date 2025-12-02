@@ -1369,9 +1369,41 @@ class ProjectManagerTab(QWidget):
             # Step C: Get profitability data for paid/remaining amounts
             profit_data = self.project_service.get_project_profitability(project.name)
             
+            # Step C2: Get payments for the project
+            payments_list = []
+            try:
+                payments = self.project_service.get_payments_for_project(project.name)
+                for payment in payments:
+                    # Get account name from accounting service
+                    account_name = "نقدي"
+                    if hasattr(payment, 'account_id') and payment.account_id:
+                        try:
+                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                            if account:
+                                account_name = account.name
+                        except:
+                            pass
+                    
+                    payments_list.append({
+                        'date': payment.date.strftime("%Y-%m-%d") if hasattr(payment.date, 'strftime') else str(payment.date)[:10],
+                        'amount': f"{payment.amount:,.0f}",
+                        'method': payment.method if hasattr(payment, 'method') else account_name,
+                        'account_name': account_name
+                    })
+            except Exception as e:
+                print(f"WARNING: [ProjectManager] فشل جلب الدفعات: {e}")
+            
             # Step D: Prepare the complete data dictionary
+            # Generate unique invoice number based on timestamp
+            import random
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            random_suffix = random.randint(10, 99)
+            invoice_number = f"SW-{timestamp}{random_suffix}"
+            
             invoice_data = {
-                "invoice_number": f"INV-{project.id if hasattr(project, 'id') else project.name}",
+                "invoice_number": invoice_number,
+                "invoice_date": project.start_date.strftime("%Y-%m-%d") if hasattr(project, 'start_date') and project.start_date else datetime.now().strftime("%Y-%m-%d"),
+                "due_date": project.end_date.strftime("%Y-%m-%d") if hasattr(project, 'end_date') and project.end_date else datetime.now().strftime("%Y-%m-%d"),
                 "client_name": client.name,
                 "client_phone": client.phone or "---",
                 "client_address": client.address or "---",
@@ -1380,13 +1412,18 @@ class ProjectManagerTab(QWidget):
                 "items": [
                     {
                         "name": item.description,
-                        "price": f"{item.total:,.2f}"
+                        "qty": f"{item.quantity:.1f}",
+                        "price": f"{item.unit_price:,.0f}",
+                        "discount": f"{item.discount_rate:.1f}",
+                        "total": f"{item.total:,.0f}"
                     }
                     for item in project.items
                 ],
-                "grand_total": f"{project.total_amount:,.2f}",
-                "total_paid": f"{profit_data.get('total_paid', 0):,.2f}",
-                "remaining": f"{profit_data.get('balance_due', 0):,.2f}"
+                "subtotal": f"{project.subtotal:,.0f}" if hasattr(project, 'subtotal') else f"{project.total_amount:,.0f}",
+                "grand_total": f"{project.total_amount:,.0f}",
+                "total_paid": f"{profit_data.get('total_paid', 0):,.0f}",
+                "remaining_amount": f"{profit_data.get('balance_due', 0):,.0f}",
+                "payments": payments_list
             }
             
             # Step E: Use InvoicePrintingService to generate and open PDF
@@ -1452,9 +1489,41 @@ class ProjectManagerTab(QWidget):
             # Step C: Get profitability data for paid/remaining amounts
             profit_data = self.project_service.get_project_profitability(project.name)
             
+            # Step C2: Get payments for the project
+            payments_list = []
+            try:
+                payments = self.project_service.get_payments_for_project(project.name)
+                for payment in payments:
+                    # Get account name from accounting service
+                    account_name = "نقدي"
+                    if hasattr(payment, 'account_id') and payment.account_id:
+                        try:
+                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                            if account:
+                                account_name = account.name
+                        except:
+                            pass
+                    
+                    payments_list.append({
+                        'date': payment.date.strftime("%Y-%m-%d") if hasattr(payment.date, 'strftime') else str(payment.date)[:10],
+                        'amount': f"{payment.amount:,.0f}",
+                        'method': payment.method if hasattr(payment, 'method') else account_name,
+                        'account_name': account_name
+                    })
+            except Exception as e:
+                print(f"WARNING: [ProjectManager] فشل جلب الدفعات: {e}")
+            
             # Step D: Prepare the complete data dictionary (same as print_invoice)
+            # Generate unique invoice number based on timestamp
+            import random
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            random_suffix = random.randint(10, 99)
+            invoice_number = f"SW-{timestamp}{random_suffix}"
+            
             invoice_data = {
-                "invoice_number": f"INV-{project.id if hasattr(project, 'id') else project.name}",
+                "invoice_number": invoice_number,
+                "invoice_date": project.start_date.strftime("%Y-%m-%d") if hasattr(project, 'start_date') and project.start_date else datetime.now().strftime("%Y-%m-%d"),
+                "due_date": project.end_date.strftime("%Y-%m-%d") if hasattr(project, 'end_date') and project.end_date else datetime.now().strftime("%Y-%m-%d"),
                 "client_name": client.name,
                 "client_phone": client.phone or "---",
                 "client_address": client.address or "---",
@@ -1463,13 +1532,18 @@ class ProjectManagerTab(QWidget):
                 "items": [
                     {
                         "name": item.description,
-                        "price": f"{item.total:,.2f}"
+                        "qty": f"{item.quantity:.1f}",
+                        "price": f"{item.unit_price:,.0f}",
+                        "discount": f"{item.discount_rate:.1f}",
+                        "total": f"{item.total:,.0f}"
                     }
                     for item in project.items
                 ],
-                "grand_total": f"{project.total_amount:,.2f}",
-                "total_paid": f"{profit_data.get('total_paid', 0):,.2f}",
-                "remaining": f"{profit_data.get('balance_due', 0):,.2f}"
+                "subtotal": f"{project.subtotal:,.0f}" if hasattr(project, 'subtotal') else f"{project.total_amount:,.0f}",
+                "grand_total": f"{project.total_amount:,.0f}",
+                "total_paid": f"{profit_data.get('total_paid', 0):,.0f}",
+                "remaining_amount": f"{profit_data.get('balance_due', 0):,.0f}",
+                "payments": payments_list
             }
             
             # Step E: Use InvoicePrintingService to generate HTML preview

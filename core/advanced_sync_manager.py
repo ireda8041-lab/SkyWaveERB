@@ -41,7 +41,7 @@ class ConnectionChecker(QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.is_running = True
-        self.check_interval = 30  # ثانية
+        self.check_interval = 10  # ثانية
         self.last_status = None
         
     def run(self):

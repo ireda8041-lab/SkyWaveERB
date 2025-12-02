@@ -105,10 +105,14 @@ class InvoicePrintingService:
         if getattr(sys, 'frozen', False):
             base_path = Path(sys._MEIPASS)
         else:
-            base_path = Path(__file__).parent.parent
+            # استخدام المجلد الحالي بدلاً من parent.parent
+            base_path = Path.cwd()
         
         default_logo = str(base_path / "site logo.png")
         default_font = str(base_path / "assets" / "font" / "Cairo-VariableFont_slnt,wght.ttf")
+        
+        print(f"DEBUG: [InvoicePrintingService] base_path: {base_path}")
+        print(f"DEBUG: [InvoicePrintingService] default_logo: {default_logo}")
         
         # إضافة بيانات الشركة من الإعدادات
         if self.settings_service:
@@ -118,7 +122,7 @@ class InvoicePrintingService:
                 context.setdefault('company_tagline', settings.get('company_tagline', 'حلول تسويقية متكاملة'))
                 context.setdefault('company_address', settings.get('company_address', 'القاهرة - مصر'))
                 context.setdefault('company_phone', settings.get('company_phone', '+20 XXX XXX XXXX'))
-                context.setdefault('logo_path', settings.get('company_logo_path', default_logo))
+                # لا نستخدم logo_path من الإعدادات، نستخدم default_logo دائماً
             except Exception as e:
                 print(f"WARNING: [InvoicePrintingService] فشل تحميل إعدادات الشركة: {e}")
         
@@ -127,7 +131,8 @@ class InvoicePrintingService:
         context.setdefault('company_tagline', 'حلول تسويقية متكاملة')
         context.setdefault('company_address', 'القاهرة - مصر')
         context.setdefault('company_phone', '+20 XXX XXX XXXX')
-        context.setdefault('logo_path', default_logo)
+        # استخدام default_logo دائماً
+        logo_path_for_conversion = default_logo
         context.setdefault('font_path', default_font)
         context.setdefault('invoice_number', 'INV-0000')
         context.setdefault('client_name', '---')
@@ -140,12 +145,37 @@ class InvoicePrintingService:
         context.setdefault('total_paid', '0.00')
         context.setdefault('remaining', '0.00')
         
-        # تحويل المسارات إلى مسارات مطلقة
-        if os.path.exists(context['logo_path']):
-            context['logo_path'] = os.path.abspath(context['logo_path']).replace('\\', '/')
+        # تحويل اللوجو إلى base64 للاستخدام في HTML
+        logo_base64 = ""
         
+        print(f"INFO: [InvoicePrintingService] محاولة تحميل اللوجو من: {logo_path_for_conversion}")
+        
+        if os.path.exists(logo_path_for_conversion):
+            try:
+                import base64
+                with open(logo_path_for_conversion, 'rb') as f:
+                    logo_data = f.read()
+                    logo_base64 = f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
+                context['logo_path'] = logo_base64
+                print(f"✅ [InvoicePrintingService] تم تحميل اللوجو بنجاح ({len(logo_data)} بايت)")
+            except Exception as e:
+                print(f"WARNING: [InvoicePrintingService] فشل تحميل اللوجو: {e}")
+                context['logo_path'] = ""
+        else:
+            print(f"WARNING: [InvoicePrintingService] ملف اللوجو غير موجود: {logo_path_for_conversion}")
+            context['logo_path'] = ""
+        
+        # تحويل مسار الخط إلى مسار مطلق
         if os.path.exists(context['font_path']):
             context['font_path'] = os.path.abspath(context['font_path']).replace('\\', '/')
+        
+        # إضافة الحقول المطلوبة للقالب الجديد
+        context.setdefault('invoice_date', context.get('date'))
+        context.setdefault('due_date', context.get('date'))
+        context.setdefault('company_website', 'www.skywaveads.com')
+        context.setdefault('subtotal', context.get('grand_total', '0'))
+        context.setdefault('remaining_amount', context.get('remaining', '0'))
+        context.setdefault('payments', [])
         
         return context
     
