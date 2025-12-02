@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# قاعدة البيانات المحلية
+skywave_local.db
+*.db
+*.db-journal
+
+# السجلات
+logs/*.log
+!logs/.gitkeep
+
+# الملفات المصدرة
+exports/*.xlsx
+exports/*.csv
+exports/*.pdf
+!exports/.gitkeep
+
+# ملفات WhatsApp
+whatsapp_profile/
+chrome_profiles/
+*.crx
+
+# الإعدادات المحلية
+.env
+*.local
+
+# نظام التشغيل
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# الاختبارات
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# البناء
+*.spec
+build/
+dist/
+
+# مؤقت
+*.tmp
+*.bak
+*.swp

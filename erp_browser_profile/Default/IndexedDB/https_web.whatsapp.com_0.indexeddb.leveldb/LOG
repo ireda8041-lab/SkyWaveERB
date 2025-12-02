@@ -1,0 +1,15 @@
+2025/12/02-22:20:26.007 7f20 Reusing MANIFEST D:\blogs\skywave_erp_app\erp_browser_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2025/12/02-22:20:26.008 7f20 Recovering log #117
+2025/12/02-22:20:26.020 7f20 Reusing old log D:\blogs\skywave_erp_app\erp_browser_profile\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000117.log 
+2025/12/02-22:20:26.611 7f20 Level-0 table #123: started
+2025/12/02-22:20:26.621 7f20 Level-0 table #123: 295684 bytes OK
+2025/12/02-22:20:26.623 7f20 Delete type=0 #117
+2025/12/02-22:20:26.624 7f20 Manual compaction at level-0 from '\x00(\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00)\x00\x00\x00' @ 0 : 0; will stop at (end)
+2025/12/02-22:20:28.536 1474 Compacting 1@1 + 2@2 files
+2025/12/02-22:20:28.635 1474 Generated table #124@1: 53467 keys, 2221888 bytes
+2025/12/02-22:20:28.692 1474 Generated table #125@1: 33594 keys, 1808918 bytes
+2025/12/02-22:20:28.692 1474 Compacted 1@1 + 2@2 files => 4030806 bytes
+2025/12/02-22:20:28.693 1474 compacted to: files[ 0 0 2 0 0 0 0 ]
+2025/12/02-22:20:28.694 1474 Delete type=2 #119
+2025/12/02-22:20:28.694 1474 Delete type=2 #120
+2025/12/02-22:20:28.694 1474 Delete type=2 #123

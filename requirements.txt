@@ -1,0 +1,48 @@
+# Sky Wave ERP - Modern Architecture Requirements
+# Updated for Chrome-Only Strategy & WhatsApp Integration
+
+# === CORE GUI FRAMEWORK ===
+PyQt6>=6.5.0
+
+# === DATABASE & DATA HANDLING ===
+pymongo>=4.5.0
+dnspython>=2.4.0
+pydantic>=2.4.0
+
+# === SMART INVOICE MANAGER (Removed) ===
+# selenium>=4.15.0
+# webdriver-manager>=4.0.0
+
+# === TEMPLATE ENGINE ===
+Jinja2>=3.1.2
+
+# === PDF & DOCUMENT PROCESSING ===
+reportlab>=4.0.0
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+Pillow>=10.0.0
+
+# === DATA EXPORT ===
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# === UTILITIES ===
+python-dateutil>=2.8.2
+requests>=2.31.0
+
+# === CLIPBOARD & AUTOMATION (Removed) ===
+# pyperclip>=1.8.2
+# pyautogui>=0.9.54
+
+# === LOGGING & MONITORING ===
+colorlog>=6.7.0
+
+# === BUILD TOOLS ===
+pyinstaller>=5.13.0
+
+# === DEPRECATED/REMOVED LIBRARIES ===
+# The following libraries are NO LONGER USED in the new architecture:
+# - pdfkit (replaced by Chrome PDF generation)
+# - wkhtmltopdf (replaced by Chrome PDF generation)
+# - pyautogui (replaced by Selenium automation)
+# - pywhatkit (replaced by Selenium WhatsApp Web automation)
