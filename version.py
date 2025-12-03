@@ -1,7 +1,7 @@
 # الملف: version.py
 # رقم الإصدار الحالي للبرنامج
 
-CURRENT_VERSION = "1.0.2"
+CURRENT_VERSION = "1.0.1"
 APP_NAME = "Sky Wave ERP"
 
 # رابط التحقق من التحديثات (سيتم تفعيله عند رفع version.json على GitHub)

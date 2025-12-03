@@ -135,6 +135,15 @@ class SkyWaveERPApp:
         
         # Advanced Sync Manager
         self.advanced_sync_manager = AdvancedSyncManager(repository=self.repository)
+        
+        # ⚡ التحقق من التحديثات عند بدء البرنامج
+        try:
+            from auto_updater import check_for_updates
+            has_update, latest_version, download_url, changelog = check_for_updates()
+            if has_update:
+                logger.info(f"🆕 تحديث جديد متوفر: v{latest_version}")
+        except Exception as e:
+            logger.warning(f"فشل التحقق من التحديثات: {e}")
 
         logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
         logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
