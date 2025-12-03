@@ -146,7 +146,7 @@ class KeyboardShortcutManager(QObject):
     
     def _create_shortcut(self, name: str, definition: Dict):
         """
-        إنشاء اختصار واحد
+        ⚡ إنشاء اختصار واحد بشكل احترافي
         
         Args:
             name: اسم الاختصار
@@ -157,6 +157,10 @@ class KeyboardShortcutManager(QObject):
                 QKeySequence(definition['key']),
                 self.main_window
             )
+            
+            # ⚡ تفعيل الاختصار دائماً
+            shortcut.setEnabled(True)
+            shortcut.setAutoRepeat(False)  # منع التكرار التلقائي
             
             # ربط الاختصار بالإجراء أو الإشارة
             if 'signal' in definition:

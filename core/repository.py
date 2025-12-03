@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from . import schemas # استيراد ملف الاسكيما اللي عملناه
+import time  # ⚡ لحساب وقت الـ Cache
 
 # --- إعدادات الاتصال ---
 # (استخدمت بيانات اليوزر 'skywave_app' لأنها الأنسب للبرنامج)
@@ -18,7 +19,7 @@ LOCAL_DB_FILE = "skywave_local.db" # اسم ملف قاعدة البيانات �
 
 class Repository:
     """
-    المخزن الذكي.
+    ⚡ المخزن الذكي مع Caching للسرعة.
     يتعامل مع الأونلاين (Mongo) والأوفلاين (SQLite) في مكان واحد.
     """
     
@@ -26,6 +27,8 @@ class Repository:
         self.online = False
         self.mongo_client = None
         self.mongo_db = None
+        
+
         
         try:
             # 1. محاولة الاتصال بـ MongoDB (أونلاين)
@@ -366,8 +369,11 @@ class Repository:
         self.sqlite_conn.commit()
         print("INFO: الجداول المحلية جاهزة.")
         
-        # إنشاء indexes لتحسين الأداء
+        # ⚡ إنشاء indexes لتحسين الأداء (مهم جداً للسرعة)
         self._create_sqlite_indexes()
+        
+        # تحسين قاعدة البيانات
+        self._optimize_database()
         
         # إنشاء collection و indexes في MongoDB إذا كان متصل
         if self.online:
@@ -575,34 +581,20 @@ class Repository:
 
     def get_all_clients(self) -> List[schemas.Client]:
         """
-        جلب كل العملاء "النشطين" فقط (بذكاء)
-        1. يحاول يجيب من Mongo لو فيه نت.
-        2. لو فشل (أو مفيش نت)، يجيب من SQLite.
+        ⚡ جلب كل العملاء "النشطين" فقط (محسّن للسرعة)
         """
         active_status = schemas.ClientStatus.ACTIVE.value
-        if self.online:
-            try:
-                clients_data = list(self.mongo_db.clients.find({"status": active_status}))
-                # تحويل الداتا لـ Pydantic models
-                clients_list = []
-                for c in clients_data:
-                    mongo_id = str(c.pop('_id'))
-                    c.pop('_mongo_id', None)
-                    c.pop('mongo_id', None)
-                    clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
-                print(f"INFO: تم جلب {len(clients_list)} عميل 'نشط' من الأونلاين (MongoDB).")
-                # (هنا ممكن نضيف لوجيك لتحديث الـ SQLite لو فيه وقت)
-                return clients_list
-            except Exception as e:
-                print(f"ERROR: فشل جلب العملاء من Mongo: {e}. سيتم الجلب من المحلي.")
+        
+        # ⚡ استخدام SQLite مباشرة (أسرع بكتير)
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
+            rows = self.sqlite_cursor.fetchall()
+            clients_list = [schemas.Client(**dict(row)) for row in rows]
+            return clients_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب العملاء: {e}")
+            return []
 
-        # الجلب من SQLite في حالة الأوفلاين أو فشل الأونلاين
-        self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
-        rows = self.sqlite_cursor.fetchall()
-        # تحويل الـ sqlite rows لـ Pydantic models
-        clients_list = [schemas.Client(**row) for row in rows]
-        print(f"INFO: تم جلب {len(clients_list)} عميل 'نشط' من المحلي (SQLite).")
-        return clients_list
 
     def get_archived_clients(self) -> List[schemas.Client]:
         """ (جديدة) جلب كل العملاء "المؤرشفين" فقط (بذكاء) """

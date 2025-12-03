@@ -16,60 +16,7 @@ from ui.styles import BUTTON_STYLES, TABLE_STYLE
 import os
 
 
-class ClientDataLoader(QThread):
-    """
-    ⚡ Worker Thread لتحميل بيانات العملاء في الخلفية
-    يمنع تجميد الواجهة أثناء التحميل
-    """
-    finished = pyqtSignal(list, dict, dict)  # clients_list, invoices_total, payments_total
-    error = pyqtSignal(str)
-    
-    def __init__(self, client_service, show_archived=False):
-        super().__init__()
-        self.client_service = client_service
-        self.show_archived = show_archived
-    
-    def run(self):
-        """تشغيل عملية التحميل في الخلفية"""
-        try:
-            print("INFO: [ClientDataLoader] بدء تحميل البيانات...")
-            
-            # 1. جلب العملاء
-            if self.show_archived:
-                clients_list = self.client_service.get_archived_clients()
-            else:
-                clients_list = self.client_service.get_all_clients()
-            
-            print(f"INFO: [ClientDataLoader] تم جلب {len(clients_list)} عميل")
-            
-            # 2. جلب كل الفواتير والمدفوعات مرة واحدة
-            all_invoices = self.client_service.repo.get_all_invoices()
-            all_payments = self.client_service.repo.get_all_payments()
-            
-            print(f"INFO: [ClientDataLoader] تم جلب {len(all_invoices)} فاتورة و {len(all_payments)} دفعة")
-            
-            # 3. حساب الإجماليات
-            client_invoices_total = {}
-            client_payments_total = {}
-            
-            for inv in all_invoices:
-                if inv.status != schemas.InvoiceStatus.VOID:
-                    client_invoices_total[inv.client_id] = client_invoices_total.get(inv.client_id, 0) + inv.total_amount
-            
-            for payment in all_payments:
-                client_payments_total[payment.client_id] = client_payments_total.get(payment.client_id, 0) + payment.amount
-            
-            print(f"INFO: [ClientDataLoader] تم حساب إجماليات {len(client_invoices_total)} عميل")
-            
-            # 4. إرسال النتيجة
-            self.finished.emit(clients_list, client_invoices_total, client_payments_total)
-            print("INFO: [ClientDataLoader] تم إرسال البيانات بنجاح")
-            
-        except Exception as e:
-            print(f"ERROR: [ClientDataLoader] خطأ في التحميل: {e}")
-            import traceback
-            traceback.print_exc()
-            self.error.emit(str(e))
+
 
 
 class ClientManagerTab(QWidget):
@@ -294,48 +241,49 @@ class ClientManagerTab(QWidget):
         self.update_buttons_state(False)
 
     def load_clients_data(self):
-        """⚡ تحميل بيانات العملاء باستخدام Threading (لا تجميد)"""
+        """⚡ تحميل بيانات العملاء بشكل محسّن للسرعة"""
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
-        
-        # تعطيل الأزرار أثناء التحميل
-        self.add_button.setEnabled(False)
-        self.edit_button.setEnabled(False)
-        self.export_button.setEnabled(False)
-        self.import_button.setEnabled(False)
-        self.refresh_button.setEnabled(False)
-        
-        # عرض رسالة تحميل
-        self.clients_table.setRowCount(1)
-        loading_item = QTableWidgetItem("⏳ جاري تحميل البيانات...")
-        loading_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        loading_item.setFont(QFont("Cairo", 12, QFont.Weight.Bold))
-        loading_item.setForeground(QColor("#2454a5"))
-        self.clients_table.setItem(0, 0, loading_item)
-        self.clients_table.setSpan(0, 0, 1, 8)
-        
-        # بدء التحميل في الخلفية
-        self.loader_thread = ClientDataLoader(
-            self.client_service,
-            self.show_archived_checkbox.isChecked()
-        )
-        self.loader_thread.finished.connect(self._on_data_loaded)
-        self.loader_thread.error.connect(self._on_load_error)
-        self.loader_thread.start()
-    
-    def _on_data_loaded(self, clients_list, client_invoices_total, client_payments_total):
-        """معالجة البيانات بعد التحميل"""
         try:
-            print(f"INFO: [ClientManager] استلام البيانات: {len(clients_list)} عميل")
-            self.clients_list = clients_list
+            if self.show_archived_checkbox.isChecked():
+                self.clients_list = self.client_service.get_archived_clients()
+            else:
+                self.clients_list = self.client_service.get_all_clients()
+
             self.clients_table.setRowCount(0)
+
+            # ⚡ حساب الإجماليات بدون جلب كل الفواتير (استعلام SQL مباشر محسّن)
+            client_invoices_total = {}
+            client_payments_total = {}
             
-            # إزالة الـ span
-            self.clients_table.clearSpans()
+            try:
+                # ⚡ استعلام واحد فقط لحساب إجماليات الفواتير (من المشاريع)
+                self.client_service.repo.sqlite_cursor.execute("""
+                    SELECT p.client_id, SUM(p.total_amount) as total
+                    FROM projects p
+                    WHERE p.status != 'مؤرشف'
+                    GROUP BY p.client_id
+                """)
+                client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                                        for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                
+                # ⚡ استعلام واحد فقط لحساب إجماليات المدفوعات
+                self.client_service.repo.sqlite_cursor.execute("""
+                    SELECT client_id, SUM(amount) as total
+                    FROM payments
+                    GROUP BY client_id
+                """)
+                client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                                        for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                
+                print(f"INFO: [ClientManager] تم حساب إجماليات {len(client_invoices_total)} عميل")
+            except Exception as e:
+                print(f"ERROR: فشل حساب الإجماليات: {e}")
+                import traceback
+                traceback.print_exc()
 
             for index, client in enumerate(self.clients_list):
                 self.clients_table.insertRow(index)
 
-                # اللوجو
                 logo_label = QLabel()
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 if client.logo_path and os.path.exists(client.logo_path):
@@ -349,18 +297,26 @@ class ClientManagerTab(QWidget):
                 else:
                     logo_label.setText("🚫")
                     logo_label.setStyleSheet("font-size: 20px; color: #888;")
+
                 self.clients_table.setCellWidget(index, 0, logo_label)
 
-                # البيانات الأساسية
                 self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
                 self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
-                self.clients_table.setItem(index, 3, QTableWidgetItem(client.phone or ""))
-                self.clients_table.setItem(index, 4, QTableWidgetItem(client.email or ""))
+                self.clients_table.setItem(index, 3, QTableWidgetItem(client.email or ""))
+                self.clients_table.setItem(index, 4, QTableWidgetItem(client.phone or ""))
 
-                client_id = client._mongo_id if hasattr(client, '_mongo_id') and client._mongo_id else str(client.id)
+                # ⚡ جلب ID العميل بطريقة صحيحة
+                client_id = None
+                if hasattr(client, '_mongo_id') and client._mongo_id:
+                    client_id = str(client._mongo_id)
+                elif hasattr(client, 'id') and client.id:
+                    client_id = str(client.id)
                 
                 # إجمالي الفواتير
-                total_invoices = client_invoices_total.get(client_id, 0)
+                total_invoices = 0.0
+                if client_id:
+                    total_invoices = client_invoices_total.get(client_id, 0.0)
+                
                 total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
                 total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 total_item.setForeground(QColor("#2454a5"))
@@ -368,14 +324,16 @@ class ClientManagerTab(QWidget):
                 self.clients_table.setItem(index, 5, total_item)
 
                 # إجمالي المدفوعات
-                total_payments = client_payments_total.get(client_id, 0)
+                total_payments = 0.0
+                if client_id:
+                    total_payments = client_payments_total.get(client_id, 0.0)
+                
                 payment_item = QTableWidgetItem(f"{total_payments:,.0f} ج.م")
                 payment_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 payment_item.setForeground(QColor("#00a876"))
                 payment_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
                 self.clients_table.setItem(index, 6, payment_item)
 
-                # الحالة
                 status_item = QTableWidgetItem(client.status.value)
                 if client.status == schemas.ClientStatus.ARCHIVED:
                     status_item.setBackground(QColor("#ef4444"))
@@ -386,34 +344,12 @@ class ClientManagerTab(QWidget):
                 status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.clients_table.setItem(index, 7, status_item)
 
-            print(f"✅ [ClientManager] تم تحميل {len(self.clients_list)} عميل بنجاح")
+            print(f"INFO: [ClientManager] تم جلب {len(self.clients_list)} عميل.")
             self.selected_client = None
             self.update_buttons_state(False)
-            
+
         except Exception as e:
-            print(f"ERROR: [ClientManager] فشل معالجة البيانات: {e}")
-            QMessageBox.critical(self, "خطأ", f"فشل معالجة البيانات:\n{str(e)}")
-        
-        finally:
-            # إعادة تفعيل الأزرار
-            self.add_button.setEnabled(True)
-            self.export_button.setEnabled(True)
-            self.import_button.setEnabled(True)
-            self.refresh_button.setEnabled(True)
-    
-    def _on_load_error(self, error_msg):
-        """معالجة الأخطاء"""
-        print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
-        QMessageBox.critical(self, "خطأ", f"فشل تحميل البيانات:\n{error_msg}")
-        
-        # إعادة تفعيل الأزرار
-        self.add_button.setEnabled(True)
-        self.export_button.setEnabled(True)
-        self.import_button.setEnabled(True)
-        self.refresh_button.setEnabled(True)
-        
-        # مسح رسالة التحميل
-        self.clients_table.setRowCount(0)
+            print(f"ERROR: [ClientManager] فشل تحميل العملاء: {e}")
 
     def open_editor(self, client_to_edit: Optional[schemas.Client]):
         dialog = ClientEditorDialog(

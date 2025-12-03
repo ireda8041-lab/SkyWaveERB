@@ -1375,6 +1375,8 @@ class ProjectManagerTab(QWidget):
             payments_list = []
             try:
                 payments = self.project_service.get_payments_for_project(project.name)
+                print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project.name}")
+                
                 for payment in payments:
                     # Get account name from accounting service
                     account_name = "نقدي"
@@ -1383,17 +1385,40 @@ class ProjectManagerTab(QWidget):
                             account = self.accounting_service.repo.get_account_by_id(payment.account_id)
                             if account:
                                 account_name = account.name
-                        except:
-                            pass
+                            else:
+                                account_name = str(payment.account_id)
+                        except Exception as acc_err:
+                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                            account_name = str(payment.account_id)
+                    
+                    # تصحيح التاريخ
+                    payment_date = payment.date
+                    if hasattr(payment_date, 'strftime'):
+                        date_str = payment_date.strftime("%Y-%m-%d")
+                    elif isinstance(payment_date, str):
+                        date_str = payment_date[:10]
+                    else:
+                        date_str = str(payment_date)[:10]
+                    
+                    # تصحيح المبلغ
+                    try:
+                        amount_val = float(payment.amount)
+                    except:
+                        amount_val = 0.0
                     
                     payments_list.append({
-                        'date': payment.date.strftime("%Y-%m-%d") if hasattr(payment.date, 'strftime') else str(payment.date)[:10],
-                        'amount': f"{payment.amount:,.0f}",
+                        'date': date_str,
+                        'amount': amount_val,
                         'method': payment.method if hasattr(payment, 'method') else account_name,
-                        'account_name': account_name
+                        'account_name': account_name,
+                        'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
                     })
+                    
+                print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
             except Exception as e:
-                print(f"WARNING: [ProjectManager] فشل جلب الدفعات: {e}")
+                print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Step D: Prepare the complete data dictionary
             # Generate unique invoice number based on timestamp
@@ -1414,17 +1439,19 @@ class ProjectManagerTab(QWidget):
                 "items": [
                     {
                         "name": item.description,
-                        "qty": f"{item.quantity:.1f}",
-                        "price": f"{item.unit_price:,.0f}",
-                        "discount": f"{item.discount_rate:.1f}",
-                        "total": f"{item.total:,.0f}"
+                        "qty": float(item.quantity),
+                        "price": float(item.unit_price),
+                        "discount": float(item.discount_rate),
+                        "total": float(item.total)
                     }
                     for item in project.items
                 ],
-                "subtotal": f"{project.subtotal:,.0f}" if hasattr(project, 'subtotal') else f"{project.total_amount:,.0f}",
-                "grand_total": f"{project.total_amount:,.0f}",
-                "total_paid": f"{profit_data.get('total_paid', 0):,.0f}",
-                "remaining_amount": f"{profit_data.get('balance_due', 0):,.0f}",
+                "subtotal": float(project.subtotal) if hasattr(project, 'subtotal') else float(project.total_amount),
+                "grand_total": float(project.total_amount),
+                "total_paid": float(profit_data.get('total_paid', 0)),
+                "remaining_amount": float(profit_data.get('balance_due', 0)),
+                "remaining": float(profit_data.get('balance_due', 0)),
+                "total_amount": float(project.total_amount),
                 "payments": payments_list
             }
             
@@ -1495,6 +1522,8 @@ class ProjectManagerTab(QWidget):
             payments_list = []
             try:
                 payments = self.project_service.get_payments_for_project(project.name)
+                print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project.name}")
+                
                 for payment in payments:
                     # Get account name from accounting service
                     account_name = "نقدي"
@@ -1503,17 +1532,40 @@ class ProjectManagerTab(QWidget):
                             account = self.accounting_service.repo.get_account_by_id(payment.account_id)
                             if account:
                                 account_name = account.name
-                        except:
-                            pass
+                            else:
+                                account_name = str(payment.account_id)
+                        except Exception as acc_err:
+                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                            account_name = str(payment.account_id)
+                    
+                    # تصحيح التاريخ
+                    payment_date = payment.date
+                    if hasattr(payment_date, 'strftime'):
+                        date_str = payment_date.strftime("%Y-%m-%d")
+                    elif isinstance(payment_date, str):
+                        date_str = payment_date[:10]
+                    else:
+                        date_str = str(payment_date)[:10]
+                    
+                    # تصحيح المبلغ
+                    try:
+                        amount_val = float(payment.amount)
+                    except:
+                        amount_val = 0.0
                     
                     payments_list.append({
-                        'date': payment.date.strftime("%Y-%m-%d") if hasattr(payment.date, 'strftime') else str(payment.date)[:10],
-                        'amount': f"{payment.amount:,.0f}",
+                        'date': date_str,
+                        'amount': amount_val,
                         'method': payment.method if hasattr(payment, 'method') else account_name,
-                        'account_name': account_name
+                        'account_name': account_name,
+                        'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
                     })
+                    
+                print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
             except Exception as e:
-                print(f"WARNING: [ProjectManager] فشل جلب الدفعات: {e}")
+                print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Step D: Prepare the complete data dictionary (same as print_invoice)
             # Generate unique invoice number based on timestamp
@@ -1534,17 +1586,19 @@ class ProjectManagerTab(QWidget):
                 "items": [
                     {
                         "name": item.description,
-                        "qty": f"{item.quantity:.1f}",
-                        "price": f"{item.unit_price:,.0f}",
-                        "discount": f"{item.discount_rate:.1f}",
-                        "total": f"{item.total:,.0f}"
+                        "qty": float(item.quantity),
+                        "price": float(item.unit_price),
+                        "discount": float(item.discount_rate),
+                        "total": float(item.total)
                     }
                     for item in project.items
                 ],
-                "subtotal": f"{project.subtotal:,.0f}" if hasattr(project, 'subtotal') else f"{project.total_amount:,.0f}",
-                "grand_total": f"{project.total_amount:,.0f}",
-                "total_paid": f"{profit_data.get('total_paid', 0):,.0f}",
-                "remaining_amount": f"{profit_data.get('balance_due', 0):,.0f}",
+                "subtotal": float(project.subtotal) if hasattr(project, 'subtotal') else float(project.total_amount),
+                "grand_total": float(project.total_amount),
+                "total_paid": float(profit_data.get('total_paid', 0)),
+                "remaining_amount": float(profit_data.get('balance_due', 0)),
+                "remaining": float(profit_data.get('balance_due', 0)),
+                "total_amount": float(project.total_amount),
                 "payments": payments_list
             }
             

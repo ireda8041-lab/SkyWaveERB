@@ -43,8 +43,9 @@ class ProjectService:
         print("INFO: قسم المشاريع (ProjectService) جاهز.")
 
     def get_all_projects(self) -> List[schemas.Project]:
-        """ جلب كل المشاريع (ما عدا المؤرشفة) """
+        """ ⚡ جلب كل المشاريع (محسّن للسرعة) """
         try:
+            # ⚡ استخدام SQLite مباشرة بدون MongoDB
             return self.repo.get_all_projects(exclude_status=schemas.ProjectStatus.ARCHIVED)
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل جلب المشاريع: {e}")
@@ -218,42 +219,41 @@ class ProjectService:
             print(f"ERROR: [ProjectService] فشل إنشاء المشروع من عرض السعر: {e}")
 
     def _auto_update_project_status(self, project_name: str):
-        """⚡ تحديث حالة المشروع أوتوماتيك بناءً على المدفوعات"""
+        """⚡ تحديث حالة المشروع أوتوماتيك (محسّن للسرعة)"""
         try:
             project = self.repo.get_project_by_number(project_name)
             if not project:
                 return
             
-            # حساب المدفوعات
-            payments = self.repo.get_payments_for_project(project_name)
-            total_paid = sum([p.amount for p in payments])
+            # ⚡ استعلام SQL مباشر (أسرع)
+            self.repo.sqlite_cursor.execute(
+                "SELECT SUM(amount) FROM payments WHERE project_id = ?",
+                (project_name,)
+            )
+            result = self.repo.sqlite_cursor.fetchone()
+            total_paid = result[0] if result and result[0] else 0
             
             # تحديد الحالة الجديدة
             new_status = None
             if total_paid >= project.total_amount:
-                # تم الدفع بالكامل = مكتمل
                 new_status = schemas.ProjectStatus.COMPLETED
             elif total_paid > 0:
-                # تم دفع جزء = نشط
                 new_status = schemas.ProjectStatus.ACTIVE
             else:
-                # لم يتم الدفع = تخطيط
                 new_status = schemas.ProjectStatus.PLANNING
             
             # تحديث الحالة إذا تغيرت
             if new_status and project.status != new_status:
                 project.status = new_status
                 self.repo.update_project(project_name, project)
-                print(f"✅ [ProjectService] تم تحديث حالة المشروع '{project_name}' إلى '{new_status.value}'")
                 
         except Exception as e:
             print(f"WARNING: [ProjectService] فشل تحديث حالة المشروع: {e}")
     
     # --- دوال الربحية (معدلة عشان تستخدم الداتا الصح) ---
     def get_project_profitability(self, project_name: str) -> dict:
-        print(f"INFO: [ProjectService] جاري حساب ربحية مشروع: {project_name}")
+        """⚡ حساب ربحية المشروع (محسّن للسرعة)"""
         try:
-            # (الإيرادات هي قيمة المشروع نفسه)
             project = self.repo.get_project_by_number(project_name)
             if not project:
                 return {
@@ -264,16 +264,32 @@ class ProjectService:
                     "balance_due": 0
                 }
 
-            total_revenue = project.total_amount  # (الإيراد هو إجمالي العقد)
+            total_revenue = project.total_amount
 
-            total_expenses = self.repo.get_project_expenses(project_name)
+            # ⚡ استعلام SQL مباشر للمصروفات (أسرع)
+            try:
+                self.repo.sqlite_cursor.execute(
+                    "SELECT SUM(amount) FROM expenses WHERE project_id = ?",
+                    (project_name,)
+                )
+                result = self.repo.sqlite_cursor.fetchone()
+                total_expenses = result[0] if result and result[0] else 0
+            except:
+                total_expenses = 0
 
-            # (الجديد: هنجيب المدفوع)
-            payments = self.repo.get_payments_for_project(project_name)
-            total_paid = sum([p.amount for p in payments])
+            # ⚡ استعلام SQL مباشر للدفعات (أسرع)
+            try:
+                self.repo.sqlite_cursor.execute(
+                    "SELECT SUM(amount) FROM payments WHERE project_id = ?",
+                    (project_name,)
+                )
+                result = self.repo.sqlite_cursor.fetchone()
+                total_paid = result[0] if result and result[0] else 0
+            except:
+                total_paid = 0
 
-            net_profit = total_revenue - total_expenses  # (ربح الشركة)
-            balance_due = max(0, total_revenue - total_paid)  # (المتبقي على العميل - لا يمكن أن يكون سالب)
+            net_profit = total_revenue - total_expenses
+            balance_due = max(0, total_revenue - total_paid)
             
             # ⚡ تحديث حالة المشروع أوتوماتيك
             self._auto_update_project_status(project_name)

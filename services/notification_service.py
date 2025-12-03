@@ -238,6 +238,39 @@ class NotificationService:
             logger.error(f"فشل الحصول على الإشعارات: {e}")
             return []
     
+    def get_recent_activities(self, limit: int = 10) -> List[Notification]:
+        """
+        ⚡ الحصول على آخر 10 أنشطة/أحداث في البرنامج
+        
+        Args:
+            limit: عدد الأنشطة (افتراضي 10)
+            
+        Returns:
+            قائمة آخر الأنشطة
+        """
+        try:
+            cursor = self.repo.sqlite_cursor
+            cursor.execute("""
+                SELECT * FROM notifications 
+                ORDER BY created_at DESC 
+                LIMIT ?
+            """, (limit,))
+            
+            rows = cursor.fetchall()
+            activities = []
+            
+            for row in rows:
+                notification = self._row_to_notification(row)
+                if notification:
+                    activities.append(notification)
+            
+            logger.debug(f"تم جلب {len(activities)} نشاط حديث")
+            return activities
+        
+        except Exception as e:
+            logger.error(f"فشل الحصول على الأنشطة الحديثة: {e}")
+            return []
+    
     def mark_as_read(self, notification_id: int) -> bool:
         """
         تحديد إشعار كمقروء
@@ -470,6 +503,88 @@ class NotificationService:
             )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار فشل المزامنة: {e}")
+    
+    # ⚡ معالجات الأحداث الجديدة - آخر 10 أحداث
+    
+    def _on_client_created(self, data: dict):
+        """معالج حدث إنشاء عميل جديد"""
+        try:
+            client = data.get('client')
+            if client:
+                self.create_notification(
+                    title="✅ عميل جديد",
+                    message=f"تم إضافة العميل: {client.name}",
+                    type=NotificationType.SUCCESS,
+                    priority=NotificationPriority.LOW,
+                    related_entity_type="client",
+                    related_entity_id=str(client.id) if hasattr(client, 'id') else None
+                )
+        except Exception as e:
+            logger.error(f"فشل إنشاء إشعار العميل: {e}")
+    
+    def _on_project_created(self, data: dict):
+        """معالج حدث إنشاء مشروع جديد"""
+        try:
+            project = data.get('project')
+            if project:
+                self.create_notification(
+                    title="🚀 مشروع جديد",
+                    message=f"تم إنشاء المشروع: {project.name}",
+                    type=NotificationType.SUCCESS,
+                    priority=NotificationPriority.MEDIUM,
+                    related_entity_type="project",
+                    related_entity_id=project.name
+                )
+        except Exception as e:
+            logger.error(f"فشل إنشاء إشعار المشروع: {e}")
+    
+    def _on_invoice_created(self, data: dict):
+        """معالج حدث إنشاء فاتورة جديدة"""
+        try:
+            invoice = data.get('invoice')
+            if invoice:
+                self.create_notification(
+                    title="📄 فاتورة جديدة",
+                    message=f"تم إنشاء الفاتورة: {invoice.invoice_number}",
+                    type=NotificationType.INFO,
+                    priority=NotificationPriority.MEDIUM,
+                    related_entity_type="invoice",
+                    related_entity_id=invoice.invoice_number
+                )
+        except Exception as e:
+            logger.error(f"فشل إنشاء إشعار الفاتورة: {e}")
+    
+    def _on_expense_created(self, data: dict):
+        """معالج حدث إنشاء مصروف جديد"""
+        try:
+            expense = data.get('expense')
+            if expense:
+                self.create_notification(
+                    title="💸 مصروف جديد",
+                    message=f"تم تسجيل مصروف: {expense.category} - {expense.amount} ج.م",
+                    type=NotificationType.WARNING,
+                    priority=NotificationPriority.LOW,
+                    related_entity_type="expense",
+                    related_entity_id=str(expense.id) if hasattr(expense, 'id') else None
+                )
+        except Exception as e:
+            logger.error(f"فشل إنشاء إشعار المصروف: {e}")
+    
+    def _on_quotation_created(self, data: dict):
+        """معالج حدث إنشاء عرض سعر جديد"""
+        try:
+            quotation = data.get('quotation')
+            if quotation:
+                self.create_notification(
+                    title="📋 عرض سعر جديد",
+                    message=f"تم إنشاء عرض السعر: {quotation.quote_number}",
+                    type=NotificationType.INFO,
+                    priority=NotificationPriority.LOW,
+                    related_entity_type="quotation",
+                    related_entity_id=quotation.quote_number
+                )
+        except Exception as e:
+            logger.error(f"فشل إنشاء إشعار عرض السعر: {e}")
     
     def check_project_due_dates(self):
         """

@@ -418,8 +418,10 @@ class TemplateService(BaseService):
                     print(f"  - دفعة: {payment_entry}")
             
             # حساب المتبقي - إصلاح المشكلة المحاسبية
-            remaining = grand_total - total_paid
+            remaining = max(0, grand_total - total_paid)  # ⚡ لا يمكن أن يكون سالب
 
+            print(f"  - الإجمالي الكلي: {grand_total}")
+            print(f"  - المدفوع: {total_paid}")
             print(f"  - المتبقي: {remaining}")
             
             # إضافة معلومات الشركة من الإعدادات

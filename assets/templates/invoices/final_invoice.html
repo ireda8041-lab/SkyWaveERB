@@ -35,22 +35,19 @@
             padding: 20px;
             display: flex;
             justify-content: center;
+            min-height: 100vh;
         }
         
         .invoice-container {
             background-color: white;
             width: 210mm;
             max-width: 210mm;
-            min-height: 297mm;
-            max-height: 297mm;
-            height: 297mm;
-            padding: 40px;
+            padding: 25px;
             border-radius: 5px;
             box-shadow: 0 0 15px rgba(247, 245, 245, 0.1);
             position: relative;
             display: flex;
             flex-direction: column;
-            overflow: hidden;
             box-sizing: border-box;
         }
         
@@ -323,7 +320,7 @@
             font-size: 15px;
         }
         
-        /* ⚡ تحسينات الطباعة - A4 ثابت */
+        /* ⚡ تحسينات الطباعة - A4 كامل */
         @media print {
             @page {
                 size: A4;
@@ -340,11 +337,19 @@
                 box-shadow: none;
                 width: 210mm !important;
                 max-width: 210mm !important;
-                height: 297mm !important;
-                max-height: 297mm !important;
                 min-height: 297mm !important;
                 border-radius: 0;
-                page-break-after: avoid;
+                padding: 20px !important;
+                page-break-inside: avoid;
+            }
+            
+            /* إخفاء الأزرار والعناصر غير الضرورية */
+            button, .no-print {
+                display: none !important;
+            }
+            
+            /* تأكيد ظهور كل العناصر */
+            .section-title, table, .totals-container, .footer {
                 page-break-inside: avoid;
             }
         }
@@ -434,7 +439,7 @@
             </tbody>
         </table>
         
-        {% if payments %}
+        {% if payments and payments|length > 0 %}
         <div class="section-title" style="margin-top: 20px;">
              سجل الدفعات المستلمة
         </div>
@@ -451,21 +456,9 @@
                 {% for payment in payments %}
                 <tr class="data-row">
                     <td>{{ loop.index }}</td>
-                    <td> {{ payment.date }}</td>
-                    <td style="color: #000000;">
-                        {% if 'بنك' in payment.account_name or 'Bank' in payment.account_name %}
-                             {{ payment.account_name }}
-                        {% elif 'كاش' in payment.account_name or 'نقد' in payment.account_name or 'Cash' in payment.account_name %}
-                             {{ payment.account_name }}
-                        {% elif 'فودافون' in payment.account_name or 'Vodafone' in payment.account_name %}
-                             {{ payment.account_name }}
-                        {% elif 'انستا' in payment.account_name or 'Insta' in payment.account_name %}
-                             {{ payment.account_name }}
-                        {% else %}
-                             {{ payment.account_name }}
-                        {% endif %}
-                    </td>
-                    <d style="color: var(--primary-green);"> {{ payment.amount }} ج.م</d>
+                    <td>{{ payment.date if payment.date else 'غير محدد' }}</td>
+                    <td style="color: #000000;">{{ payment.account_name if payment.account_name else payment.account_id }}</td>
+                    <td style="color: var(--primary-green);">{{ "%.2f"|format(payment.amount|float) }} ج.م</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -475,19 +468,19 @@
         <div class="totals-container">
             <div class="total-row bg-white">
                 <span class="total-label"> الإجمالي الفرعي:</span>
-                <span class="total-value" style="color: var(--primary-blue);">{{ subtotal }} ج.م</span>
+                <span class="total-value" style="color: var(--primary-blue);">{{ "%.2f"|format(subtotal|float) }} ج.م</span>
             </div>
             <div class="total-row bg-white">
                 <span class="total-label"> الإجمالي الكلي:</span>
-                <span class="total-value" style="color: var(--primary-blue);">{{ grand_total }} ج.م</span>
+                <span class="total-value" style="color: var(--primary-blue);">{{ "%.2f"|format(grand_total|float) }} ج.م</span>
             </div>
             <div class="total-row bg-light-green">
                 <span class="total-label"> المبلغ المدفوع:</span>
-                <span class="total-value">{{ total_paid }} ج.م</span>
+                <span class="total-value">{{ "%.2f"|format(total_paid|float) }} ج.م</span>
             </div>
             <div class="total-row bg-blue">
                 <span class="total-label"> المبلغ المتبقي:</span>
-                <span class="total-value">{{ remaining_amount }} ج.م</span>
+                <span class="total-value">{{ "%.2f"|format(remaining_amount|float) }} ج.م</span>
             </div>
         </div>
         

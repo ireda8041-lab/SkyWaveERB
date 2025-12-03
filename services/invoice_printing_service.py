@@ -69,6 +69,9 @@ class InvoicePrintingService:
         try:
             print(f"INFO: [InvoicePrintingService] بدء طباعة الفاتورة: {invoice_data.get('invoice_number', 'N/A')}")
             
+            # ⚡ تصحيح البيانات قبل الطباعة
+            invoice_data = self._fix_invoice_data(invoice_data)
+            
             # Step 1: تحضير البيانات الكاملة
             context = self._prepare_context(invoice_data)
             
@@ -98,6 +101,59 @@ class InvoicePrintingService:
             import traceback
             traceback.print_exc()
             return None
+    
+    def _fix_invoice_data(self, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
+        """⚡ تصحيح البيانات المفقودة أو الخاطئة"""
+        # تصحيح الأرقام
+        for key in ['subtotal', 'grand_total', 'total_paid', 'remaining_amount', 'total_amount']:
+            if key in invoice_data:
+                try:
+                    invoice_data[key] = float(invoice_data[key]) if invoice_data[key] else 0.0
+                except:
+                    invoice_data[key] = 0.0
+        
+        # تصحيح الدفعات
+        if 'payments' in invoice_data and invoice_data['payments']:
+            fixed_payments = []
+            for payment in invoice_data['payments']:
+                if isinstance(payment, dict):
+                    # تصحيح التاريخ
+                    if 'date' in payment:
+                        date_val = payment['date']
+                        if hasattr(date_val, 'strftime'):
+                            payment['date'] = date_val.strftime('%Y-%m-%d')
+                        elif isinstance(date_val, str):
+                            payment['date'] = date_val[:10]
+                    
+                    # تصحيح المبلغ
+                    if 'amount' in payment:
+                        try:
+                            payment['amount'] = float(payment['amount'])
+                        except:
+                            payment['amount'] = 0.0
+                    
+                    # تصحيح اسم الحساب
+                    if 'account_name' not in payment or not payment['account_name']:
+                        payment['account_name'] = payment.get('account_id', 'غير محدد')
+                    
+                    fixed_payments.append(payment)
+            
+            invoice_data['payments'] = fixed_payments
+        else:
+            invoice_data['payments'] = []
+        
+        # تصحيح البنود
+        if 'items' in invoice_data and invoice_data['items']:
+            for item in invoice_data['items']:
+                if isinstance(item, dict):
+                    for key in ['quantity', 'unit_price', 'total', 'discount_rate']:
+                        if key in item:
+                            try:
+                                item[key] = float(item[key]) if item[key] else 0.0
+                            except:
+                                item[key] = 0.0
+        
+        return invoice_data
     
     def _prepare_context(self, invoice_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -180,9 +236,30 @@ class InvoicePrintingService:
         context.setdefault('invoice_date', context.get('date'))
         context.setdefault('due_date', context.get('date'))
         context.setdefault('company_website', 'www.skywaveads.com')
-        context.setdefault('subtotal', context.get('grand_total', '0'))
-        context.setdefault('remaining_amount', context.get('remaining', '0'))
-        context.setdefault('payments', [])
+        context.setdefault('subtotal', context.get('grand_total', 0))
+        context.setdefault('remaining_amount', context.get('remaining', 0))
+        
+        # ⚡ تصحيح الدفعات - جلب اسم الحساب
+        if 'payments' in context and context['payments']:
+            for payment in context['payments']:
+                if isinstance(payment, dict):
+                    # إذا مفيش account_name، نجيبه من account_id
+                    if 'account_name' not in payment or not payment['account_name']:
+                        account_id = payment.get('account_id', '')
+                        if account_id and self.settings_service:
+                            try:
+                                # محاولة جلب اسم الحساب من الريبوزيتوري
+                                from core.repository import Repository
+                                repo = Repository()
+                                account = repo.get_account_by_id(account_id)
+                                if account:
+                                    payment['account_name'] = account.name
+                                else:
+                                    payment['account_name'] = account_id
+                            except:
+                                payment['account_name'] = account_id
+                        else:
+                            payment['account_name'] = account_id if account_id else 'غير محدد'
         
         return context
     
