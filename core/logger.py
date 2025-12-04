@@ -15,7 +15,8 @@ class LoggerSetup:
     """
     
     # إعدادات افتراضية
-    LOG_DIR = "logs"
+    # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات)
+    LOG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP', 'logs')
     LOG_FILE = "skywave_erp.log"
     MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
     BACKUP_COUNT = 5  # عدد الملفات الاحتياطية

@@ -169,12 +169,10 @@ class AutoUpdateService(QObject):
         return self._last_check
     
     def _get_settings_path(self) -> str:
-        """مسار ملف الإعدادات"""
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        return os.path.join(base_dir, "update_settings.json")
+        """مسار ملف الإعدادات - في مجلد AppData لتجنب مشاكل الصلاحيات"""
+        app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+        os.makedirs(app_data_dir, exist_ok=True)
+        return os.path.join(app_data_dir, "update_settings.json")
     
     def _load_last_check_time(self):
         """تحميل آخر وقت فحص"""

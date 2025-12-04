@@ -23,8 +23,13 @@ except ImportError:
 
 # --- إعدادات الاتصال ---
 MONGO_URI = "mongodb://skywaveads:Newjoer2k24$@147.79.66.116:27017/skywave_erp_db?authSource=admin"
-LOCAL_DB_FILE = "skywave_local.db"
 DB_NAME = "skywave_erp_db"
+
+# استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
+import os
+_APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+os.makedirs(_APP_DATA_DIR, exist_ok=True)
+LOCAL_DB_FILE = os.path.join(_APP_DATA_DIR, "skywave_local.db")
 
 
 class Repository:

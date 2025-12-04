@@ -2,11 +2,15 @@ import json
 import os
 from typing import Dict, Any
 
+# استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
+_APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+os.makedirs(_APP_DATA_DIR, exist_ok=True)
+
 
 class SettingsService:
     """قسم الإعدادات المسؤول عن حفظ وقراءة إعدادات التطبيق."""
 
-    SETTINGS_FILE = "skywave_settings.json"
+    SETTINGS_FILE = os.path.join(_APP_DATA_DIR, "skywave_settings.json")
 
     DEFAULT_SETTINGS = {
         "company_name": "Sky Wave",
