@@ -23,13 +23,13 @@ class LoginWindow(QDialog):
         self.auth_service = auth_service
         self.authenticated_user: Optional[User] = None
         
+        # إخفاء النافذة مؤقتاً لمنع الشاشة البيضاء
+        self.setWindowOpacity(0.0)
+        
         self.setWindowTitle("Sky Wave ERP - تسجيل الدخول")
         self.setFixedSize(520, 850)
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        
-        # إضافة الشفافية 90%
-        self.setWindowOpacity(0.9)
         
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -37,6 +37,9 @@ class LoginWindow(QDialog):
         
         self.init_ui()
         self.center_on_screen()
+        
+        # إظهار النافذة بعد تطبيق الستايل
+        self.setWindowOpacity(0.95)
     
     def init_ui(self):
         """إنشاء واجهة المستخدم"""

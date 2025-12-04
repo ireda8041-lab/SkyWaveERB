@@ -1,24 +1,40 @@
 # الملف: ui/notification_widget.py
 
 """
-ويدجت الإشعارات
-يعرض الإشعارات للمستخدم مع أيقونة الجرس
+ويدجت الإشعارات الاحترافي
+يعرض الإشعارات للمستخدم بتصميم SkyWave Brand
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QFrame, QScrollArea, QMenu
+    QListWidget, QListWidgetItem, QFrame, QScrollArea, QMenu,
+    QGraphicsDropShadowEffect
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize
-from PyQt6.QtGui import QFont, QCursor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtGui import QFont, QCursor, QColor
 from datetime import datetime
 from typing import List
 from core.schemas import Notification, NotificationType, NotificationPriority
 
+# ألوان SkyWave Brand
+NOTIFICATION_COLORS = {
+    "primary": "#0A6CF1",
+    "success": "#10B981",
+    "warning": "#FF6636",
+    "danger": "#FF4FD8",
+    "info": "#8B2CF5",
+    "bg_dark": "#001A3A",
+    "bg_medium": "#0A2A55",
+    "bg_light": "#052045",
+    "text_primary": "#EAF3FF",
+    "text_secondary": "#B0C4DE",
+    "border": "#1E3A5F",
+}
+
 
 class NotificationItem(QFrame):
     """
-    عنصر إشعار واحد
+    عنصر إشعار واحد - تصميم احترافي
     """
     
     clicked = pyqtSignal(int)  # إشارة عند الضغط على الإشعار
@@ -33,51 +49,79 @@ class NotificationItem(QFrame):
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
         self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         
-        # تحديد اللون حسب النوع
+        # تحديد اللون حسب النوع (ألوان SkyWave Brand)
         color = self._get_color_for_type(self.notification.type)
         
-        # تحديد الخلفية حسب حالة القراءة
+        # تحديد الخلفية حسب حالة القراءة (ألوان SkyWave Brand)
         if self.notification.is_read:
-            bg_color = "#f5f5f5"
+            bg_color = NOTIFICATION_COLORS["bg_medium"]
+            text_color = NOTIFICATION_COLORS["text_secondary"]
+            border_width = "3px"
         else:
-            bg_color = "#e3f2fd"
+            bg_color = NOTIFICATION_COLORS["bg_dark"]
+            text_color = NOTIFICATION_COLORS["text_primary"]
+            border_width = "4px"
         
         self.setStyleSheet(f"""
             NotificationItem {{
-                background-color: {bg_color};
-                border-left: 4px solid {color};
-                border-radius: 4px;
-                padding: 8px;
-                margin: 4px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {bg_color}, stop:1 {NOTIFICATION_COLORS['bg_light']});
+                border-left: {border_width} solid {color};
+                border-radius: 10px;
+                padding: 14px;
+                margin: 6px 4px;
             }}
             NotificationItem:hover {{
-                background-color: #e0e0e0;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {NOTIFICATION_COLORS['bg_light']}, stop:1 {NOTIFICATION_COLORS['bg_medium']});
+                border-left: 5px solid {color};
             }}
         """)
         
+        # إضافة ظل خفيف
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(8)
+        shadow.setColor(QColor(0, 0, 0, 60))
+        shadow.setOffset(0, 2)
+        self.setGraphicsEffect(shadow)
+        
+        # تحديث ألوان النصوص
+        self.text_color = text_color
+        
         layout = QVBoxLayout()
-        layout.setSpacing(4)
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 8, 8, 8)
         
         # الصف الأول: الأيقونة والعنوان والوقت
         header_layout = QHBoxLayout()
+        header_layout.setSpacing(10)
         
-        # أيقونة النوع
-        icon_label = QLabel(self._get_icon_for_type(self.notification.type))
-        icon_label.setStyleSheet(f"color: {color}; font-size: 16px;")
-        header_layout.addWidget(icon_label)
+        # أيقونة النوع مع خلفية دائرية
+        icon_container = QLabel(self._get_icon_for_type(self.notification.type))
+        icon_container.setFixedSize(32, 32)
+        icon_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_container.setStyleSheet(f"""
+            QLabel {{
+                background-color: {color}20;
+                border-radius: 16px;
+                font-size: 16px;
+                padding: 4px;
+            }}
+        """)
+        header_layout.addWidget(icon_container)
         
         # العنوان
         title_label = QLabel(self.notification.title)
-        title_font = QFont()
+        title_font = QFont("Segoe UI", 11)
         title_font.setBold(not self.notification.is_read)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #333;")
+        title_label.setStyleSheet(f"color: {self.text_color}; background: transparent;")
         header_layout.addWidget(title_label, 1)
         
-        # الوقت
+        # الوقت مع أيقونة
         time_str = self._format_time(self.notification.created_at)
-        time_label = QLabel(time_str)
-        time_label.setStyleSheet("color: #999; font-size: 11px;")
+        time_label = QLabel(f"🕐 {time_str}")
+        time_label.setStyleSheet(f"color: {NOTIFICATION_COLORS['text_secondary']}; font-size: 10px; background: transparent;")
         header_layout.addWidget(time_label)
         
         layout.addLayout(header_layout)
@@ -85,24 +129,24 @@ class NotificationItem(QFrame):
         # الصف الثاني: الرسالة
         message_label = QLabel(self.notification.message)
         message_label.setWordWrap(True)
-        message_label.setStyleSheet("color: #666; font-size: 12px;")
+        message_label.setStyleSheet(f"color: {NOTIFICATION_COLORS['text_secondary']}; font-size: 12px; padding-right: 42px; background: transparent;")
         layout.addWidget(message_label)
         
         self.setLayout(layout)
     
     def _get_color_for_type(self, type: NotificationType) -> str:
-        """الحصول على اللون حسب نوع الإشعار"""
+        """الحصول على اللون حسب نوع الإشعار (ألوان SkyWave Brand)"""
         colors = {
-            NotificationType.INFO: "#2196F3",
-            NotificationType.SUCCESS: "#4CAF50",
-            NotificationType.WARNING: "#FF9800",
-            NotificationType.ERROR: "#F44336",
-            NotificationType.PROJECT_DUE: "#FF9800",
-            NotificationType.PAYMENT_RECEIVED: "#4CAF50",
-            NotificationType.QUOTATION_EXPIRED: "#FF9800",
-            NotificationType.SYNC_FAILED: "#F44336"
+            NotificationType.INFO: NOTIFICATION_COLORS["primary"],       # Primary Blue
+            NotificationType.SUCCESS: NOTIFICATION_COLORS["success"],    # Green
+            NotificationType.WARNING: NOTIFICATION_COLORS["warning"],    # Glowing Orange
+            NotificationType.ERROR: NOTIFICATION_COLORS["danger"],       # Bright Pink
+            NotificationType.PROJECT_DUE: NOTIFICATION_COLORS["warning"],  # Glowing Orange
+            NotificationType.PAYMENT_RECEIVED: NOTIFICATION_COLORS["success"],  # Green
+            NotificationType.QUOTATION_EXPIRED: NOTIFICATION_COLORS["warning"],  # Glowing Orange
+            NotificationType.SYNC_FAILED: NOTIFICATION_COLORS["danger"]  # Bright Pink
         }
-        return colors.get(type, "#2196F3")
+        return colors.get(type, NOTIFICATION_COLORS["primary"])
     
     def _get_icon_for_type(self, type: NotificationType) -> str:
         """الحصول على الأيقونة حسب نوع الإشعار"""
@@ -147,7 +191,7 @@ class NotificationItem(QFrame):
 
 class NotificationPopup(QFrame):
     """
-    نافذة منبثقة لعرض الإشعارات
+    نافذة منبثقة لعرض الإشعارات - تصميم احترافي
     """
     
     notification_clicked = pyqtSignal(int)
@@ -156,52 +200,72 @@ class NotificationPopup(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setFixedSize(400, 500)
+        self.setFixedSize(480, 520)  # عرض أكبر لاستيعاب النص العربي
         self.init_ui()
     
     def init_ui(self):
         """تهيئة الواجهة"""
-        self.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #ccc;
-                border-radius: 8px;
-            }
+        # ألوان SkyWave Brand مع تدرج
+        self.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {NOTIFICATION_COLORS['bg_dark']}, stop:1 {NOTIFICATION_COLORS['bg_medium']});
+                border: 2px solid {NOTIFICATION_COLORS['primary']};
+                border-radius: 16px;
+            }}
         """)
         
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # الرأس
+        # الرأس (ألوان SkyWave Brand) - تصميم احترافي
         header = QFrame()
-        header.setStyleSheet("""
-            QFrame {
-                background-color: #2196F3;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                padding: 12px;
-            }
+        header.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {NOTIFICATION_COLORS['primary']}, stop:1 #005BC5);
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                padding: 18px;
+            }}
         """)
         header_layout = QHBoxLayout()
+        header_layout.setSpacing(12)
+        
+        # أيقونة الجرس مع تأثير
+        bell_icon = QLabel("🔔")
+        bell_icon.setStyleSheet("font-size: 24px; background: transparent;")
+        header_layout.addWidget(bell_icon)
         
         title_label = QLabel("الإشعارات")
-        title_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold;")
+        title_label.setStyleSheet("color: white; font-size: 18px; font-weight: bold; background: transparent;")
         header_layout.addWidget(title_label)
         
-        mark_all_btn = QPushButton("تحديد الكل كمقروء")
-        mark_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                border: 1px solid white;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
+        header_layout.addStretch()
+        
+        mark_all_btn = QPushButton("✓ تحديد الكل كمقروء")
+        mark_all_btn.setMinimumWidth(180)  # عرض أكبر للنص الكامل
+        mark_all_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        mark_all_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: rgba(255, 255, 255, 0.2);
-            }
+                color: white;
+                border: 1px solid rgba(255, 255, 255, 0.4);
+                border-radius: 8px;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+                min-width: 170px;
+                font-family: 'Cairo', 'Segoe UI', sans-serif;
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.6);
+            }}
+            QPushButton:pressed {{
+                background-color: rgba(255, 255, 255, 0.4);
+            }}
         """)
         mark_all_btn.clicked.connect(self.mark_all_read_clicked.emit)
         header_layout.addWidget(mark_all_btn)
@@ -209,14 +273,33 @@ class NotificationPopup(QFrame):
         header.setLayout(header_layout)
         layout.addWidget(header)
         
-        # منطقة التمرير للإشعارات
+        # منطقة التمرير للإشعارات (ألوان SkyWave Brand) - تصميم احترافي
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
-                background-color: white;
-            }
+                background-color: {NOTIFICATION_COLORS['bg_dark']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {NOTIFICATION_COLORS['bg_medium']};
+                width: 8px;
+                border-radius: 4px;
+                margin: 4px 2px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {NOTIFICATION_COLORS['primary']}, stop:1 #005BC5);
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #005BC5, stop:1 {NOTIFICATION_COLORS['primary']});
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
         """)
         
         self.notifications_container = QWidget()
@@ -253,9 +336,9 @@ class NotificationPopup(QFrame):
             self.notifications_layout.addStretch()
         else:
             # لا توجد إشعارات
-            no_notif_label = QLabel("لا توجد إشعارات")
+            no_notif_label = QLabel("📭\n\nلا توجد إشعارات")
             no_notif_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_notif_label.setStyleSheet("color: #999; padding: 40px;")
+            no_notif_label.setStyleSheet("color: #64748b; padding: 60px; font-size: 14px;")
             self.notifications_layout.addWidget(no_notif_label)
 
 
@@ -293,13 +376,13 @@ class NotificationWidget(QWidget):
         bell_layout.setContentsMargins(0, 0, 0, 0)
         bell_layout.setSpacing(0)
         
-        # زر الجرس
+        # زر الجرس (ألوان SkyWave Brand)
         self.bell_button = QPushButton("🔔 الإشعارات")
         self.bell_button.setMinimumWidth(100)
         self.bell_button.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.bell_button.setStyleSheet("""
             QPushButton {
-                background-color: #3b82f6;
+                background-color: #0A6CF1;
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -308,19 +391,19 @@ class NotificationWidget(QWidget):
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #2563eb;
+                background-color: #005BC5;
             }
         """)
         self.bell_button.clicked.connect(self.toggle_popup)
         layout.addWidget(self.bell_button)
         
-        # Badge (عدد الإشعارات غير المقروءة)
+        # Badge (عدد الإشعارات غير المقروءة) - ألوان SkyWave Brand
         self.badge_label = QLabel("0")
         self.badge_label.setFixedSize(22, 22)
         self.badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.badge_label.setStyleSheet("""
             QLabel {
-                background-color: #ef4444;
+                background-color: #FF4FD8;
                 color: white;
                 border-radius: 11px;
                 font-size: 11px;
@@ -409,6 +492,3 @@ class NotificationWidget(QWidget):
         
         except Exception as e:
             print(f"خطأ في تحديد جميع الإشعارات كمقروءة: {e}")
-
-
-print("ui/notification_widget.py تم إنشاؤه بنجاح.")

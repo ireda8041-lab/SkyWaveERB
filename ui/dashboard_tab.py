@@ -24,6 +24,11 @@ class DashboardTab(QWidget):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
         # العنوان مع زرار التحديث
         from PyQt6.QtWidgets import QHBoxLayout, QPushButton
         header_layout = QHBoxLayout()
@@ -60,7 +65,7 @@ class DashboardTab(QWidget):
         grid_layout = QGridLayout()
         grid_layout.setSpacing(20)
 
-        self.collected_card = self.create_kpi_card("إجمالي الإيرادات (المُحصلة)", "0.00 EGP", "#10b981")
+        self.collected_card = self.create_kpi_card("إجمالي الإيرادات (المُحصلة)", "0.00 EGP", "#0A6CF1")
         self.outstanding_card = self.create_kpi_card("إجمالي المستحقات (المتبقية)", "0.00 EGP", "#f59e0b")
         self.expenses_card = self.create_kpi_card("إجمالي المصروفات", "0.00 EGP", "#ef4444")
         self.net_profit_card = self.create_kpi_card("صافي الربح (نقدي)", "0.00 EGP", "#3b82f6")

@@ -296,7 +296,7 @@ class CurrencyEditorDialog(QDialog):
                 self.source_label.setStyleSheet("color: #f59e0b; font-size: 11px;")
             else:
                 self.source_label.setText(f"✅ تم جلب السعر من: {source}")
-                self.source_label.setStyleSheet("color: #10b981; font-size: 11px;")
+                self.source_label.setStyleSheet("color: #0A6CF1; font-size: 11px;")
             
             QMessageBox.information(
                 self, "تم",

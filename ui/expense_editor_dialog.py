@@ -147,7 +147,7 @@ class ExpenseEditorDialog(QDialog):
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 padding: 12px 30px;
                 font-weight: bold;
@@ -155,7 +155,7 @@ class ExpenseEditorDialog(QDialog):
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #059669;
+                background-color: #0A6CF1;
             }
             QPushButton:disabled {
                 background-color: #6b7280;

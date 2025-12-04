@@ -62,9 +62,10 @@ class LoadingOverlay(QWidget):
         super().__init__(parent)
         self.setObjectName("loadingOverlay")
         
-        # التأكد من أن الـ widget يغطي النافذة بالكامل
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
+        # ✅ جعل الخلفية شفافة تماماً
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAutoFillBackground(False)
         
         # إعداد الشفافية
         self.opacity_effect = QGraphicsOpacityEffect(self)
@@ -110,10 +111,10 @@ class LoadingOverlay(QWidget):
         self.message_label.setStyleSheet("color: #e0e3f0;")
         layout.addWidget(self.message_label)
         
-        # التنسيق
+        # ✅ التنسيق - خلفية شفافة تماماً
         self.setStyleSheet("""
             #loadingOverlay {
-                background-color: rgba(30, 33, 57, 0.97);
+                background-color: transparent;
             }
         """)
     
@@ -144,7 +145,8 @@ class LoadingOverlay(QWidget):
         """تغيير الحجم مع النافذة الأم"""
         super().resizeEvent(event)
         if self.parent():
-            self.setGeometry(self.parent().rect())
+            # ✅ تغطية الأب فقط (التابات) وليس النافذة الرئيسية
+            self.setGeometry(0, 0, self.parent().width(), self.parent().height())
     
     def showEvent(self, event):
         """عند الظهور"""

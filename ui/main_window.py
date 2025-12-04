@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
     ):
         super().__init__()
         
+        # إخفاء النافذة مؤقتاً لمنع الشاشة البيضاء
+        self.setWindowOpacity(0.0)
+        
         # تخصيص شريط العنوان
         self.setup_title_bar()
 
@@ -82,7 +85,32 @@ class MainWindow(QMainWindow):
 
         role_display = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
         self.setWindowTitle(f"Sky Wave ERP - {current_user.full_name or current_user.username} ({role_display})")
-        self.setGeometry(100, 100, 1200, 800)
+        
+        # ✅ جعل النافذة متجاوبة مع حجم الشاشة
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import QSize
+        
+        # الحصول على حجم الشاشة المتاح
+        screen = QApplication.primaryScreen().availableGeometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+        
+        # تعيين الحد الأدنى للنافذة (80% من حجم الشاشة)
+        min_width = int(screen_width * 0.8)
+        min_height = int(screen_height * 0.8)
+        self.setMinimumSize(QSize(min_width, min_height))
+        
+        # فتح النافذة بحجم الشاشة الكامل
+        self.setGeometry(screen)
+        self.showMaximized()
+        
+        # جعل النافذة قابلة لتغيير الحجم بشكل ديناميكي
+        from PyQt6.QtCore import Qt
+        self.setWindowFlags(Qt.WindowType.Window)
+        
+        # جعل المحتوى متجاوب تماماً
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # إنشاء شريط الأدوات (Toolbar) في الأعلى
         toolbar = self.addToolBar("الأدوات الرئيسية")
@@ -120,6 +148,11 @@ class MainWindow(QMainWindow):
 
         # --- 1. إنشاء الـ Tab Widget ---
         self.tabs = QTabWidget()
+        
+        # جعل الـ tabs متجاوبة مع حجم الشاشة بشكل كامل
+        from PyQt6.QtWidgets import QSizePolicy
+        self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.tabs.setMinimumSize(QSize(800, 600))  # حد أدنى معقول
         
         # تحسين شكل التابات (Dark Blue Theme - زي الصورة)
         self.tabs.setStyleSheet("""
@@ -227,6 +260,10 @@ class MainWindow(QMainWindow):
         )
         self.tabs.insertTab(7, self.accounting_tab, "📊 المحاسبة")
         
+        # (جديد) إضافة تاب إدارة المهام (TODO)
+        from ui.todo_manager import TodoManagerWidget
+        self.todo_tab = TodoManagerWidget()
+        self.tabs.insertTab(8, self.todo_tab, "📋 المهام")
         
         self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo)
         self.tabs.insertTab(9, self.settings_tab, "🔧 الإعدادات")
@@ -250,21 +287,35 @@ class MainWindow(QMainWindow):
             self.advanced_sync_manager.sync_progress.connect(self.status_bar.update_sync_progress)
             self.advanced_sync_manager.notification_ready.connect(self.status_bar.show_notification)
         
-        # إضافة شريط الحالة للنافذة
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-        main_layout.addWidget(self.tabs)
-        main_layout.addWidget(self.status_bar)
-        self.setCentralWidget(main_widget)
+        # إنشاء container widget للـ tabs
+        central_widget = QWidget()
+        central_layout = QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(5, 5, 5, 5)  # هوامش صغيرة
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.tabs, 1)  # stretch factor = 1 للتمدد الكامل
         
-        # === شاشة التحميل المتراكبة (بعد تعيين central widget) ===
-        self.loading_overlay = LoadingOverlay(self)
-        self.loading_overlay.set_message("جاري تجهيز البيانات...")
-        self.loading_overlay.setGeometry(self.rect())
-        self.loading_overlay.raise_()  # رفع فوق كل العناصر
-        self.loading_overlay.show()
+        # إضافة الـ central widget
+        self.setCentralWidget(central_widget)
+        
+        # جعل الـ central widget متجاوب بشكل كامل
+        from PyQt6.QtWidgets import QSizePolicy
+        central_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        central_widget.setMinimumSize(QSize(800, 600))
+        
+        # ✅ إضافة شريط الحالة في الأسفل باستخدام QStatusBar
+        from PyQt6.QtWidgets import QStatusBar
+        qt_status_bar = QStatusBar()
+        qt_status_bar.setFixedHeight(45)
+        qt_status_bar.addPermanentWidget(self.status_bar, 1)
+        self.setStatusBar(qt_status_bar)
+        
+        # ✅ التأكد من أن الشريط السفلي دائمًا مرئي
+        self.status_bar.setVisible(True)
+        qt_status_bar.setVisible(True)
+        
+        # === شاشة التحميل المتراكبة - معطلة لتجنب التجميد ===
+        # البيانات تحمل في الخلفية بدون الحاجة لشاشة تحميل
+        self.loading_overlay = None
 
         # --- 4. إعداد المزامنة (إذا لم يتم تمريرها) ---
         if not self.sync_manager:
@@ -273,41 +324,80 @@ class MainWindow(QMainWindow):
         # إعداد المزامنة التلقائية كل 10 دقائق
         self.setup_auto_sync()
 
-        # --- 4. تحميل البيانات ---
-        self.load_all_data()
+        # --- 4. تحميل البيانات في الخلفية ---
         self.tabs.currentChanged.connect(self.on_tab_changed)
         
-        # إخفاء شاشة التحميل بعد تحميل البيانات
-        QTimer.singleShot(2000, self._finish_loading)
+        # ✅ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
+        QTimer.singleShot(500, self._load_initial_data_safely)
 
     def on_tab_changed(self, index):
-        """ (معدلة) بالتابات الجديدة """
-        tab_name = self.tabs.tabText(index)
+        """ (معدلة) بالتابات الجديدة - مع حماية من التجميد """
+        try:
+            tab_name = self.tabs.tabText(index)
+            print(f"INFO: [MainWindow] تغيير إلى التاب: {tab_name}")
+            
+            # تأخير قصير لتجنب التجميد
+            QTimer.singleShot(100, lambda: self._load_tab_data_safely(tab_name))
+            
+        except Exception as e:
+            print(f"ERROR: خطأ في تغيير التاب: {e}")
+    
+    def _load_tab_data_safely(self, tab_name: str):
+        """تحميل بيانات التاب بأمان"""
+        try:
+            if tab_name == "🏠 الصفحة الرئيسية":
+                if hasattr(self, 'dashboard_tab'):
+                    self.dashboard_tab.refresh_data()
+            elif tab_name == "🚀 المشاريع":
+                if hasattr(self, 'projects_tab'):
+                    self.projects_tab.service_service = self.service_service
+                    self.projects_tab.accounting_service = self.accounting_service
+                    QTimer.singleShot(50, self.projects_tab.load_projects_data)
+            elif tab_name == "📝 عروض الأسعار":
+                if hasattr(self, 'quotes_tab'):
+                    self.quotes_tab.project_service = self.project_service
+                    QTimer.singleShot(50, self.quotes_tab.load_quotations_data)
+            elif tab_name == "💳 المصروفات":
+                if hasattr(self, 'expense_tab'):
+                    QTimer.singleShot(50, self.expense_tab.load_expenses_data)
+            elif tab_name == "💰 الدفعات":
+                if hasattr(self, 'payments_tab'):
+                    QTimer.singleShot(50, self.payments_tab.load_payments_data)
+            elif tab_name == "👤 العملاء":
+                if hasattr(self, 'clients_tab'):
+                    QTimer.singleShot(50, self.clients_tab.load_clients_data)
+            elif tab_name == "🛠️ الخدمات والباقات":
+                if hasattr(self, 'services_tab'):
+                    QTimer.singleShot(50, self.services_tab.load_services_data)
+            elif tab_name == "📊 المحاسبة":
+                if hasattr(self, 'accounting_tab'):
+                    self.accounting_tab.project_service = self.project_service
+            elif tab_name == "🔧 الإعدادات":
+                if hasattr(self, 'settings_tab'):
+                    QTimer.singleShot(50, self.settings_tab.load_settings_data)
+                    
+            print(f"INFO: [MainWindow] تم تحميل بيانات التاب: {tab_name}")
+            
+        except Exception as e:
+            print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {e}")
 
-        if tab_name == "🏠 الصفحة الرئيسية":
-            self.dashboard_tab.refresh_data()
-        elif tab_name == "🚀 المشاريع":
-            self.projects_tab.service_service = self.service_service
-            self.projects_tab.accounting_service = self.accounting_service
-            self.projects_tab.load_projects_data()
-        elif tab_name == "📝 عروض الأسعار":
-            self.quotes_tab.project_service = self.project_service
-            self.quotes_tab.load_quotations_data()
-        elif tab_name == "💳 المصروفات":  # (جديد)
-            self.expense_tab.load_expenses_data()
-        elif tab_name == "💰 الدفعات":  # (جديد) تاب الدفعات
-            self.payments_tab.load_payments_data()
-        elif tab_name == "👤 العملاء":
-            self.clients_tab.load_clients_data()
-        elif tab_name == "🛠️ الخدمات والباقات":
-            self.services_tab.load_services_data()
-        elif tab_name == "📊 المحاسبة":  # (جديد)
-            self.accounting_tab.project_service = self.project_service
-            # تحديث بيانات المحاسبة
-            pass
-        elif tab_name == "🔧 الإعدادات":
-            self.settings_tab.load_settings_data()
 
+    
+    def _load_initial_data_safely(self):
+        """تحميل البيانات الأولية بأمان وبدون تجميد"""
+        try:
+            print("INFO: [MainWindow] بدء تحميل البيانات الأولية...")
+            # تحميل بيانات الداشبورد فقط (التاب الأول)
+            if hasattr(self, 'dashboard_tab'):
+                self.dashboard_tab.refresh_data()
+            print("INFO: [MainWindow] تم تحميل البيانات الأولية بنجاح")
+        except Exception as e:
+            print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
+    
+    def _load_initial_data(self):
+        """تحميل البيانات الأولية بدون تجميد - deprecated"""
+        self._load_initial_data_safely()
+    
     def load_all_data(self):
         """
         تحمل البيانات للتاب المفتوح حالياً
@@ -379,31 +469,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"خطأ في تحديث البيانات بعد المزامنة: {e}")
 
-    def _finish_loading(self):
-        """إنهاء شاشة التحميل بعد تجهيز البيانات"""
-        if hasattr(self, 'loading_overlay') and self.loading_overlay:
-            self.loading_overlay.fade_out()
-    
-    def showEvent(self, event):
-        """عند ظهور النافذة - تحديث حجم شاشة التحميل"""
-        super().showEvent(event)
-        if hasattr(self, 'loading_overlay') and self.loading_overlay:
-            # تأخير قصير للتأكد من أن النافذة ظهرت بالكامل
-            QTimer.singleShot(50, self._show_loading_overlay)
-    
-    def _show_loading_overlay(self):
-        """عرض شاشة التحميل بعد ظهور النافذة"""
-        if hasattr(self, 'loading_overlay') and self.loading_overlay:
-            self.loading_overlay.setGeometry(self.rect())
-            self.loading_overlay.raise_()
-            self.loading_overlay.show()
-            print(f"INFO: [MainWindow] تم عرض شاشة التحميل - الحجم: {self.loading_overlay.size()}")
-    
-    def resizeEvent(self, event):
-        """تغيير حجم شاشة التحميل مع النافذة"""
-        super().resizeEvent(event)
-        if hasattr(self, 'loading_overlay') and self.loading_overlay:
-            self.loading_overlay.setGeometry(self.rect())
+
 
     def _connect_shortcuts(self):
         """ربط الاختصارات بالإجراءات"""
@@ -445,8 +511,23 @@ class MainWindow(QMainWindow):
     
     def _on_search_activated(self):
         """معالج اختصار تفعيل البحث"""
-        # Search feature not implemented yet
-        pass
+        # تفعيل البحث في التاب الحالي
+        current_index = self.tabs.currentIndex()
+        current_tab = self.tabs.widget(current_index)
+        
+        # البحث عن شريط البحث في التاب الحالي
+        if hasattr(current_tab, 'search_bar'):
+            current_tab.search_bar.setFocus()
+            current_tab.search_bar.selectAll()
+        else:
+            # محاولة البحث عن أي QLineEdit في التاب
+            from PyQt6.QtWidgets import QLineEdit
+            search_bars = current_tab.findChildren(QLineEdit)
+            for search_bar in search_bars:
+                if 'search' in search_bar.placeholderText().lower() or 'بحث' in search_bar.placeholderText():
+                    search_bar.setFocus()
+                    search_bar.selectAll()
+                    break
     
     def _on_refresh_data(self):
         """معالج اختصار تحديث البيانات"""
@@ -518,6 +599,21 @@ class MainWindow(QMainWindow):
             f"Sky Wave ERP - {self.current_user.full_name or self.current_user.username} "
             f"({role_display.get(user_role, str(user_role))})"
         )
+    def resizeEvent(self, event):
+        """معالج تغيير حجم النافذة - تحديث محسّن"""
+        super().resizeEvent(event)
+        # إعادة ضبط جميع العناصر عند تغيير الحجم
+        if hasattr(self, 'tabs'):
+            self.tabs.updateGeometry()
+            # تحديث التاب الحالي
+            current_widget = self.tabs.currentWidget()
+            if current_widget:
+                current_widget.updateGeometry()
+        
+        # تحديث central widget
+        if self.centralWidget():
+            self.centralWidget().updateGeometry()
+    
     def setup_title_bar(self):
         """تخصيص شريط العنوان بألوان البرنامج"""
         try:
