@@ -1,0 +1,160 @@
+# pyproject.toml - إعدادات المشروع
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skywave-erp"
+version = "1.0.0"
+description = "نظام إدارة موارد المؤسسات - Sky Wave ERP"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Sky Wave Team", email = "dev@skywave.agency"}
+]
+keywords = ["erp", "accounting", "invoicing", "business"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Accounting",
+]
+
+dependencies = [
+    "PyQt6>=6.4.0",
+    "pydantic>=2.0.0",
+    "pymongo>=4.0.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "pytest-timeout>=2.0.0",
+    "pytest-html>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "bandit>=1.7.0",
+    "safety>=2.3.0",
+    "pre-commit>=3.0.0",
+]
+
+test = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "pytest-timeout>=2.0.0",
+    "pytest-html>=4.0.0",
+]
+
+[project.urls]
+Homepage = "https://skywave.agency"
+Documentation = "https://docs.skywave.agency"
+Repository = "https://github.com/skywave/skywave-erp"
+
+[project.scripts]
+skywave = "main:main"
+
+# ==================== Tool Configurations ====================
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+exclude = '''
+/(
+    \.git
+    | \.venv
+    | __pycache__
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_gitignore = true
+known_first_party = ["core", "services", "ui"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["tests/", "build/", "dist/"]
+
+[[tool.mypy.overrides]]
+module = "PyQt6.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pymongo.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "security: marks tests as security tests",
+    "performance: marks tests as performance tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["core", "services"]
+branch = true
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+show_missing = true
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.bandit]
+exclude_dirs = ["tests", "build", "dist"]
+skips = ["B101", "B311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".git", ".venv", "__pycache__", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "C4", "UP"]
+ignore = ["E501", "B008"]
+
+[tool.pylint.messages_control]
+disable = ["C0114", "C0115", "C0116", "R0903", "R0913"]
+
+[tool.pylint.format]
+max-line-length = 100

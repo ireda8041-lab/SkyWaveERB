@@ -56,10 +56,11 @@ class UpdateChecker(QThread):
     def _is_newer_version(self, remote: str, local: str) -> bool:
         """
         مقارنة رقمي الإصدارات
+        يدعم صيغة YY.MM.DD (مثل 25.12.04) والصيغة التقليدية (مثل 1.0.0)
         
         Args:
-            remote: رقم الإصدار البعيد (مثل "1.0.1")
-            local: رقم الإصدار المحلي (مثل "1.0.0")
+            remote: رقم الإصدار البعيد
+            local: رقم الإصدار المحلي
         
         Returns:
             True إذا كان الإصدار البعيد أحدث

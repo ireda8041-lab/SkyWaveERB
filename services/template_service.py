@@ -77,7 +77,7 @@ class TemplateService(BaseService):
             if isinstance(value, str):
                 value = float(value.replace(',', ''))
             return f"{value:,.2f}"
-        except:
+        except (ValueError, AttributeError, TypeError):
             return str(value)
     
     def _add_default_template(self):
@@ -365,7 +365,7 @@ class TemplateService(BaseService):
                     invoice_id = f"SW-{int(project_id):04d}"
                 else:
                     invoice_id = f"SW-{datetime.now().strftime('%Y%m%d%H%M')}"
-            except:
+            except (AttributeError, KeyError, TypeError):
                 invoice_id = f"SW-{datetime.now().strftime('%Y%m%d%H%M')}"
             
             # تاريخ اليوم
