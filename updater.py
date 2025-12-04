@@ -9,6 +9,8 @@ import time
 import zipfile
 import shutil
 import subprocess
+import json
+import fileinput
 from pathlib import Path
 
 
@@ -56,6 +58,72 @@ def extract_update(zip_path, target_folder):
         
     except Exception as e:
         log_message(f"❌ خطأ في فك الضغط: {e}")
+        return False
+
+
+def update_version_file(target_folder):
+    """
+    تحديث رقم الإصدار في ملف version.py بعد التثبيت
+    يقرأ الرقم الجديد من version.json ويحدث CURRENT_VERSION
+    
+    Args:
+        target_folder: مجلد البرنامج الذي يحتوي على version.py و version.json
+    
+    Returns:
+        bool: True إذا نجح التحديث، False إذا فشل
+    """
+    try:
+        # مسارات الملفات
+        version_json_path = os.path.join(target_folder, "version.json")
+        version_py_path = os.path.join(target_folder, "version.py")
+        
+        # التحقق من وجود الملفات
+        if not os.path.exists(version_json_path):
+            log_message(f"⚠️ تحذير: لم يتم العثور على {version_json_path}")
+            return False
+            
+        if not os.path.exists(version_py_path):
+            log_message(f"⚠️ تحذير: لم يتم العثور على {version_py_path}")
+            return False
+        
+        # قراءة رقم الإصدار الجديد من version.json
+        log_message(f"📖 قراءة رقم الإصدار من: {version_json_path}")
+        with open(version_json_path, 'r', encoding='utf-8') as f:
+            update_data = json.load(f)
+            new_version = update_data.get("version")
+        
+        if not new_version:
+            log_message("❌ خطأ: لم يتم العثور على رقم الإصدار في version.json")
+            return False
+        
+        log_message(f"🔢 الإصدار الجديد: {new_version}")
+        
+        # تحديث ملف version.py
+        log_message(f"✏️ تحديث ملف: {version_py_path}")
+        updated = False
+        
+        with fileinput.FileInput(version_py_path, inplace=True, encoding='utf-8') as file:
+            for line in file:
+                # البحث عن السطر الذي يحتوي على CURRENT_VERSION
+                if line.strip().startswith("CURRENT_VERSION"):
+                    # استبدال السطر بالرقم الجديد
+                    print(f'CURRENT_VERSION = "{new_version}"')
+                    updated = True
+                else:
+                    # طباعة باقي السطور كما هي
+                    print(line, end='')
+        
+        if updated:
+            log_message(f"✅ تم تحديث version.py إلى الإصدار {new_version} بنجاح")
+            return True
+        else:
+            log_message("⚠️ تحذير: لم يتم العثور على CURRENT_VERSION في version.py")
+            return False
+            
+    except Exception as e:
+        log_message(f"❌ خطأ في تحديث ملف الإصدار: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -142,10 +210,15 @@ def main():
         input("اضغط Enter للخروج...")
         sys.exit(1)
     
-    # الخطوة 3: حذف ملف ZIP
+    # الخطوة 3: تحديث رقم الإصدار في version.py
+    log_message("🔄 تحديث رقم الإصدار...")
+    if not update_version_file(target_folder):
+        log_message("⚠️ تحذير: فشل تحديث رقم الإصدار (سيستمر التحديث)")
+    
+    # الخطوة 4: حذف ملف ZIP
     cleanup_zip(zip_path)
     
-    # الخطوة 4: تشغيل البرنامج
+    # الخطوة 5: تشغيل البرنامج
     if not launch_application(target_folder, executable_name):
         log_message("⚠️ فشل تشغيل البرنامج تلقائياً")
         log_message("يرجى تشغيل البرنامج يدوياً")
