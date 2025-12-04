@@ -244,26 +244,25 @@ class AccountingManagerTab(QWidget):
         layout.addLayout(main_h_layout)
 
     def _setup_tree_columns(self):
-        """ضبط أعمدة الشجرة بشكل ثابت وواضح"""
+        """ضبط أعمدة الشجرة بشكل متجاوب"""
         header = self.accounts_tree.header()
-        header.setStretchLastSection(False)
-        header.setMinimumSectionSize(80)
+        header.setStretchLastSection(True)  # آخر عمود يتمدد
+        header.setMinimumSectionSize(60)
         
-        # ✅ جعل جميع الأعمدة ثابتة العرض لضمان وضوح المحتوى
+        # ✅ أعمدة ثابتة للكود والعملة والحالة، والباقي يتمدد
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # الكود
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # اسم الحساب
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # اسم الحساب - يتمدد
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)  # النوع
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # العملة
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # الرصيد
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)  # الحالة
         
-        # ✅ تحديد عرض كل عمود بدقة لعرض المحتوى بالكامل
-        header.resizeSection(0, 100)   # الكود - أوسع قليلاً
-        header.resizeSection(1, 350)   # اسم الحساب - واسع جداً لعرض الأسماء الطويلة
-        header.resizeSection(2, 180)   # النوع - واسع لعرض النوع بالكامل
-        header.resizeSection(3, 80)    # العملة
-        header.resizeSection(4, 150)   # الرصيد - واسع لعرض الأرقام الكبيرة
-        header.resizeSection(5, 100)   # الحالة
+        # ✅ تحديد عرض الأعمدة الثابتة
+        header.resizeSection(0, 80)    # الكود
+        header.resizeSection(2, 100)   # النوع
+        header.resizeSection(3, 60)    # العملة
+        header.resizeSection(4, 120)   # الرصيد
+        header.resizeSection(5, 80)    # الحالة
     
     def load_accounts_data(self):
         """
@@ -397,6 +396,7 @@ class AccountingManagerTab(QWidget):
             self.accounts_tree.expandAll()
             
             print(f"INFO: [AccManager] تم عرض {len(self.all_accounts_list)} حساب مع الأرصدة التراكمية.")
+            print(f"DEBUG: [AccManager] tree_map keys: {list(tree_map.keys())[:10]}")
             
             # ✨ تحديث لوحة الملخص باستخدام الأرصدة المحسوبة
             self.update_summary_labels(tree_map)

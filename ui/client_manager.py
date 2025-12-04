@@ -102,7 +102,7 @@ class ClientManagerTab(QWidget):
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.clients_table.setAlternatingRowColors(True)
-        self.clients_table.verticalHeader().setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
+        self.clients_table.verticalHeader().setDefaultSectionSize(65)  # ⚡ ارتفاع الصفوف (تم تكبيره)
         self.clients_table.verticalHeader().setVisible(False)
         self.clients_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.clients_table.setColumnWidth(0, 70)
@@ -273,30 +273,32 @@ class ClientManagerTab(QWidget):
             client_payments_total = {}
             
             try:
-                # ⚡ استعلام لحساب عدد المشاريع لكل عميل (وليس المبلغ)
+                # ⚡ استعلام لحساب إجمالي الفواتير (total_amount) لكل عميل
+                # client_id في جدول المشاريع يخزن اسم العميل
                 self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT p.client_id, COUNT(*) as project_count
+                    SELECT p.client_id, SUM(COALESCE(p.total_amount, 0)) as total_invoices
                     FROM projects p
                     WHERE p.status != 'مؤرشف'
                     GROUP BY p.client_id
                 """)
-                client_invoices_total = {str(row[0]): int(row[1]) if row[1] else 0 
+                client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 
-                # ⚡ استعلام لحساب إجمالي المدفوعات بعد الخصم
-                # نحسب: (total_amount - discount_amount) من المشاريع، ثم نطرح المدفوعات
+                # ⚡ استعلام لحساب إجمالي المدفوعات لكل عميل
+                # جدول الدفعات فيه client_id مباشرة (اسم العميل)
                 self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT p.client_id, 
-                           SUM(COALESCE(pay.amount, 0)) as total_paid
-                    FROM projects p
-                    LEFT JOIN payments pay ON pay.project_id = p.id
-                    WHERE p.status != 'مؤرشف'
-                    GROUP BY p.client_id
+                    SELECT client_id, SUM(COALESCE(amount, 0)) as total_paid
+                    FROM payments
+                    GROUP BY client_id
                 """)
                 client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 
-                print(f"INFO: [ClientManager] تم حساب إجماليات {len(client_invoices_total)} عميل")
+                print(f"INFO: [ClientManager] === إجماليات العملاء ===")
+                print(f"INFO: [ClientManager] فواتير: {len(client_invoices_total)} عميل")
+                print(f"INFO: [ClientManager] مدفوعات: {len(client_payments_total)} عميل")
+                for name, total in client_invoices_total.items():
+                    print(f"  📄 {name}: فواتير={total:,.0f}, مدفوعات={client_payments_total.get(name, 0):,.0f}")
             except Exception as e:
                 print(f"ERROR: فشل حساب الإجماليات: {e}")
                 import traceback
@@ -323,38 +325,25 @@ class ClientManagerTab(QWidget):
 
                 self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
                 self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
-                self.clients_table.setItem(index, 3, QTableWidgetItem(client.email or ""))
-                self.clients_table.setItem(index, 4, QTableWidgetItem(client.phone or ""))
+                self.clients_table.setItem(index, 3, QTableWidgetItem(client.phone or ""))
+                self.clients_table.setItem(index, 4, QTableWidgetItem(client.email or ""))
 
-                # ⚡ جلب ID العميل بطريقة صحيحة - جرب كل الاحتمالات
-                client_id = None
+                # ⚡ جلب إجماليات العميل - client_id في المشاريع = اسم العميل
                 client_name = client.name
                 
-                # محاولة 1: استخدام الاسم (لأن المشاريع بتستخدم الاسم كـ client_id)
+                # البحث بالاسم أولاً (الطريقة الأساسية)
                 total_invoices = client_invoices_total.get(client_name, 0.0)
                 total_payments = client_payments_total.get(client_name, 0.0)
                 
-                # محاولة 2: إذا مفيش نتيجة، جرب MongoDB ID
-                if total_invoices == 0.0 and hasattr(client, '_mongo_id') and client._mongo_id:
-                    client_id = str(client._mongo_id)
-                    total_invoices = client_invoices_total.get(client_id, 0.0)
-                    total_payments = client_payments_total.get(client_id, 0.0)
-                
-                # محاولة 3: إذا لسه مفيش نتيجة، جرب SQLite ID
-                if total_invoices == 0.0 and hasattr(client, 'id') and client.id:
-                    client_id = str(client.id)
-                    total_invoices = client_invoices_total.get(client_id, 0.0)
-                    total_payments = client_payments_total.get(client_id, 0.0)
-                
-                # عرض عدد المشاريع (وليس المبلغ)
-                total_item = QTableWidgetItem(f"{total_invoices} مشروع")
+                # عرض إجمالي الفواتير (المبلغ الإجمالي)
+                total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
                 total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)  # ⚡ للترتيب الرقمي
                 total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 total_item.setForeground(QColor("#2454a5"))
                 total_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
                 self.clients_table.setItem(index, 5, total_item)
 
-                # عرض إجمالي المدفوعات (مع UserRole للترتيب الصحيح)
+                # عرض إجمالي المدفوعات
                 payment_item = QTableWidgetItem(f"{total_payments:,.0f} ج.م")
                 payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)  # ⚡ للترتيب الرقمي
                 payment_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)

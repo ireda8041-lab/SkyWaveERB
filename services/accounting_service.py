@@ -76,13 +76,6 @@ class AccountingService:
         """
         print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
         
-        # ⚡ منع التجميد
-        try:
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-        except Exception:
-            pass
-        
         try:
             accounts = self.repo.get_all_accounts()
             
@@ -90,20 +83,62 @@ class AccountingService:
                 print("WARNING: [AccountingService] لا توجد حسابات")
                 return {}
             
+            # ⚡ منع التجميد - معالجة الأحداث كل 50 حساب
+            try:
+                from PyQt6.QtWidgets import QApplication
+                process_events = lambda: QApplication.processEvents()
+            except Exception:
+                process_events = lambda: None
+            
             # 1. حساب الأرصدة من القيود المحاسبية
             account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
             
+            # إنشاء قاموس لربط account_id بـ account_code
+            account_id_to_code = {}
+            for acc in accounts:
+                if acc.code:
+                    # ربط بالـ _mongo_id
+                    if hasattr(acc, '_mongo_id') and acc._mongo_id:
+                        account_id_to_code[str(acc._mongo_id)] = acc.code
+                    # ربط بالـ id
+                    if hasattr(acc, 'id') and acc.id:
+                        account_id_to_code[str(acc.id)] = acc.code
+                    # ربط بالكود نفسه
+                    account_id_to_code[acc.code] = acc.code
+            
             try:
+                # جلب القيود بالطريقة العادية (أكثر موثوقية)
                 journal_entries = self.repo.get_all_journal_entries()
+                print(f"DEBUG: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
+                
                 for entry in journal_entries:
                     for line in entry.lines:
-                        code = line.account_code
+                        # محاولة الحصول على الكود من account_code أو account_id
+                        code = getattr(line, 'account_code', None)
+                        if not code:
+                            # محاولة الحصول على الكود من account_id
+                            acc_id = getattr(line, 'account_id', None)
+                            if acc_id:
+                                code = account_id_to_code.get(str(acc_id))
+                        
+                        if not code:
+                            continue
+                            
                         if code not in account_movements:
                             account_movements[code] = {'debit': 0.0, 'credit': 0.0}
-                        account_movements[code]['debit'] += line.debit or 0.0
-                        account_movements[code]['credit'] += line.credit or 0.0
+                        account_movements[code]['debit'] += getattr(line, 'debit', 0) or 0.0
+                        account_movements[code]['credit'] += getattr(line, 'credit', 0) or 0.0
+                
+                print(f"DEBUG: [AccountingService] تم حساب حركات {len(account_movements)} حساب")
+                for code, mov in list(account_movements.items())[:5]:
+                    print(f"  - {code}: مدين={mov['debit']}, دائن={mov['credit']}")
+                    
             except Exception as e:
-                print(f"WARNING: [AccountingService] فشل جلب القيود: {e}")
+                print(f"ERROR: [AccountingService] فشل جلب القيود: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            process_events()
             
             # 2. إنشاء قاموس للوصول السريع O(1)
             tree_map: Dict[str, dict] = {}
@@ -117,7 +152,6 @@ class AccountingService:
                     }
             
             # 3. بناء هيكل الشجرة وحساب الأرصدة من القيود
-            roots = []
             for acc in accounts:
                 if not acc.code:
                     continue
@@ -132,48 +166,58 @@ class AccountingService:
                 # حساب الرصيد حسب نوع الحساب
                 acc_type = acc.type.value if acc.type else 'ASSET'
                 if acc_type in ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']:
-                    # الأصول والمصروفات: المدين يزيد، الدائن ينقص
                     node['total'] = debit_total - credit_total
                 else:
-                    # الخصوم والإيرادات وحقوق الملكية: الدائن يزيد، المدين ينقص
                     node['total'] = credit_total - debit_total
                 
-                # ربط الحساب بالأب (استخدام parent_id أو parent_code)
+                # ربط الحساب بالأب - محاولة عدة طرق
                 parent_code = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
-                if parent_code and str(parent_code) in tree_map:
+                
+                # إذا لم يكن هناك parent_code، نحاول استنتاجه من الكود
+                if not parent_code and len(acc.code) > 1:
+                    # مثال: 1100 -> 1000, 1110 -> 1100, 5120 -> 5100
+                    possible_parent = acc.code[:-1] + '0' * (len(acc.code) - len(acc.code[:-1]))
+                    if len(acc.code) == 4:
+                        possible_parent = acc.code[:1] + '000'  # 1100 -> 1000
+                        if possible_parent != acc.code and possible_parent in tree_map:
+                            parent_code = possible_parent
+                        else:
+                            # جرب 1100 -> 1000 بطريقة أخرى
+                            possible_parent = acc.code[:2] + '00'  # 1120 -> 1100
+                            if possible_parent != acc.code and possible_parent in tree_map:
+                                parent_code = possible_parent
+                
+                if parent_code and str(parent_code) in tree_map and str(parent_code) != acc.code:
                     tree_map[str(parent_code)]['children'].append(node)
-                else:
-                    # حساب جذر (بدون أب)
-                    roots.append(node)
+                    print(f"DEBUG: ربط {acc.code} ({acc.name}) بالأب {parent_code}")
             
-            # 4. حساب الأرصدة التراكمية للمجموعات (من الأسفل للأعلى)
+            process_events()
+            
+            # 4. حساب الأرصدة التراكمية للمجموعات (مرة واحدة فقط)
+            visited = set()
+            
             def calculate_total(node: dict) -> float:
                 """حساب إجمالي العقدة بشكل تكراري"""
+                node_code = node['obj'].code
+                if node_code in visited:
+                    return node['total']
+                visited.add(node_code)
+                
                 if not node['children']:
-                    # حساب فرعي (ورقة) - إرجاع رصيده المحسوب من القيود
                     return node['total']
                 
-                # مجموعة - جمع أرصدة الأبناء + الرصيد المباشر
                 children_total = sum(calculate_total(child) for child in node['children'])
-                direct_balance = node['total']  # الرصيد المباشر للمجموعة
-                total_balance = direct_balance + children_total
-                node['total'] = total_balance
-                return total_balance
+                node['total'] = node['total'] + children_total
+                return node['total']
             
-            # تشغيل الحساب لكل العقد التي لها أطفال
-            # نبدأ من الأوراق ونطلع للجذور
-            def process_all_nodes():
-                changed = True
-                while changed:
-                    changed = False
-                    for code, node in tree_map.items():
-                        if node['children']:
-                            old_total = node['total']
-                            calculate_total(node)
-                            if abs(old_total - node['total']) > 0.01:
-                                changed = True
+            # حساب من الجذور فقط
+            for code, node in tree_map.items():
+                acc = node['obj']
+                parent_code = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+                if not parent_code or str(parent_code) not in tree_map:
+                    calculate_total(node)
             
-            process_all_nodes()
+            process_events()
             
             # طباعة ملخص للتأكد
             print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")

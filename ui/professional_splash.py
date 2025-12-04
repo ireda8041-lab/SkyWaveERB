@@ -1,16 +1,17 @@
 # الملف: ui/professional_splash.py
 """
-شاشة البداية الاحترافية مع رسائل التحميل
+شاشة البداية الاحترافية مع لوجو ودائرة تحميل
 """
 
-from PyQt6.QtWidgets import QSplashScreen, QLabel, QVBoxLayout, QWidget, QProgressBar
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRectF
-from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor, QLinearGradient, QPainterPath, QRegion, QBitmap
+from PyQt6.QtWidgets import QSplashScreen
+from PyQt6.QtCore import Qt, QTimer, QRectF
+from PyQt6.QtGui import QPixmap, QFont, QPainter, QColor, QLinearGradient, QPainterPath, QRegion, QBitmap, QPen
 from core.resource_utils import get_resource_path
+import time
 
 
 class ProfessionalSplash(QSplashScreen):
-    """شاشة بداية احترافية مع لوجو ورسائل تحميل"""
+    """شاشة بداية احترافية مع لوجو ودائرة تحميل"""
     
     def __init__(self):
         # إنشاء خلفية متدرجة احترافية
@@ -23,7 +24,7 @@ class ProfessionalSplash(QSplashScreen):
         
         # رسم شكل بزوايا منحنية (curved) باستخدام QPainterPath
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, 800, 500), 40, 40)  # زوايا منحنية جداً
+        path.addRoundedRect(QRectF(0, 0, 800, 500), 40, 40)
         
         # رسم خلفية متدرجة
         gradient = QLinearGradient(0, 0, 0, 500)
@@ -45,23 +46,6 @@ class ProfessionalSplash(QSplashScreen):
         inner_path2.addRoundedRect(QRectF(12, 12, 776, 476), 38, 38)
         painter.drawPath(inner_path2)
         
-        # تحميل ورسم اللوجو
-        logo_path = get_resource_path("logo.png")
-        logo_pixmap = QPixmap(logo_path)
-        
-        if not logo_pixmap.isNull():
-            # تكبير اللوجو
-            logo_pixmap = logo_pixmap.scaled(
-                250, 250,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            
-            # رسم اللوجو في المنتصف
-            x = (800 - logo_pixmap.width()) // 2
-            y = 100
-            painter.drawPixmap(x, y, logo_pixmap)
-        
         painter.end()
         
         super().__init__(pixmap, Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
@@ -80,11 +64,22 @@ class ProfessionalSplash(QSplashScreen):
         self.setMask(QRegion(mask))
         
         # إعداد الخطوط
-        self.message_font = QFont("Cairo", 12, QFont.Weight.Bold)
         self.title_font = QFont("Cairo", 22, QFont.Weight.Bold)
-        self.version_font = QFont("Cairo", 11)
+        self.percent_font = QFont("Cairo", 14, QFont.Weight.Bold)
         
-        self.current_message = "جاري التحميل..."
+        # متغيرات التحميل
+        self.progress = 0
+        self.start_time = time.time()
+        
+        # تحميل اللوجو
+        logo_path = get_resource_path("logo.png")
+        self.logo_pixmap = QPixmap(logo_path)
+        if not self.logo_pixmap.isNull():
+            self.logo_pixmap = self.logo_pixmap.scaled(
+                280, 280,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
         
         # عرض الشاشة مع شفافية
         self.setWindowOpacity(1.0)
@@ -96,25 +91,20 @@ class ProfessionalSplash(QSplashScreen):
         y = (screen.height() - 500) // 2
         self.move(x, y)
         
-        # Timer لتحديث الشريط باستمرار
+        # Timer لتحديث الدائرة باستمرار
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.repaint)
-        self.timer.start(50)  # تحديث كل 50ms
+        self.timer.start(30)  # تحديث كل 30ms للسلاسة
         
         self.show()
-        self.raise_()  # رفع فوق كل النوافذ
+        self.raise_()
     
     def show_message(self, message: str):
-        """عرض رسالة تحميل"""
-        self.current_message = message
-        self.showMessage(
-            message,
-            Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-            QColor("#00d4ff")
-        )
+        """تحديث نسبة التحميل"""
+        # زيادة النسبة تدريجياً
+        self.progress = min(self.progress + 15, 95)
         self.repaint()
         
-        # معالجة الأحداث لضمان التحديث الفوري
         from PyQt6.QtWidgets import QApplication
         QApplication.processEvents()
     
@@ -136,65 +126,42 @@ class ProfessionalSplash(QSplashScreen):
             "Sky Wave ERP"
         )
         
-        # رسم رقم الإصدار
-        try:
-            from version import CURRENT_VERSION
-            version_text = f"الإصدار {CURRENT_VERSION}"
-        except (ImportError, AttributeError):
-            version_text = "v1.0.3"
+        # رسم اللوجو في المنتصف
+        if not self.logo_pixmap.isNull():
+            x = (800 - self.logo_pixmap.width()) // 2
+            y = (500 - self.logo_pixmap.height()) // 2 - 20
+            painter.drawPixmap(x, y, self.logo_pixmap)
         
-        painter.setFont(self.version_font)
-        painter.setPen(QColor("#b0b0b0"))
+        # رسم دائرة التحميل في الأسفل
+        center_x = 400
+        center_y = 420
+        radius = 30
         
-        version_rect = self.rect()
-        version_rect.setTop(70)
-        version_rect.setBottom(95)
-        painter.drawText(
-            version_rect,
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-            version_text
-        )
+        # خلفية الدائرة
+        pen = QPen(QColor("#003366"))
+        pen.setWidth(6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawEllipse(center_x - radius, center_y - radius, radius * 2, radius * 2)
         
-        # رسم الرسالة في الأسفل
-        painter.setFont(self.message_font)
+        # دائرة التحميل المتحركة
+        elapsed = time.time() - self.start_time
+        start_angle = int(elapsed * 300) % 360  # دوران مستمر
+        
+        # تدرج لوني للدائرة
+        pen = QPen(QColor("#00d4ff"))
+        pen.setWidth(6)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        
+        # رسم قوس متحرك
+        arc_rect = QRectF(center_x - radius, center_y - radius, radius * 2, radius * 2)
+        painter.drawArc(arc_rect, start_angle * 16, 270 * 16)
+        
+        # رسم نسبة التحميل بجانب الدائرة
+        painter.setFont(self.percent_font)
         painter.setPen(QColor("#00d4ff"))
-        
-        text_rect = self.rect()
-        text_rect.setTop(text_rect.height() - 100)
-        text_rect.setBottom(text_rect.height() - 60)
-        
         painter.drawText(
-            text_rect,
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
-            self.current_message
+            center_x + radius + 15, center_y + 6,
+            f"{self.progress}%"
         )
-        
-        # رسم شريط تقدم بسيط (متحرك - لا يختفي أبداً)
-        progress_rect = self.rect()
-        progress_rect.setTop(progress_rect.height() - 50)
-        progress_rect.setBottom(progress_rect.height() - 42)
-        progress_rect.setLeft(200)
-        progress_rect.setRight(600)
-        
-        # خلفية شريط التقدم (دائماً ظاهرة)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#003366"))
-        painter.drawRoundedRect(progress_rect, 4, 4)
-        
-        # شريط التقدم المتحرك (نبضة - لا يختفي)
-        import time
-        pulse = int((time.time() * 150) % 400)
-        if pulse < 100:  # منع الاختفاء الكامل
-            pulse = 100
-        
-        progress_fill = progress_rect.adjusted(0, 0, 0, 0)
-        progress_fill.setRight(progress_fill.left() + pulse)
-        
-        # تدرج لوني للشريط
-        from PyQt6.QtGui import QLinearGradient
-        progress_gradient = QLinearGradient(progress_fill.left(), 0, progress_fill.right(), 0)
-        progress_gradient.setColorAt(0, QColor("#0088cc"))
-        progress_gradient.setColorAt(1, QColor("#00d4ff"))
-        
-        painter.setBrush(progress_gradient)
-        painter.drawRoundedRect(progress_fill, 4, 4)
