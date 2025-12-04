@@ -76,6 +76,13 @@ class AccountingService:
         """
         print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
         
+        # ⚡ منع التجميد
+        try:
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+        except Exception:
+            pass
+        
         try:
             accounts = self.repo.get_all_accounts()
             
