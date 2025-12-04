@@ -1,53 +1,80 @@
 ﻿# الملف: core/repository.py
+"""
+⚡ المخزن الذكي - Sky Wave ERP
+محسّن للسرعة القصوى مع نظام Cache ذكي
+"""
 
 import sqlite3
 import pymongo
 import json
+import threading
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from . import schemas # استيراد ملف الاسكيما اللي عملناه
-import time  # ⚡ لحساب وقت الـ Cache
+from . import schemas
+import time
+
+# ⚡ استيراد محسّن السرعة
+try:
+    from .speed_optimizer import LRUCache, cached, invalidate_cache
+    CACHE_ENABLED = True
+except ImportError:
+    CACHE_ENABLED = False
+    print("WARNING: speed_optimizer غير متوفر - الـ cache معطل")
 
 # --- إعدادات الاتصال ---
-# (استخدمت بيانات اليوزر 'skywave_app' لأنها الأنسب للبرنامج)
 MONGO_URI = "mongodb://skywaveads:Newjoer2k24$@147.79.66.116:27017/skywave_erp_db?authSource=admin"
-
-LOCAL_DB_FILE = "skywave_local.db" # اسم ملف قاعدة البيانات الأوفلاين
+LOCAL_DB_FILE = "skywave_local.db"
 DB_NAME = "skywave_erp_db"
-LOCAL_DB_FILE = "skywave_local.db" # اسم ملف قاعدة البيانات الأوفلاين
 
 
 class Repository:
     """
-    ⚡ المخزن الذكي مع Caching للسرعة.
-    يتعامل مع الأونلاين (Mongo) والأوفلاين (SQLite) في مكان واحد.
+    ⚡ المخزن الذكي مع Caching للسرعة القصوى.
+    - Cache ذكي للبيانات المتكررة
+    - SQLite محسّن للأداء
+    - MongoDB للمزامنة
     """
     
     def __init__(self):
         self.online = False
         self.mongo_client = None
         self.mongo_db = None
+        self._lock = threading.RLock()
         
-
+        # ⚡ Cache للبيانات المتكررة
+        if CACHE_ENABLED:
+            self._clients_cache = LRUCache(maxsize=500, ttl_seconds=60)
+            self._projects_cache = LRUCache(maxsize=500, ttl_seconds=60)
+            self._services_cache = LRUCache(maxsize=200, ttl_seconds=120)
         
         try:
-            # 1. محاولة الاتصال بـ MongoDB (أونلاين)
+            # 1. محاولة الاتصال بـ MongoDB (أونلاين) - مهلة أقصر
             self.mongo_client = pymongo.MongoClient(
                 MONGO_URI,
-                serverSelectionTimeoutMS=5000 # مهلة 5 ثواني
+                serverSelectionTimeoutMS=3000,  # ⚡ 3 ثواني بدل 5
+                connectTimeoutMS=3000,
+                socketTimeoutMS=5000
             )
-            self.mongo_client.server_info() # اختبار الاتصال
+            self.mongo_client.server_info()
             self.mongo_db = self.mongo_client[DB_NAME]
             self.online = True
-            print("INFO: متصل بقاعدة البيانات الأونلاين (MongoDB).")
+            print("INFO: ✅ متصل بـ MongoDB")
             
         except pymongo.errors.ServerSelectionTimeoutError:
-            print("WARNING: فشل الاتصال بـ MongoDB. سيبدأ البرنامج في وضع الأوفلاين.")
+            print("WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
+            self.online = False
+        except Exception as e:
+            print(f"WARNING: ⚠️ خطأ في الاتصال: {e}")
             self.online = False
         
-        # 2. دائماً اتصل بـ SQLite (أوفلاين)
-        self.sqlite_conn = sqlite3.connect(LOCAL_DB_FILE, check_same_thread=False)
-        self.sqlite_conn.row_factory = sqlite3.Row # عشان نقدر نوصل للداتا بالاسم
+        # 2. SQLite (أوفلاين) - محسّن للسرعة
+        self.sqlite_conn = sqlite3.connect(
+            LOCAL_DB_FILE, 
+            check_same_thread=False,
+            timeout=30.0,
+            isolation_level=None  # ⚡ Autocommit للسرعة
+        )
+        self.sqlite_conn.row_factory = sqlite3.Row
         self.sqlite_cursor = self.sqlite_conn.cursor()
         print(f"INFO: متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
         
@@ -81,15 +108,15 @@ class Repository:
         # Migration: إضافة الأعمدة الناقصة للجداول القديمة
         try:
             self.sqlite_cursor.execute("ALTER TABLE accounts ADD COLUMN currency TEXT DEFAULT 'EGP'")
-        except:
+        except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
         try:
             self.sqlite_cursor.execute("ALTER TABLE accounts ADD COLUMN description TEXT")
-        except:
+        except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
         try:
             self.sqlite_cursor.execute("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'نشط'")
-        except:
+        except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
 
         # جدول المصروفات (expenses)
@@ -112,7 +139,7 @@ class Repository:
         # Migration: إضافة عمود payment_account_id للجداول القديمة
         try:
             self.sqlite_cursor.execute("ALTER TABLE expenses ADD COLUMN payment_account_id TEXT")
-        except:
+        except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
         
         # جدول العملاء (clients)
@@ -317,7 +344,7 @@ class Repository:
         # Migration: إضافة عمود custom_permissions للجداول القديمة
         try:
             self.sqlite_cursor.execute("ALTER TABLE users ADD COLUMN custom_permissions TEXT")
-        except:
+        except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
 
         # جدول قائمة انتظار المزامنة (sync_queue)
@@ -499,6 +526,12 @@ class Repository:
         1. يحفظ في SQLite دائماً (بحالة 'new_offline').
         2. يحاول الحفظ في Mongo لو فيه نت.
         """
+        # ✅ فحص التكرار قبل الإضافة
+        existing_client = self.get_client_by_name(client_data.name)
+        if existing_client:
+            print(f"WARNING: العميل '{client_data.name}' موجود بالفعل!")
+            raise Exception(f"العميل '{client_data.name}' موجود بالفعل في النظام")
+        
         now = datetime.now().isoformat()
         client_data.created_at = now
         client_data.last_modified = now
@@ -608,15 +641,35 @@ class Repository:
 
     def get_all_clients(self) -> List[schemas.Client]:
         """
-        ⚡ جلب كل العملاء "النشطين" فقط (محسّن للسرعة)
+        ⚡ جلب كل العملاء النشطين (من MongoDB أولاً ثم SQLite)
         """
         active_status = schemas.ClientStatus.ACTIVE.value
         
-        # ⚡ استخدام SQLite مباشرة (أسرع بكتير)
+        # جلب من MongoDB أولاً لو متصل
+        if self.online:
+            try:
+                clients_data = list(self.mongo_db.clients.find({"status": active_status}))
+                clients_list = []
+                for c in clients_data:
+                    try:
+                        mongo_id = str(c.pop('_id'))
+                        c.pop('_mongo_id', None)
+                        c.pop('mongo_id', None)
+                        clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
+                    except Exception as item_err:
+                        print(f"WARNING: تخطي عميل بسبب خطأ: {item_err}")
+                        continue
+                print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
+                return clients_list
+            except Exception as e:
+                print(f"WARNING: فشل جلب العملاء من MongoDB: {e}. جاري الجلب من SQLite...")
+        
+        # جلب من SQLite كـ fallback
         try:
             self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
             rows = self.sqlite_cursor.fetchall()
             clients_list = [schemas.Client(**dict(row)) for row in rows]
+            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي.")
             return clients_list
         except Exception as e:
             print(f"ERROR: فشل جلب العملاء: {e}")
@@ -624,7 +677,7 @@ class Repository:
 
 
     def get_archived_clients(self) -> List[schemas.Client]:
-        """ (جديدة) جلب كل العملاء "المؤرشفين" فقط (بذكاء) """
+        """ جلب كل العملاء المؤرشفين فقط """
         archived_status = schemas.ClientStatus.ARCHIVED.value
         if self.online:
             try:
@@ -2532,7 +2585,7 @@ class Repository:
                         elif isinstance(d['items'], str):
                             try:
                                 d['items'] = json.loads(d['items'])
-                            except:
+                            except (json.JSONDecodeError, TypeError, ValueError):
                                 d['items'] = []
                         # إضافة currency افتراضي إذا غير موجود
                         if 'currency' not in d or d['currency'] is None:
