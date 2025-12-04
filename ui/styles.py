@@ -332,17 +332,17 @@ CHART_OF_ACCOUNTS_TREE_STYLE = f"""
         background-color: {COLORS['bg_dark']};
         border: 1px solid {COLORS['border']};
         color: {COLORS['text_primary']};
-        font-size: 14px;
+        font-size: 13px;
         font-family: 'Cairo', 'Segoe UI', sans-serif;
         alternate-background-color: {COLORS['bg_medium']};
         gridline-color: {COLORS['border']};
+        selection-background-color: {COLORS['primary']};
     }}
     QTreeView::item {{
-        padding: 12px 10px;
+        padding: 8px 6px;
         border-bottom: 1px solid {COLORS['border']};
         border-right: 1px solid rgba(30, 58, 95, 0.5);
-        min-height: 40px;
-        text-align: center;
+        min-height: 35px;
     }}
     QTreeView::item:selected {{
         background-color: {COLORS['primary']};
@@ -368,13 +368,12 @@ CHART_OF_ACCOUNTS_TREE_STYLE = f"""
     QHeaderView::section {{
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['primary']}, stop:1 #005BC5);
         color: white;
-        padding: 15px 10px;
+        padding: 10px 8px;
         border: none;
         border-right: 1px solid rgba(255,255,255,0.3);
         font-weight: bold;
-        font-size: 14px;
-        min-height: 40px;
-        text-align: center;
+        font-size: 13px;
+        min-height: 35px;
         font-family: 'Cairo', 'Segoe UI', sans-serif;
     }}
 """

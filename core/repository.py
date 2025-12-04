@@ -438,6 +438,25 @@ class Repository:
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_project ON payments(project_id)")
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date)")
             
+            # ⚡ Unique indexes لمنع التكرار
+            # منع تكرار العملاء بنفس الاسم (case insensitive)
+            try:
+                self.sqlite_cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_name_unique ON clients(LOWER(name)) WHERE status != 'مؤرشف'")
+            except Exception:
+                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+            
+            # منع تكرار المشاريع بنفس الاسم لنفس العميل
+            try:
+                self.sqlite_cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_client_unique ON projects(LOWER(name), client_id) WHERE status != 'مؤرشف'")
+            except Exception:
+                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+            
+            # منع تكرار الدفعات (نفس المشروع + نفس التاريخ + نفس المبلغ)
+            try:
+                self.sqlite_cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique ON payments(project_id, date, amount)")
+            except Exception:
+                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+            
             # Indexes لـ notifications
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_is_read ON notifications(is_read)")
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type)")
@@ -526,11 +545,17 @@ class Repository:
         1. يحفظ في SQLite دائماً (بحالة 'new_offline').
         2. يحاول الحفظ في Mongo لو فيه نت.
         """
-        # ✅ فحص التكرار قبل الإضافة (بالاسم والهاتف)
+        # ✅ فحص التكرار قبل الإضافة (بالاسم - exact match)
         existing_client = self.get_client_by_name(client_data.name)
         if existing_client:
             print(f"WARNING: العميل '{client_data.name}' موجود بالفعل!")
             raise Exception(f"العميل '{client_data.name}' موجود بالفعل في النظام")
+        
+        # ✅ فحص التكرار بالاسم (case insensitive)
+        similar_client = self._get_similar_client(client_data.name)
+        if similar_client:
+            print(f"WARNING: يوجد عميل مشابه '{similar_client.name}'!")
+            raise Exception(f"يوجد عميل مشابه بالاسم '{similar_client.name}'")
         
         # ✅ فحص التكرار بالهاتف أيضاً
         if client_data.phone:
@@ -780,6 +805,133 @@ class Repository:
                 return schemas.Client(**dict(row))
         except Exception as e:
             print(f"WARNING: فشل البحث بالهاتف (SQLite): {e}")
+        
+        return None
+
+    def _get_similar_project(self, name: str, client_id: str) -> Optional[schemas.Project]:
+        """البحث عن مشروع مشابه لنفس العميل (case insensitive)"""
+        if not name or not client_id:
+            return None
+        
+        name_lower = name.strip().lower()
+        
+        if self.online:
+            try:
+                # البحث case insensitive في MongoDB
+                project_data = self.mongo_db.projects.find_one({
+                    "client_id": client_id,
+                    "name": {"$regex": f"^{name_lower}$", "$options": "i"},
+                    "status": {"$ne": "مؤرشف"}
+                })
+                if project_data:
+                    mongo_id = str(project_data.pop('_id'))
+                    project_data.pop('_mongo_id', None)
+                    project_data.pop('mongo_id', None)
+                    if 'items' not in project_data or project_data['items'] is None:
+                        project_data['items'] = []
+                    elif isinstance(project_data['items'], str):
+                        try:
+                            project_data['items'] = json.loads(project_data['items'])
+                        except:
+                            project_data['items'] = []
+                    if 'currency' not in project_data or project_data['currency'] is None:
+                        project_data['currency'] = 'EGP'
+                    return schemas.Project(**project_data, _mongo_id=mongo_id)
+            except Exception as e:
+                print(f"WARNING: فشل البحث عن مشروع مشابه (Mongo): {e}")
+        
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM projects WHERE client_id = ? AND LOWER(name) = ? AND status != ?",
+                (client_id, name_lower, "مؤرشف")
+            )
+            row = self.sqlite_cursor.fetchone()
+            if row:
+                row_dict = dict(row)
+                if isinstance(row_dict.get('items'), str):
+                    try:
+                        row_dict['items'] = json.loads(row_dict['items'])
+                    except:
+                        row_dict['items'] = []
+                return schemas.Project(**row_dict)
+        except Exception as e:
+            print(f"WARNING: فشل البحث عن مشروع مشابه (SQLite): {e}")
+        
+        return None
+
+    def _get_duplicate_payment(self, project_id: str, date, amount: float) -> Optional[schemas.Payment]:
+        """البحث عن دفعة مكررة (نفس المشروع + نفس التاريخ + نفس المبلغ)"""
+        if not project_id:
+            return None
+        
+        date_str = date.isoformat() if hasattr(date, 'isoformat') else str(date)
+        date_str_short = date_str[:10]  # YYYY-MM-DD فقط
+        
+        if self.online:
+            try:
+                # البحث في MongoDB
+                payment_data = self.mongo_db.payments.find_one({
+                    "project_id": project_id,
+                    "amount": amount,
+                    "$or": [
+                        {"date": {"$regex": f"^{date_str_short}"}},
+                        {"date": date}
+                    ]
+                })
+                if payment_data:
+                    mongo_id = str(payment_data.pop('_id'))
+                    payment_data.pop('_mongo_id', None)
+                    payment_data.pop('mongo_id', None)
+                    return schemas.Payment(**payment_data, _mongo_id=mongo_id)
+            except Exception as e:
+                print(f"WARNING: فشل البحث عن دفعة مكررة (Mongo): {e}")
+        
+        try:
+            self.sqlite_cursor.execute(
+                """SELECT * FROM payments 
+                   WHERE project_id = ? AND amount = ? AND date LIKE ?""",
+                (project_id, amount, f"{date_str_short}%")
+            )
+            row = self.sqlite_cursor.fetchone()
+            if row:
+                return schemas.Payment(**dict(row))
+        except Exception as e:
+            print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
+        
+        return None
+
+    def _get_similar_client(self, name: str) -> Optional[schemas.Client]:
+        """البحث عن عميل مشابه (case insensitive + تشابه جزئي)"""
+        if not name:
+            return None
+        
+        name_lower = name.strip().lower()
+        
+        if self.online:
+            try:
+                # البحث case insensitive في MongoDB
+                client_data = self.mongo_db.clients.find_one({
+                    "name": {"$regex": f"^{name_lower}$", "$options": "i"},
+                    "status": {"$ne": schemas.ClientStatus.ARCHIVED.value}
+                })
+                if client_data:
+                    mongo_id = str(client_data.pop('_id'))
+                    client_data.pop('_mongo_id', None)
+                    client_data.pop('mongo_id', None)
+                    return schemas.Client(**client_data, _mongo_id=mongo_id)
+            except Exception as e:
+                print(f"WARNING: فشل البحث عن عميل مشابه (Mongo): {e}")
+        
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM clients WHERE LOWER(name) = ? AND status != ?",
+                (name_lower, schemas.ClientStatus.ARCHIVED.value)
+            )
+            row = self.sqlite_cursor.fetchone()
+            if row:
+                return schemas.Client(**dict(row))
+        except Exception as e:
+            print(f"WARNING: فشل البحث عن عميل مشابه (SQLite): {e}")
         
         return None
 
@@ -1627,9 +1779,20 @@ class Repository:
     # --- دوال التعامل مع الدفعات ---
 
     def create_payment(self, payment_data: schemas.Payment) -> schemas.Payment:
-        """ (معدلة) إنشاء دفعة جديدة (مربوطة بمشروع) """
+        """ (معدلة) إنشاء دفعة جديدة (مربوطة بمشروع) مع فحص التكرار """
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
+        
+        # ✅ فحص التكرار قبل الإضافة (نفس المشروع + نفس التاريخ + نفس المبلغ)
+        existing_payment = self._get_duplicate_payment(
+            payment_data.project_id, 
+            payment_data.date, 
+            payment_data.amount
+        )
+        if existing_payment:
+            print(f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})")
+            raise Exception(f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})")
+        
         payment_data.created_at = now_dt
         payment_data.last_modified = now_dt
         payment_data.sync_status = 'new_offline'
@@ -2541,9 +2704,22 @@ class Repository:
     # --- دوال التعامل مع المشاريع ---
 
     def create_project(self, project_data: schemas.Project) -> schemas.Project:
-        """ (معدلة) إنشاء مشروع جديد (بالحقول المالية) """
+        """ (معدلة) إنشاء مشروع جديد (بالحقول المالية) مع فحص التكرار """
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
+        
+        # ✅ فحص التكرار قبل الإضافة
+        existing_project = self.get_project_by_number(project_data.name)
+        if existing_project:
+            print(f"WARNING: المشروع '{project_data.name}' موجود بالفعل!")
+            raise Exception(f"المشروع '{project_data.name}' موجود بالفعل في النظام")
+        
+        # ✅ فحص تكرار بنفس العميل ونفس الاسم (case insensitive)
+        similar_project = self._get_similar_project(project_data.name, project_data.client_id)
+        if similar_project:
+            print(f"WARNING: يوجد مشروع مشابه '{similar_project.name}' لنفس العميل!")
+            raise Exception(f"يوجد مشروع مشابه '{similar_project.name}' لنفس العميل")
+        
         project_data.created_at = now_dt
         project_data.last_modified = now_dt
         project_data.sync_status = 'new_offline'
@@ -3254,3 +3430,327 @@ if __name__ == "__main__":
         print(f"- {client.name} (Status: {client.sync_status}, MongoID: {client._mongo_id})")
     
     print("\n--- انتهاء الاختبار ---")
+
+    # ============================================
+    # دوال تنظيف التكرارات وإصلاح البيانات
+    # ============================================
+    
+    def cleanup_duplicate_clients(self) -> dict:
+        """
+        تنظيف العملاء المكررين (يحتفظ بالأقدم ويحذف الأحدث)
+        Returns: dict with counts of duplicates found and removed
+        """
+        print("INFO: [Repo] جاري البحث عن العملاء المكررين...")
+        result = {"found": 0, "removed": 0, "details": []}
+        
+        try:
+            # جلب كل العملاء مرتبين بتاريخ الإنشاء
+            self.sqlite_cursor.execute("""
+                SELECT id, _mongo_id, name, phone, created_at 
+                FROM clients 
+                WHERE status != 'مؤرشف'
+                ORDER BY created_at ASC
+            """)
+            rows = self.sqlite_cursor.fetchall()
+            
+            seen_names = {}  # {name_lower: first_id}
+            seen_phones = {}  # {phone_clean: first_id}
+            duplicates_to_archive = []
+            
+            for row in rows:
+                row_dict = dict(row)
+                client_id = row_dict['id']
+                name = row_dict.get('name', '').strip().lower()
+                phone = row_dict.get('phone', '')
+                phone_clean = phone.strip().replace(" ", "").replace("-", "") if phone else None
+                
+                is_duplicate = False
+                reason = ""
+                
+                # فحص تكرار الاسم
+                if name and name in seen_names:
+                    is_duplicate = True
+                    reason = f"اسم مكرر: {row_dict.get('name')}"
+                elif name:
+                    seen_names[name] = client_id
+                
+                # فحص تكرار الهاتف
+                if not is_duplicate and phone_clean and phone_clean in seen_phones:
+                    is_duplicate = True
+                    reason = f"هاتف مكرر: {phone}"
+                elif phone_clean:
+                    seen_phones[phone_clean] = client_id
+                
+                if is_duplicate:
+                    duplicates_to_archive.append((client_id, row_dict.get('_mongo_id'), reason))
+                    result["found"] += 1
+            
+            # أرشفة المكررين
+            for client_id, mongo_id, reason in duplicates_to_archive:
+                try:
+                    self.sqlite_cursor.execute(
+                        "UPDATE clients SET status = 'مؤرشف', sync_status = 'modified_offline' WHERE id = ?",
+                        (client_id,)
+                    )
+                    result["removed"] += 1
+                    result["details"].append({"id": client_id, "reason": reason})
+                    print(f"INFO: [Repo] تم أرشفة العميل المكرر ID: {client_id} - {reason}")
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل أرشفة العميل {client_id}: {e}")
+            
+            self.sqlite_conn.commit()
+            
+            # مزامنة مع MongoDB
+            if self.online and duplicates_to_archive:
+                try:
+                    for client_id, mongo_id, _ in duplicates_to_archive:
+                        if mongo_id:
+                            self.mongo_db.clients.update_one(
+                                {"_id": self._to_objectid(mongo_id)},
+                                {"$set": {"status": "مؤرشف"}}
+                            )
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل مزامنة أرشفة العملاء المكررين: {e}")
+            
+            print(f"INFO: [Repo] تم العثور على {result['found']} عميل مكرر، تم أرشفة {result['removed']}")
+            
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل تنظيف العملاء المكررين: {e}")
+        
+        return result
+
+    def cleanup_duplicate_projects(self) -> dict:
+        """
+        تنظيف المشاريع المكررة (نفس الاسم لنفس العميل)
+        """
+        print("INFO: [Repo] جاري البحث عن المشاريع المكررة...")
+        result = {"found": 0, "removed": 0, "details": []}
+        
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT id, _mongo_id, name, client_id, created_at 
+                FROM projects 
+                WHERE status != 'مؤرشف'
+                ORDER BY created_at ASC
+            """)
+            rows = self.sqlite_cursor.fetchall()
+            
+            seen_projects = {}  # {(name_lower, client_id): first_id}
+            duplicates_to_archive = []
+            
+            for row in rows:
+                row_dict = dict(row)
+                project_id = row_dict['id']
+                name = row_dict.get('name', '').strip().lower()
+                client_id = row_dict.get('client_id', '')
+                key = (name, client_id)
+                
+                if key in seen_projects:
+                    duplicates_to_archive.append((project_id, row_dict.get('_mongo_id'), f"مشروع مكرر: {row_dict.get('name')}"))
+                    result["found"] += 1
+                else:
+                    seen_projects[key] = project_id
+            
+            for project_id, mongo_id, reason in duplicates_to_archive:
+                try:
+                    self.sqlite_cursor.execute(
+                        "UPDATE projects SET status = 'مؤرشف', sync_status = 'modified_offline' WHERE id = ?",
+                        (project_id,)
+                    )
+                    result["removed"] += 1
+                    result["details"].append({"id": project_id, "reason": reason})
+                    print(f"INFO: [Repo] تم أرشفة المشروع المكرر ID: {project_id} - {reason}")
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل أرشفة المشروع {project_id}: {e}")
+            
+            self.sqlite_conn.commit()
+            
+            if self.online and duplicates_to_archive:
+                try:
+                    for project_id, mongo_id, _ in duplicates_to_archive:
+                        if mongo_id:
+                            self.mongo_db.projects.update_one(
+                                {"_id": self._to_objectid(mongo_id)},
+                                {"$set": {"status": "مؤرشف"}}
+                            )
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل مزامنة أرشفة المشاريع المكررة: {e}")
+            
+            print(f"INFO: [Repo] تم العثور على {result['found']} مشروع مكرر، تم أرشفة {result['removed']}")
+            
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل تنظيف المشاريع المكررة: {e}")
+        
+        return result
+
+    def cleanup_duplicate_payments(self) -> dict:
+        """
+        تنظيف الدفعات المكررة (نفس المشروع + نفس التاريخ + نفس المبلغ)
+        """
+        print("INFO: [Repo] جاري البحث عن الدفعات المكررة...")
+        result = {"found": 0, "removed": 0, "details": []}
+        
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT id, _mongo_id, project_id, date, amount, created_at 
+                FROM payments 
+                ORDER BY created_at ASC
+            """)
+            rows = self.sqlite_cursor.fetchall()
+            
+            seen_payments = {}  # {(project_id, date_short, amount): first_id}
+            duplicates_to_delete = []
+            
+            for row in rows:
+                row_dict = dict(row)
+                payment_id = row_dict['id']
+                project_id = row_dict.get('project_id', '')
+                date_str = str(row_dict.get('date', ''))[:10]  # YYYY-MM-DD
+                amount = row_dict.get('amount', 0)
+                key = (project_id, date_str, amount)
+                
+                if key in seen_payments:
+                    duplicates_to_delete.append((payment_id, row_dict.get('_mongo_id'), f"دفعة مكررة: {amount} في {date_str}"))
+                    result["found"] += 1
+                else:
+                    seen_payments[key] = payment_id
+            
+            for payment_id, mongo_id, reason in duplicates_to_delete:
+                try:
+                    self.sqlite_cursor.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
+                    result["removed"] += 1
+                    result["details"].append({"id": payment_id, "reason": reason})
+                    print(f"INFO: [Repo] تم حذف الدفعة المكررة ID: {payment_id} - {reason}")
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل حذف الدفعة {payment_id}: {e}")
+            
+            self.sqlite_conn.commit()
+            
+            if self.online and duplicates_to_delete:
+                try:
+                    for payment_id, mongo_id, _ in duplicates_to_delete:
+                        if mongo_id:
+                            self.mongo_db.payments.delete_one({"_id": self._to_objectid(mongo_id)})
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل حذف الدفعات المكررة من MongoDB: {e}")
+            
+            print(f"INFO: [Repo] تم العثور على {result['found']} دفعة مكررة، تم حذف {result['removed']}")
+            
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل تنظيف الدفعات المكررة: {e}")
+        
+        return result
+
+    def fix_account_hierarchy(self) -> dict:
+        """
+        إصلاح العلاقات الهرمية للحسابات (ربط parent_code بشكل صحيح)
+        """
+        print("INFO: [Repo] جاري إصلاح العلاقات الهرمية للحسابات...")
+        result = {"fixed": 0, "errors": 0, "details": []}
+        
+        try:
+            # جلب كل الحسابات
+            self.sqlite_cursor.execute("SELECT * FROM accounts ORDER BY code")
+            rows = self.sqlite_cursor.fetchall()
+            
+            accounts_by_code = {}
+            for row in rows:
+                row_dict = dict(row)
+                accounts_by_code[row_dict['code']] = row_dict
+            
+            for code, account in accounts_by_code.items():
+                # تحديد الحساب الأب بناءً على الكود
+                # مثال: 1100 -> parent = 1000, 1110 -> parent = 1100
+                if len(code) > 4:
+                    parent_code = code[:-1] + '0'  # 11100 -> 11100 -> 1110
+                    if parent_code not in accounts_by_code:
+                        parent_code = code[:-2] + '00'  # 1110 -> 1100
+                    if parent_code not in accounts_by_code:
+                        parent_code = code[:-3] + '000'  # 1100 -> 1000
+                elif len(code) == 4:
+                    parent_code = code[0] + '000'  # 1100 -> 1000
+                else:
+                    parent_code = None
+                
+                current_parent = account.get('parent_id') or account.get('parent_code')
+                
+                # تحديث إذا كان الـ parent مختلف
+                if parent_code and parent_code in accounts_by_code and parent_code != code:
+                    if current_parent != parent_code:
+                        try:
+                            self.sqlite_cursor.execute(
+                                "UPDATE accounts SET parent_id = ?, sync_status = 'modified_offline' WHERE code = ?",
+                                (parent_code, code)
+                            )
+                            result["fixed"] += 1
+                            result["details"].append({"code": code, "new_parent": parent_code})
+                            print(f"INFO: [Repo] تم ربط الحساب {code} بالحساب الأب {parent_code}")
+                        except Exception as e:
+                            result["errors"] += 1
+                            print(f"WARNING: [Repo] فشل ربط الحساب {code}: {e}")
+            
+            self.sqlite_conn.commit()
+            
+            # تحديث is_group للحسابات التي لها أطفال
+            self.update_is_group_flags()
+            
+            # مزامنة مع MongoDB
+            if self.online:
+                try:
+                    for detail in result["details"]:
+                        self.mongo_db.accounts.update_one(
+                            {"code": detail["code"]},
+                            {"$set": {"parent_id": detail["new_parent"], "parent_code": detail["new_parent"]}}
+                        )
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل مزامنة إصلاح الحسابات: {e}")
+            
+            print(f"INFO: [Repo] تم إصلاح {result['fixed']} حساب، أخطاء: {result['errors']}")
+            
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل إصلاح العلاقات الهرمية: {e}")
+        
+        return result
+
+    def update_is_group_flags(self):
+        """
+        تحديث علامة is_group للحسابات (الحسابات التي لها أطفال)
+        """
+        try:
+            # أولاً: تعيين كل الحسابات كـ is_group = False
+            self.sqlite_cursor.execute("UPDATE accounts SET is_group = 0")
+            
+            # ثانياً: تحديد الحسابات التي لها أطفال
+            self.sqlite_cursor.execute("""
+                UPDATE accounts SET is_group = 1 
+                WHERE code IN (
+                    SELECT DISTINCT parent_id FROM accounts WHERE parent_id IS NOT NULL AND parent_id != ''
+                )
+            """)
+            
+            self.sqlite_conn.commit()
+            print("INFO: [Repo] تم تحديث علامات is_group للحسابات")
+            
+        except Exception as e:
+            print(f"WARNING: [Repo] فشل تحديث علامات is_group: {e}")
+
+    def cleanup_all_duplicates(self) -> dict:
+        """
+        تنظيف شامل لكل التكرارات (عملاء + مشاريع + دفعات)
+        """
+        print("INFO: [Repo] ========== بدء التنظيف الشامل ==========")
+        
+        results = {
+            "clients": self.cleanup_duplicate_clients(),
+            "projects": self.cleanup_duplicate_projects(),
+            "payments": self.cleanup_duplicate_payments(),
+            "accounts": self.fix_account_hierarchy()
+        }
+        
+        total_found = sum(r.get("found", 0) for r in results.values())
+        total_fixed = sum(r.get("removed", 0) + r.get("fixed", 0) for r in results.values())
+        
+        print(f"INFO: [Repo] ========== انتهى التنظيف الشامل ==========")
+        print(f"INFO: [Repo] إجمالي المشاكل: {total_found}, تم إصلاح: {total_fixed}")
+        
+        return results

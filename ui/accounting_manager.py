@@ -218,23 +218,20 @@ class AccountingManagerTab(QWidget):
         # ✅ إعداد الأعمدة بشكل صحيح
         header = self.accounts_tree.header()
         header.setMinimumHeight(40)
-        header.setDefaultSectionSize(100)
-        header.setStretchLastSection(True)  # آخر عمود يتمدد
+        header.setDefaultSectionSize(120)
+        header.setStretchLastSection(False)  # لا يتمدد آخر عمود
         
-        # ✅ ضبط عرض الأعمدة الثابتة
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)      # الكود
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)    # اسم الحساب - يتمدد
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)      # النوع
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)      # العملة
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)      # الرصيد
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)      # الحالة
+        # ✅ ضبط عرض الأعمدة - اسم الحساب يتمدد والباقي ثابت
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)           # الكود
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)         # اسم الحساب - يتمدد
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # النوع - حسب المحتوى
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)           # العملة
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # الرصيد - حسب المحتوى
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # الحالة - حسب المحتوى
         
-        # ✅ تحديد عرض الأعمدة
-        self.accounts_tree.setColumnWidth(0, 80)    # الكود
-        self.accounts_tree.setColumnWidth(2, 100)   # النوع
+        # ✅ تحديد عرض الأعمدة الثابتة
+        self.accounts_tree.setColumnWidth(0, 70)    # الكود
         self.accounts_tree.setColumnWidth(3, 60)    # العملة
-        self.accounts_tree.setColumnWidth(4, 120)   # الرصيد
-        self.accounts_tree.setColumnWidth(5, 80)    # الحالة
         
         # ✨ STEP 3: ENABLE LEDGER - Double Click for Ledger Window
         self.accounts_tree.doubleClicked.connect(self.open_ledger_window)

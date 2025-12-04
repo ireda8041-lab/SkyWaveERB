@@ -1497,11 +1497,9 @@ class ProjectManagerTab(QWidget):
                 traceback.print_exc()
             
             # Step D: Prepare the complete data dictionary
-            # Generate unique invoice number based on timestamp
-            import random
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            random_suffix = random.randint(10, 99)
-            invoice_number = f"SW-{timestamp}{random_suffix}"
+            # توليد رقم الفاتورة من ID المشروع (نفس الطريقة المستخدمة في الجدول)
+            project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '0000'))
+            invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else "SW-0000"
             
             invoice_data = {
                 "invoice_number": invoice_number,

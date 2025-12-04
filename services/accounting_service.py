@@ -1698,3 +1698,64 @@ class AccountingService:
                 "errors": errors + [error_msg],
                 "message": error_msg
             }
+
+    def cleanup_all_data(self) -> dict:
+        """
+        تنظيف شامل للبيانات المكررة وإصلاح العلاقات
+        
+        يقوم بـ:
+        1. تنظيف العملاء المكررين
+        2. تنظيف المشاريع المكررة
+        3. تنظيف الدفعات المكررة
+        4. إصلاح ربط الحسابات بالآباء
+        5. تنظيف الحسابات الفرعية للعملاء
+        
+        Returns:
+            dict مع نتائج التنظيف الشامل
+        """
+        print("=" * 70)
+        print("INFO: [AccountingService] ========== بدء التنظيف الشامل ==========")
+        print("=" * 70)
+        
+        results = {}
+        
+        try:
+            # 1. تنظيف التكرارات من Repository
+            if hasattr(self.repo, 'cleanup_all_duplicates'):
+                print("\n📋 الخطوة 1: تنظيف التكرارات...")
+                results['duplicates'] = self.repo.cleanup_all_duplicates()
+            
+            # 2. إصلاح ربط الحسابات
+            print("\n📋 الخطوة 2: إصلاح ربط الحسابات...")
+            results['accounts_fix'] = self.fix_accounts_parent_codes()
+            
+            # 3. تنظيف الحسابات الفرعية للعملاء
+            print("\n📋 الخطوة 3: تنظيف الحسابات الفرعية للعملاء...")
+            results['client_accounts'] = self.cleanup_client_sub_accounts()
+            
+            # إرسال إشارات التحديث
+            app_signals.emit_data_changed('clients')
+            app_signals.emit_data_changed('projects')
+            app_signals.emit_data_changed('payments')
+            app_signals.emit_data_changed('accounts')
+            
+            print("\n" + "=" * 70)
+            print("INFO: [AccountingService] ========== انتهى التنظيف الشامل ==========")
+            print("=" * 70)
+            
+            return {
+                "success": True,
+                "results": results,
+                "message": "تم التنظيف الشامل بنجاح"
+            }
+            
+        except Exception as e:
+            error_msg = f"فشل التنظيف الشامل: {e}"
+            print(f"ERROR: [AccountingService] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "results": results,
+                "message": error_msg
+            }
