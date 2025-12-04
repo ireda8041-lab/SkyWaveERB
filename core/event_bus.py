@@ -1,52 +1,213 @@
 # الملف: core/event_bus.py
+"""
+نظام ناقل الأحداث (Event Bus)
+يوفر نمط Publish-Subscribe للتواصل بين مكونات التطبيق
+"""
 
 from collections import defaultdict
-from typing import Callable, Any, Dict, List
+from typing import Callable, Any, Dict, List, Optional, Set
+from threading import Lock
+from core.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 class EventBus:
     """
-    إذاعة المدينة (Event Bus).
-    مسؤولة عن توصيل "الأحداث" من "الناشر" (Publisher) 
-    إلى "المستمعين" (Listeners/Subscribers).
+    ناقل الأحداث (Event Bus)
+    
+    مسؤول عن توصيل الأحداث من الناشر (Publisher) 
+    إلى المستمعين (Listeners/Subscribers).
+    
+    الأحداث المدعومة:
+    - CLIENT_CREATED: عند إنشاء عميل جديد
+    - CLIENT_UPDATED: عند تحديث بيانات عميل
+    - CLIENT_DELETED: عند حذف/أرشفة عميل
+    - PROJECT_CREATED: عند إنشاء مشروع جديد
+    - PROJECT_UPDATED: عند تحديث مشروع
+    - INVOICE_CREATED: عند إنشاء فاتورة
+    - INVOICE_VOIDED: عند إلغاء فاتورة
+    - EXPENSE_CREATED: عند تسجيل مصروف
+    - EXPENSE_DELETED: عند حذف مصروف
+    - PAYMENT_RECORDED: عند تسجيل دفعة
+    - SYNC_STARTED: عند بدء المزامنة
+    - SYNC_COMPLETED: عند اكتمال المزامنة
+    - SYNC_FAILED: عند فشل المزامنة
+    - NOTIFICATION_CREATED: عند إنشاء إشعار
+    
+    Attributes:
+        _handlers: قاموس المعالجات لكل حدث
+        _lock: قفل للتزامن في البيئات متعددة الخيوط
     """
     
-    def __init__(self):
-        # هنستخدم dict عشان نخزن "المستمعين" لكل "حدث"
-        # شكله هيكون كده:
-        # {
-        #   'INVOICE_CREATED': [listener1_func, listener2_func],
-        #   'EXPENSE_CREATED': [listener3_func]
-        # }
-        self.listeners: Dict[str, List[Callable]] = defaultdict(list)
-        print("INFO: إذاعة المدينة (EventBus) جاهزة للعمل.")
+    # قائمة الأحداث المعروفة (للتوثيق والتحقق)
+    KNOWN_EVENTS: Set[str] = {
+        "CLIENT_CREATED", "CLIENT_UPDATED", "CLIENT_DELETED",
+        "PROJECT_CREATED", "PROJECT_UPDATED", "PROJECT_DELETED",
+        "INVOICE_CREATED", "INVOICE_UPDATED", "INVOICE_VOIDED",
+        "EXPENSE_CREATED", "EXPENSE_UPDATED", "EXPENSE_DELETED",
+        "PAYMENT_RECORDED", "PAYMENT_DELETED",
+        "QUOTATION_CREATED", "QUOTATION_UPDATED",
+        "SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED",
+        "NOTIFICATION_CREATED",
+    }
+    
+    def __init__(self) -> None:
+        """تهيئة نظام الأحداث"""
+        self._handlers: Dict[str, List[Callable[[Any], None]]] = defaultdict(list)
+        self._lock: Lock = Lock()
+        logger.info("تم تهيئة EventBus")
 
-    def subscribe(self, event_name: str, listener_func: Callable):
-        """
-        الاشتراك في حدث (ظبط الراديو على محطة معينة).
-        
-        :param event_name: اسم الحدث (المحطة) زي 'INVOICE_CREATED'
-        :param listener_func: الدالة (الوظيفة) اللي هتشتغل لما الحدث يحصل
-        """
-        self.listeners[event_name].append(listener_func)
-        print(f"INFO: [EventBus] تم اشتراك مستمع جديد في حدث: {event_name}")
+    @property
+    def listeners(self) -> Dict[str, List[Callable]]:
+        """الوصول للمعالجات (للتوافق مع الكود القديم)"""
+        return self._handlers
 
-    def publish(self, event_name: str, data: Any = None):
+    def subscribe(
+        self,
+        event_name: str,
+        listener_func: Callable[[Any], None]
+    ) -> None:
         """
-        نشر حدث (بث خبر على الراديو).
+        الاشتراك في حدث
         
-        :param event_name: اسم الحدث (المحطة)
-        :param data: البيانات اللي عايزين نبعتها مع الخبر (زي بيانات الفاتورة)
+        Args:
+            event_name: اسم الحدث (مثل 'INVOICE_CREATED')
+            listener_func: الدالة التي ستُستدعى عند حدوث الحدث
+        
+        Example:
+            >>> def on_invoice_created(data):
+            ...     print(f"فاتورة جديدة: {data['invoice_number']}")
+            >>> bus.subscribe('INVOICE_CREATED', on_invoice_created)
         """
-        if event_name in self.listeners:
-            print(f"INFO: [EventBus] جاري نشر حدث: {event_name} مع بيانات: {data}")
-            # هيلف على كل المستمعين المسجلين للحدث ده
-            for listener_func in self.listeners[event_name]:
+        with self._lock:
+            if listener_func not in self._handlers[event_name]:
+                self._handlers[event_name].append(listener_func)
+                logger.debug(f"تم اشتراك مستمع جديد في حدث: {event_name}")
+            else:
+                logger.warning(f"المستمع مشترك بالفعل في حدث: {event_name}")
+
+    def unsubscribe(
+        self,
+        event_name: str,
+        listener_func: Callable[[Any], None]
+    ) -> bool:
+        """
+        إلغاء الاشتراك من حدث
+        
+        Args:
+            event_name: اسم الحدث
+            listener_func: الدالة المراد إلغاء اشتراكها
+        
+        Returns:
+            True إذا تم إلغاء الاشتراك بنجاح
+        """
+        with self._lock:
+            if event_name in self._handlers:
                 try:
-                    # وينفذ الدالة بتاعتهم ويبعتلهم الداتا
-                    listener_func(data)
-                except Exception as e:
-                    # لو مستمع واحد فشل، الباقي يكمل عادي
-                    print(f"ERROR: [EventBus] فشل المستمع {listener_func.__name__} في معالجة حدث {event_name}: {e}")
+                    self._handlers[event_name].remove(listener_func)
+                    logger.debug(f"تم إلغاء اشتراك مستمع من حدث: {event_name}")
+                    return True
+                except ValueError:
+                    logger.warning(f"المستمع غير مشترك في حدث: {event_name}")
+                    return False
+            return False
+
+    def publish(
+        self,
+        event_name: str,
+        data: Optional[Any] = None
+    ) -> int:
+        """
+        نشر حدث
+        
+        Args:
+            event_name: اسم الحدث
+            data: البيانات المرفقة مع الحدث
+        
+        Returns:
+            عدد المستمعين الذين تم إخطارهم بنجاح
+        
+        Example:
+            >>> bus.publish('INVOICE_CREATED', {'invoice_number': 'INV-001'})
+        """
+        with self._lock:
+            handlers = list(self._handlers.get(event_name, []))
+        
+        if not handlers:
+            logger.debug(f"لا يوجد مستمعين لحدث: {event_name}")
+            return 0
+        
+        logger.info(f"جاري نشر حدث: {event_name} ({len(handlers)} مستمع)")
+        logger.debug(f"بيانات الحدث: {data}")
+        
+        success_count = 0
+        for listener_func in handlers:
+            try:
+                listener_func(data)
+                success_count += 1
+            except Exception as e:
+                func_name = getattr(listener_func, '__name__', str(listener_func))
+                logger.error(
+                    f"فشل المستمع {func_name} في معالجة حدث {event_name}: {e}",
+                    exc_info=True
+                )
+        
+        return success_count
+
+    def has_subscribers(self, event_name: str) -> bool:
+        """
+        التحقق من وجود مشتركين لحدث
+        
+        Args:
+            event_name: اسم الحدث
+        
+        Returns:
+            True إذا كان هناك مشتركين
+        """
+        with self._lock:
+            return len(self._handlers.get(event_name, [])) > 0
+
+    def get_subscriber_count(self, event_name: str) -> int:
+        """
+        الحصول على عدد المشتركين لحدث
+        
+        Args:
+            event_name: اسم الحدث
+        
+        Returns:
+            عدد المشتركين
+        """
+        with self._lock:
+            return len(self._handlers.get(event_name, []))
+
+    def clear_event(self, event_name: str) -> None:
+        """
+        مسح جميع المشتركين لحدث معين
+        
+        Args:
+            event_name: اسم الحدث
+        """
+        with self._lock:
+            if event_name in self._handlers:
+                del self._handlers[event_name]
+                logger.info(f"تم مسح جميع المشتركين لحدث: {event_name}")
+
+    def clear_all(self) -> None:
+        """مسح جميع المشتركين لجميع الأحداث"""
+        with self._lock:
+            self._handlers.clear()
+            logger.info("تم مسح جميع المشتركين")
+
+    def get_all_events(self) -> List[str]:
+        """
+        الحصول على قائمة الأحداث التي لها مشتركين
+        
+        Returns:
+            قائمة أسماء الأحداث
+        """
+        with self._lock:
+            return list(self._handlers.keys())
 
 
 # --- كود للاختبار (اختياري) ---
