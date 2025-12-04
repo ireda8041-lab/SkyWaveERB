@@ -221,6 +221,10 @@ class StatusBarWidget(QWidget):
         layout.setContentsMargins(10, 2, 10, 2)
         layout.setSpacing(15)
         
+        # التأكد من أن الويدجت مرئي دائمًا
+        self.setVisible(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
+        
         # 1. LEFT SIDE - مؤشر المزامنة
         self.sync_indicator = SyncIndicator()
         layout.addWidget(self.sync_indicator)
@@ -268,36 +272,82 @@ class StatusBarWidget(QWidget):
         separator2.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
         layout.addWidget(separator2)
         
-        # 5. RIGHT SIDE - معلومات النظام
-        self.system_info = QLabel("Sky Wave ERP v1.0")
+        # 5. RIGHT SIDE - معلومات النظام (رقم الإصدار الديناميكي)
+        from version import CURRENT_VERSION
+        self.system_info = QLabel(f"Sky Wave ERP v{CURRENT_VERSION}")
         self.system_info.setFont(QFont("Segoe UI", 9))
         self.system_info.setStyleSheet("background-color: transparent; border: none;")
         layout.addWidget(self.system_info)
         
         self.setLayout(layout)
-        self.setMaximumHeight(32)
+        
+        # ✅ إعدادات الحجم الثابت
+        self.setMinimumHeight(35)
+        self.setMaximumHeight(35)
+        
+        # ✅ سياسة الحجم - ثابت عمودياً، متمدد أفقياً
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed
+        )
+        
+        # ✅ منع الإخفاء والحذف
+        self.setVisible(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
+        
         # استخدام الألوان من ملف styles.py
         from ui.styles import COLORS
         self.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLORS['bg_dark']};
-                border-top: 1px solid {COLORS['border']};
+            }}
+            StatusBarWidget {{
+                background-color: {COLORS['bg_dark']};
+                border-top: 3px solid {COLORS['primary']};
+                min-height: 40px;
+                max-height: 40px;
             }}
             QLabel {{
                 background-color: transparent;
                 border: none;
                 color: {COLORS['text_secondary']};
+                padding: 0px;
+                margin: 0px;
             }}
             QFrame {{
                 background-color: transparent;
             }}
         """)
+        
+        # ✅ التأكد من أن الويدجت مرئي دائماً
+        self.setVisible(True)
     
     def update_time(self):
         """تحديث الوقت بصيغة 12 ساعة مع AM/PM"""
-        from PyQt6.QtCore import QTime
-        current_time = QTime.currentTime()
-        self.time_label.setText(current_time.toString("hh:mm:ss AP"))
+        try:
+            from PyQt6.QtCore import QTime
+            current_time = QTime.currentTime()
+            if self.time_label and not self.time_label.isHidden():
+                self.time_label.setText(current_time.toString("hh:mm:ss AP"))
+        except (RuntimeError, AttributeError):
+            # الويدجت تم حذفه أو البرنامج بيقفل
+            if hasattr(self, 'time_timer') and self.time_timer:
+                self.time_timer.stop()
+        except Exception as e:
+            pass  # تجاهل أي أخطاء أخرى
+    
+    def closeEvent(self, event):
+        """إيقاف الـ timer عند إغلاق الويدجت"""
+        try:
+            if hasattr(self, 'time_timer') and self.time_timer:
+                self.time_timer.stop()
+                self.time_timer.deleteLater()
+        except (AttributeError, RuntimeError):
+            # Timer غير موجود أو تم حذفه بالفعل
+            pass
+        super().closeEvent(event)
     
     def set_current_user(self, user):
         """تعيين المستخدم الحالي"""

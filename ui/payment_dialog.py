@@ -79,11 +79,11 @@ class PaymentDialog(QDialog):
         summary_layout.addWidget(total_card)
 
         # كارت المدفوع
-        paid_card = self._create_info_card("المدفوع", f"{self.total_paid:,.2f}", "#10b981")
+        paid_card = self._create_info_card("المدفوع", f"{self.total_paid:,.2f}", "#0A6CF1")
         summary_layout.addWidget(paid_card)
 
         # كارت المتبقي (بلون أحمر لو في متبقي)
-        remaining_color = "#ef4444" if self.remaining_amount > 0 else "#10b981"
+        remaining_color = "#ef4444" if self.remaining_amount > 0 else "#0A6CF1"
         remaining_card = self._create_info_card("المتبقي", f"{self.remaining_amount:,.2f}", remaining_color)
         summary_layout.addWidget(remaining_card)
 
@@ -125,14 +125,14 @@ class PaymentDialog(QDialog):
         self.save_btn = QPushButton("💾 تسجيل الدفعة")
         self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 padding: 10px;
                 font-weight: bold;
                 border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #059669;
+                background-color: #0A6CF1;
             }
             QPushButton:disabled {
                 background-color: #6b7280;

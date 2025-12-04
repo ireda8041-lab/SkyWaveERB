@@ -38,6 +38,11 @@ class SettingsTab(QWidget):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
         # إنشاء التابات الفرعية
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
@@ -168,7 +173,7 @@ class SettingsTab(QWidget):
         # معلومات العملة الأساسية
         base_info = QLabel("💰 العملة الأساسية للنظام: الجنيه المصري (EGP)")
         base_info.setStyleSheet("""
-            background-color: #10b981;
+            background-color: #0A6CF1;
             color: white;
             padding: 10px;
             border-radius: 6px;
@@ -535,7 +540,7 @@ class SettingsTab(QWidget):
         # تحويل السعر
         try:
             rate = float(rate_text.replace(" (أساسية)", "").replace(",", ""))
-        except:
+        except (ValueError, AttributeError):
             rate = 1.0
         
         status_text = self.currencies_table.item(current_row, 5).text()
@@ -897,12 +902,14 @@ class SettingsTab(QWidget):
                 # محاولة جلب المشاريع وعروض الأسعار
                 try:
                     projects_count = len(self.repository.get_all_projects())
-                except:
+                except (AttributeError, TypeError) as e:
+                    print(f"WARNING: فشل جلب عدد المشاريع: {e}")
                     projects_count = 0
                 
                 try:
                     quotations_count = len(self.repository.get_all_quotations())
-                except:
+                except (AttributeError, TypeError) as e:
+                    print(f"WARNING: فشل جلب عدد عروض الأسعار: {e}")
                     quotations_count = 0
                 
                 total = (clients_count + services_count + invoices_count + 
@@ -1011,14 +1018,14 @@ class SettingsTab(QWidget):
         self.save_default_accounts_btn = QPushButton("💾 حفظ الإعدادات")
         self.save_default_accounts_btn.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 padding: 10px 20px;
                 font-weight: bold;
                 border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #059669;
+                background-color: #0A6CF1;
             }
         """)
         self.save_default_accounts_btn.clicked.connect(self.save_default_accounts)
@@ -1303,7 +1310,7 @@ class SettingsTab(QWidget):
         
         current_version_label = QLabel(f"الإصدار الحالي: <b>{CURRENT_VERSION}</b>")
         current_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        current_version_label.setStyleSheet("font-size: 16px; color: #10b981; padding: 10px;")
+        current_version_label.setStyleSheet("font-size: 16px; color: #0A6CF1; padding: 10px;")
         version_layout.addWidget(current_version_label)
         
         version_group.setLayout(version_layout)
@@ -1341,7 +1348,7 @@ class SettingsTab(QWidget):
                 font-weight: bold;
             }
             QProgressBar::chunk {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 border-radius: 6px;
             }
         """)
@@ -1436,7 +1443,7 @@ class SettingsTab(QWidget):
             f"اضغط على 'تنزيل التحديث' للبدء"
         )
         self.update_status_label.setStyleSheet("""
-            background-color: #10b981;
+            background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;
@@ -1459,7 +1466,7 @@ class SettingsTab(QWidget):
             f"الإصدار الحالي: <b>{CURRENT_VERSION}</b>"
         )
         self.update_status_label.setStyleSheet("""
-            background-color: #10b981;
+            background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;
@@ -1563,7 +1570,7 @@ class SettingsTab(QWidget):
             f"اضغط على 'تثبيت التحديث' لإكمال العملية"
         )
         self.update_status_label.setStyleSheet("""
-            background-color: #10b981;
+            background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;

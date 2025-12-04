@@ -130,7 +130,7 @@ class UserEditorDialog(QDialog):
         self.save_button.clicked.connect(self.save_user)
         self.save_button.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 padding: 10px 20px;
                 font-weight: bold;
@@ -138,7 +138,7 @@ class UserEditorDialog(QDialog):
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #059669;
+                background-color: #0A6CF1;
             }
         """)
         

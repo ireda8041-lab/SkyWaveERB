@@ -137,18 +137,17 @@ class QuotationEditorWindow(QDialog):
             "حذف",
         ])
         
-        # منع التحرير خارج الخلية
-        self.items_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # السماح بالتحرير للكمية والسعر والخصم فقط
+        self.items_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.EditKeyPressed)
         self.items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.items_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.items_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.items_table.setTabKeyNavigation(False)
         
         header = self.items_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        # تعطيل cellChanged لأن الجدول لم يعد قابل للتحرير
-        # self.items_table.cellChanged.connect(self.on_item_cell_changed)
+        
+        # تفعيل cellChanged لحساب الإجمالي عند التعديل
+        self.items_table.cellChanged.connect(self.on_item_cell_changed)
         self.layout.addWidget(self.items_table)
 
         self.save_button = QPushButton()
@@ -196,6 +195,10 @@ class QuotationEditorWindow(QDialog):
     def add_item_to_table(self, item_to_add: Optional[schemas.QuotationItem] = None):
         if item_to_add:
             item_schema = item_to_add
+            # إعادة حساب الإجمالي مع الخصم (في حالة تحميل عرض سعر موجود)
+            subtotal = item_schema.quantity * item_schema.unit_price
+            item_schema.discount_amount = subtotal * (item_schema.discount_rate / 100)
+            item_schema.total = subtotal - item_schema.discount_amount
         else:
             service = self.service_combo.currentData()
             quantity = self.item_quantity_input.value()

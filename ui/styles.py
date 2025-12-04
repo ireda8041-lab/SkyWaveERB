@@ -49,7 +49,7 @@ BUTTON_STYLES = {
             font-weight: bold;
             font-size: 14px;
             min-height: 20px;
-
+            min-width: 120px;
         }}
         QPushButton:hover {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8);
@@ -69,7 +69,7 @@ BUTTON_STYLES = {
     
     "success": f"""
         QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['success']}, stop:1 #059669);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['success']}, stop:1 #0A6CF1);
             color: white;
             border: none;
             border-radius: 10px;
@@ -77,15 +77,15 @@ BUTTON_STYLES = {
             font-weight: bold;
             font-size: 14px;
             min-height: 20px;
-
+            min-width: 120px;
         }}
         QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #059669, stop:1 #047857);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0A6CF1, stop:1 #0A6CF1);
 
 
         }}
         QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #047857, stop:1 #065f46);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0A6CF1, stop:1 #0A6CF1);
 
 
         }}
@@ -105,7 +105,7 @@ BUTTON_STYLES = {
             font-weight: bold;
             font-size: 14px;
             min-height: 20px;
-
+            min-width: 120px;
         }}
         QPushButton:hover {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d97706, stop:1 #b45309);
@@ -182,7 +182,7 @@ BUTTON_STYLES = {
             font-weight: bold;
             font-size: 14px;
             min-height: 20px;
-
+            min-width: 120px;
         }}
         QPushButton:hover {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3d4f5d, stop:1 #2d3548);
@@ -322,36 +322,54 @@ TREE_WIDGET_STYLE_DARK = f"""
 
 # ✨ نمط شجرة الحسابات (Chart of Accounts) - Dark Blue Theme
 CHART_OF_ACCOUNTS_TREE_STYLE = f"""
-    QTreeWidget {{
+    QTreeView {{
         background-color: {COLORS['bg_dark']};
-        border: none;
+        border: 1px solid {COLORS['border']};
         color: {COLORS['text_primary']};
-        font-size: 12px;
+        font-size: 14px;
+        font-family: 'Cairo', 'Segoe UI', sans-serif;
+        alternate-background-color: {COLORS['bg_medium']};
+        gridline-color: {COLORS['border']};
     }}
-    QTreeWidget::item {{
-        padding: 8px 4px;
-        border-bottom: 1px solid #3f3f55;
-        min-height: 32px;
+    QTreeView::item {{
+        padding: 12px 10px;
+        border-bottom: 1px solid {COLORS['border']};
+        border-right: 1px solid rgba(30, 58, 95, 0.5);
+        min-height: 40px;
         text-align: center;
     }}
-    QTreeWidget::item:selected {{
+    QTreeView::item:selected {{
         background-color: {COLORS['primary']};
         color: white;
+        font-weight: bold;
     }}
-    QTreeWidget::item:hover {{
-        background-color: {COLORS['bg_medium']};
+    QTreeView::item:hover {{
+        background-color: rgba(10, 108, 241, 0.2);
     }}
-    QTreeWidget::branch {{
-        background-color: {COLORS['bg_dark']};
+    QTreeView::branch {{
+        background-color: transparent;
+    }}
+    QTreeView::branch:has-children:!has-siblings:closed,
+    QTreeView::branch:closed:has-children:has-siblings {{
+        border-image: none;
+        image: none;
+    }}
+    QTreeView::branch:open:has-children:!has-siblings,
+    QTreeView::branch:open:has-children:has-siblings {{
+        border-image: none;
+        image: none;
     }}
     QHeaderView::section {{
-        background-color: {COLORS['header_bg']};
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['primary']}, stop:1 #005BC5);
         color: white;
-        padding: 10px;
+        padding: 15px 10px;
         border: none;
+        border-right: 1px solid rgba(255,255,255,0.3);
         font-weight: bold;
-        font-size: 13px;
+        font-size: 14px;
+        min-height: 40px;
         text-align: center;
+        font-family: 'Cairo', 'Segoe UI', sans-serif;
     }}
 """
 
@@ -402,8 +420,9 @@ COMPLETE_STYLESHEET = f"""
 QWidget {{
     background-color: {COLORS['bg_dark']};
     color: {COLORS['text_primary']};
-    font-family: 'Cairo', 'Segoe UI', 'Tahoma', sans-serif;
-    font-size: 13px;
+    font-family: 'Cairo', 'Segoe UI', 'Tahoma', 'Arial Unicode MS', sans-serif;
+    font-size: 14px;
+    font-weight: normal;
 }}
 
 /* === 2. Inputs (Clean & Simple) === */
@@ -426,10 +445,11 @@ QComboBox {{
     background-color: {COLORS['bg_medium']};
     border: 1px solid #374151;
     border-radius: 4px;
-    padding: 6px 10px;
-    min-height: 32px;
+    padding: 8px 12px;
+    min-height: 36px;
+    min-width: 150px;
     color: #F8FAFC;
-    font-size: 13px;
+    font-size: 14px;
 }}
 
 QComboBox:focus {{
@@ -551,11 +571,12 @@ QPushButton {{
     color: #FFFFFF;
     border: none;
     border-radius: 8px;
-    padding: 10px 20px;
-    min-height: 38px;
-    min-width: 80px;
+    padding: 12px 24px;
+    min-height: 40px;
+    min-width: 120px;
     font-weight: bold;
     font-size: 14px;
+    font-family: 'Cairo', 'Segoe UI', sans-serif;
 }}
 
 QPushButton:hover {{
@@ -612,24 +633,36 @@ QTableWidget {{
 }}
 
 QHeaderView::section {{
-    background-color: {COLORS['header_bg']};
-    color: {COLORS['text_primary']};
-    padding: 8px;
-    border: 1px solid {COLORS['border']};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['primary']}, stop:1 #005BC5);
+    color: white;
+    padding: 15px 10px;
+    border: none;
+    border-right: 1px solid rgba(255,255,255,0.3);
     font-weight: bold;
-    min-height: 30px;
+    font-size: 14px;
+    min-height: 40px;
     text-align: center;
+    font-family: 'Cairo', 'Segoe UI', sans-serif;
 }}
 
 QTableWidget::item {{
-    padding: 5px;
-    border-bottom: 1px solid {COLORS['bg_medium']};
+    padding: 12px 10px;
+    border-bottom: 1px solid {COLORS['border']};
+    border-right: 1px solid rgba(30, 58, 95, 0.5);
     text-align: center;
+    min-height: 40px;
+    font-size: 14px;
+    font-family: 'Cairo', 'Segoe UI', sans-serif;
 }}
 
 QTableWidget::item:selected {{
-    background-color: rgba(10, 108, 241, 0.3);
-    color: {COLORS['text_primary']};
+    background-color: {COLORS['primary']};
+    color: white;
+    font-weight: bold;
+}}
+
+QTableWidget::item:alternate {{
+    background-color: {COLORS['bg_medium']};
 }}
 
 /* إخفاء أي مؤشر أو مربع اختيار داخل الجدول */
@@ -772,11 +805,41 @@ QCheckBox::indicator:checked {{
 
 def apply_styles(app):
     """تطبيق الأنماط على التطبيق بالكامل"""
-    # تطبيق الخط العربي على كل التطبيق
-    from PyQt6.QtGui import QFont
-    cairo_font = QFont("Cairo", 12)
-    cairo_font.setWeight(QFont.Weight.Normal)
-    app.setFont(cairo_font)
+    # تحميل الخط العربي من الملف
+    from PyQt6.QtGui import QFont, QFontDatabase
+    import os
+    import sys
+    
+    # تحديد المسار الصحيح للخط
+    if getattr(sys, 'frozen', False):
+        # البرنامج مجمع (EXE)
+        base_path = sys._MEIPASS
+    else:
+        # البرنامج يعمل من Python
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
+    
+    # تحميل خط Cairo من الملف (متوافق مع PyQt6 و Python 3.14)
+    if os.path.exists(font_path):
+        font_id = QFontDatabase.addApplicationFont(font_path)
+        if font_id != -1:
+            font_families = QFontDatabase.applicationFontFamilies(font_id)
+            if font_families:
+                cairo_font = QFont(font_families[0], 14)
+                cairo_font.setWeight(QFont.Weight.Normal)
+                app.setFont(cairo_font)
+                print(f"✅ تم تحميل خط Cairo من: {font_path}")
+            else:
+                print(f"⚠️ فشل تحميل خط Cairo، استخدام الخط الافتراضي")
+                app.setFont(QFont("Segoe UI", 14))
+        else:
+            print(f"⚠️ فشل إضافة خط Cairo، استخدام الخط الافتراضي")
+            app.setFont(QFont("Segoe UI", 14))
+    else:
+        print(f"⚠️ ملف الخط غير موجود: {font_path}")
+        # محاولة استخدام خط عربي من النظام
+        app.setFont(QFont("Tahoma", 14))
     
     # تطبيق الأنماط
     app.setStyleSheet(COMPLETE_STYLESHEET)

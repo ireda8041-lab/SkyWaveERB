@@ -18,16 +18,28 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from services.service_service import ServiceService
 from core import schemas
+from core.logger import get_logger
 from typing import List, Optional
 
 from ui.service_editor_dialog import ServiceEditorDialog
 from ui.styles import BUTTON_STYLES, TABLE_STYLE
 
+logger = get_logger(__name__)
+
 
 class ServiceManagerTab(QWidget):
-    """تاب إدارة الخدمات باستخدام محرر منبثق وحالة أرشيف."""
+    """
+    تاب إدارة الخدمات باستخدام محرر منبثق وحالة أرشيف.
+    """
 
     def __init__(self, service_service: ServiceService, parent=None):
+        """
+        تهيئة تاب إدارة الخدمات
+        
+        Args:
+            service_service: خدمة الخدمات للتعامل مع البيانات
+            parent: الويدجت الأب
+        """
         super().__init__(parent)
 
         self.service_service = service_service
@@ -36,6 +48,11 @@ class ServiceManagerTab(QWidget):
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
+
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
 
         buttons_layout = QHBoxLayout()
 
@@ -119,8 +136,11 @@ class ServiceManagerTab(QWidget):
         self.selected_service = None
         self.update_buttons_state(False)
 
-    def load_services_data(self):
-        print("INFO: [ServiceManager] جاري تحميل بيانات الخدمات...")
+    def load_services_data(self) -> None:
+        """
+        تحميل بيانات الخدمات من قاعدة البيانات وعرضها في الجدول
+        """
+        logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
         try:
             if self.show_archived_checkbox.isChecked():
                 self.services_list = self.service_service.get_archived_services()
@@ -157,10 +177,10 @@ class ServiceManagerTab(QWidget):
                 # Set row height for breathing room
                 self.services_table.setRowHeight(index, 40)
 
-            print(f"INFO: [ServiceManager] تم جلب {len(self.services_list)} خدمة.")
+            logger.info(f"[ServiceManager] تم جلب {len(self.services_list)} خدمة")
             self.update_buttons_state(False)
         except Exception as e:
-            print(f"ERROR: [ServiceManager] فشل تحميل الخدمات: {e}")
+            logger.error(f"[ServiceManager] فشل تحميل الخدمات: {e}", exc_info=True)
 
     def open_editor(self, service_to_edit: Optional[schemas.Service]):
         dialog = ServiceEditorDialog(
@@ -177,7 +197,10 @@ class ServiceManagerTab(QWidget):
         else:
             QMessageBox.warning(self, "تنبيه", "يرجى اختيار خدمة أولاً")
 
-    def archive_selected_service(self):
+    def archive_selected_service(self) -> None:
+        """
+        أرشفة الخدمة المحددة
+        """
         if not self.selected_service:
             QMessageBox.warning(self, "تنبيه", "يرجى اختيار خدمة لأرشفتها")
             return
@@ -197,7 +220,8 @@ class ServiceManagerTab(QWidget):
             service_id = self.selected_service._mongo_id or str(self.selected_service.id)
             self.service_service.delete_service(service_id)
             QMessageBox.information(self, "تم", "تمت الأرشفة بنجاح")
+            logger.info(f"[ServiceManager] تم أرشفة الخدمة: {self.selected_service.name}")
             self.load_services_data()
         except Exception as e:
-            print(f"ERROR: [ServiceManager] فشل أرشفة الخدمة: {e}")
+            logger.error(f"[ServiceManager] فشل أرشفة الخدمة: {e}", exc_info=True)
             QMessageBox.critical(self, "خطأ", f"فشل الأرشفة: {e}")

@@ -31,64 +31,113 @@ class ShortcutsHelpDialog(QDialog):
     def init_ui(self):
         """تهيئة الواجهة"""
         self.setWindowTitle("اختصارات لوحة المفاتيح")
-        self.setMinimumSize(700, 600)
+        self.setMinimumSize(750, 650)
         self.setModal(True)
         
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
             setup_custom_title_bar(self)
-        except:
-            pass  # إذا لم يكن متوفراً
+        except (ImportError, AttributeError):
+            # الدالة غير متوفرة
+            pass
         
         layout = QVBoxLayout()
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(15)
         
-        # العنوان
+        # العنوان مع خلفية ملونة (ألوان SkyWave Brand) - تصميم احترافي
+        from ui.styles import COLORS
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        
+        header_frame = QWidget()
+        header_frame.setStyleSheet(f"""
+            QWidget {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {COLORS['primary']}, stop:0.5 #005BC5, stop:1 #8B2CF5);
+                border-radius: 16px;
+                padding: 25px;
+            }}
+        """)
+        
+        # إضافة ظل للهيدر
+        header_shadow = QGraphicsDropShadowEffect()
+        header_shadow.setBlurRadius(20)
+        header_shadow.setColor(QColor(10, 108, 241, 100))
+        header_shadow.setOffset(0, 5)
+        header_frame.setGraphicsEffect(header_shadow)
+        
         title_layout = QHBoxLayout()
+        title_layout.setSpacing(20)
         
+        # أيقونة مع خلفية دائرية
+        icon_container = QWidget()
+        icon_container.setFixedSize(70, 70)
+        icon_container.setStyleSheet("""
+            QWidget {
+                background-color: rgba(255, 255, 255, 0.2);
+                border-radius: 35px;
+            }
+        """)
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
         icon_label = QLabel("⌨️")
-        icon_label.setStyleSheet("font-size: 32px;")
-        title_layout.addWidget(icon_label)
+        icon_label.setStyleSheet("font-size: 36px; background: transparent;")
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_layout.addWidget(icon_label)
+        title_layout.addWidget(icon_container)
+        
+        title_text_layout = QVBoxLayout()
+        title_text_layout.setSpacing(8)
         
         title = QLabel("اختصارات لوحة المفاتيح")
-        title.setStyleSheet("font-size: 24px; font-weight: bold; padding: 10px;")
-        title_layout.addWidget(title, 1)
-        
-        layout.addLayout(title_layout)
+        title.setStyleSheet("font-size: 26px; font-weight: bold; color: white; background: transparent;")
+        title_text_layout.addWidget(title)
         
         # الوصف
-        description = QLabel(
-            "استخدم هذه الاختصارات لتسريع عملك وزيادة إنتاجيتك"
-        )
-        description.setStyleSheet("color: #666; padding: 5px 10px; font-size: 14px;")
-        layout.addWidget(description)
+        description = QLabel("استخدم هذه الاختصارات لتسريع عملك وزيادة إنتاجيتك ⚡")
+        description.setStyleSheet("color: rgba(255, 255, 255, 0.9); font-size: 14px; background: transparent;")
+        title_text_layout.addWidget(description)
         
-        # التابات للفئات
+        title_layout.addLayout(title_text_layout, 1)
+        header_frame.setLayout(title_layout)
+        
+        layout.addWidget(header_frame)
+        
+        # التابات للفئات مع تصميم محسّن (ألوان SkyWave Brand) - تصميم احترافي
         tabs = QTabWidget()
-        # استخدام الأنماط من ملف styles
-        from ui.styles import COLORS
         tabs.setStyleSheet(f"""
             QTabWidget::pane {{
-                border: 1px solid #374151;
-                border-radius: 4px;
-                background-color: {COLORS['background']};
+                border: 2px solid {COLORS['primary']};
+                border-radius: 12px;
+                background-color: {COLORS['bg_dark']};
+                padding: 15px;
+                margin-top: -1px;
             }}
             QTabBar::tab {{
-                padding: 10px 20px;
-                margin: 2px;
-                background-color: {COLORS['surface']};
-                border: 1px solid #374151;
+                padding: 14px 28px;
+                margin: 2px 4px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['bg_medium']}, stop:1 {COLORS['bg_light']});
+                border: 1px solid {COLORS['border']};
                 border-bottom: none;
-                border-top-left-radius: 4px;
-                border-top-right-radius: 4px;
-                color: {COLORS['text']};
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                color: {COLORS['text_secondary']};
+                font-size: 13px;
+                font-weight: bold;
             }}
             QTabBar::tab:selected {{
-                background-color: {COLORS['background']};
-                border-bottom: 2px solid {COLORS['primary']};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['primary']}, stop:1 #005BC5);
+                color: white;
+                border: 2px solid {COLORS['primary']};
+                border-bottom: none;
             }}
-            QTabBar::tab:hover {{
-                background-color: {COLORS['hover']};
+            QTabBar::tab:hover:!selected {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['bg_light']}, stop:1 {COLORS['bg_medium']});
+                color: white;
             }}
         """)
         
@@ -145,21 +194,33 @@ class ShortcutsHelpDialog(QDialog):
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         
-        # ملء الجدول
+        # ملء الجدول (ألوان SkyWave Brand) - تصميم احترافي
         for row, shortcut in enumerate(shortcuts):
-            # عمود الاختصار
-            key_item = QTableWidgetItem(shortcut['key'])
-            key_font = QFont()
+            # عمود الاختصار مع تصميم محسّن
+            key_text = shortcut['key']
+            key_item = QTableWidgetItem(f"  {key_text}  ")
+            key_font = QFont("Consolas", 12)
             key_font.setBold(True)
-            key_font.setPointSize(12)
             key_item.setFont(key_font)
             key_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            key_item.setBackground(Qt.GlobalColor.lightGray)
+            from PyQt6.QtGui import QColor, QLinearGradient
+            # تلوين متناوب للصفوف
+            if row % 2 == 0:
+                key_item.setBackground(QColor("#0A6CF1"))  # Primary Blue
+            else:
+                key_item.setBackground(QColor("#005BC5"))  # Darker Blue
+            key_item.setForeground(QColor("white"))
             table.setItem(row, 0, key_item)
             
             # عمود الوصف
-            desc_item = QTableWidgetItem(shortcut['description'])
-            desc_item.setFont(QFont("Arial", 11))
+            desc_item = QTableWidgetItem(f"  {shortcut['description']}")
+            desc_font = QFont("Segoe UI", 11)
+            desc_item.setFont(desc_font)
+            if row % 2 == 0:
+                desc_item.setBackground(QColor("#0A2A55"))  # bg_medium
+            else:
+                desc_item.setBackground(QColor("#052045"))  # bg_light
+            desc_item.setForeground(QColor("#EAF3FF"))  # text_primary
             table.setItem(row, 1, desc_item)
         
         # ضبط عرض الأعمدة

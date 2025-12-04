@@ -408,6 +408,11 @@ class ProjectEditorDialog(QDialog):
         main_layout.addLayout(buttons_layout)
 
         self.setLayout(main_layout)
+
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.on_service_selected(0)
 
         # تطبيق الأسهم على كل الـ widgets
@@ -533,7 +538,8 @@ class ProjectEditorDialog(QDialog):
         # فصل الإشارة مؤقتاً لتجنب التكرار
         try:
             self.items_table.cellChanged.disconnect(self.on_item_changed_simple)
-        except:
+        except (TypeError, RuntimeError):
+            # الإشارة غير متصلة بالفعل
             pass
         
         self.items_table.setRowCount(0)
@@ -846,13 +852,25 @@ class ProjectEditorDialog(QDialog):
                 # تحديث قائمة الخدمات
                 self.services_list = self.service_service.get_all_services()
                 
-                # إضافة الخدمة الجديدة للـ ComboBox
-                new_service = self.services_list[-1]  # آخر خدمة مضافة
-                self.service_combo.addItem(f"{new_service.name} ({new_service.default_price})", userData=new_service)
-                self.service_combo.setCurrentText(new_service.name)
+                # ✅ البحث عن الخدمة الجديدة بالاسم (أكثر أماناً)
+                new_service = None
+                for service in self.services_list:
+                    if service.name.lower() == service_name.lower():
+                        new_service = service
+                        break
                 
-                QMessageBox.information(self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!")
-                return new_service
+                # ✅ إذا لم نجد الخدمة، نستخدم آخر خدمة (مع التحقق من القائمة)
+                if not new_service and self.services_list:
+                    new_service = self.services_list[-1]
+                
+                if new_service:
+                    self.service_combo.addItem(f"{new_service.name} ({new_service.default_price})", userData=new_service)
+                    self.service_combo.setCurrentText(new_service.name)
+                    QMessageBox.information(self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!")
+                    return new_service
+                else:
+                    QMessageBox.warning(self, "خطأ", "فشل في العثور على الخدمة المضافة")
+                    return None
         
         return None
 
@@ -977,6 +995,11 @@ class ProjectManagerTab(QWidget):
         main_layout = QHBoxLayout()
         self.setLayout(main_layout)
 
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
         # --- 1. الجزء الأيسر (الجدول والأزرار) ---
         left_panel = QVBoxLayout()
         buttons_layout = QHBoxLayout()
@@ -1045,15 +1068,15 @@ class ProjectManagerTab(QWidget):
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
         self.projects_table = QTableWidget()
-        self.projects_table.setColumnCount(4)
-        self.projects_table.setHorizontalHeaderLabels(["اسم المشروع", "العميل", "الحالة", "تاريخ البدء"])
+        self.projects_table.setColumnCount(5)
+        self.projects_table.setHorizontalHeaderLabels(["رقم الفاتورة", "اسم المشروع", "العميل", "الحالة", "تاريخ البدء"])
         
         # ⚡ تفعيل الترتيب بالضغط على رأس العمود
         self.projects_table.setSortingEnabled(True)
         
         self.search_bar = UniversalSearchBar(
             self.projects_table,
-            placeholder="🔍 بحث (اسم المشروع، العميل، الحالة، التاريخ)..."
+            placeholder="🔍 بحث (رقم الفاتورة، اسم المشروع، العميل، الحالة، التاريخ)..."
         )
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -1078,7 +1101,7 @@ class ProjectManagerTab(QWidget):
         self.preview_groupbox.setLayout(preview_layout)
 
         kpi_layout = QHBoxLayout()
-        self.revenue_card = self.create_kpi_card("إجمالي العقد", "0.00", "#10b981")
+        self.revenue_card = self.create_kpi_card("إجمالي العقد", "0.00", "#0A6CF1")
         self.paid_card = self.create_kpi_card("إجمالي المدفوع", "0.00", "#3b82f6")
         self.due_card = self.create_kpi_card("الرصيد المتبقي", "0.00", "#f59e0b")
         kpi_layout.addWidget(self.revenue_card)
@@ -1138,100 +1161,124 @@ class ProjectManagerTab(QWidget):
         """ (معدلة) تملى لوحة المعاينة بكل التفاصيل """
         selected_rows = self.projects_table.selectedIndexes()
         if selected_rows:
-            selected_index = selected_rows[0].row()
-            if selected_index < len(self.projects_list):
-                self.selected_project = self.projects_list[selected_index]
-                self.edit_button.setEnabled(True)
-                self.profit_button.setEnabled(True)
-                self.payment_button.setEnabled(True)
-                self.print_button.setEnabled(True)
-                self.preview_template_button.setEnabled(True)  # ✅ تفعيل زرار المعاينة
-                self.preview_groupbox.setVisible(True)
-
-                project_name = self.selected_project.name
-
-                # (1. جلب الأرقام الرئيسية)
-                profit_data = self.project_service.get_project_profitability(project_name)
-                self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
-                self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
-                self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
-
-                # (2. جلب الدفعات المرتبطة)
-                try:
-                    payments = self.project_service.get_payments_for_project(project_name)
-                    self.preview_payments_table.setRowCount(0)
-                    
-                    if payments and len(payments) > 0:
-                        for i, pay in enumerate(payments):
-                            self.preview_payments_table.insertRow(i)
-                            # معالجة التاريخ بأمان
-                            try:
-                                if hasattr(pay.date, 'strftime'):
-                                    date_str = pay.date.strftime("%Y-%m-%d")
-                                else:
-                                    date_str = str(pay.date)[:10]
-                            except:
-                                date_str = "N/A"
-                            
-                            self.preview_payments_table.setItem(i, 0, QTableWidgetItem(date_str))
-                            self.preview_payments_table.setItem(i, 1, QTableWidgetItem(f"{pay.amount:,.2f}"))
-                            
-                            # عرض اسم الحساب بدلاً من ID
-                            account_name = str(pay.account_id)
-                            try:
-                                account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+            selected_row = selected_rows[0].row()
+            
+            # ⚡ جلب اسم المشروع من الجدول مباشرة (يعمل مع الترتيب)
+            project_name_item = self.projects_table.item(selected_row, 1)  # عمود اسم المشروع
+            if not project_name_item:
+                return
+            
+            project_name = project_name_item.text()
+            
+            # البحث عن المشروع في القائمة بالاسم
+            self.selected_project = None
+            for proj in self.projects_list:
+                if proj.name == project_name:
+                    self.selected_project = proj
+                    break
+            
+            if not self.selected_project:
+                return
+                
+            self.edit_button.setEnabled(True)
+            self.profit_button.setEnabled(True)
+            self.payment_button.setEnabled(True)
+            self.print_button.setEnabled(True)
+            self.preview_template_button.setEnabled(True)  # ✅ تفعيل زرار المعاينة
+            self.preview_groupbox.setVisible(True)
+            
+            # (1. جلب الأرقام الرئيسية)
+            profit_data = self.project_service.get_project_profitability(project_name)
+            self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
+            self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
+            self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
+            
+            # (2. جلب الدفعات المرتبطة)
+            try:
+                payments = self.project_service.get_payments_for_project(project_name)
+                self.preview_payments_table.setRowCount(0)
+                
+                if payments and len(payments) > 0:
+                    for i, pay in enumerate(payments):
+                        self.preview_payments_table.insertRow(i)
+                        # معالجة التاريخ بأمان
+                        try:
+                            if hasattr(pay.date, 'strftime'):
+                                date_str = pay.date.strftime("%Y-%m-%d")
+                            else:
+                                date_str = str(pay.date)[:10]
+                        except (AttributeError, ValueError, TypeError):
+                            date_str = "N/A"
+                        
+                        self.preview_payments_table.setItem(i, 0, QTableWidgetItem(date_str))
+                        self.preview_payments_table.setItem(i, 1, QTableWidgetItem(f"{pay.amount:,.2f}"))
+                        
+                        # عرض اسم الحساب بدلاً من ID
+                        account_name = "نقدي"  # افتراضي
+                        try:
+                            # محاولة جلب الحساب بالكود أولاً
+                            account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+                            if account:
+                                account_name = account.name
+                            else:
+                                # محاولة جلب الحساب بالـ ID
+                                account = self.accounting_service.repo.get_account_by_id(pay.account_id)
                                 if account:
                                     account_name = account.name
-                            except:
-                                pass
-                            
-                            self.preview_payments_table.setItem(i, 2, QTableWidgetItem(account_name))
-                    else:
-                        # إضافة صف يوضح عدم وجود دفعات
-                        self.preview_payments_table.insertRow(0)
-                        no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
-                        no_data_item.setForeground(QColor("gray"))
-                        self.preview_payments_table.setItem(0, 0, no_data_item)
-                        self.preview_payments_table.setSpan(0, 0, 1, 3)
-                        
-                except Exception as e:
-                    print(f"ERROR: [ProjectManager] فشل تحميل الدفعات: {e}")
-                    import traceback
-                    traceback.print_exc()
-
-                # (3. جلب المصروفات المرتبطة)
-                try:
-                    expenses = self.project_service.get_expenses_for_project(project_name)
-                    self.preview_expenses_table.setRowCount(0)
-                    
-                    if expenses and len(expenses) > 0:
-                        for i, exp in enumerate(expenses):
-                            self.preview_expenses_table.insertRow(i)
-                            # معالجة التاريخ بأمان
-                            try:
-                                if hasattr(exp.date, 'strftime'):
-                                    date_str = exp.date.strftime("%Y-%m-%d")
                                 else:
-                                    date_str = str(exp.date)[:10]
-                            except:
-                                date_str = "N/A"
-                            
-                            self.preview_expenses_table.setItem(i, 0, QTableWidgetItem(date_str))
-                            self.preview_expenses_table.setItem(i, 1, QTableWidgetItem(exp.description or exp.category))
-                            self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(f"{exp.amount:,.2f}"))
-                    else:
-                        # إضافة صف يوضح عدم وجود مصروفات
-                        self.preview_expenses_table.insertRow(0)
-                        no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
-                        no_data_item.setForeground(QColor("gray"))
-                        self.preview_expenses_table.setItem(0, 0, no_data_item)
-                        self.preview_expenses_table.setSpan(0, 0, 1, 3)
+                                    # استخدام الـ ID كما هو
+                                    account_name = str(pay.account_id)
+                        except Exception as acc_err:
+                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                            account_name = str(pay.account_id)
                         
-                except Exception as e:
-                    print(f"ERROR: [ProjectManager] فشل تحميل المصروفات: {e}")
-                    import traceback
-                    traceback.print_exc()
-                return
+                        self.preview_payments_table.setItem(i, 2, QTableWidgetItem(account_name))
+                else:
+                    # إضافة صف يوضح عدم وجود دفعات
+                    self.preview_payments_table.insertRow(0)
+                    no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
+                    no_data_item.setForeground(QColor("gray"))
+                    self.preview_payments_table.setItem(0, 0, no_data_item)
+                    self.preview_payments_table.setSpan(0, 0, 1, 3)
+                    
+            except Exception as e:
+                print(f"ERROR: [ProjectManager] فشل تحميل الدفعات: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # (3. جلب المصروفات المرتبطة)
+            try:
+                expenses = self.project_service.get_expenses_for_project(project_name)
+                self.preview_expenses_table.setRowCount(0)
+                
+                if expenses and len(expenses) > 0:
+                    for i, exp in enumerate(expenses):
+                        self.preview_expenses_table.insertRow(i)
+                        # معالجة التاريخ بأمان
+                        try:
+                            if hasattr(exp.date, 'strftime'):
+                                date_str = exp.date.strftime("%Y-%m-%d")
+                            else:
+                                date_str = str(exp.date)[:10]
+                        except (AttributeError, ValueError, TypeError):
+                            date_str = "N/A"
+                        
+                        self.preview_expenses_table.setItem(i, 0, QTableWidgetItem(date_str))
+                        self.preview_expenses_table.setItem(i, 1, QTableWidgetItem(exp.description or exp.category))
+                        self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(f"{exp.amount:,.2f}"))
+                else:
+                    # إضافة صف يوضح عدم وجود مصروفات
+                    self.preview_expenses_table.insertRow(0)
+                    no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
+                    no_data_item.setForeground(QColor("gray"))
+                    self.preview_expenses_table.setItem(0, 0, no_data_item)
+                    self.preview_expenses_table.setSpan(0, 0, 1, 3)
+                    
+            except Exception as e:
+                print(f"ERROR: [ProjectManager] فشل تحميل المصروفات: {e}")
+                import traceback
+                traceback.print_exc()
+            return
 
         self.selected_project = None
         self.edit_button.setEnabled(False)
@@ -1255,10 +1302,14 @@ class ProjectManagerTab(QWidget):
             self.projects_table.setRowCount(0)
             for row, project in enumerate(self.projects_list):
                 self.projects_table.insertRow(row)
-                self.projects_table.setItem(row, 0, QTableWidgetItem(project.name))
-                self.projects_table.setItem(row, 1, QTableWidgetItem(project.client_id))
-                self.projects_table.setItem(row, 2, QTableWidgetItem(project.status.value))
-                self.projects_table.setItem(row, 3, QTableWidgetItem(self._format_date(project.start_date)))
+                # توليد رقم الفاتورة من ID المشروع
+                project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', row + 1))
+                invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else f"SW-{str(row + 1).zfill(4)}"
+                self.projects_table.setItem(row, 0, QTableWidgetItem(invoice_number))
+                self.projects_table.setItem(row, 1, QTableWidgetItem(project.name))
+                self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
+                self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
+                self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
 
             # ⚡ إعادة تفعيل الترتيب بعد التحميل
             self.projects_table.setSortingEnabled(True)
@@ -1282,7 +1333,7 @@ class ProjectManagerTab(QWidget):
                 else:
                     parsed = datetime.strptime(value[:10], "%Y-%m-%d")
                 return parsed.strftime("%Y-%m-%d")
-            except:
+            except (ValueError, TypeError, AttributeError):
                 return value[:10] if len(value) >= 10 else value
         return str(value)
 
@@ -1393,11 +1444,17 @@ class ProjectManagerTab(QWidget):
                     account_name = "نقدي"
                     if hasattr(payment, 'account_id') and payment.account_id:
                         try:
-                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                            # محاولة جلب الحساب بالكود أولاً (لأن account_id قد يكون كود الحساب)
+                            account = self.accounting_service.repo.get_account_by_code(payment.account_id)
                             if account:
                                 account_name = account.name
                             else:
-                                account_name = str(payment.account_id)
+                                # محاولة جلب الحساب بالـ ID
+                                account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                                if account:
+                                    account_name = account.name
+                                else:
+                                    account_name = str(payment.account_id)
                         except Exception as acc_err:
                             print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
                             account_name = str(payment.account_id)
@@ -1414,7 +1471,7 @@ class ProjectManagerTab(QWidget):
                     # تصحيح المبلغ
                     try:
                         amount_val = float(payment.amount)
-                    except:
+                    except (ValueError, TypeError, AttributeError):
                         amount_val = 0.0
                     
                     payments_list.append({
@@ -1457,7 +1514,8 @@ class ProjectManagerTab(QWidget):
                     }
                     for item in project.items
                 ],
-                "subtotal": float(project.subtotal) if hasattr(project, 'subtotal') else float(project.total_amount),
+                # حساب المجموع الفرعي من البنود (مع الخصومات)
+                "subtotal": sum([float(item.total) for item in project.items]),
                 "grand_total": float(project.total_amount),
                 "total_paid": float(profit_data.get('total_paid', 0)),
                 "remaining_amount": float(profit_data.get('balance_due', 0)),
@@ -1540,11 +1598,17 @@ class ProjectManagerTab(QWidget):
                     account_name = "نقدي"
                     if hasattr(payment, 'account_id') and payment.account_id:
                         try:
-                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                            # محاولة جلب الحساب بالكود أولاً (لأن account_id قد يكون كود الحساب)
+                            account = self.accounting_service.repo.get_account_by_code(payment.account_id)
                             if account:
                                 account_name = account.name
                             else:
-                                account_name = str(payment.account_id)
+                                # محاولة جلب الحساب بالـ ID
+                                account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                                if account:
+                                    account_name = account.name
+                                else:
+                                    account_name = str(payment.account_id)
                         except Exception as acc_err:
                             print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
                             account_name = str(payment.account_id)
@@ -1561,7 +1625,7 @@ class ProjectManagerTab(QWidget):
                     # تصحيح المبلغ
                     try:
                         amount_val = float(payment.amount)
-                    except:
+                    except (ValueError, TypeError, AttributeError):
                         amount_val = 0.0
                     
                     payments_list.append({
@@ -1604,7 +1668,8 @@ class ProjectManagerTab(QWidget):
                     }
                     for item in project.items
                 ],
-                "subtotal": float(project.subtotal) if hasattr(project, 'subtotal') else float(project.total_amount),
+                # حساب المجموع الفرعي من البنود (مع الخصومات)
+                "subtotal": sum([float(item.total) for item in project.items]),
                 "grand_total": float(project.total_amount),
                 "total_paid": float(profit_data.get('total_paid', 0)),
                 "remaining_amount": float(profit_data.get('balance_due', 0)),

@@ -108,7 +108,7 @@ class QuotationManagerTab(QWidget):
             self.quotes_table.setRowCount(0)
 
             colors_map = {
-                schemas.QuotationStatus.ACCEPTED: QColor("#10b981"),
+                schemas.QuotationStatus.ACCEPTED: QColor("#0A6CF1"),
                 schemas.QuotationStatus.SENT: QColor("#3b82f6"),
                 schemas.QuotationStatus.DRAFT: QColor("#9ca3af"),
                 schemas.QuotationStatus.REJECTED: QColor("#ef4444"),

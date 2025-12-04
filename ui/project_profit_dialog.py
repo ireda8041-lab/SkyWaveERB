@@ -61,7 +61,7 @@ class ProjectProfitDialog(QDialog):
         # --- كروت الأرقام الرئيسية ---
         kpi_layout = QHBoxLayout()
         self.revenue_card = self.create_kpi_card("💰 إجمالي العقد", "revenue", "#3b82f6")
-        self.paid_card = self.create_kpi_card("✅ المدفوع", "paid", "#10b981")
+        self.paid_card = self.create_kpi_card("✅ المدفوع", "paid", "#0A6CF1")
         self.due_card = self.create_kpi_card("⏳ المتبقي", "due", "#f59e0b")
         self.expenses_card = self.create_kpi_card("📉 المصروفات", "expenses", "#ef4444")
         self.profit_card = self.create_kpi_card("📈 صافي الربح", "profit", "#8b5cf6")
@@ -89,7 +89,7 @@ class ProjectProfitDialog(QDialog):
                 font-weight: bold;
             }
             QProgressBar::chunk {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 border-radius: 3px;
             }
         """)
@@ -169,7 +169,7 @@ class ProjectProfitDialog(QDialog):
                 if value >= 0:
                     card.setStyleSheet("""
                         QFrame {
-                            background-color: #10b981;
+                            background-color: #0A6CF1;
                             border-radius: 10px;
                             padding: 10px;
                         }
@@ -195,7 +195,7 @@ class ProjectProfitDialog(QDialog):
                 else:
                     card.setStyleSheet("""
                         QFrame {
-                            background-color: #10b981;
+                            background-color: #0A6CF1;
                             border-radius: 10px;
                             padding: 10px;
                         }
@@ -238,10 +238,31 @@ class ProjectProfitDialog(QDialog):
                 self.payments_table.setItem(i, 0, QTableWidgetItem(date_str))
                 
                 amount_item = QTableWidgetItem(f"{pay.amount:,.2f}")
-                amount_item.setForeground(QColor("#10b981"))
+                amount_item.setForeground(QColor("#0A6CF1"))
                 self.payments_table.setItem(i, 1, amount_item)
                 
-                self.payments_table.setItem(i, 2, QTableWidgetItem(pay.account_id or "-"))
+                # عرض اسم الحساب بدلاً من ID
+                account_name = "-"
+                if hasattr(pay, 'account_id') and pay.account_id:
+                    try:
+                        # محاولة جلب الحساب من الخدمة
+                        if hasattr(self.project_service, 'accounting_service'):
+                            account = self.project_service.accounting_service.repo.get_account_by_code(pay.account_id)
+                            if account:
+                                account_name = account.name
+                            else:
+                                account = self.project_service.accounting_service.repo.get_account_by_id(pay.account_id)
+                                if account:
+                                    account_name = account.name
+                                else:
+                                    account_name = str(pay.account_id)
+                        else:
+                            account_name = str(pay.account_id)
+                    except Exception as acc_err:
+                        print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                        account_name = str(pay.account_id)
+                
+                self.payments_table.setItem(i, 2, QTableWidgetItem(account_name))
                 self.payments_table.setItem(i, 3, QTableWidgetItem(getattr(pay, 'notes', '') or "-"))
 
             # جلب المصروفات

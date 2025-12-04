@@ -91,7 +91,7 @@ class ServiceEditorDialog(QDialog):
         buttons_layout = QHBoxLayout()
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setStyleSheet(
-            "background-color: #10b981; color: white; padding: 10px; font-weight: bold;"
+            "background-color: #0A6CF1; color: white; padding: 10px; font-weight: bold;"
         )
         self.save_button.clicked.connect(self.save_service)
         buttons_layout.addWidget(self.save_button)

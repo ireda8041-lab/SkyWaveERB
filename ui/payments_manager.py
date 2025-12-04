@@ -105,10 +105,10 @@ class PaymentEditorDialog(QDialog):
         self.save_btn = QPushButton("💾 حفظ التعديلات")
         self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #10b981; color: white;
+                background-color: #0A6CF1; color: white;
                 padding: 10px; font-weight: bold; border-radius: 6px;
             }
-            QPushButton:hover { background-color: #059669; }
+            QPushButton:hover { background-color: #0A6CF1; }
         """)
         self.save_btn.clicked.connect(self.save_changes)
         
@@ -302,7 +302,7 @@ class PaymentsManagerTab(QWidget):
         # إجمالي الدفعات
         self.total_label = QLabel("إجمالي التحصيلات: 0.00 ج.م")
         self.total_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.total_label.setStyleSheet("color: #10b981; padding: 10px;")
+        self.total_label.setStyleSheet("color: #0A6CF1; padding: 10px;")
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_payments_data(self):
@@ -352,7 +352,7 @@ class PaymentsManagerTab(QWidget):
                 # النوع (دائماً تحصيل/وارد للدفعات)
                 type_item = QTableWidgetItem("💰 وارد")
                 type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                type_item.setForeground(QColor("#10b981"))
+                type_item.setForeground(QColor("#0A6CF1"))
                 self.payments_table.setItem(i, 2, type_item)
 
                 # العميل/المشروع - عرض اسم العميل الحقيقي واسم المشروع
@@ -387,7 +387,7 @@ class PaymentsManagerTab(QWidget):
                 # المبلغ
                 amount_item = QTableWidgetItem(f"{payment.amount:,.2f}")
                 amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                amount_item.setForeground(QColor("#10b981"))
+                amount_item.setForeground(QColor("#0A6CF1"))
                 self.payments_table.setItem(i, 4, amount_item)
 
                 # طريقة الدفع - حساب من الحساب المستلم
