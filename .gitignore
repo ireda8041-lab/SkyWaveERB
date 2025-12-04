@@ -35,6 +35,8 @@ env/
 # قاعدة البيانات المحلية
 skywave_local.db
 *.db
+*.db-shm
+*.db-wal
 *.db-journal
 
 # السجلات
@@ -68,11 +70,14 @@ htmlcov/
 .tox/
 
 # البناء
-*.spec
 build/
 dist/
+installer_output/
 
 # مؤقت
 *.tmp
 *.bak
 *.swp
+
+# مجلد مكرر
+SkyWaveERB/
