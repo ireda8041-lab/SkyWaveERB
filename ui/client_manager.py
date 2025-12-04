@@ -102,7 +102,7 @@ class ClientManagerTab(QWidget):
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.clients_table.setAlternatingRowColors(True)
-        self.clients_table.verticalHeader().setDefaultSectionSize(65)  # ⚡ ارتفاع الصفوف (تم تكبيره)
+        self.clients_table.verticalHeader().setDefaultSectionSize(70)  # ⚡ ارتفاع الصفوف (تم تكبيره)
         self.clients_table.verticalHeader().setVisible(False)
         self.clients_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         self.clients_table.setColumnWidth(0, 70)
