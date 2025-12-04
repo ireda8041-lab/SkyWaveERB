@@ -142,6 +142,12 @@ class Repository:
         except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
         
+        # Migration: إضافة عمود status_manually_set للمشاريع
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE projects ADD COLUMN status_manually_set INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # العمود موجود بالفعل
+        
         # جدول العملاء (clients)
         self.sqlite_cursor.execute("""
         CREATE TABLE IF NOT EXISTS clients (
@@ -217,6 +223,7 @@ class Repository:
             name TEXT NOT NULL UNIQUE,
             client_id TEXT NOT NULL,
             status TEXT NOT NULL,
+            status_manually_set INTEGER DEFAULT 0,
             description TEXT,
             start_date TEXT,
             end_date TEXT,
@@ -346,6 +353,32 @@ class Repository:
             self.sqlite_cursor.execute("ALTER TABLE users ADD COLUMN custom_permissions TEXT")
         except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
+
+        # جدول المهام (tasks) - نظام TODO
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            priority TEXT NOT NULL DEFAULT 'MEDIUM',
+            status TEXT NOT NULL DEFAULT 'TODO',
+            category TEXT NOT NULL DEFAULT 'GENERAL',
+            due_date TEXT,
+            due_time TEXT,
+            completed_at TEXT,
+            related_project_id TEXT,
+            related_client_id TEXT,
+            tags TEXT,
+            reminder INTEGER DEFAULT 0,
+            reminder_minutes INTEGER DEFAULT 30,
+            assigned_to TEXT,
+            FOREIGN KEY (related_project_id) REFERENCES projects(name),
+            FOREIGN KEY (related_client_id) REFERENCES clients(id)
+        )""")
 
         # جدول قائمة انتظار المزامنة (sync_queue)
         self.sqlite_cursor.execute("""
@@ -1567,6 +1600,35 @@ class Repository:
             print(f"ERROR: [Repo] فشل أرشفة الحساب: {e}")
             return False
 
+    def delete_account_permanently(self, account_id: str) -> bool:
+        """ حذف حساب نهائياً من قاعدة البيانات """
+        print(f"INFO: [Repo] جاري حذف الحساب نهائياً ID: {account_id}")
+        try:
+            # حذف من SQLite
+            self.sqlite_cursor.execute(
+                "DELETE FROM accounts WHERE id = ? OR _mongo_id = ?",
+                (account_id, account_id)
+            )
+            self.sqlite_conn.commit()
+            
+            # حذف من MongoDB
+            if self.online:
+                try:
+                    from bson import ObjectId
+                    try:
+                        self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
+                    except:
+                        self.mongo_db.accounts.delete_one({"code": account_id})
+                    print(f"INFO: [Repo] تم حذف الحساب من MongoDB")
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+            
+            print(f"INFO: [Repo] تم حذف الحساب نهائياً")
+            return True
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل حذف الحساب: {e}")
+            return False
+
     # --- دوال التعامل مع الفواتير ---
 
     def create_invoice(self, invoice_data: schemas.Invoice) -> schemas.Invoice:
@@ -2725,19 +2787,22 @@ class Repository:
         project_data.sync_status = 'new_offline'
 
         items_json = json.dumps([item.model_dump() for item in project_data.items])
+        
+        # ⚡ جلب قيمة status_manually_set
+        status_manually_set = 1 if getattr(project_data, 'status_manually_set', False) else 0
 
         sql = """
             INSERT INTO projects (
                 sync_status, created_at, last_modified, name, client_id,
-                status, description, start_date, end_date,
+                status, status_manually_set, description, start_date, end_date,
                 items, subtotal, discount_rate, discount_amount, tax_rate,
                 tax_amount, total_amount, currency, project_notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             project_data.sync_status, now_iso, now_iso,
             project_data.name, project_data.client_id,
-            project_data.status.value, project_data.description,
+            project_data.status.value, status_manually_set, project_data.description,
             project_data.start_date.isoformat() if project_data.start_date else None,
             project_data.end_date.isoformat() if project_data.end_date else None,
             
@@ -2757,6 +2822,7 @@ class Repository:
             try:
                 project_dict = project_data.model_dump(exclude={"_mongo_id", "id"})
                 project_dict['status'] = project_data.status.value
+                project_dict['status_manually_set'] = getattr(project_data, 'status_manually_set', False)
                 project_dict['start_date'] = project_data.start_date
                 project_dict['end_date'] = project_data.end_date
                 project_dict['currency'] = project_data.currency.value
@@ -2900,16 +2966,19 @@ class Repository:
 
         # --- 1. تحديث SQLite ---
         try:
+            # ⚡ جلب قيمة status_manually_set
+            status_manually_set = 1 if getattr(project_data, 'status_manually_set', False) else 0
+            
             sql = """
                 UPDATE projects SET
-                    client_id = ?, status = ?, description = ?, start_date = ?, end_date = ?,
+                    client_id = ?, status = ?, status_manually_set = ?, description = ?, start_date = ?, end_date = ?,
                     items = ?, subtotal = ?, discount_rate = ?, discount_amount = ?, tax_rate = ?,
                     tax_amount = ?, total_amount = ?, currency = ?, project_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE name = ?
             """
             params = (
-                project_data.client_id, project_data.status.value,
+                project_data.client_id, project_data.status.value, status_manually_set,
                 project_data.description,
                 project_data.start_date.isoformat() if project_data.start_date else None,
                 project_data.end_date.isoformat() if project_data.end_date else None,
@@ -3754,3 +3823,321 @@ if __name__ == "__main__":
         print(f"INFO: [Repo] إجمالي المشاكل: {total_found}, تم إصلاح: {total_fixed}")
         
         return results
+
+    # ==================== دوال التعامل مع المهام (Tasks) ====================
+
+    def create_task(self, task_data: dict) -> dict:
+        """
+        إنشاء مهمة جديدة
+        """
+        now_dt = datetime.now()
+        now_iso = now_dt.isoformat()
+        
+        # تحضير البيانات
+        task_id = task_data.get('id') or self._generate_task_id()
+        
+        sql = """
+            INSERT INTO tasks (
+                sync_status, created_at, last_modified,
+                title, description, priority, status, category,
+                due_date, due_time, completed_at,
+                related_project_id, related_client_id, tags,
+                reminder, reminder_minutes, assigned_to
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        
+        tags_json = json.dumps(task_data.get('tags', []), ensure_ascii=False)
+        
+        self.sqlite_cursor.execute(sql, (
+            'new_offline', now_iso, now_iso,
+            task_data.get('title', ''),
+            task_data.get('description', ''),
+            task_data.get('priority', 'MEDIUM'),
+            task_data.get('status', 'TODO'),
+            task_data.get('category', 'GENERAL'),
+            task_data.get('due_date'),
+            task_data.get('due_time'),
+            task_data.get('completed_at'),
+            task_data.get('related_project_id'),
+            task_data.get('related_client_id'),
+            tags_json,
+            1 if task_data.get('reminder', False) else 0,
+            task_data.get('reminder_minutes', 30),
+            task_data.get('assigned_to')
+        ))
+        self.sqlite_conn.commit()
+        
+        local_id = self.sqlite_cursor.lastrowid
+        task_data['id'] = str(local_id)
+        task_data['created_at'] = now_iso
+        task_data['last_modified'] = now_iso
+        
+        print(f"INFO: [Repo] تم إنشاء مهمة: {task_data.get('title')} (ID: {local_id})")
+        
+        # مزامنة مع MongoDB
+        if self.online:
+            try:
+                mongo_data = task_data.copy()
+                mongo_data['created_at'] = now_dt
+                mongo_data['last_modified'] = now_dt
+                if mongo_data.get('due_date'):
+                    mongo_data['due_date'] = datetime.fromisoformat(mongo_data['due_date']) if isinstance(mongo_data['due_date'], str) else mongo_data['due_date']
+                if mongo_data.get('completed_at'):
+                    mongo_data['completed_at'] = datetime.fromisoformat(mongo_data['completed_at']) if isinstance(mongo_data['completed_at'], str) else mongo_data['completed_at']
+                
+                result = self.mongo_db.tasks.insert_one(mongo_data)
+                mongo_id = str(result.inserted_id)
+                
+                self.sqlite_cursor.execute(
+                    "UPDATE tasks SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                    (mongo_id, local_id)
+                )
+                self.sqlite_conn.commit()
+                task_data['_mongo_id'] = mongo_id
+                print(f"INFO: [Repo] تم مزامنة المهمة أونلاين (Mongo ID: {mongo_id})")
+            except Exception as e:
+                print(f"WARNING: [Repo] فشل مزامنة المهمة: {e}")
+        
+        return task_data
+
+    def update_task(self, task_id: str, task_data: dict) -> dict:
+        """
+        تحديث مهمة موجودة
+        """
+        now_iso = datetime.now().isoformat()
+        
+        tags_json = json.dumps(task_data.get('tags', []), ensure_ascii=False)
+        
+        sql = """
+            UPDATE tasks SET
+                title = ?, description = ?, priority = ?, status = ?, category = ?,
+                due_date = ?, due_time = ?, completed_at = ?,
+                related_project_id = ?, related_client_id = ?, tags = ?,
+                reminder = ?, reminder_minutes = ?, assigned_to = ?,
+                last_modified = ?, sync_status = 'modified_offline'
+            WHERE id = ? OR _mongo_id = ?
+        """
+        
+        self.sqlite_cursor.execute(sql, (
+            task_data.get('title', ''),
+            task_data.get('description', ''),
+            task_data.get('priority', 'MEDIUM'),
+            task_data.get('status', 'TODO'),
+            task_data.get('category', 'GENERAL'),
+            task_data.get('due_date'),
+            task_data.get('due_time'),
+            task_data.get('completed_at'),
+            task_data.get('related_project_id'),
+            task_data.get('related_client_id'),
+            tags_json,
+            1 if task_data.get('reminder', False) else 0,
+            task_data.get('reminder_minutes', 30),
+            task_data.get('assigned_to'),
+            now_iso,
+            task_id, task_id
+        ))
+        self.sqlite_conn.commit()
+        
+        print(f"INFO: [Repo] تم تحديث مهمة: {task_data.get('title')}")
+        
+        # مزامنة مع MongoDB
+        if self.online:
+            try:
+                update_data = task_data.copy()
+                update_data['last_modified'] = datetime.now()
+                if update_data.get('due_date') and isinstance(update_data['due_date'], str):
+                    update_data['due_date'] = datetime.fromisoformat(update_data['due_date'])
+                if update_data.get('completed_at') and isinstance(update_data['completed_at'], str):
+                    update_data['completed_at'] = datetime.fromisoformat(update_data['completed_at'])
+                
+                self.mongo_db.tasks.update_one(
+                    {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]},
+                    {"$set": update_data}
+                )
+                
+                self.sqlite_cursor.execute(
+                    "UPDATE tasks SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                    (task_id, task_id)
+                )
+                self.sqlite_conn.commit()
+            except Exception as e:
+                print(f"WARNING: [Repo] فشل مزامنة تحديث المهمة: {e}")
+        
+        return task_data
+
+    def delete_task(self, task_id: str) -> bool:
+        """
+        حذف مهمة
+        """
+        try:
+            # حذف من SQLite
+            self.sqlite_cursor.execute(
+                "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?",
+                (task_id, task_id)
+            )
+            self.sqlite_conn.commit()
+            
+            print(f"INFO: [Repo] تم حذف مهمة (ID: {task_id})")
+            
+            # حذف من MongoDB
+            if self.online:
+                try:
+                    self.mongo_db.tasks.delete_one(
+                        {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]}
+                    )
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل حذف المهمة من MongoDB: {e}")
+            
+            return True
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل حذف المهمة: {e}")
+            return False
+
+    def get_task_by_id(self, task_id: str) -> Optional[dict]:
+        """
+        جلب مهمة بالـ ID
+        """
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM tasks WHERE id = ? OR _mongo_id = ?",
+                (task_id, task_id)
+            )
+            row = self.sqlite_cursor.fetchone()
+            
+            if row:
+                return self._row_to_task_dict(row)
+            return None
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب المهمة: {e}")
+            return None
+
+    def get_all_tasks(self) -> List[dict]:
+        """
+        جلب جميع المهام
+        """
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+            rows = self.sqlite_cursor.fetchall()
+            
+            tasks = [self._row_to_task_dict(row) for row in rows]
+            print(f"INFO: [Repo] تم جلب {len(tasks)} مهمة")
+            return tasks
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب المهام: {e}")
+            return []
+
+    def get_tasks_by_status(self, status: str) -> List[dict]:
+        """
+        جلب المهام حسب الحالة
+        """
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC",
+                (status,)
+            )
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_task_dict(row) for row in rows]
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب المهام بالحالة: {e}")
+            return []
+
+    def get_tasks_by_project(self, project_id: str) -> List[dict]:
+        """
+        جلب المهام المرتبطة بمشروع
+        """
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM tasks WHERE related_project_id = ? ORDER BY created_at DESC",
+                (project_id,)
+            )
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_task_dict(row) for row in rows]
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب مهام المشروع: {e}")
+            return []
+
+    def get_tasks_by_client(self, client_id: str) -> List[dict]:
+        """
+        جلب المهام المرتبطة بعميل
+        """
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT * FROM tasks WHERE related_client_id = ? ORDER BY created_at DESC",
+                (client_id,)
+            )
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_task_dict(row) for row in rows]
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب مهام العميل: {e}")
+            return []
+
+    def get_overdue_tasks(self) -> List[dict]:
+        """
+        جلب المهام المتأخرة
+        """
+        try:
+            now_iso = datetime.now().isoformat()
+            self.sqlite_cursor.execute(
+                """SELECT * FROM tasks 
+                   WHERE due_date < ? AND status NOT IN ('COMPLETED', 'CANCELLED')
+                   ORDER BY due_date ASC""",
+                (now_iso,)
+            )
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_task_dict(row) for row in rows]
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب المهام المتأخرة: {e}")
+            return []
+
+    def get_today_tasks(self) -> List[dict]:
+        """
+        جلب مهام اليوم
+        """
+        try:
+            today = datetime.now().date().isoformat()
+            self.sqlite_cursor.execute(
+                """SELECT * FROM tasks 
+                   WHERE date(due_date) = date(?)
+                   ORDER BY due_time ASC""",
+                (today,)
+            )
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_task_dict(row) for row in rows]
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب مهام اليوم: {e}")
+            return []
+
+    def _row_to_task_dict(self, row) -> dict:
+        """
+        تحويل صف قاعدة البيانات إلى dict
+        """
+        task = {
+            'id': str(row['id']),
+            '_mongo_id': row['_mongo_id'],
+            'sync_status': row['sync_status'],
+            'created_at': row['created_at'],
+            'last_modified': row['last_modified'],
+            'title': row['title'],
+            'description': row['description'],
+            'priority': row['priority'],
+            'status': row['status'],
+            'category': row['category'],
+            'due_date': row['due_date'],
+            'due_time': row['due_time'],
+            'completed_at': row['completed_at'],
+            'related_project_id': row['related_project_id'],
+            'related_client_id': row['related_client_id'],
+            'tags': json.loads(row['tags']) if row['tags'] else [],
+            'reminder': bool(row['reminder']),
+            'reminder_minutes': row['reminder_minutes'] or 30,
+            'assigned_to': row['assigned_to']
+        }
+        return task
+
+    def _generate_task_id(self) -> str:
+        """
+        توليد ID فريد للمهمة
+        """
+        import uuid
+        return str(uuid.uuid4())[:8]

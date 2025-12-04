@@ -79,10 +79,10 @@ class InvoicePrintingService:
             template = self.invoice_template if self.invoice_template else self.env.get_template("final_invoice.html")
             html_content = template.render(**context)
             
-            # Step 3: توليد اسم الملف
+            # Step 3: توليد اسم الملف (اسم العميل - اسم المشروع)
             safe_client_name = self._sanitize_filename(invoice_data.get('client_name', 'client'))
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"invoice_{safe_client_name}_{timestamp}"
+            safe_project_name = self._sanitize_filename(invoice_data.get('project_name', 'project'))
+            filename = f"{safe_client_name} - {safe_project_name}"
             
             # Step 4: توليد PDF
             pdf_path = self._generate_pdf(html_content, filename)

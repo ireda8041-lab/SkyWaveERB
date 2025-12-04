@@ -164,6 +164,7 @@ class Project(BaseSchema):
     name: str  # يجب أن يكون فريداً
     client_id: str
     status: ProjectStatus = ProjectStatus.ACTIVE
+    status_manually_set: bool = False  # ⚡ هل الحالة تم تعيينها يدوياً؟
     description: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
@@ -407,3 +408,53 @@ class Notification(BaseSchema):
     action_url: Optional[str] = None  # رابط الإجراء (اختياري)
     expires_at: Optional[datetime] = None  # تاريخ انتهاء الصلاحية (للإشعارات المؤقتة)
 
+
+
+# ==================== نظام المهام (Tasks) ====================
+
+class TaskPriority(str, Enum):
+    """أولوية المهمة"""
+    LOW = "منخفضة"
+    MEDIUM = "متوسطة"
+    HIGH = "عالية"
+    URGENT = "عاجلة"
+
+
+class TaskStatus(str, Enum):
+    """حالة المهمة"""
+    TODO = "قيد الانتظار"
+    IN_PROGRESS = "قيد التنفيذ"
+    COMPLETED = "مكتملة"
+    CANCELLED = "ملغاة"
+
+
+class TaskCategory(str, Enum):
+    """فئة المهمة"""
+    GENERAL = "عامة"
+    PROJECT = "مشروع"
+    CLIENT = "عميل"
+    PAYMENT = "دفعة"
+    MEETING = "اجتماع"
+    FOLLOW_UP = "متابعة"
+    DEADLINE = "موعد نهائي"
+
+
+class Task(BaseSchema):
+    """
+    نموذج المهمة (من collection 'tasks')
+    يستخدم لإدارة المهام والتذكيرات
+    """
+    title: str  # عنوان المهمة
+    description: Optional[str] = None  # وصف المهمة
+    priority: TaskPriority = TaskPriority.MEDIUM  # الأولوية
+    status: TaskStatus = TaskStatus.TODO  # الحالة
+    category: TaskCategory = TaskCategory.GENERAL  # الفئة
+    due_date: Optional[datetime] = None  # تاريخ الاستحقاق
+    due_time: Optional[str] = None  # وقت الاستحقاق (HH:MM)
+    completed_at: Optional[datetime] = None  # تاريخ الإكمال
+    related_project_id: Optional[str] = None  # معرف المشروع المرتبط
+    related_client_id: Optional[str] = None  # معرف العميل المرتبط
+    tags: List[str] = Field(default_factory=list)  # الوسوم
+    reminder: bool = False  # هل التذكير مفعل
+    reminder_minutes: int = 30  # دقائق قبل الموعد للتذكير
+    assigned_to: Optional[str] = None  # المستخدم المسؤول

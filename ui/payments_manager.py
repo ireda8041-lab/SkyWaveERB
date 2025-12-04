@@ -29,12 +29,14 @@ class PaymentEditorDialog(QDialog):
         payment: schemas.Payment,
         accounts: List[schemas.Account],
         accounting_service: AccountingService,
+        project_service: ProjectService = None,
         parent=None,
     ):
         super().__init__(parent)
         self.payment = payment
         self.accounts = accounts
         self.accounting_service = accounting_service
+        self.project_service = project_service
         self.original_amount = payment.amount
         self.original_account_id = payment.account_id
 
@@ -173,14 +175,18 @@ class PaymentEditorDialog(QDialog):
             self.payment.date = self.date_input.dateTime().toPyDateTime()
             self.payment.method = self.method_combo.currentText()
 
-            # حفظ في قاعدة البيانات
+            # حفظ في قاعدة البيانات مع تحديث حالة المشروع أوتوماتيك ⚡
             payment_id = self.payment.id or self.payment._mongo_id
-            result = self.accounting_service.repo.update_payment(payment_id, self.payment)
+            
+            if self.project_service:
+                result = self.project_service.update_payment_for_project(payment_id, self.payment)
+            else:
+                result = self.accounting_service.repo.update_payment(payment_id, self.payment)
 
             if result:
                 # عكس القيد القديم وإنشاء قيد جديد
                 self._reverse_and_repost_journal_entry(selected_account.code, new_amount)
-                QMessageBox.information(self, "تم", "تم تعديل الدفعة وتحديث القيود المحاسبية.")
+                QMessageBox.information(self, "تم", "تم تعديل الدفعة وتحديث القيود المحاسبية وحالة المشروع.")
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل حفظ التعديلات.")
@@ -242,6 +248,11 @@ class PaymentsManagerTab(QWidget):
 
         self.setup_ui()
         self.apply_permissions()
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.payments_changed.connect(self._on_payments_changed)
+        
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_payments_data() - يتم استدعاؤها من MainWindow
 
@@ -427,6 +438,11 @@ class PaymentsManagerTab(QWidget):
         except Exception as e:
             print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {e}")
 
+    def _on_payments_changed(self):
+        """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""
+        print("INFO: [PaymentsManager] ⚡ استلام إشارة تحديث الدفعات - جاري التحديث...")
+        self.load_payments_data()
+
     def get_selected_payment(self) -> Optional[schemas.Payment]:
         """الحصول على الدفعة المحددة"""
         # محاولة الحصول على الصف من الخلية المحددة
@@ -468,6 +484,7 @@ class PaymentsManagerTab(QWidget):
             payment=selected_payment,
             accounts=accounts,
             accounting_service=self.accounting_service,
+            project_service=self.project_service,
             parent=self
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -543,7 +560,7 @@ class PaymentsManagerTab(QWidget):
             self.delete_button.setToolTip("ليس لديك صلاحية حذف الدفعات")
 
     def delete_selected_payment(self):
-        """حذف الدفعة المحددة مع عكس القيد المحاسبي"""
+        """حذف الدفعة المحددة مع عكس القيد المحاسبي وتحديث حالة المشروع"""
         selected_payment = self.get_selected_payment()
         if not selected_payment:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد دفعة أولاً.")
@@ -578,15 +595,16 @@ class PaymentsManagerTab(QWidget):
                 amount=selected_payment.amount
             )
             
-            # 2. حذف الدفعة من قاعدة البيانات
+            # 2. حذف الدفعة مع تحديث حالة المشروع أوتوماتيك ⚡
             payment_id = selected_payment.id or selected_payment._mongo_id
-            result = self.accounting_service.repo.delete_payment(payment_id)
+            project_name = selected_payment.project_id
+            result = self.project_service.delete_payment_for_project(payment_id, project_name)
             
             if result:
                 QMessageBox.information(
                     self, 
                     "تم الحذف", 
-                    "تم حذف الدفعة وعكس القيد المحاسبي بنجاح."
+                    "تم حذف الدفعة وعكس القيد المحاسبي وتحديث حالة المشروع بنجاح."
                 )
                 self.load_payments_data()
             else:

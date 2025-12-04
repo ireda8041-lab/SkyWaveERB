@@ -78,6 +78,52 @@ class ProjectService:
         self._cached_projects = None
         self._cache_time = 0
 
+    def update_all_projects_status(self):
+        """⚡ تحديث حالات كل المشاريع أوتوماتيك (مع احترام التعديل اليدوي)"""
+        print("INFO: [ProjectService] ===== بدء تحديث حالات المشاريع =====")
+        try:
+            projects = self.repo.get_all_projects()
+            print(f"INFO: [ProjectService] عدد المشاريع: {len(projects)}")
+            
+            for project in projects:
+                # تجاهل المشاريع المؤرشفة
+                if project.status == schemas.ProjectStatus.ARCHIVED:
+                    continue
+                
+                # ⚡ تجاهل المشاريع اللي حالتها معينة يدوياً
+                status_manually_set = getattr(project, 'status_manually_set', False)
+                if status_manually_set:
+                    print(f"DEBUG: {project.name}: حالة يدوية - تم تجاهلها")
+                    continue
+                    
+                # جلب الدفعات
+                payments = self.repo.get_payments_for_project(project.name)
+                total_paid = sum(p.amount for p in payments) if payments else 0.0
+                
+                print(f"DEBUG: {project.name}: total={project.total_amount}, paid={total_paid}, status={project.status.value}")
+                
+                # تحديد الحالة الجديدة
+                if project.total_amount > 0 and total_paid >= project.total_amount:
+                    new_status = schemas.ProjectStatus.COMPLETED
+                elif total_paid > 0:
+                    new_status = schemas.ProjectStatus.ACTIVE
+                else:
+                    new_status = schemas.ProjectStatus.PLANNING
+                
+                # تحديث إذا تغيرت
+                if project.status != new_status:
+                    print(f"INFO: [ProjectService] تحديث {project.name}: {project.status.value} -> {new_status.value}")
+                    project.status = new_status
+                    project.status_manually_set = False  # الحالة أصبحت أوتوماتيك
+                    self.repo.update_project(project.name, project)
+            
+            self.invalidate_cache()
+            print("INFO: [ProjectService] ===== انتهى تحديث حالات المشاريع =====")
+        except Exception as e:
+            print(f"ERROR: [ProjectService] فشل تحديث حالات المشاريع: {e}")
+            import traceback
+            traceback.print_exc()
+
     def get_archived_projects(self) -> List[schemas.Project]:
         """ جلب كل المشاريع المؤرشفة """
         try:
@@ -204,16 +250,31 @@ class ProjectService:
             old_project = self.repo.get_project_by_number(project_name)
             if not old_project:
                 raise Exception("المشروع الأصلي غير موجود")
+            
+            # ⚡ تحديد لو المستخدم غير الحالة يدوياً
+            new_status = new_data_dict.get('status')
+            if new_status and new_status != old_project.status:
+                # المستخدم غير الحالة يدوياً
+                new_data_dict['status_manually_set'] = True
+                print(f"INFO: [ProjectService] المستخدم غير حالة المشروع يدوياً: {old_project.status.value} -> {new_status.value}")
+            
             updated_project_schema = old_project.model_copy(update=new_data_dict)
 
             saved_project = self.repo.update_project(project_name, updated_project_schema)
 
+            # ⚡ تحديث حالة المشروع أوتوماتيك بناءً على الدفعات (لو مش معينة يدوياً)
+            if not new_data_dict.get('status_manually_set', False):
+                self._auto_update_project_status(project_name, force_update=False)
+
             # ⚡ إبطال الـ cache وإبلاغ الروبوت المحاسبي
             self.invalidate_cache()
             self.bus.publish('PROJECT_EDITED', {"project": saved_project})
+            app_signals.emit_data_changed('projects')
 
             print(f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع {project_name}")
-            return saved_project
+            
+            # إعادة جلب المشروع بعد تحديث الحالة
+            return self.repo.get_project_by_number(project_name)
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل تعديل المشروع: {e}")
             raise
@@ -241,12 +302,73 @@ class ProjectService:
                 "project": project
             })
 
+            # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
+            self._auto_update_project_status(project.name, force_update=True)
+            
+            # ⚡ إرسال إشارات التحديث للـ UI
+            app_signals.emit_data_changed('projects')
+            app_signals.emit_data_changed('payments')
+
             print(f"SUCCESS: [ProjectService] تم تسجيل الدفعة.")
             return created_payment
 
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل إنشاء الدفعة: {e}")
             raise
+
+    def update_payment_for_project(self, payment_id, payment_data: schemas.Payment) -> bool:
+        """⚡ تعديل دفعة مع تحديث حالة المشروع أوتوماتيك"""
+        try:
+            project_name = payment_data.project_id
+            project = self.repo.get_project_by_number(project_name)
+            result = self.repo.update_payment(payment_id, payment_data)
+            
+            if result:
+                # ✅ إبلاغ الروبوت المحاسبي بتعديل الدفعة
+                self.bus.publish('PAYMENT_UPDATED', {
+                    "payment": payment_data,
+                    "project": project
+                })
+                
+                # ⚡ تحديث حالة المشروع أوتوماتيك
+                self._auto_update_project_status(project_name, force_update=True)
+                self.invalidate_cache()
+                app_signals.emit_data_changed('projects')
+                app_signals.emit_data_changed('payments')
+                print(f"SUCCESS: [ProjectService] تم تعديل الدفعة وتحديث حالة المشروع")
+            
+            return result
+        except Exception as e:
+            print(f"ERROR: [ProjectService] فشل تعديل الدفعة: {e}")
+            return False
+
+    def delete_payment_for_project(self, payment_id, project_name: str) -> bool:
+        """⚡ حذف دفعة مع تحديث حالة المشروع أوتوماتيك"""
+        try:
+            # جلب بيانات الدفعة قبل الحذف
+            payment = self.repo.get_payment_by_id(payment_id)
+            
+            result = self.repo.delete_payment(payment_id)
+            
+            if result:
+                # ✅ إبلاغ الروبوت المحاسبي بحذف الدفعة
+                self.bus.publish('PAYMENT_DELETED', {
+                    "payment_id": payment_id,
+                    "payment": payment,
+                    "project_name": project_name
+                })
+                
+                # ⚡ تحديث حالة المشروع أوتوماتيك
+                self._auto_update_project_status(project_name, force_update=True)
+                self.invalidate_cache()
+                app_signals.emit_data_changed('projects')
+                app_signals.emit_data_changed('payments')
+                print(f"SUCCESS: [ProjectService] تم حذف الدفعة وتحديث حالة المشروع")
+            
+            return result
+        except Exception as e:
+            print(f"ERROR: [ProjectService] فشل حذف الدفعة: {e}")
+            return False
 
     # (الجديد: دالة تحويل عرض السعر بقت هنا)
     def handle_convert_to_project(self, quote_data_dict: dict):
@@ -262,24 +384,46 @@ class ProjectService:
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل إنشاء المشروع من عرض السعر: {e}")
 
-    def _auto_update_project_status(self, project_name: str):
-        """⚡ تحديث حالة المشروع أوتوماتيك (محسّن للسرعة)"""
+    def _auto_update_project_status(self, project_name: str, force_update: bool = False):
+        """⚡ تحديث حالة المشروع أوتوماتيك بناءً على الدفعات (مع احترام التعديل اليدوي)"""
         try:
             project = self.repo.get_project_by_number(project_name)
             if not project:
+                print(f"WARNING: [ProjectService] لم يتم العثور على المشروع: {project_name}")
                 return
             
-            # ⚡ استعلام SQL مباشر (أسرع)
-            self.repo.sqlite_cursor.execute(
-                "SELECT SUM(amount) FROM payments WHERE project_id = ?",
-                (project_name,)
-            )
-            result = self.repo.sqlite_cursor.fetchone()
-            total_paid = result[0] if result and result[0] else 0
+            # تجاهل المشاريع المؤرشفة
+            if project.status == schemas.ProjectStatus.ARCHIVED:
+                print(f"INFO: [ProjectService] المشروع {project_name} مؤرشف - لن يتم تحديث حالته")
+                return
             
-            # تحديد الحالة الجديدة
+            # ⚡ تجاهل المشاريع اللي حالتها تم تعيينها يدوياً (إلا لو force_update)
+            status_manually_set = getattr(project, 'status_manually_set', False)
+            if status_manually_set and not force_update:
+                print(f"INFO: [ProjectService] المشروع {project_name} حالته معينة يدوياً - لن يتم تحديثها أوتوماتيك")
+                return
+            
+            # جلب الدفعات من قاعدة البيانات (Online أو Offline)
+            total_paid = 0.0
+            try:
+                payments = self.repo.get_payments_for_project(project_name)
+                total_paid = sum(p.amount for p in payments) if payments else 0.0
+            except Exception as e:
+                print(f"WARNING: [ProjectService] فشل جلب الدفعات: {e}")
+                # محاولة من SQLite مباشرة
+                try:
+                    self.repo.sqlite_cursor.execute(
+                        "SELECT SUM(amount) FROM payments WHERE project_id = ?",
+                        (project_name,)
+                    )
+                    result = self.repo.sqlite_cursor.fetchone()
+                    total_paid = result[0] if result and result[0] else 0.0
+                except:
+                    pass
+            
+            # تحديد الحالة الجديدة بناءً على الدفعات
             new_status = None
-            if total_paid >= project.total_amount:
+            if project.total_amount > 0 and total_paid >= project.total_amount:
                 new_status = schemas.ProjectStatus.COMPLETED
             elif total_paid > 0:
                 new_status = schemas.ProjectStatus.ACTIVE
@@ -288,11 +432,35 @@ class ProjectService:
             
             # تحديث الحالة إذا تغيرت
             if new_status and project.status != new_status:
+                print(f"INFO: [ProjectService] ⚡ تحديث حالة {project_name}: {project.status.value} -> {new_status.value} (paid: {total_paid:,.2f} / total: {project.total_amount:,.2f})")
                 project.status = new_status
+                project.status_manually_set = False  # الحالة أصبحت أوتوماتيك
                 self.repo.update_project(project_name, project)
+                self.invalidate_cache()
+                app_signals.emit_data_changed('projects')
                 
         except Exception as e:
-            print(f"WARNING: [ProjectService] فشل تحديث حالة المشروع: {e}")
+            print(f"WARNING: [ProjectService] فشل تحديث حالة المشروع {project_name}: {e}")
+
+    def reset_project_status_to_auto(self, project_name: str) -> bool:
+        """⚡ إعادة حالة المشروع للتحديث الأوتوماتيك"""
+        try:
+            project = self.repo.get_project_by_number(project_name)
+            if not project:
+                return False
+            
+            # إلغاء التعيين اليدوي
+            project.status_manually_set = False
+            self.repo.update_project(project_name, project)
+            
+            # تحديث الحالة أوتوماتيك
+            self._auto_update_project_status(project_name, force_update=False)
+            
+            print(f"INFO: [ProjectService] ✅ تم إعادة حالة المشروع {project_name} للتحديث الأوتوماتيك")
+            return True
+        except Exception as e:
+            print(f"ERROR: [ProjectService] فشل إعادة حالة المشروع للأوتوماتيك: {e}")
+            return False
     
     # --- دوال الربحية (معدلة عشان تستخدم الداتا الصح) ---
     def get_project_profitability(self, project_name: str) -> dict:

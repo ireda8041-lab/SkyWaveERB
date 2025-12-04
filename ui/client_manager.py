@@ -37,6 +37,10 @@ class ClientManagerTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.clients_changed.connect(self._on_clients_changed)
 
 
         buttons_layout = QHBoxLayout()
@@ -400,6 +404,11 @@ class ClientManagerTab(QWidget):
             print(f"ERROR: [ClientManager] فشل تحميل العملاء: {e}")
             # ⚡ إعادة تفعيل الترتيب حتى في حالة الخطأ
             self.clients_table.setSortingEnabled(True)
+
+    def _on_clients_changed(self):
+        """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
+        print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
+        self.load_clients_data()
 
     def open_editor(self, client_to_edit: Optional[schemas.Client]):
         dialog = ClientEditorDialog(

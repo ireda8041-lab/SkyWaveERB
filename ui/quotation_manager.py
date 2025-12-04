@@ -45,6 +45,10 @@ class QuotationManagerTab(QWidget):
 
         layout = QVBoxLayout()
         self.setLayout(layout)
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.quotations_changed.connect(self._on_quotations_changed)
 
         buttons_layout = QHBoxLayout()
 
@@ -143,6 +147,11 @@ class QuotationManagerTab(QWidget):
 
         except Exception as e:
             print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {e}")
+
+    def _on_quotations_changed(self):
+        """⚡ استجابة لإشارة تحديث عروض الأسعار - تحديث الجدول أوتوماتيك"""
+        print("INFO: [QuoteManager] ⚡ استلام إشارة تحديث عروض الأسعار - جاري التحديث...")
+        self.load_quotations_data()
 
     def open_quote_editor(self):
         print("INFO: [QuoteManager] جاري فتح شاشة عرض سعر (وضع جديد)...")

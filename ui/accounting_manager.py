@@ -215,26 +215,14 @@ class AccountingManagerTab(QWidget):
         # ✅ تحديد ارتفاع الصفوف بشكل ثابت
         self.accounts_tree.setUniformRowHeights(True)
         
-        # ✅ إعداد الأعمدة بشكل صحيح
+        # ✅ إعداد الأعمدة - كل الأعمدة تتمدد بالتساوي
         header = self.accounts_tree.header()
         header.setMinimumHeight(40)
-        header.setDefaultSectionSize(100)
-        header.setStretchLastSection(False)
+        header.setDefaultSectionSize(150)
+        header.setStretchLastSection(True)
         
-        # ✅ ضبط أوضاع الأعمدة
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)      # الكود
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)    # اسم الحساب - يتمدد
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)      # النوع
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)      # العملة
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)      # الرصيد
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)      # الحالة
-        
-        # ✅ تحديد عرض الأعمدة
-        self.accounts_tree.setColumnWidth(0, 50)      # الكود
-        self.accounts_tree.setColumnWidth(2, 80)      # النوع
-        self.accounts_tree.setColumnWidth(3, 45)      # العملة
-        self.accounts_tree.setColumnWidth(4, 90)      # الرصيد
-        self.accounts_tree.setColumnWidth(5, 50)      # الحالة
+        # ✅ كل الأعمدة تتمدد لتملأ المساحة
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         
         # ✨ STEP 3: ENABLE LEDGER - Double Click for Ledger Window
         self.accounts_tree.doubleClicked.connect(self.open_ledger_window)
@@ -298,7 +286,7 @@ class AccountingManagerTab(QWidget):
                 
                 name_item = QStandardItem(f"{'📁 ' if is_group else '📄 '}{acc.name}")
                 name_item.setEditable(False)
-                name_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
                 # ✅ عرض النوع بشكل واضح ومقروء
                 type_display = {
@@ -329,7 +317,7 @@ class AccountingManagerTab(QWidget):
                 balance_text = f"{abs(calculated_balance):,.2f}"
                 balance_item = QStandardItem(balance_text)
                 balance_item.setEditable(False)
-                balance_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                balance_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
                 status_text = "✅ نشط" if acc.status == schemas.AccountStatus.ACTIVE else "❌ مؤرشف"
                 status_item = QStandardItem(status_text)
@@ -454,18 +442,21 @@ class AccountingManagerTab(QWidget):
             return
 
         reply = QMessageBox.question(
-            self, "تأكيد الحذف",
-            f"هل أنت متأكد من أرشفة الحساب:\n{selected.name}؟",
+            self, "⚠️ تأكيد الحذف النهائي",
+            f"هل أنت متأكد من حذف الحساب نهائياً؟\n\n"
+            f"الكود: {selected.code}\n"
+            f"الاسم: {selected.name}\n\n"
+            f"⚠️ هذا الإجراء لا يمكن التراجع عنه!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 account_id = selected._mongo_id or str(selected.id)
                 self.accounting_service.delete_account(account_id)
-                QMessageBox.information(self, "تم", "تم أرشفة الحساب بنجاح.")
+                QMessageBox.information(self, "✅ تم", "تم حذف الحساب نهائياً.")
                 self.load_accounts_data()
             except Exception as e:
-                QMessageBox.critical(self, "خطأ", f"فشل الأرشفة: {e}")
+                QMessageBox.critical(self, "خطأ", f"فشل الحذف: {e}")
 
     def create_default_accounts(self):
         """إنشاء الحسابات الافتراضية مع نافذة تقدم جميلة"""

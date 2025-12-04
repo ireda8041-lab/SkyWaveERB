@@ -23,7 +23,12 @@ class AppSignals(QObject):
     clients_changed = pyqtSignal()
     services_changed = pyqtSignal()
     payments_changed = pyqtSignal()
+    quotations_changed = pyqtSignal()  # ⚡ إشارة تحديث عروض الأسعار
     journal_entry_created = pyqtSignal(str)  # إشارة إنشاء قيد محاسبي
+    
+    # ⚡ إشارات المزامنة
+    sync_completed = pyqtSignal(dict)  # نتائج المزامنة
+    sync_failed = pyqtSignal(str)  # رسالة الخطأ
     
     def emit_data_changed(self, data_type: str):
         """إرسال إشارة تحديث البيانات"""
@@ -42,6 +47,8 @@ class AppSignals(QObject):
             self.services_changed.emit()
         elif data_type == 'payments':
             self.payments_changed.emit()
+        elif data_type == 'quotations':
+            self.quotations_changed.emit()
     
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""

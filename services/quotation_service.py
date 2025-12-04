@@ -5,6 +5,7 @@ from core.repository import Repository
 from core.event_bus import EventBus
 from core import schemas
 from core.logger import get_logger
+from core.signals import app_signals
 
 # (جديد) هنحتاج قسم المشاريع
 from services.project_service import ProjectService
@@ -98,6 +99,8 @@ class QuotationService:
 
             new_quote_schema = schemas.Quotation(**new_data_dict)
             created_quote = self.repo.create_quotation(new_quote_schema)
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('quotations')
 
             print(f"INFO: [QuotationService] تم حفظ عرض السعر بنجاح برقم: {created_quote.quote_number}")
             return created_quote
@@ -188,6 +191,8 @@ class QuotationService:
 
             updated_quote_schema = old_quote.model_copy(update=new_data_dict)
             saved_quote = self.repo.update_quotation(quote_number, updated_quote_schema)
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('quotations')
 
             print(f"SUCCESS: [QuotationService] تم تعديل عرض السعر {quote_number}.")
             return saved_quote

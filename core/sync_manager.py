@@ -457,6 +457,12 @@ class SyncManager:
             # سحب العملات
             self._pull_and_merge_collection('currencies')
             
+            # سحب الإشعارات
+            self._pull_and_merge_collection('notifications')
+            
+            # سحب المهام
+            self._pull_and_merge_collection('tasks')
+            
             logger.info("✅ اكتمل سحب ودمج جميع البيانات بنجاح")
             
         except Exception as e:
@@ -665,7 +671,7 @@ class SyncManager:
         
         tables = ['clients', 'projects', 'services', 'accounts', 
                   'expenses', 'invoices', 'payments', 'journal_entries', 
-                  'quotations', 'currencies']
+                  'quotations', 'currencies', 'notifications', 'tasks']
         
         total_pushed = 0
         for table in tables:
@@ -771,7 +777,8 @@ class SyncManager:
             'journal_entries': 'id',
             'quotations': 'quote_number',
             'currencies': 'code',
-            'users': 'username'
+            'users': 'username',
+            'notifications': 'id'
         }
         return unique_fields.get(table_name, 'name')
     

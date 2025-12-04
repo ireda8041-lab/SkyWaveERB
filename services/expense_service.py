@@ -125,6 +125,8 @@ class ExpenseService:
             result = self.repo.update_expense(expense_id, expense_data)
             if result:
                 self.bus.publish('EXPENSE_UPDATED', expense_data)
+                # ⚡ إرسال إشارة التحديث
+                app_signals.emit_data_changed('expenses')
                 logger.info("[ExpenseService] تم تعديل المصروف بنجاح")
             return result
         except Exception as e:
@@ -149,6 +151,8 @@ class ExpenseService:
             result = self.repo.delete_expense(expense_id)
             if result:
                 self.bus.publish('EXPENSE_DELETED', {'id': expense_id})
+                # ⚡ إرسال إشارة التحديث
+                app_signals.emit_data_changed('expenses')
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:

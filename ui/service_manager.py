@@ -52,7 +52,10 @@ class ServiceManagerTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.services_changed.connect(self._on_services_changed)
 
         buttons_layout = QHBoxLayout()
 
@@ -189,6 +192,11 @@ class ServiceManagerTab(QWidget):
             self.update_buttons_state(False)
         except Exception as e:
             logger.error(f"[ServiceManager] فشل تحميل الخدمات: {e}", exc_info=True)
+
+    def _on_services_changed(self):
+        """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
+        print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
+        self.load_services_data()
 
     def open_editor(self, service_to_edit: Optional[schemas.Service]):
         dialog = ServiceEditorDialog(

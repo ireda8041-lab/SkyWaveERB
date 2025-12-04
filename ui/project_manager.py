@@ -998,6 +998,11 @@ class ProjectManagerTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.projects_changed.connect(self._on_projects_changed)
+        app_signals.payments_changed.connect(self._on_projects_changed)
 
 
         # --- 1. الجزء الأيسر (الجدول والأزرار) ---
@@ -1299,6 +1304,9 @@ class ProjectManagerTab(QWidget):
         QApplication.processEvents()
         
         try:
+            # ⚡ تحديث حالات المشاريع أوتوماتيك قبل التحميل
+            self.project_service.update_all_projects_status()
+            
             # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
             self.projects_table.setSortingEnabled(False)
             
@@ -1327,6 +1335,11 @@ class ProjectManagerTab(QWidget):
             print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {e}")
             # ⚡ إعادة تفعيل الترتيب حتى في حالة الخطأ
             self.projects_table.setSortingEnabled(True)
+
+    def _on_projects_changed(self):
+        """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
+        print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
+        self.load_projects_data()
 
     def _format_date(self, value) -> str:
         if not value:

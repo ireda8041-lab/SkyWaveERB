@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, List, Optional, Dict, Any
 from core.repository import Repository
 from core import schemas
 from core.logger import get_logger
+from core.signals import app_signals
 import time
 
 if TYPE_CHECKING:
@@ -86,6 +87,8 @@ class ClientService:
         try:
             created_client = self.repo.create_client(client_data)
             self.invalidate_cache()  # ⚡ إبطال الـ cache
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('clients')
             logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
             return created_client
         except Exception as e:
@@ -116,6 +119,8 @@ class ClientService:
             updated_client_schema = existing_client.model_copy(update=new_data)
             saved_client = self.repo.update_client(client_id, updated_client_schema)
             self.invalidate_cache()  # ⚡ إبطال الـ cache
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('clients')
 
             logger.info(f"[ClientService] ✅ تم تعديل العميل {updated_client_schema.name}")
             return saved_client
@@ -174,6 +179,8 @@ class ClientService:
         try:
             success = self.repo.archive_client_by_id(client_id)
             if success:
+                # ⚡ إرسال إشارة التحديث
+                app_signals.emit_data_changed('clients')
                 logger.info("[ClientService] تم أرشفة العميل بنجاح")
             return success
         except Exception as e:

@@ -5,7 +5,7 @@ from core.event_bus import EventBus
 from core import schemas
 from core.signals import app_signals
 from core.logger import get_logger
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 
 logger = get_logger(__name__)
@@ -46,10 +46,16 @@ class AccountingService:
         """
         self.bus.subscribe('INVOICE_CREATED', self.handle_new_invoice)
         self.bus.subscribe('EXPENSE_CREATED', self.handle_new_expense)
+        self.bus.subscribe('EXPENSE_UPDATED', self.handle_updated_expense)  # ✅ تعديل مصروف
+        self.bus.subscribe('EXPENSE_DELETED', self.handle_deleted_expense)  # ✅ حذف مصروف
         self.bus.subscribe('PAYMENT_RECEIVED', self.handle_new_payment)
+        self.bus.subscribe('PAYMENT_UPDATED', self.handle_updated_payment)  # ✅ تعديل دفعة
+        self.bus.subscribe('PAYMENT_DELETED', self.handle_deleted_payment)  # ✅ حذف دفعة
         self.bus.subscribe('INVOICE_VOIDED', self.handle_voided_invoice)
         self.bus.subscribe('INVOICE_EDITED', self.handle_edited_invoice)
-        logger.info("[AccountingService] تم الاشتراك في الأحداث المالية: INVOICE_CREATED, EXPENSE_CREATED, PAYMENT_RECEIVED, INVOICE_VOIDED, INVOICE_EDITED")
+        self.bus.subscribe('PROJECT_CREATED', self.handle_new_project)  # ✅ المشاريع = الفواتير
+        self.bus.subscribe('PROJECT_EDITED', self.handle_edited_project)  # ✅ تعديل المشروع
+        logger.info("[AccountingService] تم الاشتراك في جميع الأحداث المالية")
 
     def get_all_journal_entries(self) -> List[schemas.JournalEntry]:
         """
@@ -170,22 +176,10 @@ class AccountingService:
                     
                 node = tree_map[acc.code]
                 
-                # حساب الرصيد من القيود المحاسبية + الرصيد الافتتاحي
-                movements = account_movements.get(acc.code, {'debit': 0.0, 'credit': 0.0})
-                debit_total = movements['debit']
-                credit_total = movements['credit']
+                # استخدام الرصيد المخزن في الحساب مباشرة (بدون حساب من القيود)
+                # لأن القيود تُنشأ عند تسجيل الدفعات وتُحدث الرصيد تلقائياً
                 opening_balance = getattr(acc, 'balance', 0.0) or 0.0
-                
-                # حساب الرصيد حسب نوع الحساب
-                acc_type = acc.type.value if acc.type else 'ASSET'
-                if acc_type in ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']:
-                    node['total'] = opening_balance + debit_total - credit_total
-                else:
-                    node['total'] = opening_balance + credit_total - debit_total
-                
-                # Debug للحسابات المهمة
-                if acc.code in ['1103', '1104', '1100', '1200', '1000']:
-                    print(f"DEBUG: {acc.code} ({acc.name}): balance={opening_balance}, debit={debit_total}, credit={credit_total}, total={node['total']}")
+                node['total'] = opening_balance
             
             # ربط الحسابات بالآباء تلقائياً بناءً على الكود
             for acc in accounts:
@@ -208,23 +202,22 @@ class AccountingService:
             
             process_events()
             
-            # 4. حساب الأرصدة التراكمية للمجموعات
+            # 4. حساب الأرصدة التراكمية للمجموعات (من الأوراق للجذور)
             def calculate_total(node: dict) -> float:
-                """حساب إجمالي العقدة بشكل تكراري (من الأسفل للأعلى)"""
-                # إذا لم يكن له أبناء، أرجع رصيده الخاص
+                """حساب إجمالي العقدة بشكل تكراري"""
+                # إذا لم يكن له أبناء، أرجع رصيده الخاص (بالقيمة المطلقة للأصول)
                 if not node['children']:
-                    return node['total']
+                    return abs(node['total'])
                 
-                # إذا كان له أبناء (مجموعة)، رصيده = مجموع أرصدة الأبناء
-                children_total = sum(calculate_total(child) for child in node['children'])
-                node['total'] = children_total
-                return node['total']
+                # حساب أرصدة الأبناء (بالقيمة المطلقة)
+                total = sum(abs(calculate_total(child)) for child in node['children'])
+                node['total'] = total
+                return total
             
-            # حساب من الجذور (الحسابات الرئيسية 1000, 2000, 3000, 4000, 5000)
+            # حساب من الجذور
             for code in ['1000', '2000', '3000', '4000', '5000']:
                 if code in tree_map:
                     calculate_total(tree_map[code])
-                    print(f"DEBUG: بعد الحساب - {code}: {tree_map[code]['total']:.2f}")
             
             process_events()
             
@@ -318,6 +311,115 @@ class AccountingService:
             import traceback
             traceback.print_exc()
 
+    def handle_new_project(self, data: dict):
+        """
+        ✅ معالج إنشاء مشروع جديد (المشروع = الفاتورة في النظام)
+        ينشئ قيد يومية تلقائياً عند إنشاء مشروع جديد
+        
+        القيد المحاسبي للمشروع:
+        - مدين: حساب العملاء (1200) - يزيد المستحقات
+        - دائن: حساب الإيرادات (4100) - يزيد الإيرادات
+        """
+        project: schemas.Project = data["project"]
+        print(f"INFO: [AccountingService] تم استقبال حدث مشروع جديد: {project.name}")
+
+        try:
+            # تجاهل المشاريع بدون قيمة
+            if not project.total_amount or project.total_amount <= 0:
+                print(f"INFO: [AccountingService] المشروع {project.name} بدون قيمة - لن يتم إنشاء قيد")
+                return
+            
+            # إنشاء معرف المشروع
+            project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '')) or project.name
+            
+            # إنشاء القيد المحاسبي الرئيسي (العملاء مدين، الإيرادات دائن)
+            success = self.post_journal_entry(
+                date=project.start_date or datetime.now(),
+                description=f"مشروع/فاتورة: {project.name}",
+                ref_type="project",
+                ref_id=project_id,
+                debit_account_code=self.ACC_RECEIVABLE_CODE,  # حساب العملاء (مدين)
+                credit_account_code=self.SERVICE_REVENUE_CODE,  # حساب الإيرادات (دائن)
+                amount=project.total_amount
+            )
+            
+            if success:
+                print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}")
+            else:
+                print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمشروع {project.name}")
+
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل معالجة المشروع {project.name}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_edited_project(self, data: dict):
+        """
+        ✅ معالج تعديل مشروع - يحدث القيد المحاسبي
+        
+        عند تعديل قيمة المشروع، يتم:
+        1. البحث عن القيد الأصلي
+        2. تحديث القيد بالقيمة الجديدة
+        """
+        project: schemas.Project = data["project"]
+        print(f"INFO: [AccountingService] تم استقبال حدث تعديل مشروع: {project.name}")
+
+        try:
+            project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '')) or project.name
+            
+            # البحث عن القيد الأصلي
+            original_entry = self.repo.get_journal_entry_by_doc_id(project_id)
+            
+            if not original_entry:
+                # لا يوجد قيد أصلي - إنشاء قيد جديد إذا كان المشروع له قيمة
+                if project.total_amount and project.total_amount > 0:
+                    print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمشروع {project.name} - إنشاء قيد جديد")
+                    self.handle_new_project(data)
+                return
+            
+            # تحديث القيد بالقيمة الجديدة
+            ar_account = self.repo.get_account_by_code(self.ACC_RECEIVABLE_CODE)
+            rev_account = self.repo.get_account_by_code(self.SERVICE_REVENUE_CODE)
+            
+            if not ar_account or not rev_account:
+                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                return
+            
+            new_lines = [
+                schemas.JournalEntryLine(
+                    account_id=ar_account.code,
+                    account_code=ar_account.code,
+                    account_name=ar_account.name,
+                    debit=project.total_amount,
+                    credit=0.0,
+                    description=f"مدين: {ar_account.name}"
+                ),
+                schemas.JournalEntryLine(
+                    account_id=rev_account.code,
+                    account_code=rev_account.code,
+                    account_name=rev_account.name,
+                    debit=0.0,
+                    credit=project.total_amount,
+                    description=f"دائن: {rev_account.name}"
+                )
+            ]
+            
+            success = self.repo.update_journal_entry_by_doc_id(
+                doc_id=project_id,
+                new_lines=new_lines,
+                new_description=f"تعديل مشروع/فاتورة: {project.name}"
+            )
+            
+            if success:
+                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمشروع {project.name}")
+            else:
+                print(f"WARNING: [AccountingService] فشل تحديث القيد للمشروع {project.name}")
+
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل تعديل قيد المشروع {project.name}: {e}")
+            import traceback
+            traceback.print_exc()
+
     def handle_new_expense(self, data):
         """
         معالج إنشاء مصروف جديد - ينشئ قيد يومية تلقائياً
@@ -374,6 +476,124 @@ class AccountingService:
             import traceback
             traceback.print_exc()
 
+    def handle_updated_expense(self, data):
+        """
+        ✅ معالج تعديل مصروف - يحدث القيد المحاسبي
+        """
+        try:
+            if isinstance(data, dict):
+                expense = data.get("expense", data)
+                if isinstance(expense, dict):
+                    expense = schemas.Expense(**expense)
+            else:
+                expense = data
+            
+            print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
+            
+            expense_id = getattr(expense, '_mongo_id', None) or str(getattr(expense, 'id', ''))
+            
+            # البحث عن القيد الأصلي
+            original_entry = self.repo.get_journal_entry_by_doc_id(expense_id)
+            
+            if not original_entry:
+                print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
+                self.handle_new_expense(data)
+                return
+            
+            # تحديث القيد بالقيمة الجديدة
+            expense_account_code = getattr(expense, 'account_id', None) or "5900"
+            payment_account_code = getattr(expense, 'payment_account_id', None) or self.CASH_ACCOUNT_CODE
+            
+            expense_account = self.repo.get_account_by_code(expense_account_code)
+            payment_account = self.repo.get_account_by_code(payment_account_code)
+            
+            if not expense_account or not payment_account:
+                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                return
+            
+            new_lines = [
+                schemas.JournalEntryLine(
+                    account_id=expense_account.code,
+                    account_code=expense_account.code,
+                    account_name=expense_account.name,
+                    debit=expense.amount,
+                    credit=0.0,
+                    description=f"مدين: {expense_account.name}"
+                ),
+                schemas.JournalEntryLine(
+                    account_id=payment_account.code,
+                    account_code=payment_account.code,
+                    account_name=payment_account.name,
+                    debit=0.0,
+                    credit=expense.amount,
+                    description=f"دائن: {payment_account.name}"
+                )
+            ]
+            
+            success = self.repo.update_journal_entry_by_doc_id(
+                doc_id=expense_id,
+                new_lines=new_lines,
+                new_description=f"تعديل مصروف: {expense.category}"
+            )
+            
+            if success:
+                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
+            else:
+                print(f"WARNING: [AccountingService] فشل تحديث القيد للمصروف")
+                
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل تعديل قيد المصروف: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_deleted_expense(self, data: dict):
+        """
+        ✅ معالج حذف مصروف - يعكس القيد المحاسبي
+        """
+        try:
+            expense_id = data.get('id')
+            if not expense_id:
+                print(f"WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
+                return
+            
+            print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
+            
+            # البحث عن القيد الأصلي
+            original_entry = self.repo.get_journal_entry_by_doc_id(str(expense_id))
+            
+            if not original_entry:
+                print(f"INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
+                return
+            
+            # إنشاء قيد عكسي
+            reversed_lines = []
+            for line in original_entry.lines:
+                reversed_lines.append(
+                    schemas.JournalEntryLine(
+                        account_id=line.account_id,
+                        account_code=getattr(line, 'account_code', None),
+                        account_name=getattr(line, 'account_name', None),
+                        debit=line.credit,  # عكس
+                        credit=line.debit,  # عكس
+                        description=f"عكس قيد: {line.description}"
+                    )
+                )
+            
+            journal_entry_data = schemas.JournalEntry(
+                date=datetime.now(),
+                description=f"قيد عكسي لحذف مصروف",
+                lines=reversed_lines,
+                related_document_id=f"DEL-{expense_id}"
+            )
+            
+            self.repo.create_journal_entry(journal_entry_data)
+            print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للمصروف: {e}")
+            import traceback
+            traceback.print_exc()
+
     def handle_new_payment(self, data: dict):
         """
         معالج استلام دفعة جديدة - ينشئ قيد يومية تلقائياً
@@ -424,6 +644,120 @@ class AccountingService:
 
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_updated_payment(self, data: dict):
+        """
+        ✅ معالج تعديل دفعة - يحدث القيد المحاسبي
+        """
+        try:
+            payment: schemas.Payment = data["payment"]
+            print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
+            
+            payment_id = getattr(payment, '_mongo_id', None) or str(getattr(payment, 'id', ''))
+            
+            # البحث عن القيد الأصلي
+            original_entry = self.repo.get_journal_entry_by_doc_id(payment_id)
+            
+            if not original_entry:
+                print(f"INFO: [AccountingService] لا يوجد قيد أصلي للدفعة - إنشاء قيد جديد")
+                self.handle_new_payment(data)
+                return
+            
+            # تحديد الحسابات
+            receiving_account_code = getattr(payment, 'account_id', None) or self.CASH_ACCOUNT_CODE
+            client_account_code = self.ACC_RECEIVABLE_CODE
+            
+            receiving_account = self.repo.get_account_by_code(receiving_account_code)
+            client_account = self.repo.get_account_by_code(client_account_code)
+            
+            if not receiving_account or not client_account:
+                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                return
+            
+            new_lines = [
+                schemas.JournalEntryLine(
+                    account_id=receiving_account.code,
+                    account_code=receiving_account.code,
+                    account_name=receiving_account.name,
+                    debit=payment.amount,
+                    credit=0.0,
+                    description=f"مدين: {receiving_account.name}"
+                ),
+                schemas.JournalEntryLine(
+                    account_id=client_account.code,
+                    account_code=client_account.code,
+                    account_name=client_account.name,
+                    debit=0.0,
+                    credit=payment.amount,
+                    description=f"دائن: {client_account.name}"
+                )
+            ]
+            
+            success = self.repo.update_journal_entry_by_doc_id(
+                doc_id=payment_id,
+                new_lines=new_lines,
+                new_description=f"تعديل دفعة: {payment.amount} جنيه"
+            )
+            
+            if success:
+                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للدفعة")
+            else:
+                print(f"WARNING: [AccountingService] فشل تحديث القيد للدفعة")
+                
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل تعديل قيد الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_deleted_payment(self, data: dict):
+        """
+        ✅ معالج حذف دفعة - يعكس القيد المحاسبي
+        """
+        try:
+            payment_id = data.get('payment_id')
+            payment = data.get('payment')
+            
+            if not payment_id:
+                print(f"WARNING: [AccountingService] لم يتم تحديد معرف الدفعة المحذوفة")
+                return
+            
+            print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
+            
+            # البحث عن القيد الأصلي
+            original_entry = self.repo.get_journal_entry_by_doc_id(str(payment_id))
+            
+            if not original_entry:
+                print(f"INFO: [AccountingService] لا يوجد قيد محاسبي للدفعة المحذوفة")
+                return
+            
+            # إنشاء قيد عكسي
+            reversed_lines = []
+            for line in original_entry.lines:
+                reversed_lines.append(
+                    schemas.JournalEntryLine(
+                        account_id=line.account_id,
+                        account_code=getattr(line, 'account_code', None),
+                        account_name=getattr(line, 'account_name', None),
+                        debit=line.credit,  # عكس
+                        credit=line.debit,  # عكس
+                        description=f"عكس قيد: {line.description}"
+                    )
+                )
+            
+            journal_entry_data = schemas.JournalEntry(
+                date=datetime.now(),
+                description=f"قيد عكسي لحذف دفعة",
+                lines=reversed_lines,
+                related_document_id=f"DEL-PAY-{payment_id}"
+            )
+            
+            self.repo.create_journal_entry(journal_entry_data)
+            print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للدفعة المحذوفة")
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للدفعة: {e}")
             import traceback
             traceback.print_exc()
 
@@ -716,12 +1050,12 @@ class AccountingService:
             raise
 
     def delete_account(self, account_id: str) -> bool:
-        """ (جديدة) أرشفة حساب (لزرار "حذف") """
-        print(f"INFO: [AccountingService] استلام طلب أرشفة الحساب ID: {account_id}")
+        """ حذف حساب نهائياً من قاعدة البيانات """
+        print(f"INFO: [AccountingService] استلام طلب حذف الحساب ID: {account_id}")
         try:
-            return self.repo.archive_account_by_id(account_id)
+            return self.repo.delete_account_permanently(account_id)
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل أرشفة الحساب: {e}")
+            print(f"ERROR: [AccountingService] فشل حذف الحساب: {e}")
             raise
     
     def post_transaction(

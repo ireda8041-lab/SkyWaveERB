@@ -39,6 +39,11 @@ class ExpenseManagerTab(QWidget):
         self.expenses_list: List[schemas.Expense] = []
 
         self.setup_ui()
+        
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.expenses_changed.connect(self._on_expenses_changed)
+        
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
 
@@ -154,6 +159,11 @@ class ExpenseManagerTab(QWidget):
 
         except Exception as e:
             print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {e}")
+
+    def _on_expenses_changed(self):
+        """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
+        print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
+        self.load_expenses_data()
 
     def get_selected_expense(self) -> Optional[schemas.Expense]:
         """الحصول على المصروف المحدد"""

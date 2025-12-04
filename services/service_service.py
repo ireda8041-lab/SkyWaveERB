@@ -4,6 +4,7 @@ from core.repository import Repository
 from core.event_bus import EventBus
 from core import schemas
 from core.logger import get_logger
+from core.signals import app_signals
 from typing import List, Optional
 
 from services.settings_service import SettingsService
@@ -80,6 +81,8 @@ class ServiceService:
         try:
             new_service_schema = schemas.Service(**service_data)
             created_service = self.repo.create_service(new_service_schema)
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('services')
             logger.info(f"[ServiceService] تم إضافة الخدمة {created_service.name} بنجاح")
             return created_service
         except Exception as e:
@@ -108,6 +111,8 @@ class ServiceService:
 
             updated_service_schema = existing_service.model_copy(update=new_data)
             saved_service = self.repo.update_service(service_id, updated_service_schema)
+            # ⚡ إرسال إشارة التحديث
+            app_signals.emit_data_changed('services')
 
             logger.info(f"[ServiceService] تم تعديل الخدمة {saved_service.name} بنجاح")
             return saved_service
@@ -132,6 +137,8 @@ class ServiceService:
         try:
             success = self.repo.archive_service_by_id(service_id)
             if success:
+                # ⚡ إرسال إشارة التحديث
+                app_signals.emit_data_changed('services')
                 logger.info("[ServiceService] تم أرشفة الخدمة بنجاح")
             return success
         except Exception as e:
