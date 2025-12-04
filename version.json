@@ -1,18 +1,17 @@
 {
-  "version": "25.12.04",
-  "version_name": "December 2025 - Speed Update",
+  "version": "25.12.41",
+  "version_name": "December 2025 - Stability Fix",
   "release_date": "2025-12-04",
-  "url": "https://github.com/imhzm/SkyWaveERB/releases/download/v25.12.04/SkyWave-Setup.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v25.12.41/SkyWave-Setup-25.12.41.exe",
   "changelog": [
-    "⚡ تحسينات كبيرة في السرعة والأداء",
-    "🚀 نظام Cache ذكي للبيانات",
-    "📅 نظام إصدار تلقائي بصيغة التاريخ (YY.MM.DD)",
-    "🔄 تحديثات تلقائية في الخلفية",
-    "🗄️ تحسين أداء قاعدة البيانات SQLite",
-    "✅ 537 اختبار ناجح"
+    "🔧 إصلاح مشكلة الصلاحيات في Program Files",
+    "� ننقل ملفات البيانات إلى AppData",
+    "� نقلم ملفات الـ Logs إلى مجلد المستخدم",
+    "⚙️ نقل ملفات الإعدادات إلى مجلد آمن",
+    "✅ البرنامج يعمل بدون صلاحيات Administrator"
   ],
   "min_version": "1.0.0",
-  "mandatory": false,
-  "notes_ar": "تحديث ديسمبر 2025 - تحسينات كبيرة في السرعة والأداء",
-  "notes_en": "December 2025 Update - Major speed and performance improvements"
+  "mandatory": true,
+  "notes_ar": "إصلاح مشكلة الصلاحيات - البرنامج يعمل الآن بشكل صحيح",
+  "notes_en": "Permission fix - App now works correctly without admin rights"
 }

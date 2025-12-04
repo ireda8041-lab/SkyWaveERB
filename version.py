@@ -18,12 +18,12 @@ def _get_today_version() -> str:
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = _get_today_version()  # ⚡ يتحدث تلقائياً
+CURRENT_VERSION = "25.12.41"  # الإصدار الثابت
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 
 # ==================== روابط التحديث ====================
-UPDATE_CHECK_URL = "https://raw.githubusercontent.com/imhzm/SkyWaveERB/main/version.json"
+UPDATE_CHECK_URL = "https://raw.githubusercontent.com/ireda8041-lab/SkyWaveERB/main/version.json"
 
 # ==================== إعدادات التحديث التلقائي ====================
 AUTO_UPDATE_ENABLED = True
