@@ -111,7 +111,7 @@ class ClientEditorDialog(QDialog):
         self.save_button = QPushButton("💾 حفظ")
         self.cancel_button = QPushButton("✕ إلغاء")
 
-        self.save_button.setStyleSheet("background-color: #10b981; color: white; padding: 10px; font-weight: bold;")
+        self.save_button.setStyleSheet("background-color: #0A6CF1; color: white; padding: 10px; font-weight: bold;")
         self.cancel_button.setStyleSheet("background-color: #ef4444; color: white; padding: 10px; font-weight: bold;")
 
         self.save_button.clicked.connect(self.save_client)

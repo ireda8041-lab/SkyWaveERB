@@ -18,7 +18,7 @@ from core import schemas
 from typing import List, Optional, Dict
 
 from ui.account_editor_dialog import AccountEditorDialog
-from ui.styles import BUTTON_STYLES, TREE_STYLE_DARK, COLORS
+from ui.styles import BUTTON_STYLES, TREE_STYLE_DARK, COLORS, CHART_OF_ACCOUNTS_TREE_STYLE
 from core.signals import app_signals
 
 # ✨ Import Global Events for Real-time Updates
@@ -91,7 +91,13 @@ class AccountingManagerTab(QWidget):
         self.all_accounts_list: List[schemas.Account] = []
 
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
         self.setLayout(main_layout)
+        
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تاب إدارة الحسابات (التاب الوحيد)
         self.setup_accounts_tab(main_layout)
@@ -119,6 +125,13 @@ class AccountingManagerTab(QWidget):
         """معالج إنشاء قيد محاسبي جديد"""
         print(f"INFO: ✅ تم إنشاء قيد محاسبي جديد: {entry_id} - تحديث الأرصدة...")
         self.load_accounts_data()
+    
+    def resizeEvent(self, event):
+        """معالج تغيير حجم النافذة - لضبط الأعمدة"""
+        super().resizeEvent(event)
+        # إعادة ضبط الأعمدة عند تغيير حجم النافذة
+        if hasattr(self, 'accounts_tree'):
+            self._setup_tree_columns()
 
     # ==================== تاب إدارة الحسابات ====================
     def setup_accounts_tab(self, main_layout: QVBoxLayout):
@@ -172,25 +185,48 @@ class AccountingManagerTab(QWidget):
         self.accounts_tree = QTreeView()
         self.accounts_model = QStandardItemModel()
         self.accounts_model.setHorizontalHeaderLabels([
-            "اسم الحساب", "الكود", "النوع", "العملة", "الرصيد", "الحالة"
+            "الكود", "اسم الحساب", "النوع", "العملة", "الرصيد", "الحالة"
         ])
         self.accounts_tree.setModel(self.accounts_model)
         self.accounts_tree.setAlternatingRowColors(True)
-        self.accounts_tree.setStyleSheet(TREE_STYLE_DARK)
+        
+        # إعداد عرض الأعمدة
+        header = self.accounts_tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # الكود
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # اسم الحساب
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # النوع
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # العملة
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # الرصيد
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
+        
+        # ✅ ستايل محسّن للجدول مع وضوح أفضل (ألوان SkyWave Brand)
+        self.accounts_tree.setStyleSheet(CHART_OF_ACCOUNTS_TREE_STYLE)
         
         # تقليل المسافة البادئة للشجرة
-        self.accounts_tree.setIndentation(15)
+        self.accounts_tree.setIndentation(20)
         
-        # توسيع الأعمدة - كل الأعمدة تتمدد بالتساوي
-        header = self.accounts_tree.header()
-        header.setStretchLastSection(True)
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setMinimumSectionSize(80)
+        # جعل الـ tree متجاوب
+        from PyQt6.QtWidgets import QSizePolicy
+        self.accounts_tree.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تكبير خط الشجرة
         font = self.accounts_tree.font()
         font.setPointSize(11)
+        font.setFamily("Segoe UI")
         self.accounts_tree.setFont(font)
+        
+        # ✅ تفعيل التمرير الأفقي عند الحاجة
+        self.accounts_tree.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.accounts_tree.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # ضبط الأعمدة
+        self._setup_tree_columns()
+        
+        # ✅ تحديد ارتفاع الصفوف بشكل ثابت
+        self.accounts_tree.setUniformRowHeights(True)
+        header = self.accounts_tree.header()
+        header.setDefaultSectionSize(100)
+        header.setMinimumHeight(40)
         
         # ✨ STEP 3: ENABLE LEDGER - Double Click for Ledger Window
         self.accounts_tree.doubleClicked.connect(self.open_ledger_window)
@@ -207,6 +243,28 @@ class AccountingManagerTab(QWidget):
 
         layout.addLayout(main_h_layout)
 
+    def _setup_tree_columns(self):
+        """ضبط أعمدة الشجرة بشكل ثابت وواضح"""
+        header = self.accounts_tree.header()
+        header.setStretchLastSection(False)
+        header.setMinimumSectionSize(80)
+        
+        # ✅ جعل جميع الأعمدة ثابتة العرض لضمان وضوح المحتوى
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # الكود
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)  # اسم الحساب
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)  # النوع
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # العملة
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # الرصيد
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)  # الحالة
+        
+        # ✅ تحديد عرض كل عمود بدقة لعرض المحتوى بالكامل
+        header.resizeSection(0, 100)   # الكود - أوسع قليلاً
+        header.resizeSection(1, 350)   # اسم الحساب - واسع جداً لعرض الأسماء الطويلة
+        header.resizeSection(2, 180)   # النوع - واسع لعرض النوع بالكامل
+        header.resizeSection(3, 80)    # العملة
+        header.resizeSection(4, 150)   # الرصيد - واسع لعرض الأرقام الكبيرة
+        header.resizeSection(5, 100)   # الحالة
+    
     def load_accounts_data(self):
         """
         تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية
@@ -224,7 +282,7 @@ class AccountingManagerTab(QWidget):
             
             self.accounts_model.clear()
             self.accounts_model.setHorizontalHeaderLabels([
-                "اسم الحساب", "الكود", "النوع", "العملة", "الرصيد", "الحالة"
+                "الكود", "اسم الحساب", "النوع", "العملة", "الرصيد", "الحالة"
             ])
 
             root = self.accounts_model.invisibleRootItem()
@@ -237,49 +295,72 @@ class AccountingManagerTab(QWidget):
                 is_group = bool(node['children'])  # مجموعة إذا كان لها أبناء
                 
                 # إنشاء عناصر الصف
-                name_item = QStandardItem(f"{'📁 ' if is_group else '📄 '}{acc.name}")
-                name_item.setEditable(False)
-                name_item.setData(acc, Qt.ItemDataRole.UserRole)
-                
                 code_item = QStandardItem(acc.code or "")
                 code_item.setEditable(False)
+                code_item.setData(acc, Qt.ItemDataRole.UserRole)  # تخزين الحساب في عمود الكود
+                code_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
-                type_item = QStandardItem(acc.type.value if acc.type else "")
+                name_item = QStandardItem(f"{'📁 ' if is_group else '📄 '}{acc.name}")
+                name_item.setEditable(False)
+                name_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                
+                # ✅ عرض النوع بشكل واضح ومقروء
+                type_display = {
+                    'ASSET': 'أصول',
+                    'CASH': 'أصول نقدية',
+                    'LIABILITY': 'خصوم',
+                    'EQUITY': 'حقوق ملكية',
+                    'REVENUE': 'إيرادات',
+                    'EXPENSE': 'مصروفات',
+                    'أصول': 'أصول',
+                    'أصول نقدية': 'أصول نقدية',
+                    'خصوم': 'خصوم',
+                    'حقوق ملكية': 'حقوق ملكية',
+                    'إيرادات': 'إيرادات',
+                    'مصروفات': 'مصروفات'
+                }
+                type_text = type_display.get(acc.type.value if acc.type else acc.type, acc.type.value if acc.type else "")
+                type_item = QStandardItem(type_text)
                 type_item.setEditable(False)
+                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
                 currency = acc.currency.value if acc.currency else "EGP"
                 currency_item = QStandardItem(currency)
                 currency_item.setEditable(False)
+                currency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
-                # ✨ استخدام الرصيد المحسوب (التراكمي للمجموعات)
-                balance_item = QStandardItem(f"{calculated_balance:,.2f}")
+                # ✨ استخدام الرصيد المحسوب (التراكمي للمجموعات) مع تنسيق واضح
+                balance_text = f"{abs(calculated_balance):,.2f}"
+                balance_item = QStandardItem(balance_text)
                 balance_item.setEditable(False)
+                balance_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                 
                 status_text = "✅ نشط" if acc.status == schemas.AccountStatus.ACTIVE else "❌ مؤرشف"
                 status_item = QStandardItem(status_text)
                 status_item.setEditable(False)
+                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
                 
-                row = [name_item, code_item, type_item, currency_item, balance_item, status_item]
+                row = [code_item, name_item, type_item, currency_item, balance_item, status_item]
                 
                 # تطبيق التنسيق حسب النوع (مجموعة أم حساب فرعي)
                 if is_group:
-                    # حساب مجموعة - خط عريض، خلفية داكنة
+                    # حساب مجموعة - خط عريض، خلفية داكنة (ألوان SkyWave Brand)
                     for item in row:
                         item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                        item.setBackground(QColor("#252a35"))
-                        item.setForeground(QColor("#ffffff"))
+                        item.setBackground(QColor(COLORS['bg_light']))
+                        item.setForeground(QColor(COLORS['text_primary']))
                 else:
-                    # حساب فرعي - خط عادي
+                    # حساب فرعي - خط عادي (ألوان SkyWave Brand)
                     for item in row:
                         item.setFont(QFont("Segoe UI", 9))
-                        item.setBackground(QColor("#2b2b3b"))
-                        item.setForeground(QColor("#cfcfcf"))
+                        item.setBackground(QColor(COLORS['bg_medium']))
+                        item.setForeground(QColor(COLORS['text_secondary']))
                 
                 # ✨ تلوين الرصيد حسب القيمة
                 if calculated_balance < 0:
                     balance_item.setForeground(QColor("#ff3d00"))  # أحمر للسالب
                 elif calculated_balance > 0:
-                    balance_item.setForeground(QColor("#00c853"))  # أخضر للموجب
+                    balance_item.setForeground(QColor("#0A6CF1"))  # أخضر للموجب
                 else:
                     balance_item.setForeground(QColor("#9ca3af"))  # رمادي للصفر
                 
@@ -289,13 +370,15 @@ class AccountingManagerTab(QWidget):
                 # ترتيب الأبناء حسب الكود ثم عرضهم
                 sorted_children = sorted(node['children'], key=lambda x: str(x['obj'].code or ""))
                 for child in sorted_children:
-                    render_node(child, name_item)
+                    render_node(child, code_item)
             
             # تحديد الجذور (الحسابات بدون أب)
             roots = []
             for code, node in tree_map.items():
                 acc = node['obj']
-                if not acc.parent_code:
+                # استخدام parent_id أو parent_code
+                parent = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+                if not parent:
                     roots.append(node)
             
             # ترتيب الجذور حسب الكود
@@ -307,11 +390,6 @@ class AccountingManagerTab(QWidget):
 
             # توسيع جميع المجموعات
             self.accounts_tree.expandAll()
-            
-            # ضبط عرض الأعمدة
-            header = self.accounts_tree.header()
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             
             print(f"INFO: [AccManager] تم عرض {len(self.all_accounts_list)} حساب مع الأرصدة التراكمية.")
             
@@ -442,7 +520,8 @@ class AccountingManagerTab(QWidget):
         # إعادة تحميل الحسابات للتأكد من القائمة محدثة
         try:
             self.all_accounts_list = self.accounting_service.repo.get_all_accounts()
-        except:
+        except (AttributeError, TypeError) as e:
+            print(f"WARNING: [AccountingManager] فشل جلب الحسابات: {e}")
             self.all_accounts_list = []
 
         created, skipped, errors = 0, 0, 0
@@ -748,21 +827,24 @@ class AccountingManagerTab(QWidget):
         print("INFO: [AccManager] جاري تحديث الملخص المالي...")
         try:
             # استخدام الأرصدة المحسوبة من tree_map إذا كانت متوفرة
-            if tree_map:
+            if tree_map and isinstance(tree_map, dict) and len(tree_map) > 0:
                 # استخراج الأرصدة من الحسابات الرئيسية (الجذور)
                 total_assets = tree_map.get('1000', {}).get('total', 0.0)
                 total_liabilities = tree_map.get('2000', {}).get('total', 0.0)
                 total_equity = tree_map.get('3000', {}).get('total', 0.0)
                 total_revenue = tree_map.get('4000', {}).get('total', 0.0)
                 total_expenses = tree_map.get('5000', {}).get('total', 0.0)
+                print(f"DEBUG: [Summary] من tree_map - أصول:{total_assets}, إيرادات:{total_revenue}, مصروفات:{total_expenses}")
             else:
                 # Fallback: استخدام الخدمة للحصول على الملخص
+                print("DEBUG: [Summary] tree_map فارغ - استخدام get_financial_summary")
                 summary = self.accounting_service.get_financial_summary()
                 total_assets = summary.get('assets', 0.0)
                 total_liabilities = summary.get('liabilities', 0.0)
                 total_equity = summary.get('equity', 0.0)
                 total_revenue = summary.get('revenue', 0.0)
                 total_expenses = summary.get('expenses', 0.0)
+                print(f"DEBUG: [Summary] من service - أصول:{total_assets}, إيرادات:{total_revenue}, مصروفات:{total_expenses}")
             
             # حساب صافي الربح = الإيرادات - المصروفات
             net_profit = total_revenue - total_expenses
@@ -813,52 +895,63 @@ class AccountingManagerTab(QWidget):
     # ✨ STEP 3: ENABLE LEDGER - Ledger Window Method
     def open_ledger_window(self, index):
         """فتح نافذة كشف الحساب عند النقر المزدوج"""
+        print(f"INFO: [AccountingManager] تم النقر المزدوج على الحساب")
+        
+        # الحصول على العنصر من الفهرس
         item = self.accounts_model.itemFromIndex(index)
         if not item:
+            print("WARNING: [AccountingManager] لم يتم العثور على العنصر")
             return
         
+        # الحصول على الحساب من البيانات المخزنة
         account = item.data(Qt.ItemDataRole.UserRole)
         if not account:
-            # إذا كان عنصر مجموعة (نوع الحساب)، لا نفتح كشف حساب
+            print("WARNING: [AccountingManager] لم يتم العثور على بيانات الحساب")
             return
         
-        # لا نفتح كشف حساب للمجموعات
+        print(f"INFO: [AccountingManager] فتح كشف حساب: {account.name} ({account.code})")
+        
+        # التحقق إذا كان حساب مجموعة
         is_group = getattr(account, 'is_group', False) or self._is_group_account(account.code, self.all_accounts_list)
         if is_group:
             QMessageBox.information(
                 self,
                 "تنبيه",
-                f"الحساب '{account.name}' هو حساب مجموعة.\nلا يمكن عرض كشف حساب للمجموعات."
+                f"الحساب '{account.name}' هو حساب مجموعة.\n\n"
+                f"لا يمكن عرض كشف حساب للمجموعات.\n"
+                f"يرجى اختيار حساب فرعي."
             )
             return
         
         try:
-            # فتح نافذة كشف الحساب الحقيقية
+            # فتح نافذة كشف الحساب
             from ui.ledger_window import LedgerWindow
             
+            print(f"INFO: [AccountingManager] إنشاء نافذة كشف الحساب...")
             ledger_window = LedgerWindow(
                 account=account,
                 accounting_service=self.accounting_service,
                 parent=self
             )
+            
+            print(f"INFO: [AccountingManager] عرض نافذة كشف الحساب...")
             ledger_window.exec()
             
-        except ImportError:
-            # إذا لم تكن نافذة كشف الحساب متاحة، نعرض رسالة
-            QMessageBox.information(
+        except ImportError as e:
+            print(f"ERROR: [AccountingManager] فشل استيراد LedgerWindow: {e}")
+            QMessageBox.critical(
                 self,
-                "كشف الحساب",
-                f"كشف حساب: {account.name}\n"
-                f"الكود: {account.code}\n"
-                f"الرصيد: {account.balance:,.2f} جنيه\n\n"
-                f"نافذة كشف الحساب التفصيلية قيد التطوير."
+                "خطأ",
+                f"فشل تحميل نافذة كشف الحساب.\n\n"
+                f"الملف ui/ledger_window.py غير موجود أو به خطأ.\n\n"
+                f"الخطأ: {str(e)}"
             )
         except Exception as e:
-            print(f"ERROR: فشل فتح كشف الحساب: {e}")
+            print(f"ERROR: [AccountingManager] فشل فتح كشف الحساب: {e}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(
                 self,
                 "خطأ",
-                f"فشل فتح كشف الحساب:\n{str(e)}"
+                f"فشل فتح كشف الحساب:\n\n{str(e)}"
             )

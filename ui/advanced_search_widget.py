@@ -33,16 +33,17 @@ class SearchResultWidget(QFrame):
         
     def setup_ui(self):
         self.setFrameStyle(QFrame.Shape.Box)
+        # ألوان SkyWave Brand
         self.setStyleSheet("""
             SearchResultWidget {
-                background-color: white;
-                border: 1px solid #e0e0e0;
+                background-color: #0A2A55;
+                border: 1px solid #1E3A5F;
                 border-radius: 8px;
                 margin: 2px;
             }
             SearchResultWidget:hover {
-                background-color: #f5f5f5;
-                border-color: #4a90e2;
+                background-color: #052045;
+                border-color: #0A6CF1;
             }
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -57,19 +58,19 @@ class SearchResultWidget(QFrame):
         title_font.setBold(True)
         title_font.setPointSize(11)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #1a237e;")
+        title_label.setStyleSheet("color: #EAF3FF; background: transparent;")
         layout.addWidget(title_label)
         
         # العنوان الفرعي
         if self.result.subtitle:
             subtitle_label = QLabel(self.result.subtitle)
-            subtitle_label.setStyleSheet("color: #666; font-size: 10px;")
+            subtitle_label.setStyleSheet("color: #B0C4DE; font-size: 10px; background: transparent;")
             layout.addWidget(subtitle_label)
         
         # الوصف
         if self.result.description:
             desc_label = QLabel(self.result.description)
-            desc_label.setStyleSheet("color: #888; font-size: 9px;")
+            desc_label.setStyleSheet("color: #8B9DC3; font-size: 9px; background: transparent;")
             desc_label.setWordWrap(True)
             layout.addWidget(desc_label)
         
@@ -93,7 +94,7 @@ class SearchResultWidget(QFrame):
         # المبلغ
         if self.result.amount:
             amount_label = QLabel(f"💰 {self.result.amount:,.0f}")
-            amount_label.setStyleSheet("color: #10b981; font-size: 8px; font-weight: bold;")
+            amount_label.setStyleSheet("color: #0A6CF1; font-size: 8px; font-weight: bold;")
             info_layout.addWidget(amount_label)
         
         layout.addLayout(info_layout)
@@ -216,14 +217,15 @@ class AdvancedSearchWidget(QWidget):
         self.search_input.setPlaceholderText("ابحث في جميع أقسام النظام... (العملاء، المشاريع، الفواتير، إلخ)")
         self.search_input.setStyleSheet("""
             QLineEdit {
-                border: 2px solid #e0e0e0;
+                border: 2px solid #1E3A5F;
                 border-radius: 6px;
                 padding: 8px 12px;
                 font-size: 14px;
-                background-color: white;
+                background-color: #0A2A55;
+                color: #EAF3FF;
             }
             QLineEdit:focus {
-                border-color: #4a90e2;
+                border-color: #0A6CF1;
             }
         """)
         search_layout.addWidget(self.search_input)
@@ -254,7 +256,7 @@ class AdvancedSearchWidget(QWidget):
         self.advanced_button.setCheckable(True)
         self.advanced_button.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -362,10 +364,11 @@ class AdvancedSearchWidget(QWidget):
         ])
         self.scope_combo.setStyleSheet("""
             QComboBox {
-                border: 1px solid #e0e0e0;
+                border: 1px solid #1E3A5F;
                 border-radius: 4px;
                 padding: 5px;
-                background-color: white;
+                background-color: #0A2A55;
+                color: #EAF3FF;
             }
         """)
         layout.addWidget(self.scope_combo)
@@ -557,7 +560,7 @@ class AdvancedSearchWidget(QWidget):
         apply_button = QPushButton("تطبيق")
         apply_button.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 border: none;
                 border-radius: 4px;
@@ -706,26 +709,34 @@ class AdvancedSearchWidget(QWidget):
         parent_layout.addWidget(status_frame)
     
     def apply_styles(self):
-        """تطبيق الأنماط العامة"""
+        """تطبيق الأنماط العامة - ألوان SkyWave Brand"""
         self.setStyleSheet("""
             QWidget {
                 font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                background-color: #001A3A;
+                color: #EAF3FF;
             }
             QGroupBox {
                 font-size: 12px;
+                color: #EAF3FF;
+                border: 1px solid #1E3A5F;
+                background-color: #0A2A55;
             }
             QLabel {
                 font-size: 12px;
+                color: #EAF3FF;
+                background: transparent;
             }
             QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QDateEdit {
-                border: 1px solid #e0e0e0;
+                border: 1px solid #1E3A5F;
                 border-radius: 4px;
                 padding: 4px;
-                background-color: white;
+                background-color: #0A2A55;
+                color: #EAF3FF;
                 font-size: 12px;
             }
             QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus {
-                border-color: #4a90e2;
+                border-color: #0A6CF1;
             }
         """)
     
@@ -961,13 +972,57 @@ class AdvancedSearchWidget(QWidget):
             return
         
         try:
-            # يمكن إضافة منطق التصدير هنا (Excel, PDF, إلخ)
-            QMessageBox.information(
-                self, 
-                "تصدير النتائج", 
-                f"سيتم تصدير {len(self.current_results)} نتيجة\n(هذه الميزة قيد التطوير)"
+            from PyQt6.QtWidgets import QFileDialog
+            import csv
+            from datetime import datetime
+            
+            # اختيار مكان الحفظ
+            default_filename = f"نتائج_البحث_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "حفظ نتائج البحث",
+                default_filename,
+                "CSV Files (*.csv);;All Files (*)"
             )
+            
+            if not file_path:
+                return
+            
+            # كتابة البيانات
+            with open(file_path, 'w', newline='', encoding='utf-8-sig') as file:
+                writer = csv.writer(file)
+                
+                # كتابة معلومات البحث
+                writer.writerow(['نتائج البحث المتقدم'])
+                writer.writerow(['التاريخ:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+                writer.writerow(['عدد النتائج:', len(self.current_results)])
+                writer.writerow([])  # سطر فارغ
+                
+                # كتابة رؤوس الأعمدة
+                headers = []
+                for col in range(self.results_table.columnCount()):
+                    header_item = self.results_table.horizontalHeaderItem(col)
+                    headers.append(header_item.text() if header_item else f'Column {col}')
+                writer.writerow(headers)
+                
+                # كتابة البيانات
+                for row in range(self.results_table.rowCount()):
+                    row_data = []
+                    for col in range(self.results_table.columnCount()):
+                        item = self.results_table.item(row, col)
+                        row_data.append(item.text() if item else '')
+                    writer.writerow(row_data)
+            
+            QMessageBox.information(
+                self,
+                "✅ تم التصدير",
+                f"تم تصدير {len(self.current_results)} نتيجة بنجاح!\n\n📄 {file_path}"
+            )
+            
         except Exception as e:
+            print(f"ERROR: [AdvancedSearch] فشل التصدير: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.warning(self, "خطأ في التصدير", f"فشل في تصدير النتائج:\n{str(e)}")
 
 

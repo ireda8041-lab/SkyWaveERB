@@ -164,14 +164,14 @@ class AccountEditorDialog(QDialog):
         self.save_button.clicked.connect(self.save_account)
         self.save_button.setStyleSheet("""
             QPushButton {
-                background-color: #10b981;
+                background-color: #0A6CF1;
                 color: white;
                 padding: 10px 20px;
                 font-weight: bold;
                 border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #059669;
+                background-color: #0A6CF1;
             }
             QPushButton:disabled {
                 background-color: #6b7280;

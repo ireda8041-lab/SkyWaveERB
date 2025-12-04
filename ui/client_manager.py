@@ -34,6 +34,11 @@ class ClientManagerTab(QWidget):
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
+        # جعل التاب متجاوب مع حجم الشاشة
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+
         buttons_layout = QHBoxLayout()
 
         self.add_button = QPushButton("➕ إضافة عميل جديد")
@@ -261,21 +266,25 @@ class ClientManagerTab(QWidget):
             client_payments_total = {}
             
             try:
-                # ⚡ استعلام واحد فقط لحساب إجماليات الفواتير (من المشاريع)
+                # ⚡ استعلام لحساب عدد المشاريع لكل عميل (وليس المبلغ)
                 self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT p.client_id, SUM(p.total_amount) as total
+                    SELECT p.client_id, COUNT(*) as project_count
                     FROM projects p
                     WHERE p.status != 'مؤرشف'
                     GROUP BY p.client_id
                 """)
-                client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                client_invoices_total = {str(row[0]): int(row[1]) if row[1] else 0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 
-                # ⚡ استعلام واحد فقط لحساب إجماليات المدفوعات
+                # ⚡ استعلام لحساب إجمالي المدفوعات بعد الخصم
+                # نحسب: (total_amount - discount_amount) من المشاريع، ثم نطرح المدفوعات
                 self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT client_id, SUM(amount) as total
-                    FROM payments
-                    GROUP BY client_id
+                    SELECT p.client_id, 
+                           SUM(COALESCE(pay.amount, 0)) as total_paid
+                    FROM projects p
+                    LEFT JOIN payments pay ON pay.project_id = p.id
+                    WHERE p.status != 'مؤرشف'
+                    GROUP BY p.client_id
                 """)
                 client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
@@ -330,8 +339,8 @@ class ClientManagerTab(QWidget):
                     total_invoices = client_invoices_total.get(client_id, 0.0)
                     total_payments = client_payments_total.get(client_id, 0.0)
                 
-                # عرض إجمالي الفواتير (مع UserRole للترتيب الصحيح)
-                total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
+                # عرض عدد المشاريع (وليس المبلغ)
+                total_item = QTableWidgetItem(f"{total_invoices} مشروع")
                 total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)  # ⚡ للترتيب الرقمي
                 total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 total_item.setForeground(QColor("#2454a5"))
@@ -352,7 +361,7 @@ class ClientManagerTab(QWidget):
                         status_item.setBackground(QColor("#ef4444"))
                         status_item.setForeground(QColor("white"))
                     else:
-                        status_item.setBackground(QColor("#10b981"))
+                        status_item.setBackground(QColor("#0A6CF1"))
                         status_item.setForeground(QColor("white"))
                 except Exception as e:
                     print(f"WARNING: فشل تعيين لون الخلفية: {e}")
