@@ -152,6 +152,18 @@ class AccountingService:
                     }
             
             # 3. بناء هيكل الشجرة وحساب الأرصدة من القيود
+            def get_parent_code_from_code(code: str) -> str:
+                """استنتاج كود الأب من كود الحساب تلقائياً"""
+                if not code or len(code) < 4:
+                    return None
+                # أمثلة: 1101 -> 1100, 1100 -> 1000, 5201 -> 5200
+                if code.endswith('00'):
+                    # حساب مجموعة مثل 1100 -> 1000
+                    return code[0] + '000'
+                else:
+                    # حساب فرعي مثل 1101 -> 1100
+                    return code[:2] + '00'
+            
             for acc in accounts:
                 if not acc.code:
                     continue
@@ -171,43 +183,48 @@ class AccountingService:
                 else:
                     node['total'] = opening_balance + credit_total - debit_total
                 
-                # ربط الحساب بالأب - استخدام parent_id أو parent_code
-                # قاعدة البيانات تخزن في parent_id
-                parent_code = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+                # Debug للحسابات المهمة
+                if acc.code in ['1103', '1104', '1100', '1200', '1000']:
+                    print(f"DEBUG: {acc.code} ({acc.name}): balance={opening_balance}, debit={debit_total}, credit={credit_total}, total={node['total']}")
+            
+            # ربط الحسابات بالآباء تلقائياً بناءً على الكود
+            for acc in accounts:
+                if not acc.code or acc.code.endswith('000'):
+                    continue  # الحسابات الجذرية (1000, 2000, ...) ليس لها أب
                 
-                # تحويل إلى string للمقارنة
-                if parent_code:
-                    parent_code = str(parent_code).strip()
+                # استنتاج الأب من الكود
+                parent_code = get_parent_code_from_code(acc.code)
                 
+                # التحقق من وجود الأب في الشجرة
                 if parent_code and parent_code in tree_map and parent_code != acc.code:
-                    tree_map[parent_code]['children'].append(node)
-                    print(f"DEBUG: ربط {acc.code} ({acc.name}) بالأب {parent_code}")
+                    tree_map[parent_code]['children'].append(tree_map[acc.code])
+                    print(f"DEBUG: ربط {acc.code} -> {parent_code}")
+            
+            # طباعة الأبناء لكل حساب رئيسي
+            for code in ['1000', '1100', '2000', '3000', '4000', '5000']:
+                if code in tree_map:
+                    children = [c['obj'].code for c in tree_map[code]['children']]
+                    print(f"DEBUG: {code} أبناؤه: {children}")
             
             process_events()
             
-            # 4. حساب الأرصدة التراكمية للمجموعات (مرة واحدة فقط)
-            visited = set()
-            
+            # 4. حساب الأرصدة التراكمية للمجموعات
             def calculate_total(node: dict) -> float:
-                """حساب إجمالي العقدة بشكل تكراري"""
-                node_code = node['obj'].code
-                if node_code in visited:
-                    return node['total']
-                visited.add(node_code)
-                
+                """حساب إجمالي العقدة بشكل تكراري (من الأسفل للأعلى)"""
+                # إذا لم يكن له أبناء، أرجع رصيده الخاص
                 if not node['children']:
                     return node['total']
                 
+                # إذا كان له أبناء (مجموعة)، رصيده = مجموع أرصدة الأبناء
                 children_total = sum(calculate_total(child) for child in node['children'])
-                node['total'] = node['total'] + children_total
+                node['total'] = children_total
                 return node['total']
             
-            # حساب من الجذور فقط
-            for code, node in tree_map.items():
-                acc = node['obj']
-                parent_code = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
-                if not parent_code or str(parent_code) not in tree_map:
-                    calculate_total(node)
+            # حساب من الجذور (الحسابات الرئيسية 1000, 2000, 3000, 4000, 5000)
+            for code in ['1000', '2000', '3000', '4000', '5000']:
+                if code in tree_map:
+                    calculate_total(tree_map[code])
+                    print(f"DEBUG: بعد الحساب - {code}: {tree_map[code]['total']:.2f}")
             
             process_events()
             
