@@ -324,6 +324,13 @@ class PaymentsManagerTab(QWidget):
         print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # ⚡ تعطيل التحديثات للسرعة
+            self.payments_table.setUpdatesEnabled(False)
+            
             # تحميل الدفعات
             self.payments_list = self.accounting_service.repo.get_all_payments()
             
@@ -430,9 +437,13 @@ class PaymentsManagerTab(QWidget):
 
             self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
             print(f"INFO: [PaymentsManager] تم جلب {len(self.payments_list)} دفعة.")
+            
+            # ⚡ إعادة تفعيل التحديثات
+            self.payments_table.setUpdatesEnabled(True)
 
         except Exception as e:
             print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {e}")
+            self.payments_table.setUpdatesEnabled(True)
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""

@@ -394,9 +394,9 @@ class SkyWaveERPApp:
                 logger.warning(f"فشل تطبيق التوسيط: {e}")
         QTimer.singleShot(2000, apply_styles_later)
         
-        # ⚡ تفعيل المزامنة التلقائية لجلب البيانات من السيرفر (بعد 20 ثانية - لا تعطل البرنامج)
-        QTimer.singleShot(20000, lambda: self.auto_sync.start_auto_sync(delay_seconds=0))
-        logger.info("[MainApp] ⚡ المزامنة التلقائية ستبدأ بعد 20 ثانية (في الخلفية)")
+        # ⚡ تفعيل المزامنة التلقائية لجلب البيانات من السيرفر (بعد 3 ثواني فقط)
+        QTimer.singleShot(3000, lambda: self.auto_sync.start_auto_sync(delay_seconds=0))
+        logger.info("[MainApp] ⚡ المزامنة التلقائية ستبدأ بعد 3 ثواني (في الخلفية)")
         
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)

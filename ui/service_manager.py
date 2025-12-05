@@ -149,6 +149,13 @@ class ServiceManagerTab(QWidget):
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # ⚡ تعطيل التحديثات للسرعة
+            self.services_table.setUpdatesEnabled(False)
+            
             if self.show_archived_checkbox.isChecked():
                 self.services_list = self.service_service.get_archived_services()
             else:
@@ -185,9 +192,13 @@ class ServiceManagerTab(QWidget):
                 self.services_table.setRowHeight(index, 40)
 
             logger.info(f"[ServiceManager] تم جلب {len(self.services_list)} خدمة")
+            
+            # ⚡ إعادة تفعيل التحديثات
+            self.services_table.setUpdatesEnabled(True)
             self.update_buttons_state(False)
         except Exception as e:
             logger.error(f"[ServiceManager] فشل تحميل الخدمات: {e}", exc_info=True)
+            self.services_table.setUpdatesEnabled(True)
 
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""

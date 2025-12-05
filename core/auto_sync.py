@@ -76,7 +76,7 @@ class AutoSync:
         print(f"INFO: [AutoSync] ⚡ جدولة المزامنة (بعد {delay_seconds} ثانية)")
     
     def perform_quick_sync(self):
-        """⚡ مزامنة سريعة - فقط البيانات الأساسية"""
+        """⚡ مزامنة سريعة - كل البيانات الأساسية"""
         if self.is_syncing or not self.is_running:
             return
         
@@ -90,10 +90,12 @@ class AutoSync:
             
             print("INFO: [AutoSync] ⚡ مزامنة سريعة...")
             
-            # ⚡ جلب فقط العملاء والمشاريع (الأهم)
+            # ⚡ جلب كل البيانات الأساسية
             pulled = 0
             pulled += self._quick_pull_clients()
             pulled += self._quick_pull_projects()
+            pulled += self._quick_pull_services()
+            pulled += self._quick_pull_payments()
             
             elapsed = time.time() - start_time
             print(f"INFO: [AutoSync] ✅ اكتملت المزامنة السريعة ({pulled} سجل في {elapsed:.1f}ث)")
@@ -106,18 +108,23 @@ class AutoSync:
     def _quick_pull_clients(self) -> int:
         """⚡ جلب العملاء بسرعة"""
         try:
-            clients = list(self.repository.mongo_db.clients.find({}, {'_id': 1, 'name': 1, 'status': 1, 'phone': 1, 'email': 1}))
+            clients = list(self.repository.mongo_db.clients.find())
             count = 0
             for c in clients:
                 try:
                     mongo_id = str(c.get('_id'))
                     self.repository.sqlite_cursor.execute("""
-                        INSERT OR IGNORE INTO clients (_mongo_id, name, status, phone, email, created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
-                    """, (mongo_id, c.get('name'), c.get('status', 'نشط'), c.get('phone'), c.get('email')))
+                        INSERT OR REPLACE INTO clients (_mongo_id, name, company_name, status, phone, email, 
+                        address, country, vat_number, client_type, work_field, logo_path, logo_data, client_notes,
+                        created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, c.get('name'), c.get('company_name'), c.get('status', 'نشط'), 
+                          c.get('phone'), c.get('email'), c.get('address'), c.get('country'),
+                          c.get('vat_number'), c.get('client_type'), c.get('work_field'),
+                          c.get('logo_path'), c.get('logo_data'), c.get('client_notes')))
                     count += 1
-                except:
-                    pass
+                except Exception as ex:
+                    print(f"    ⚠️ فشل جلب عميل: {ex}")
             self.repository.sqlite_conn.commit()
             print(f"  ✅ تم جلب {count} عميل")
             return count
@@ -128,23 +135,83 @@ class AutoSync:
     def _quick_pull_projects(self) -> int:
         """⚡ جلب المشاريع بسرعة"""
         try:
-            projects = list(self.repository.mongo_db.projects.find({}, {'_id': 1, 'name': 1, 'status': 1, 'client_id': 1, 'total_amount': 1}))
+            projects = list(self.repository.mongo_db.projects.find())
             count = 0
             for p in projects:
                 try:
                     mongo_id = str(p.get('_id'))
+                    items_json = json.dumps(p.get('items', []))
                     self.repository.sqlite_cursor.execute("""
-                        INSERT OR IGNORE INTO projects (_mongo_id, name, status, client_id, total_amount, created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
-                    """, (mongo_id, p.get('name'), p.get('status', 'نشط'), p.get('client_id'), p.get('total_amount', 0)))
+                        INSERT OR REPLACE INTO projects (_mongo_id, name, status, client_id, total_amount,
+                        description, start_date, end_date, items, subtotal, discount_rate, discount_amount,
+                        tax_rate, tax_amount, currency, project_notes,
+                        created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, p.get('name'), p.get('status', 'نشط'), p.get('client_id'), 
+                          p.get('total_amount', 0), p.get('description'), p.get('start_date'),
+                          p.get('end_date'), items_json, p.get('subtotal', 0), p.get('discount_rate', 0),
+                          p.get('discount_amount', 0), p.get('tax_rate', 0), p.get('tax_amount', 0),
+                          p.get('currency', 'EGP'), p.get('project_notes')))
                     count += 1
-                except:
-                    pass
+                except Exception as ex:
+                    print(f"    ⚠️ فشل جلب مشروع: {ex}")
             self.repository.sqlite_conn.commit()
             print(f"  ✅ تم جلب {count} مشروع")
             return count
         except Exception as e:
             print(f"  ⚠️ فشل جلب المشاريع: {e}")
+            return 0
+    
+    def _quick_pull_services(self) -> int:
+        """⚡ جلب الخدمات بسرعة"""
+        try:
+            services = list(self.repository.mongo_db.services.find())
+            count = 0
+            for s in services:
+                try:
+                    mongo_id = str(s.get('_id'))
+                    self.repository.sqlite_cursor.execute("""
+                        INSERT OR REPLACE INTO services (_mongo_id, name, description, default_price, category, status,
+                        created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, s.get('name'), s.get('description'), s.get('default_price', 0),
+                          s.get('category'), s.get('status', 'نشط')))
+                    count += 1
+                except Exception as ex:
+                    print(f"    ⚠️ فشل جلب خدمة: {ex}")
+            self.repository.sqlite_conn.commit()
+            print(f"  ✅ تم جلب {count} خدمة")
+            return count
+        except Exception as e:
+            print(f"  ⚠️ فشل جلب الخدمات: {e}")
+            return 0
+    
+    def _quick_pull_payments(self) -> int:
+        """⚡ جلب الدفعات بسرعة"""
+        try:
+            payments = list(self.repository.mongo_db.payments.find())
+            count = 0
+            for p in payments:
+                try:
+                    mongo_id = str(p.get('_id'))
+                    # تحويل التاريخ
+                    date_val = p.get('date')
+                    if hasattr(date_val, 'isoformat'):
+                        date_val = date_val.isoformat()
+                    self.repository.sqlite_cursor.execute("""
+                        INSERT OR REPLACE INTO payments (_mongo_id, project_id, client_id, date, amount, account_id, method,
+                        created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, p.get('project_id'), p.get('client_id'), date_val,
+                          p.get('amount', 0), p.get('account_id'), p.get('method')))
+                    count += 1
+                except Exception as ex:
+                    print(f"    ⚠️ فشل جلب دفعة: {ex}")
+            self.repository.sqlite_conn.commit()
+            print(f"  ✅ تم جلب {count} دفعة")
+            return count
+        except Exception as e:
+            print(f"  ⚠️ فشل جلب الدفعات: {e}")
             return 0
     
     def stop_auto_sync(self):

@@ -108,6 +108,13 @@ class QuotationManagerTab(QWidget):
     def load_quotations_data(self):
         print("INFO: [QuoteManager] جاري تحميل عروض الأسعار...")
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # ⚡ تعطيل التحديثات للسرعة
+            self.quotes_table.setUpdatesEnabled(False)
+            
             self.quotations_list = self.quotation_service.get_all_quotations()
             self.quotes_table.setRowCount(0)
 
@@ -144,9 +151,13 @@ class QuotationManagerTab(QWidget):
                 self.quotes_table.setItem(index, 5, total_item)
 
             print(f"INFO: [QuoteManager] تم جلب {len(self.quotations_list)} عرض سعر.")
+            
+            # ⚡ إعادة تفعيل التحديثات
+            self.quotes_table.setUpdatesEnabled(True)
 
         except Exception as e:
             print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {e}")
+            self.quotes_table.setUpdatesEnabled(True)
 
     def _on_quotations_changed(self):
         """⚡ استجابة لإشارة تحديث عروض الأسعار - تحديث الجدول أوتوماتيك"""

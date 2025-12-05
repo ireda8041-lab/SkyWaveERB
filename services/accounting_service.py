@@ -147,8 +147,6 @@ class AccountingService:
                 import traceback
                 traceback.print_exc()
             
-            process_events()
-            
             # 2. إنشاء قاموس للوصول السريع O(1)
             tree_map: Dict[str, dict] = {}
             for acc in accounts:
@@ -203,8 +201,6 @@ class AccountingService:
                     children = [c['obj'].code for c in tree_map[code]['children']]
                     print(f"DEBUG: {code} أبناؤه: {children}")
             
-            process_events()
-            
             # 4. حساب الأرصدة التراكمية للمجموعات (من الأوراق للجذور)
             def calculate_total(node: dict) -> float:
                 """حساب إجمالي العقدة بشكل تكراري"""
@@ -221,8 +217,6 @@ class AccountingService:
             for code in ['1000', '2000', '3000', '4000', '5000']:
                 if code in tree_map:
                     calculate_total(tree_map[code])
-            
-            process_events()
             
             # طباعة ملخص للتأكد
             print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")

@@ -54,6 +54,36 @@
             overflow: hidden;
         }
         
+        /* ⚡ علامة مائية - اللوجو في الخلفية (يملي الفاتورة كاملة) */
+        .watermark {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            opacity: 0.04;
+            z-index: 0;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .watermark img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        /* كل المحتوى فوق العلامة المائية */
+        .invoice-content {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        
         /* --- Header --- */
         .header {
             display: flex;
@@ -62,7 +92,6 @@
             margin-bottom: 15px;
         }
         
-        /* ترتيب العناصر: اللوجو يمين ورقم الفاتورة يسار */
         .logo-section {
             display: flex;
             align-items: center;
@@ -71,24 +100,12 @@
         }
         
         .logo-img {
-            width: 120px;
+            width: 190px;
             height: auto;
         }
         
-        .company-name h2 {
-            font-size: 16px;
-            color: #333;
-            line-height: 1.2;
-            font-weight: 700;
-        }
-        
-        /* تلوين كلمة "تصميم مواقع" و "تسويق" مثل اللوجو */
-        .company-name span {
-            color: var(--primary-blue);
-        }
-        
         .invoice-id-box {
-            background: white;
+            background: rgb(255, 255, 255);
             padding: 8px 20px;
             border-radius: 10px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.08);
@@ -115,7 +132,7 @@
         .info-cards {
             display: flex;
             gap: 15px;
-            margin-bottom: 15px;
+            margin-bottom: 45px;
         }
         
         .card {
@@ -137,29 +154,26 @@
             gap: 6px;
         }
         
-        .card-title i {
-            color: #888;
-            font-size: 13px;
-        }
-        
         .info-row {
             display: flex;
             margin-bottom: 5px;
             font-size: 12px;
         }
         
+        /* ⚡ العناوين بـ Bold والبيانات بفونت عادي */
         .info-label {
-            color: #555;
+            color: #333;
             width: auto;
-            min-width: 80px;
-            font-weight: 600;
+            min-width: 110px;
+            font-weight: 700;
             text-align: right;
             white-space: nowrap;
+            margin-left: 10px;
         }
         
         .info-value {
-            color: #000;
-            font-weight: 700;
+            color: #555;
+            font-weight: 400;
             flex: 1;
             text-align: right;
         }
@@ -178,11 +192,6 @@
             height: 16px;
         }
         
-        .section-title i {
-            color: #777;
-            font-size: 13px;
-        }
-        
         table {
             width: 100%;
             border-collapse: separate;
@@ -192,11 +201,12 @@
         
         th {
             color: white;
-            padding: 6px 10px;
+            padding: 8px 10px;
             text-align: right;
             font-weight: 600;
             font-size: 12px;
             border: none;
+            height: 36px;
         }
         
         th:first-child {
@@ -218,16 +228,16 @@
         }
         
         td {
-            padding: 6px 10px;
+            padding: 8px 10px;
             background-color: white;
             font-size: 11px;
             font-weight: 600;
             color: #333;
             border-top: 1px solid #f0f0f0;
             border-bottom: 1px solid #f0f0f0;
+            height: 32px;
         }
         
-        /* حدود دائرية للصفوف */
         .data-row td:first-child {
             border-top-right-radius: 6px;
             border-bottom-right-radius: 6px;
@@ -244,14 +254,42 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.02);
         }
         
-        /* --- Totals --- */
+        /* --- Totals & Notes Container --- */
+        .totals-notes-container {
+            display: flex;
+            gap: 15px;
+            margin-top: 8px;
+        }
+        
+        /* ⚡ قسم الملاحظات على اليمين */
+        .notes-section {
+            flex: 1;
+            background-color: var(--light-bg);
+            border-radius: 6px;
+            padding: 10px 12px;
+            border-right: 3px solid var(--primary-blue);
+        }
+        
+        .notes-title {
+            color: var(--primary-blue);
+            font-weight: 700;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+        
+        .notes-content {
+            color: #555;
+            font-size: 11px;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+        
+        /* قسم الإجمالي على اليسار */
         .totals-container {
             width: 45%;
-            margin-right: auto;
-            border: 1px solid #eee;
+            border: none;
             border-radius: 6px;
             overflow: hidden;
-            margin-top: 8px;
         }
         
         .total-row {
@@ -262,7 +300,7 @@
         }
         
         .total-row:not(:last-child) {
-            border-bottom: 1px solid #eee;
+            border-bottom: none;
         }
         
         .bg-white {
@@ -274,9 +312,15 @@
             color: var(--primary-green);
         }
         
+        .bg-light-red {
+            background-color: #fff5f5;
+            color: #e53e3e;
+        }
+        
         .bg-blue {
             background-color: var(--primary-blue);
             color: white;
+            border-radius: 0px 0px 6px 6px;
         }
         
         .total-label {
@@ -285,6 +329,76 @@
         
         .total-value {
             font-weight: 700;
+        }
+        
+        /* ⚡ قسم طرق الدفع */
+        .payment-methods-section {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: var(--light-bg);
+            border-radius: 8px;
+            border-right: 3px solid var(--primary-green);
+        }
+        
+        .payment-methods-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+        
+        .payment-method {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            background-color: white;
+            border-radius: 6px;
+            border: 1px solid #eee;
+        }
+        
+        .method-icon {
+            font-size: 16px;
+        }
+        
+        .method-details {
+            display: flex;
+            flex-direction: column;
+            font-size: 10px;
+        }
+        
+        .method-details strong {
+            color: var(--primary-blue);
+            font-size: 11px;
+        }
+        
+        .method-details span {
+            color: #666;
+            font-size: 9px;
+        }
+        
+        /* ⚡ طرق الدفع المصغرة تحت الملاحظات */
+        .payment-methods-mini {
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px dashed #ddd;
+        }
+        
+        .mini-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--primary-blue);
+            margin-bottom: 4px;
+        }
+        
+        .mini-methods {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        
+        .mini-methods span {
+            font-size: 9px;
+            color: #333;
         }
         
         /* --- Footer --- */
@@ -300,7 +414,6 @@
             font-weight: 700;
         }
         
-        /* الجزء اليمين في الفوتر (بيانات الاتصال) */
         .footer-right {
             display: flex;
             gap: 10px;
@@ -313,16 +426,11 @@
             gap: 3px;
         }
         
-        .footer-item i {
-            font-size: 10px;
-        }
-        
-        /* الجزء اليسار في الفوتر (كلمة شكر) */
         .footer-left {
             font-size: 11px;
         }
         
-        /* ⚡ تحسينات الطباعة - A4 كامل */
+        /* ⚡ تحسينات الطباعة */
         @media print {
             @page {
                 size: A4;
@@ -349,12 +457,14 @@
                 overflow: hidden;
             }
             
-            /* إخفاء الأزرار والعناصر غير الضرورية */
+            .watermark {
+                opacity: 0.05 !important;
+            }
+            
             button, .no-print {
                 display: none !important;
             }
             
-            /* تأكيد ظهور كل العناصر */
             .section-title, table, .totals-container, .footer {
                 page-break-inside: avoid;
             }
@@ -363,146 +473,182 @@
 </head>
 <body>
     <div class="invoice-container">
-        <div class="header">
-            <div class="logo-section">
-                {% if logo_path and logo_path.startswith('data:image') %}
-                <img src="{{ logo_path }}" alt="SkyWave Logo" class="logo-img">
-                {% else %}
-                <div style="font-size: 80px; color: var(--primary-blue);">
-                    <i class="fa-brands fa-servicestack"></i>
-                </div>
-                {% endif %}
-            </div>
-            <div class="invoice-id-box">
-                <div class="label"> رقم الفاتورة</div>
-                <div class="number">{{ invoice_number }}</div>
-            </div>
+        <!-- ⚡ علامة مائية -->
+        <div class="watermark">
+            {% if watermark_path %}
+            <img src="{{ watermark_path }}" alt="Watermark">
+            {% endif %}
         </div>
         
-        <div class="info-cards">
-            <div class="card">
-                <div class="card-title">
-                     معلومات العميل
+        <div class="invoice-content">
+            <div class="header">
+                <div class="logo-section">
+                    {% if logo_path and logo_path.startswith('data:image') %}
+                    <img src="{{ logo_path }}" alt="SkyWave Logo" class="logo-img">
+                    {% else %}
+                    <div style="font-size: 80px; color: var(--primary-blue);">
+                        <i class="fa-brands fa-servicestack"></i>
+                    </div>
+                    {% endif %}
                 </div>
-                <div class="info-row">
-                    <span class="info-label"> الاسم:</span>
-                    <span class="info-value">{{ client_name }}</span>
+                <div class="invoice-id-box">
+                    <div class="label"> رقم الفاتورة</div>
+                    <div class="number">{{ invoice_number }}</div>
                 </div>
-                <div class="info-row">
-                    <span class="info-label"> الهاتف:</span>
-                    <span class="info-value">{{ client_phone }}</span>
+            </div>
+            <br />
+            <div class="info-cards">
+                <div class="card">
+                    <div class="card-title">
+                         معلومات العميل
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">الاسم:</span>
+                        <span class="info-value">{{ client_name }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">الهاتف:</span>
+                        <span class="info-value">{{ client_phone }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">العنوان:</span>
+                        <span class="info-value">{{ client_address }}</span>
+                    </div>
                 </div>
-                <div class="info-row">
-                    <span class="info-label"> العنوان:</span>
-                    <span class="info-value">{{ client_address }}</span>
+                
+                <div class="card">
+                    <div class="card-title">
+                         تفاصيل الفاتورة
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">التاريخ:</span>
+                        <span class="info-value">{{ invoice_date }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">تاريخ الاستحقاق:</span>
+                        <span class="info-value">{{ due_date }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">المشروع:</span>
+                        <span class="info-value">{{ project_name }}</span>
+                    </div>
                 </div>
             </div>
             
-            <div class="card">
-                <div class="card-title">
-                     تفاصيل الفاتورة
+            <div class="section-title">
+                 تفاصيل الخدمات
+            </div>
+            <table class="service-table">
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 45%;">الخدمة</th>
+                        <th style="width: 10%;">الكمية</th>
+                        <th style="width: 15%;">السعر</th>
+                        <th style="width: 10%;">الخصم</th>
+                        <th style="width: 15%;">الإجمالي</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr class="data-row">
+                        <td>{{ loop.index }}</td>
+                        <td style="color: var(--primary-blue);">{{ item.name }}</td>
+                        <td>{{ item.qty }}</td>
+                        <td>{{ item.price }} ج.م</td>
+                        <td>{{ item.discount }}%</td>
+                        <td>{{ item.total }} ج.م</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            
+            {% if payments and payments|length > 0 %}
+            <div class="section-title" style="margin-top: 10px;">
+                 سجل الدفعات المستلمة
+            </div>
+            <table class="payment-table">
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 30%;">تاريخ الدفعة</th>
+                        <th style="width: 35%;">طريقة الدفع</th>
+                        <th style="width: 30%;">المبلغ المدفوع</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for payment in payments %}
+                    <tr class="data-row">
+                        <td>{{ loop.index }}</td>
+                        <td>{{ payment.date if payment.date else 'غير محدد' }}</td>
+                        <td style="color: #000000;">{{ payment.account_name if payment.account_name else payment.account_id }}</td>
+                        <td style="color: var(--primary-green);">{{ "%.2f"|format(payment.amount|float) }} ج.م</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            
+            <!-- ⚡ قسم الإجمالي والملاحظات -->
+            <div class="totals-notes-container">
+                <!-- قسم الملاحظات وطرق الدفع على اليمين -->
+                <div class="notes-section">
+                    <div class="notes-title">📝 ملاحظات</div>
+                    <div class="notes-content" style="white-space: pre-line;">{{ project_notes if project_notes else 'لا توجد ملاحظات' }}</div>
+                    
+                    <!-- طرق الدفع تحت الملاحظات -->
+                    <div class="payment-methods-mini">
+                        <div class="mini-title">💳 طرق الدفع:</div>
+                        <div class="mini-methods">
+                            <span><b>1️⃣ فودافون كاش:</b> 01067894321 - 0102196520</span>
+                            <span><b>2️⃣ إنستا باي:</b> 01067894321 - skywaveads@instapay</span>
+                            <span><b>3️⃣ تحويل بنكي - بنك مصر:</b> حساب: 2630333000086626 | SWIFT: BMISEGCXXXX</span>
+                            <span><b>4️⃣ تحويل دولي - بنك مصر:</b> IBAN: EG020002026302630333000086626</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="info-row">
-                    <span class="info-label"> التاريخ:</span>
-                    <span class="info-value">{{ invoice_date }}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label"> تاريخ الاستحقاق:</span>
-                    <span class="info-value">{{ due_date }}</span>
-                </div>
-                <div class="info-row">
-                    <span class="info-label"> المشروع:</span>
-                    <span class="info-value">{{ project_name }}</span>
+                
+                <!-- قسم الإجمالي على اليسار -->
+                <div class="totals-container">
+                    <div class="total-row bg-white">
+                        <span class="total-label">الإجمالي الكلي:</span>
+                        <span class="total-value" style="color: var(--primary-blue);">{{ subtotal }} ج.م</span>
+                    </div>
+                    {% if discount_amount_raw and discount_amount_raw > 0 %}
+                    <div class="total-row bg-light-red">
+                        <span class="total-label">الخصم:</span>
+                        <span class="total-value">- {{ discount_amount }} ج.م</span>
+                    </div>
+                    {% endif %}
+                    <div class="total-row bg-white">
+                        <span class="total-label">الإجمالي الفرعي:</span>
+                        <span class="total-value" style="color: var(--primary-blue);">{{ grand_total }} ج.م</span>
+                    </div>
+                    <div class="total-row bg-light-green">
+                        <span class="total-label">المبلغ المدفوع:</span>
+                        <span class="total-value">{{ total_paid }} ج.م</span>
+                    </div>
+                    <div class="total-row bg-blue">
+                        <span class="total-label">المبلغ المتبقي:</span>
+                        <span class="total-value">{{ remaining_amount }} ج.م</span>
+                    </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="section-title">
-             تفاصيل الخدمات
-        </div>
-        <table class="service-table">
-            <thead>
-                <tr>
-                    <th style="width: 5%;">#</th>
-                    <th style="width: 45%;">الخدمة</th>
-                    <th style="width: 10%;">الكمية</th>
-                    <th style="width: 15%;">السعر</th>
-                    <th style="width: 10%;">الخصم</th>
-                    <th style="width: 15%;">الإجمالي</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in items %}
-                <tr class="data-row">
-                    <td>{{ loop.index }}</td>
-                    <td style="color: var(--primary-blue);">{{ item.name }}</td>
-                    <td>{{ item.qty }}</td>
-                    <td>{{ item.price }} ج.م</td>
-                    <td>{{ item.discount }}%</td>
-                    <td>{{ item.total }} ج.م</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        
-        {% if payments and payments|length > 0 %}
-        <div class="section-title" style="margin-top: 10px;">
-             سجل الدفعات المستلمة
-        </div>
-        <table class="payment-table">
-            <thead>
-                <tr>
-                    <th style="width: 5%;">#</th>
-                    <th style="width: 30%;">تاريخ الدفعة</th>
-                    <th style="width: 35%;">طريقة الدفع</th>
-                    <th style="width: 30%;">المبلغ المدفوع</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for payment in payments %}
-                <tr class="data-row">
-                    <td>{{ loop.index }}</td>
-                    <td>{{ payment.date if payment.date else 'غير محدد' }}</td>
-                    <td style="color: #000000;">{{ payment.account_name if payment.account_name else payment.account_id }}</td>
-                    <td style="color: var(--primary-green);">{{ "%.2f"|format(payment.amount|float) }} ج.م</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
-        
-        <div class="totals-container">
-            <div class="total-row bg-white">
-                <span class="total-label"> الإجمالي الفرعي:</span>
-                <span class="total-value" style="color: var(--primary-blue);">{{ "%.2f"|format(subtotal|float) }} ج.م</span>
-            </div>
-            <div class="total-row bg-white">
-                <span class="total-label"> الإجمالي الكلي:</span>
-                <span class="total-value" style="color: var(--primary-blue);">{{ "%.2f"|format(grand_total|float) }} ج.م</span>
-            </div>
-            <div class="total-row bg-light-green">
-                <span class="total-label"> المبلغ المدفوع:</span>
-                <span class="total-value">{{ "%.2f"|format(total_paid|float) }} ج.م</span>
-            </div>
-            <div class="total-row bg-blue">
-                <span class="total-label"> المبلغ المتبقي:</span>
-                <span class="total-value">{{ "%.2f"|format(remaining_amount|float) }} ج.م</span>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <div class="footer-right">
-                <div class="footer-item">
-                    📍 {{ company_address }}
+            
+            <div class="footer">
+                <div class="footer-right">
+                    <div class="footer-item">
+                        📍 {{ company_address }}
+                    </div>
+                    <div class="footer-item">
+                        📞 {{ company_phone }}
+                    </div>
+                    <div class="footer-item">
+                        🌐 {{ company_website }}
+                    </div>
                 </div>
-                <div class="footer-item">
-                    📞 {{ company_phone }}
-                </div>
-                <div class="footer-item">
-                    🌐 {{ company_website }}
-                </div>
+                <div class="footer-left">❤️ شكراً لثقتكم</div>
             </div>
-            <div class="footer-left">❤️ شكراً لثقتكم</div>
         </div>
     </div>
 </body>

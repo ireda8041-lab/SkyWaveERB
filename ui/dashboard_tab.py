@@ -119,6 +119,10 @@ class DashboardTab(QWidget):
         print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             kpis = self.accounting_service.get_dashboard_kpis()
 
             self.update_card_value(self.collected_card, kpis.get("total_collected", 0))

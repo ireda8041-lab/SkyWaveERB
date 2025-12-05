@@ -417,6 +417,10 @@ class SettingsTab(QWidget):
     def load_settings_data(self):
         print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             settings = self.settings_service.get_settings()
             self.company_name_input.setText(settings.get("company_name", ""))
             self.company_address_input.setText(settings.get("company_address", ""))

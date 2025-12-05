@@ -1286,6 +1286,10 @@ class TodoManagerWidget(QWidget):
     
     def load_tasks(self):
         """تحميل وعرض المهام"""
+        # ⚡ معالجة الأحداث لمنع التجميد
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        
         self.filter_tasks()
         self.update_statistics()
     

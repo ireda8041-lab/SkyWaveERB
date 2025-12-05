@@ -249,6 +249,10 @@ class AccountingManagerTab(QWidget):
         print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             # ✨ استخدام الدالة الجديدة للحصول على الأرصدة المحسوبة
             tree_map = self.accounting_service.get_hierarchy_with_balances()
             

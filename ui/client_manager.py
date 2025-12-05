@@ -259,6 +259,10 @@ class ClientManagerTab(QWidget):
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             if self.show_archived_checkbox.isChecked():
                 self.clients_list = self.client_service.get_archived_clients()
             else:
@@ -266,6 +270,7 @@ class ClientManagerTab(QWidget):
 
             # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
             self.clients_table.setSortingEnabled(False)
+            self.clients_table.setUpdatesEnabled(False)  # ⚡ تعطيل التحديثات للسرعة
             self.clients_table.setRowCount(0)
 
             # ⚡ استعلامات SQL مبسطة للسرعة
@@ -383,7 +388,8 @@ class ClientManagerTab(QWidget):
 
             print(f"INFO: [ClientManager] تم جلب {len(self.clients_list)} عميل.")
             
-            # ⚡ إعادة تفعيل الترتيب بعد التحميل
+            # ⚡ إعادة تفعيل التحديثات والترتيب بعد التحميل
+            self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
             
             self.selected_client = None
@@ -391,7 +397,8 @@ class ClientManagerTab(QWidget):
 
         except Exception as e:
             print(f"ERROR: [ClientManager] فشل تحميل العملاء: {e}")
-            # ⚡ إعادة تفعيل الترتيب حتى في حالة الخطأ
+            # ⚡ إعادة تفعيل التحديثات والترتيب حتى في حالة الخطأ
+            self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
 
     def _on_clients_changed(self):

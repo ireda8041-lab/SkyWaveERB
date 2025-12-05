@@ -1343,8 +1343,13 @@ class ProjectManagerTab(QWidget):
         print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
         
         try:
-            # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # ⚡ تعطيل الترتيب والتحديثات مؤقتاً أثناء التحميل (للسرعة)
             self.projects_table.setSortingEnabled(False)
+            self.projects_table.setUpdatesEnabled(False)
             
             if self.show_archived_checkbox.isChecked():
                 self.projects_list = self.project_service.get_archived_projects()
@@ -1354,22 +1359,24 @@ class ProjectManagerTab(QWidget):
             self.projects_table.setRowCount(0)
             for row, project in enumerate(self.projects_list):
                 self.projects_table.insertRow(row)
-                # توليد رقم الفاتورة من ID المشروع
-                project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', row + 1))
-                invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else f"SW-{str(row + 1).zfill(4)}"
+                # توليد رقم الفاتورة من ID المشروع (يبدأ من 97162)
+                local_id = getattr(project, 'id', None) or (row + 1)
+                invoice_number = f"SW-{97161 + int(local_id)}"
                 self.projects_table.setItem(row, 0, QTableWidgetItem(invoice_number))
                 self.projects_table.setItem(row, 1, QTableWidgetItem(project.name))
                 self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
                 self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
                 self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
 
-            # ⚡ إعادة تفعيل الترتيب بعد التحميل
+            # ⚡ إعادة تفعيل التحديثات والترتيب بعد التحميل
+            self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
             
             self.on_project_selection_changed()
         except Exception as e:
             print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {e}")
-            # ⚡ إعادة تفعيل الترتيب حتى في حالة الخطأ
+            # ⚡ إعادة تفعيل التحديثات والترتيب حتى في حالة الخطأ
+            self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
 
     def _on_projects_changed(self):
@@ -1566,83 +1573,62 @@ class ProjectManagerTab(QWidget):
         dialog.exec()
     
     def print_invoice(self):
-        """🖨️ طباعة فاتورة المشروع المحدد باستخدام القالب الحديث (Modern Blue Design)"""
+        """🖨️ طباعة فاتورة المشروع المحدد"""
         if not self.selected_project:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مشروع أولاً")
             return
         
         try:
-            # Step A: Get the Selected Project
             project = self.selected_project
             
-            # Step B: Fetch Client Data
+            # جلب بيانات العميل
             client = self.client_service.get_client_by_id(project.client_id)
             if not client:
                 QMessageBox.warning(self, "خطأ", "لم يتم العثور على معلومات العميل")
                 return
             
-            # Step C: Get profitability data for paid/remaining amounts
+            # جلب الدفعات
+            payments_list = self._get_payments_list(project.name)
+            print(f"INFO: [ProjectManager] الدفعات المرسلة للطباعة: {payments_list}")
+            
+            # تجهيز معلومات العميل
+            client_info = {
+                'name': client.name,
+                'company_name': getattr(client, 'company_name', '') or '',
+                'phone': client.phone or "---",
+                'email': client.email or "",
+                'address': client.address or "---"
+            }
+            
+            # ⚡ استخدام template_service
+            if self.template_service:
+                print("INFO: [ProjectManager] استخدام template_service للطباعة")
+                
+                success = self.template_service.preview_template(
+                    project=project,
+                    client_info=client_info,
+                    payments=payments_list
+                )
+                
+                if success:
+                    QMessageBox.information(
+                        self,
+                        "✅ تم إنشاء الفاتورة",
+                        f"تم فتح معاينة الفاتورة في المتصفح.\n\n"
+                        f"يمكنك طباعتها من المتصفح (Ctrl+P)"
+                    )
+                else:
+                    QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
+                return
+            
+            # Fallback: استخدام InvoicePrintingService
             profit_data = self.project_service.get_project_profitability(project.name)
             
-            # Step C2: Get payments for the project
-            payments_list = []
-            try:
-                payments = self.project_service.get_payments_for_project(project.name)
-                print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project.name}")
-                
-                for payment in payments:
-                    # Get account name from accounting service
-                    account_name = "نقدي"
-                    if hasattr(payment, 'account_id') and payment.account_id:
-                        try:
-                            # محاولة جلب الحساب بالكود أولاً (لأن account_id قد يكون كود الحساب)
-                            account = self.accounting_service.repo.get_account_by_code(payment.account_id)
-                            if account:
-                                account_name = account.name
-                            else:
-                                # محاولة جلب الحساب بالـ ID
-                                account = self.accounting_service.repo.get_account_by_id(payment.account_id)
-                                if account:
-                                    account_name = account.name
-                                else:
-                                    account_name = str(payment.account_id)
-                        except Exception as acc_err:
-                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
-                            account_name = str(payment.account_id)
-                    
-                    # تصحيح التاريخ
-                    payment_date = payment.date
-                    if hasattr(payment_date, 'strftime'):
-                        date_str = payment_date.strftime("%Y-%m-%d")
-                    elif isinstance(payment_date, str):
-                        date_str = payment_date[:10]
-                    else:
-                        date_str = str(payment_date)[:10]
-                    
-                    # تصحيح المبلغ
-                    try:
-                        amount_val = float(payment.amount)
-                    except (ValueError, TypeError, AttributeError):
-                        amount_val = 0.0
-                    
-                    payments_list.append({
-                        'date': date_str,
-                        'amount': amount_val,
-                        'method': payment.method if hasattr(payment, 'method') else account_name,
-                        'account_name': account_name,
-                        'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
-                    })
-                    
-                print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
-            except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
-                import traceback
-                traceback.print_exc()
-            
+            # Fallback: استخدام InvoicePrintingService
             # Step D: Prepare the complete data dictionary
-            # توليد رقم الفاتورة من ID المشروع (نفس الطريقة المستخدمة في الجدول)
-            project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '0000'))
-            invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else "SW-0000"
+            # توليد رقم الفاتورة من ID المشروع (5 أرقام - يبدأ من 97162)
+            local_id = getattr(project, 'id', None) or 1
+            invoice_number = f"SW-{97161 + int(local_id)}"
             
             invoice_data = {
                 "invoice_number": invoice_number,
@@ -1717,149 +1703,103 @@ class ProjectManagerTab(QWidget):
 
     
 
+    def _get_payments_list(self, project_name: str) -> list:
+        """جلب قائمة الدفعات للمشروع"""
+        payments_list = []
+        try:
+            payments = self.project_service.get_payments_for_project(project_name)
+            print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project_name}")
+            
+            for payment in payments:
+                account_name = "نقدي"
+                if hasattr(payment, 'account_id') and payment.account_id:
+                    try:
+                        account = self.accounting_service.repo.get_account_by_code(payment.account_id)
+                        if account:
+                            account_name = account.name
+                        else:
+                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
+                            if account:
+                                account_name = account.name
+                            else:
+                                account_name = str(payment.account_id)
+                    except Exception:
+                        account_name = str(payment.account_id)
+                
+                payment_date = payment.date
+                if hasattr(payment_date, 'strftime'):
+                    date_str = payment_date.strftime("%Y-%m-%d")
+                elif isinstance(payment_date, str):
+                    date_str = payment_date[:10]
+                else:
+                    date_str = str(payment_date)[:10]
+                
+                try:
+                    amount_val = float(payment.amount)
+                except (ValueError, TypeError, AttributeError):
+                    amount_val = 0.0
+                
+                payments_list.append({
+                    'date': date_str,
+                    'amount': amount_val,
+                    'method': payment.method if hasattr(payment, 'method') else account_name,
+                    'account_name': account_name,
+                    'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
+                })
+            
+            print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
+        
+        return payments_list
+
     def preview_invoice_template(self):
-        """معاينة قالب الفاتورة الحديث (Modern Blue Design) في المتصفح"""
+        """معاينة قالب الفاتورة في المتصفح باستخدام template_service"""
         if not self.selected_project:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مشروع أولاً")
             return
         
         try:
-            # Step A: Get the Selected Project
             project = self.selected_project
             
-            # Step B: Fetch Client Data
+            # جلب بيانات العميل
             client = self.client_service.get_client_by_id(project.client_id)
             if not client:
                 QMessageBox.warning(self, "خطأ", "لم يتم العثور على معلومات العميل")
                 return
             
-            # Step C: Get profitability data for paid/remaining amounts
-            profit_data = self.project_service.get_project_profitability(project.name)
+            # جلب الدفعات
+            payments_list = self._get_payments_list(project.name)
+            print(f"INFO: [ProjectManager] الدفعات المرسلة للقالب: {payments_list}")
             
-            # Step C2: Get payments for the project
-            payments_list = []
-            try:
-                payments = self.project_service.get_payments_for_project(project.name)
-                print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project.name}")
-                
-                for payment in payments:
-                    # Get account name from accounting service
-                    account_name = "نقدي"
-                    if hasattr(payment, 'account_id') and payment.account_id:
-                        try:
-                            # محاولة جلب الحساب بالكود أولاً (لأن account_id قد يكون كود الحساب)
-                            account = self.accounting_service.repo.get_account_by_code(payment.account_id)
-                            if account:
-                                account_name = account.name
-                            else:
-                                # محاولة جلب الحساب بالـ ID
-                                account = self.accounting_service.repo.get_account_by_id(payment.account_id)
-                                if account:
-                                    account_name = account.name
-                                else:
-                                    account_name = str(payment.account_id)
-                        except Exception as acc_err:
-                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
-                            account_name = str(payment.account_id)
-                    
-                    # تصحيح التاريخ
-                    payment_date = payment.date
-                    if hasattr(payment_date, 'strftime'):
-                        date_str = payment_date.strftime("%Y-%m-%d")
-                    elif isinstance(payment_date, str):
-                        date_str = payment_date[:10]
-                    else:
-                        date_str = str(payment_date)[:10]
-                    
-                    # تصحيح المبلغ
-                    try:
-                        amount_val = float(payment.amount)
-                    except (ValueError, TypeError, AttributeError):
-                        amount_val = 0.0
-                    
-                    payments_list.append({
-                        'date': date_str,
-                        'amount': amount_val,
-                        'method': payment.method if hasattr(payment, 'method') else account_name,
-                        'account_name': account_name,
-                        'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
-                    })
-                    
-                print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
-            except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # Step D: Prepare the complete data dictionary (same as print_invoice)
-            # توليد رقم الفاتورة من ID المشروع (نفس الطريقة المستخدمة في الجدول)
-            project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '0000'))
-            invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else "SW-0000"
-            
-            invoice_data = {
-                "invoice_number": invoice_number,
-                "invoice_date": project.start_date.strftime("%Y-%m-%d") if hasattr(project, 'start_date') and project.start_date else datetime.now().strftime("%Y-%m-%d"),
-                "due_date": project.end_date.strftime("%Y-%m-%d") if hasattr(project, 'end_date') and project.end_date else datetime.now().strftime("%Y-%m-%d"),
-                "client_name": client.name,
-                "client_phone": client.phone or "---",
-                "client_address": client.address or "---",
-                "project_name": project.name,
-                "date": datetime.now().strftime("%Y-%m-%d"),
-                "items": [
-                    {
-                        "name": item.description,
-                        "qty": float(item.quantity),
-                        "price": float(item.unit_price),
-                        "discount": float(item.discount_rate),
-                        "total": float(item.total)
-                    }
-                    for item in project.items
-                ],
-                # حساب المجموع الفرعي من البنود (مع الخصومات)
-                "subtotal": sum([float(item.total) for item in project.items]),
-                "grand_total": float(project.total_amount),
-                "total_paid": float(profit_data.get('total_paid', 0)),
-                "remaining_amount": float(profit_data.get('balance_due', 0)),
-                "remaining": float(profit_data.get('balance_due', 0)),
-                "total_amount": float(project.total_amount),
-                "payments": payments_list
+            # تجهيز معلومات العميل
+            client_info = {
+                'name': client.name,
+                'company_name': getattr(client, 'company_name', '') or '',
+                'phone': client.phone or "---",
+                'email': client.email or "",
+                'address': client.address or "---"
             }
             
-            # Step E: Use InvoicePrintingService to generate HTML preview
-            from services.invoice_printing_service import InvoicePrintingService
-            
-            # Get settings service for company data
-            settings_service = None
-            if self.service_service and hasattr(self.service_service, 'settings_service'):
-                settings_service = self.service_service.settings_service
-            
-            # Initialize printing service
-            printing_service = InvoicePrintingService(settings_service=settings_service)
-            
-            # Generate HTML content
-            context = printing_service._prepare_context(invoice_data)
-            template = printing_service.env.get_template("final_invoice.html")
-            html_content = template.render(**context)
-            
-            # Save to temporary file and open in browser
-            import tempfile
-            import webbrowser
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
-                f.write(html_content)
-                temp_file = f.name
-            
-            # Open in default browser
-            webbrowser.open(f'file:///{temp_file}')
-            
-            print(f"INFO: [ProjectManager] تم فتح معاينة الفاتورة في المتصفح: {temp_file}")
-            
-            QMessageBox.information(
-                self,
-                "✅ معاينة الفاتورة",
-                "تم فتح معاينة الفاتورة في المتصفح الافتراضي.\n\n"
-                "يمكنك طباعتها مباشرة من المتصفح (Ctrl+P)"
-            )
+            # استخدام template_service للمعاينة
+            if self.template_service:
+                success = self.template_service.preview_template(
+                    project=project,
+                    client_info=client_info,
+                    payments=payments_list
+                )
+                
+                if success:
+                    QMessageBox.information(
+                        self,
+                        "✅ معاينة الفاتورة",
+                        "تم فتح معاينة الفاتورة في المتصفح.\n\n"
+                        "يمكنك طباعتها من المتصفح (Ctrl+P)"
+                    )
+                else:
+                    QMessageBox.critical(self, "خطأ", "فشل في معاينة الفاتورة")
+            else:
+                QMessageBox.warning(self, "خطأ", "خدمة القوالب غير متوفرة")
         
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في معاينة الفاتورة:\n{str(e)}")

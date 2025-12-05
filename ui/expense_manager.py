@@ -118,6 +118,13 @@ class ExpenseManagerTab(QWidget):
         print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
         
         try:
+            # ⚡ معالجة الأحداث لمنع التجميد
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
+            # ⚡ تعطيل التحديثات للسرعة
+            self.expenses_table.setUpdatesEnabled(False)
+            
             self.expenses_list = self.expense_service.get_all_expenses()
             self.expenses_table.setRowCount(0)
 
@@ -152,9 +159,13 @@ class ExpenseManagerTab(QWidget):
 
             self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
             print(f"INFO: [ExpenseManager] تم جلب {len(self.expenses_list)} مصروف.")
+            
+            # ⚡ إعادة تفعيل التحديثات
+            self.expenses_table.setUpdatesEnabled(True)
 
         except Exception as e:
             print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {e}")
+            self.expenses_table.setUpdatesEnabled(True)
 
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""

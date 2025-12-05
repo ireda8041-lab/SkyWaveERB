@@ -1,16 +1,18 @@
 {
-  "version": "1.0.0",
-  "version_name": "الإصدار الأول - Sky Wave ERP",
-  "release_date": "2025-12-05",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/1.0.0/SkyWave-Setup-1.0.0.exe",
+  "version": "1.0.1",
+  "version_name": "تحسينات الفواتير - Sky Wave ERP",
+  "release_date": "2025-12-06",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/1.0.1/SkyWave-Setup-1.0.1.exe",
   "changelog": [
-    "الإصدار الأول من البرنامج",
-    "نظام إدارة العملاء والمشاريع",
-    "نظام المحاسبة والفواتير",
-    "المزامنة السحابية"
+    "تحسين قالب الفاتورة",
+    "إضافة طرق الدفع في الفاتورة",
+    "حفظ الفاتورة كـ PDF",
+    "رقم الفاتورة يبدأ من SW-97162",
+    "تكبير العلامة المائية",
+    "إصلاح عرض الدفعات"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "الإصدار الأول من Sky Wave ERP",
-  "notes_en": "First release of Sky Wave ERP"
+  "notes_ar": "تحسينات على قالب الفواتير وإضافة طرق الدفع",
+  "notes_en": "Invoice template improvements and payment methods"
 }

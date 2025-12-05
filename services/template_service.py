@@ -299,24 +299,61 @@ class TemplateService(BaseService):
             if not hasattr(project, 'tax_rate'):
                 setattr(project, 'tax_rate', 0)
             
-            # حساب الإجماليات - استخدم total_amount من المشروع مباشرة
-            # لأن المشروع يحتوي على الحسابات الصحيحة بالفعل
-            grand_total = float(getattr(project, 'total_amount', 0) or 0)
-            subtotal = float(getattr(project, 'subtotal', 0) or 0)
-            discount_amount = float(getattr(project, 'discount_amount', 0) or 0)
-            tax_amount = float(getattr(project, 'tax_amount', 0) or 0)
+            # ⚡ حساب الإجماليات بشكل صحيح:
+            # - gross_total = مجموع (الكمية × السعر) قبل أي خصم (الإجمالي الكلي)
+            # - grand_total = المبلغ النهائي بعد الخصم (الإجمالي الفرعي)
             
-            # إذا كان الإجمالي صفر، حاول الحساب من البنود
-            if grand_total == 0 and hasattr(project, 'items') and project.items and len(project.items) > 0:
-                items_subtotal = sum(item.total for item in project.items)
-                items_discount = items_subtotal * (project.discount_rate / 100)
-                items_taxable = items_subtotal - items_discount
-                items_tax = items_taxable * (project.tax_rate / 100)
-                grand_total = items_taxable + items_tax
-                subtotal = items_subtotal
-                discount_amount = items_discount
-                tax_amount = items_tax
-                print(f"INFO: [TemplateService] تم حساب الإجمالي من البنود: {grand_total}")
+            # حساب الإجمالي الكلي (قبل الخصم) من البنود
+            gross_total = 0.0
+            items_total_after_discount = 0.0
+            
+            if hasattr(project, 'items') and project.items and len(project.items) > 0:
+                for item in project.items:
+                    if isinstance(item, dict):
+                        qty = float(item.get('quantity', 1))
+                        price = float(item.get('unit_price', 0))
+                        item_total = float(item.get('total', 0))
+                    else:
+                        qty = float(getattr(item, 'quantity', 1))
+                        price = float(getattr(item, 'unit_price', 0))
+                        item_total = float(getattr(item, 'total', 0))
+                    
+                    gross_total += qty * price  # قبل الخصم
+                    items_total_after_discount += item_total  # بعد خصم البند
+            
+            # حساب إجمالي الخصم على البنود
+            items_discount = gross_total - items_total_after_discount
+            
+            # خصم إضافي على مستوى المشروع
+            project_discount_rate = float(getattr(project, 'discount_rate', 0) or 0)
+            project_discount = items_total_after_discount * (project_discount_rate / 100)
+            
+            # الإجمالي النهائي (بعد كل الخصومات)
+            taxable = items_total_after_discount - project_discount
+            tax_rate = float(getattr(project, 'tax_rate', 0) or 0)
+            tax_amount = taxable * (tax_rate / 100)
+            
+            # ⚡ استخدم الحسابات الجديدة دايماً (مش من المشروع)
+            grand_total = taxable + tax_amount
+            
+            # إجمالي الخصم الكلي = خصم البنود + خصم المشروع
+            discount_amount = items_discount + project_discount
+            
+            # إذا لم يكن هناك gross_total، استخدم subtotal من المشروع
+            if gross_total == 0:
+                gross_total = float(getattr(project, 'subtotal', 0) or 0)
+                if gross_total == 0:
+                    gross_total = grand_total + discount_amount
+            
+            print(f"INFO: [TemplateService] ====== حسابات الفاتورة ======")
+            print(f"INFO: [TemplateService] مجموع البنود (قبل خصم البند): {gross_total}")
+            print(f"INFO: [TemplateService] مجموع البنود (بعد خصم البند): {items_total_after_discount}")
+            print(f"INFO: [TemplateService] خصم البنود: {items_discount}")
+            print(f"INFO: [TemplateService] نسبة خصم المشروع: {project_discount_rate}%")
+            print(f"INFO: [TemplateService] مبلغ خصم المشروع: {project_discount}")
+            print(f"INFO: [TemplateService] إجمالي الخصم: {discount_amount}")
+            print(f"INFO: [TemplateService] الإجمالي النهائي: {grand_total}")
+            print(f"INFO: [TemplateService] ==============================")
             
             # إذا لا يزال صفر، استخدم مجموع الدفعات
             if grand_total == 0 and payments:
@@ -358,15 +395,21 @@ class TemplateService(BaseService):
                     'total': f"{grand_total:,.0f}"
                 })
             
-            # إنتاج رقم الفاتورة
+            # إنتاج رقم الفاتورة (SW-XXXXX - 5 أرقام فقط، يبدأ من 97162)
             try:
-                project_id = getattr(project, 'id', None) or (project.get('id') if isinstance(project, dict) else None)
-                if project_id:
-                    invoice_id = f"SW-{int(project_id):04d}"
+                # استخدم id المحلي (رقم) فقط
+                local_id = getattr(project, 'id', None)
+                if isinstance(project, dict):
+                    local_id = project.get('id')
+                
+                if local_id:
+                    # ⚡ الصيغة: 97161 + local_id (يبدأ من SW-97162)
+                    invoice_id = f"SW-{97161 + int(local_id)}"
                 else:
-                    invoice_id = f"SW-{datetime.now().strftime('%Y%m%d%H%M')}"
+                    # استخدم timestamp كرقم
+                    invoice_id = f"SW-{datetime.now().strftime('%H%M%S')}"
             except (AttributeError, KeyError, TypeError):
-                invoice_id = f"SW-{datetime.now().strftime('%Y%m%d%H%M')}"
+                invoice_id = f"SW-{datetime.now().strftime('%H%M%S')}"
             
             # تاريخ اليوم
             today = datetime.now().strftime("%Y-%m-%d")
@@ -410,7 +453,7 @@ class TemplateService(BaseService):
                     
                     payment_entry = {
                         'date': date_str,
-                        'amount': f"{amount:,.0f}",
+                        'amount': amount,  # ⚡ رقم مش string عشان القالب يقدر يعمل format
                         'method': method_value,
                         'account_name': account_name
                     }
@@ -469,6 +512,26 @@ class TemplateService(BaseService):
                 'project_duration': f"{getattr(project, 'duration_days', 0)} يوم" if getattr(project, 'duration_days', None) else "غير محدد",
             }
             
+            # ⚡ تحميل العلامة المائية
+            watermark_base64 = ""
+            watermark_path = "logo.png"
+            if os.path.exists(watermark_path):
+                try:
+                    with open(watermark_path, 'rb') as f:
+                        watermark_data = f.read()
+                        watermark_base64 = f"data:image/png;base64,{base64.b64encode(watermark_data).decode()}"
+                    print(f"INFO: [TemplateService] تم تحميل العلامة المائية من: {watermark_path}")
+                except Exception as e:
+                    print(f"WARNING: [TemplateService] فشل تحميل العلامة المائية: {e}")
+            
+            # ⚡ جلب ملاحظات المشروع
+            project_notes = getattr(project, 'project_notes', None) or (project.get('project_notes', '') if isinstance(project, dict) else '')
+            print(f"INFO: [TemplateService] ملاحظات المشروع: '{project_notes}'")
+            print(f"INFO: [TemplateService] discount_amount_raw: {discount_amount}")
+            
+            # ⚡ نسبة الخصم (تم حسابها مسبقاً في project_discount_rate)
+            discount_rate = project_discount_rate
+            
             return {
                 # معلومات الفاتورة
                 'invoice_id': invoice_id,
@@ -487,11 +550,15 @@ class TemplateService(BaseService):
                 'items': items,
                 
                 # الحسابات
-                'subtotal': f"{subtotal:,.0f}",
-                'discount_amount': f"{discount_amount:,.0f}" if discount_amount > 0 else "0",
-                'tax_amount': f"{tax_amount:,.0f}" if tax_amount > 0 else "0",
-                'grand_total': f"{grand_total:,.0f}",
-                'total_amount': f"{grand_total:,.0f}",  # للتوافق
+                # ⚡ subtotal = الإجمالي الكلي (قبل الخصم) = gross_total
+                # ⚡ grand_total = الإجمالي الفرعي (بعد الخصم)
+                'subtotal': f"{gross_total:,.2f}",
+                'discount_rate': f"{discount_rate:.0f}",
+                'discount_amount': f"{discount_amount:,.2f}" if discount_amount > 0 else "0",
+                'discount_amount_raw': discount_amount,  # للمقارنة في القالب
+                'tax_amount': f"{tax_amount:,.2f}" if tax_amount > 0 else "0",
+                'grand_total': f"{grand_total:,.2f}",
+                'total_amount': f"{grand_total:,.2f}",  # للتوافق
                 
                 # الدفعات
                 'payments': payments_list,
@@ -504,6 +571,12 @@ class TemplateService(BaseService):
                 
                 # معلومات المشروع
                 **project_data,
+                
+                # ⚡ ملاحظات المشروع
+                'project_notes': project_notes,
+                
+                # ⚡ العلامة المائية
+                'watermark_path': watermark_base64,
                 
                 # متغيرات للتحقق
                 'debug_grand_total': grand_total,
@@ -522,24 +595,151 @@ class TemplateService(BaseService):
         template_id: Optional[int] = None,
         payments: List[Dict[str, Any]] = None
     ) -> bool:
-        """معاينة القالب في المتصفح"""
+        """معاينة القالب - حفظ كـ PDF وفتحه"""
         try:
             # إنتاج HTML
             html_content = self.generate_invoice_html(project, client_info, template_id, payments)
             
-            # حفظ في ملف مؤقت
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
-                f.write(html_content)
-                temp_file = f.name
+            # ⚡ حفظ كـ PDF بدلاً من HTML
+            # تحديد مجلد الصادرات
+            import sys
+            from pathlib import Path
             
-            # فتح في المتصفح
-            webbrowser.open(f'file://{temp_file}')
+            if getattr(sys, 'frozen', False):
+                install_path = Path(sys.executable).parent
+            else:
+                install_path = Path.cwd()
             
-            print(f"INFO: تم فتح معاينة القالب: {temp_file}")
-            return True
+            exports_dir = install_path / "exports"
+            exports_dir.mkdir(parents=True, exist_ok=True)
+            
+            # توليد اسم الملف - (اسم الشركة أو العميل) - اسم المشروع
+            company_name = client_info.get('company_name', '')
+            client_name = client_info.get('name', '')
+            project_name = getattr(project, 'name', 'project') if not isinstance(project, dict) else project.get('name', 'project')
+            
+            # استخدم اسم الشركة لو موجود، وإلا اسم العميل
+            display_name = company_name if company_name else client_name
+            display_name = self._sanitize_filename(display_name) if display_name else 'client'
+            project_name_safe = self._sanitize_filename(project_name) if project_name else 'project'
+            
+            filename = f"{display_name} - {project_name_safe}"
+            
+            # توليد PDF
+            pdf_path = self._generate_pdf(html_content, str(exports_dir), filename)
+            
+            if pdf_path and os.path.exists(pdf_path):
+                # فتح PDF
+                self._open_file(pdf_path)
+                print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
+                return True
+            else:
+                print(f"ERROR: [TemplateService] فشل إنشاء PDF")
+                return False
         
         except Exception as e:
             print(f"ERROR: خطأ في معاينة القالب: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _sanitize_filename(self, name: str) -> str:
+        """تنظيف اسم الملف من الأحرف غير المسموحة"""
+        safe_name = "".join(c for c in str(name) if c.isalnum() or c in (' ', '_', '-')).strip()
+        safe_name = safe_name.replace(' ', '_')
+        return safe_name[:50] if safe_name else 'invoice'
+    
+    def _generate_pdf(self, html_content: str, exports_dir: str, filename: str) -> Optional[str]:
+        """توليد PDF من HTML"""
+        pdf_path = os.path.join(exports_dir, f"{filename}.pdf")
+        
+        # محاولة 1: استخدام WeasyPrint
+        try:
+            from weasyprint import HTML, CSS
+            print(f"INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
+            HTML(string=html_content, base_url=self.templates_dir).write_pdf(
+                pdf_path,
+                stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
+            )
+            print(f"✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
+            return pdf_path
+        except ImportError:
+            print(f"WARNING: [TemplateService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+        
+        # محاولة 2: استخدام PyQt6
+        try:
+            print(f"INFO: [TemplateService] استخدام PyQt6 لتوليد PDF...")
+            return self._generate_pdf_with_qt(html_content, pdf_path)
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+        
+        # محاولة 3: حفظ HTML كـ fallback
+        html_path = os.path.join(exports_dir, f"{filename}.html")
+        try:
+            print(f"INFO: [TemplateService] حفظ HTML كـ fallback...")
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"⚠️ [TemplateService] تم حفظ HTML: {html_path}")
+            return html_path
+        except Exception as e:
+            print(f"ERROR: [TemplateService] فشل حفظ HTML: {e}")
+            return None
+    
+    def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> Optional[str]:
+        """توليد PDF باستخدام PyQt6"""
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QUrl, QEventLoop, QTimer
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+            
+            app = QApplication.instance()
+            if not app:
+                app = QApplication([])
+            
+            web_view = QWebEngineView()
+            pdf_generated = [False]
+            
+            def on_load_finished(ok):
+                if ok:
+                    web_view.page().printToPdf(pdf_path)
+                    pdf_generated[0] = True
+                else:
+                    print(f"ERROR: [TemplateService] فشل تحميل HTML")
+            
+            web_view.loadFinished.connect(on_load_finished)
+            web_view.setHtml(html_content, QUrl.fromLocalFile(self.templates_dir + "/"))
+            
+            loop = QEventLoop()
+            QTimer.singleShot(3000, loop.quit)
+            loop.exec()
+            
+            if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
+                print(f"✅ [TemplateService] تم إنشاء PDF باستخدام PyQt6")
+                return pdf_path
+            
+            return None
+        except ImportError as e:
+            print(f"WARNING: [TemplateService] PyQt6 WebEngine غير متوفر: {e}")
+            return None
+        except Exception as e:
+            print(f"ERROR: [TemplateService] خطأ في PyQt6: {e}")
+            return None
+    
+    def _open_file(self, file_path: str) -> bool:
+        """فتح الملف في البرنامج الافتراضي"""
+        try:
+            import sys
+            if sys.platform == 'win32':
+                os.startfile(file_path)
+            elif sys.platform == 'darwin':
+                os.system(f'open "{file_path}"')
+            else:
+                os.system(f'xdg-open "{file_path}"')
+            return True
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل فتح الملف: {e}")
             return False
     
     def save_invoice_html(
