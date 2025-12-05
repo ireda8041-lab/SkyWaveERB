@@ -1,5 +1,6 @@
 # الملف: ui/client_editor_dialog.py
 
+import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit,
     QPushButton, QLabel, QMessageBox, QGroupBox, QHBoxLayout,
@@ -150,8 +151,15 @@ class ClientEditorDialog(QDialog):
         self.client_type_combo.setCurrentText(self.client_to_edit.client_type or "فرد")
         self.work_field_input.setText(self.client_to_edit.work_field or "")
 
+        # ⚡ عرض حالة الصورة (من logo_data أو logo_path)
+        has_logo_data = hasattr(self.client_to_edit, 'logo_data') and self.client_to_edit.logo_data
         logo_path = self.client_to_edit.logo_path or ""
-        if logo_path:
+        
+        if has_logo_data:
+            # الصورة محفوظة في قاعدة البيانات كـ base64
+            self.logo_path_label.setText("✅ صورة محفوظة في قاعدة البيانات")
+            self.logo_path_label.setStyleSheet("font-style: normal; color: #10B981; font-weight: bold;")
+        elif logo_path:
             self.logo_path_label.setText(logo_path)
             self.logo_path_label.setStyleSheet("font-style: normal; color: #111827;")
         else:
@@ -161,11 +169,73 @@ class ClientEditorDialog(QDialog):
         self.notes_input.setText(self.client_to_edit.client_notes or "")
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
 
+    def _convert_image_to_base64(self, image_path: str) -> str:
+        """تحويل صورة إلى base64 للحفظ في قاعدة البيانات"""
+        import base64
+        import os
+        
+        if not image_path or not os.path.exists(image_path):
+            return ""
+        
+        try:
+            # قراءة الصورة وتحويلها
+            with open(image_path, "rb") as img_file:
+                img_data = img_file.read()
+            
+            # ضغط الصورة إذا كانت كبيرة (أكثر من 500KB)
+            if len(img_data) > 500 * 1024:
+                from PyQt6.QtGui import QPixmap, QImage
+                from PyQt6.QtCore import QBuffer, QIODevice
+                
+                pixmap = QPixmap(image_path)
+                # تصغير الصورة إلى 300x300 كحد أقصى
+                scaled = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                scaled.save(buffer, "PNG", 80)  # جودة 80%
+                img_data = buffer.data().data()
+            
+            # تحويل إلى base64
+            base64_str = base64.b64encode(img_data).decode('utf-8')
+            
+            # إضافة prefix للتعرف على نوع الصورة
+            ext = os.path.splitext(image_path)[1].lower()
+            mime_type = {
+                '.png': 'image/png',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.gif': 'image/gif'
+            }.get(ext, 'image/png')
+            
+            return f"data:{mime_type};base64,{base64_str}"
+            
+        except Exception as e:
+            print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
+            return ""
+    
     def get_form_data(self) -> Dict[str, Any]:
         """ يجمع البيانات من الحقول """
         status = schemas.ClientStatus.ACTIVE if self.status_checkbox.isChecked() else schemas.ClientStatus.ARCHIVED
         logo_text = self.logo_path_label.text()
-        logo_value = "" if "لم يتم" in logo_text else logo_text
+        
+        # ⚡ تحديد مسار الصورة (تجاهل النص التوضيحي)
+        logo_value = ""
+        if logo_text and "لم يتم" not in logo_text and "محفوظة في قاعدة البيانات" not in logo_text:
+            logo_value = logo_text
+        
+        # ⚡ تحويل الصورة إلى base64 للحفظ في قاعدة البيانات
+        logo_data = ""
+        
+        # حالة 1: تم اختيار صورة جديدة (مسار ملف)
+        if logo_value and os.path.exists(logo_value):
+            logo_data = self._convert_image_to_base64(logo_value)
+            print(f"INFO: تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
+        # حالة 2: الاحتفاظ بالصورة القديمة (عند التعديل)
+        elif self.is_editing and self.client_to_edit and hasattr(self.client_to_edit, 'logo_data'):
+            logo_data = self.client_to_edit.logo_data or ""
+            if logo_data:
+                print(f"INFO: الاحتفاظ بالصورة القديمة ({len(logo_data)} حرف)")
 
         return {
             "name": self.name_input.text(),
@@ -178,7 +248,8 @@ class ClientEditorDialog(QDialog):
             "status": status,
             "client_type": self.client_type_combo.currentText(),
             "work_field": self.work_field_input.text(),
-            "logo_path": logo_value,
+            "logo_path": logo_value,  # مسار الصورة المحلي (للتوافق)
+            "logo_data": logo_data,   # ⚡ بيانات الصورة بصيغة base64 (للمزامنة)
             "client_notes": self.notes_input.toPlainText(),
         }
 

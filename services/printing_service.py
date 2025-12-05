@@ -796,8 +796,15 @@ class PrintingService:
     def _html_to_pdf(self, html_content: str, filename_prefix: str, client_phone: str = None) -> Optional[str]:
         """تحويل HTML إلى PDF"""
         try:
-            # إنشاء مجلد الصادرات إذا لم يكن موجوداً
-            exports_dir = "exports"
+            # ⚡ حفظ الفواتير في مجلد exports داخل مسار التثبيت
+            if getattr(sys, 'frozen', False):
+                # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
+                install_path = os.path.dirname(sys.executable)
+            else:
+                # البرنامج يعمل من Python
+                install_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            exports_dir = os.path.join(install_path, "exports")
             if not os.path.exists(exports_dir):
                 os.makedirs(exports_dir)
             
@@ -918,7 +925,14 @@ class PrintingService:
     def _open_exports_folder(self):
         """فتح مجلد exports تلقائياً"""
         try:
-            exports_dir = os.path.abspath("exports")
+            # ⚡ فتح مجلد exports داخل مسار التثبيت
+            if getattr(sys, 'frozen', False):
+                install_path = os.path.dirname(sys.executable)
+            else:
+                install_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            exports_dir = os.path.join(install_path, "exports")
+            
             if os.path.exists(exports_dir):
                 if platform.system() == 'Windows':
                     os.startfile(exports_dir)

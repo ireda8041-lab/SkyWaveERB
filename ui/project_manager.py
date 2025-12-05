@@ -1131,6 +1131,39 @@ class ProjectManagerTab(QWidget):
         self.preview_expenses_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         preview_layout.addWidget(self.preview_expenses_table)
 
+        # جدول المهام المرتبطة بالمشروع
+        tasks_header_layout = QHBoxLayout()
+        tasks_label = QLabel("<b>📋 المهام المرتبطة:</b>")
+        tasks_header_layout.addWidget(tasks_label)
+        tasks_header_layout.addStretch()
+        
+        self.add_task_btn = QPushButton("➕ مهمة جديدة")
+        self.add_task_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #8B2CF5;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #7c3aed;
+            }
+        """)
+        self.add_task_btn.clicked.connect(self._on_add_task_for_project)
+        tasks_header_layout.addWidget(self.add_task_btn)
+        preview_layout.addLayout(tasks_header_layout)
+        
+        self.preview_tasks_table = QTableWidget()
+        self.preview_tasks_table.setColumnCount(4)
+        self.preview_tasks_table.setHorizontalHeaderLabels(["المهمة", "الأولوية", "الحالة", "تاريخ الاستحقاق"])
+        self.preview_tasks_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.preview_tasks_table.setMaximumHeight(120)
+        self.preview_tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.preview_tasks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        preview_layout.addWidget(self.preview_tasks_table)
+
         main_layout.addWidget(self.preview_groupbox, 1)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
@@ -1194,6 +1227,9 @@ class ProjectManagerTab(QWidget):
             self.print_button.setEnabled(True)
             self.preview_template_button.setEnabled(True)  # ✅ تفعيل زرار المعاينة
             self.preview_groupbox.setVisible(True)
+            
+            # حفظ ID المشروع للمهام
+            project_id_for_tasks = getattr(self.selected_project, 'id', None) or getattr(self.selected_project, '_mongo_id', project_name)
             
             # (1. جلب الأرقام الرئيسية)
             profit_data = self.project_service.get_project_profitability(project_name)
@@ -1286,6 +1322,13 @@ class ProjectManagerTab(QWidget):
                 print(f"ERROR: [ProjectManager] فشل تحميل المصروفات: {e}")
                 import traceback
                 traceback.print_exc()
+            
+            # (4. جلب المهام المرتبطة بالمشروع)
+            try:
+                self._load_project_tasks(project_id_for_tasks)
+            except Exception as e:
+                print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
+            
             return
 
         self.selected_project = None
@@ -1299,14 +1342,7 @@ class ProjectManagerTab(QWidget):
     def load_projects_data(self):
         print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
         
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
         try:
-            # ⚡ تحديث حالات المشاريع أوتوماتيك قبل التحميل
-            self.project_service.update_all_projects_status()
-            
             # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
             self.projects_table.setSortingEnabled(False)
             
@@ -1340,6 +1376,100 @@ class ProjectManagerTab(QWidget):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
         print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
         self.load_projects_data()
+
+    def _load_project_tasks(self, project_id: str):
+        """تحميل المهام المرتبطة بالمشروع"""
+        try:
+            from ui.todo_manager import TaskService
+            task_service = TaskService()
+            tasks = task_service.get_tasks_by_project(str(project_id))
+            
+            self.preview_tasks_table.setRowCount(0)
+            
+            if tasks and len(tasks) > 0:
+                for i, task in enumerate(tasks):
+                    self.preview_tasks_table.insertRow(i)
+                    
+                    # عنوان المهمة
+                    self.preview_tasks_table.setItem(i, 0, QTableWidgetItem(task.title))
+                    
+                    # الأولوية
+                    priority_item = QTableWidgetItem(task.priority.value)
+                    priority_colors = {
+                        "منخفضة": QColor("#10B981"),
+                        "متوسطة": QColor("#0A6CF1"),
+                        "عالية": QColor("#FF6636"),
+                        "عاجلة": QColor("#FF4FD8")
+                    }
+                    priority_item.setForeground(priority_colors.get(task.priority.value, QColor("white")))
+                    self.preview_tasks_table.setItem(i, 1, priority_item)
+                    
+                    # الحالة
+                    status_item = QTableWidgetItem(task.status.value)
+                    status_colors = {
+                        "قيد الانتظار": QColor("#B0C4DE"),
+                        "قيد التنفيذ": QColor("#FF6636"),
+                        "مكتملة": QColor("#10B981"),
+                        "ملغاة": QColor("#FF4FD8")
+                    }
+                    status_item.setForeground(status_colors.get(task.status.value, QColor("white")))
+                    self.preview_tasks_table.setItem(i, 2, status_item)
+                    
+                    # تاريخ الاستحقاق
+                    due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
+                    self.preview_tasks_table.setItem(i, 3, QTableWidgetItem(due_str))
+            else:
+                self.preview_tasks_table.insertRow(0)
+                no_data_item = QTableWidgetItem("لا توجد مهام مرتبطة")
+                no_data_item.setForeground(QColor("gray"))
+                self.preview_tasks_table.setItem(0, 0, no_data_item)
+                self.preview_tasks_table.setSpan(0, 0, 1, 4)
+                
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
+            self.preview_tasks_table.setRowCount(0)
+            self.preview_tasks_table.insertRow(0)
+            no_data_item = QTableWidgetItem("فشل تحميل المهام")
+            no_data_item.setForeground(QColor("red"))
+            self.preview_tasks_table.setItem(0, 0, no_data_item)
+            self.preview_tasks_table.setSpan(0, 0, 1, 4)
+
+    def _on_add_task_for_project(self):
+        """إضافة مهمة جديدة مرتبطة بالمشروع المحدد"""
+        if not self.selected_project:
+            QMessageBox.information(self, "تنبيه", "الرجاء اختيار مشروع أولاً")
+            return
+        
+        try:
+            from ui.todo_manager import TaskEditorDialog, TaskService, Task
+            
+            # إنشاء مهمة جديدة مع ربطها بالمشروع
+            project_id = getattr(self.selected_project, 'id', None) or getattr(self.selected_project, '_mongo_id', self.selected_project.name)
+            
+            dialog = TaskEditorDialog(
+                parent=self,
+                project_service=self.project_service,
+                client_service=self.client_service
+            )
+            
+            # تحديد المشروع مسبقاً
+            for i in range(dialog.project_combo.count()):
+                if dialog.project_combo.itemData(i) == str(project_id):
+                    dialog.project_combo.setCurrentIndex(i)
+                    break
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                task = dialog.get_task()
+                if task:
+                    task_service = TaskService()
+                    task_service.add_task(task)
+                    # تحديث جدول المهام
+                    self._load_project_tasks(str(project_id))
+                    print(f"INFO: [ProjectManager] تم إضافة مهمة للمشروع: {task.title}")
+                    
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل إضافة مهمة: {e}")
+            QMessageBox.warning(self, "خطأ", f"فشل إضافة المهمة: {str(e)}")
 
     def _format_date(self, value) -> str:
         if not value:

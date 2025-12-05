@@ -24,6 +24,11 @@ class AccountingService:
     DISCOUNT_ALLOWED_CODE = "4300"  # حساب إيرادات حملات إعلانية
     VAT_PAYABLE_CODE = "2100"  # حساب ضريبة القيمة المضافة (دائن - خصوم)
     CASH_ACCOUNT_CODE = "1101"  # حساب الخزنة الرئيسية (مدين عند التحصيل)
+    
+    # ⚡ Cache للشجرة المحاسبية
+    _hierarchy_cache = None
+    _hierarchy_cache_time = 0
+    _HIERARCHY_CACHE_TTL = 60  # 60 ثانية
 
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
@@ -70,16 +75,21 @@ class AccountingService:
             logger.error(f"[AccountingService] فشل جلب قيود اليومية: {e}", exc_info=True)
             return []
 
-    def get_hierarchy_with_balances(self) -> Dict[str, dict]:
+    def get_hierarchy_with_balances(self, force_refresh: bool = False) -> Dict[str, dict]:
         """
-        جلب شجرة الحسابات مع حساب الأرصدة التراكمية للمجموعات
-        
-        هذه الدالة تحسب أرصدة الحسابات من القيود المحاسبية (الطريقة الصحيحة)
-        ثم تجمع أرصدة الحسابات الفرعية للمجموعات بشكل تكراري
+        ⚡ جلب شجرة الحسابات مع حساب الأرصدة التراكمية للمجموعات (مع cache)
         
         Returns:
             Dict[code, {obj: Account, total: float, children: []}]
         """
+        import time
+        
+        # ⚡ استخدام الـ cache إذا كان صالحاً
+        current_time = time.time()
+        if not force_refresh and AccountingService._hierarchy_cache and (current_time - AccountingService._hierarchy_cache_time) < AccountingService._HIERARCHY_CACHE_TTL:
+            print("INFO: [AccountingService] استخدام cache الشجرة المحاسبية")
+            return AccountingService._hierarchy_cache
+        
         print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
         
         try:
@@ -88,13 +98,6 @@ class AccountingService:
             if not accounts:
                 print("WARNING: [AccountingService] لا توجد حسابات")
                 return {}
-            
-            # ⚡ منع التجميد - معالجة الأحداث كل 50 حساب
-            try:
-                from PyQt6.QtWidgets import QApplication
-                process_events = lambda: QApplication.processEvents()
-            except Exception:
-                process_events = lambda: None
             
             # 1. حساب الأرصدة من القيود المحاسبية
             account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
@@ -223,9 +226,10 @@ class AccountingService:
             
             # طباعة ملخص للتأكد
             print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")
-            for code in ['1000', '2000', '3000', '4000', '5000']:
-                if code in tree_map:
-                    print(f"  - {code} ({tree_map[code]['obj'].name}): {tree_map[code]['total']:,.2f}")
+            
+            # ⚡ حفظ في الـ cache
+            AccountingService._hierarchy_cache = tree_map
+            AccountingService._hierarchy_cache_time = time.time()
             
             return tree_map
             

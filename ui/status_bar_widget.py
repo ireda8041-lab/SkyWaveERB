@@ -209,6 +209,9 @@ class ToastNotification(QWidget):
 class StatusBarWidget(QWidget):
     """شريط الحالة الرئيسي"""
     
+    # إشارة تسجيل الخروج
+    logout_requested = pyqtSignal()
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.notifications = []
@@ -272,7 +275,32 @@ class StatusBarWidget(QWidget):
         separator2.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
         layout.addWidget(separator2)
         
-        # 5. RIGHT SIDE - معلومات النظام (رقم الإصدار الديناميكي)
+        # 5. RIGHT SIDE - زر تسجيل الخروج
+        self.logout_btn = QPushButton("🚪 تسجيل خروج")
+        self.logout_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.logout_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['danger']};
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: #D430B0;
+            }}
+        """)
+        layout.addWidget(self.logout_btn)
+        
+        # فاصل
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.Shape.VLine)
+        separator3.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
+        layout.addWidget(separator3)
+        
+        # 6. معلومات النظام (رقم الإصدار الديناميكي)
         from version import CURRENT_VERSION
         self.system_info = QLabel(f"Sky Wave ERP v{CURRENT_VERSION}")
         self.system_info.setFont(QFont("Segoe UI", 9))
@@ -280,6 +308,9 @@ class StatusBarWidget(QWidget):
         layout.addWidget(self.system_info)
         
         self.setLayout(layout)
+        
+        # ربط زر تسجيل الخروج
+        self.logout_btn.clicked.connect(self.logout_requested.emit)
         
         # ✅ إعدادات الحجم الثابت
         self.setMinimumHeight(35)

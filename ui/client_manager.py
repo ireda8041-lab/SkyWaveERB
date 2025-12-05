@@ -258,10 +258,6 @@ class ClientManagerTab(QWidget):
         """⚡ تحميل بيانات العملاء بشكل محسّن للسرعة"""
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
         
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
         try:
             if self.show_archived_checkbox.isChecked():
                 self.clients_list = self.client_service.get_archived_clients()
@@ -272,61 +268,30 @@ class ClientManagerTab(QWidget):
             self.clients_table.setSortingEnabled(False)
             self.clients_table.setRowCount(0)
 
-            # ⚡ حساب الإجماليات بدون جلب كل الفواتير (استعلام SQL مباشر محسّن)
+            # ⚡ استعلامات SQL مبسطة للسرعة
             client_invoices_total = {}
             client_payments_total = {}
             
             try:
-                # ⚡ استعلام لحساب إجمالي المشاريع (total_amount) لكل عميل
-                # نأخذ أحدث قيمة لكل مشروع بناءً على last_modified
+                # ⚡ استعلام بسيط لإجمالي المشاريع
                 self.client_service.repo.sqlite_cursor.execute("""
                     SELECT client_id, SUM(total_amount) as total_projects
-                    FROM (
-                        SELECT p1._mongo_id, p1.client_id, p1.total_amount
-                        FROM projects p1
-                        INNER JOIN (
-                            SELECT _mongo_id, MAX(last_modified) as max_date
-                            FROM projects
-                            WHERE _mongo_id IS NOT NULL AND _mongo_id != ''
-                            GROUP BY _mongo_id
-                        ) p2 ON p1._mongo_id = p2._mongo_id AND p1.last_modified = p2.max_date
-                        WHERE p1.status != 'مؤرشف' AND p1.status != 'ملغي'
-                        GROUP BY p1._mongo_id
-                    )
+                    FROM projects
+                    WHERE status != 'مؤرشف' AND status != 'ملغي'
                     GROUP BY client_id
                 """)
-                client_projects_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 
-                # ⚡ استعلام لحساب إجمالي المدفوعات لكل عميل من جدول الدفعات
-                # نأخذ أحدث قيمة لكل دفعة بناءً على last_modified
+                # ⚡ استعلام بسيط لإجمالي المدفوعات
                 self.client_service.repo.sqlite_cursor.execute("""
                     SELECT client_id, SUM(amount) as total_paid
-                    FROM (
-                        SELECT p1._mongo_id, p1.client_id, p1.amount
-                        FROM payments p1
-                        INNER JOIN (
-                            SELECT _mongo_id, MAX(last_modified) as max_date
-                            FROM payments
-                            WHERE _mongo_id IS NOT NULL AND _mongo_id != ''
-                            GROUP BY _mongo_id
-                        ) p2 ON p1._mongo_id = p2._mongo_id AND p1.last_modified = p2.max_date
-                        WHERE p1.client_id IS NOT NULL AND p1.client_id != ''
-                        GROUP BY p1._mongo_id
-                    )
+                    FROM payments
+                    WHERE client_id IS NOT NULL AND client_id != ''
                     GROUP BY client_id
                 """)
                 client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
-                
-                # استخدام client_projects_total
-                client_invoices_total = client_projects_total
-                
-                print(f"INFO: [ClientManager] === إجماليات العملاء ===")
-                print(f"INFO: [ClientManager] مشاريع: {len(client_invoices_total)} عميل")
-                print(f"INFO: [ClientManager] مدفوعات: {len(client_payments_total)} عميل")
-                for name, total in client_invoices_total.items():
-                    print(f"  📄 {name}: مشاريع={total:,.0f}, مدفوعات={client_payments_total.get(name, 0):,.0f}")
             except Exception as e:
                 print(f"ERROR: فشل حساب الإجماليات: {e}")
                 import traceback
@@ -337,8 +302,32 @@ class ClientManagerTab(QWidget):
 
                 logo_label = QLabel()
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                if client.logo_path and os.path.exists(client.logo_path):
-                    pixmap = QPixmap(client.logo_path)
+                
+                pixmap = None
+                
+                # أولاً: محاولة تحميل الصورة من base64 (للمزامنة بين الأجهزة)
+                if hasattr(client, 'logo_data') and client.logo_data:
+                    try:
+                        import base64
+                        # إزالة prefix إذا وجد
+                        logo_data = client.logo_data
+                        if ',' in logo_data:
+                            logo_data = logo_data.split(',')[1]
+                        
+                        img_bytes = base64.b64decode(logo_data)
+                        pixmap = QPixmap()
+                        pixmap.loadFromData(img_bytes)
+                    except Exception as e:
+                        print(f"WARNING: فشل تحميل صورة العميل من base64: {e}")
+                        pixmap = None
+                
+                # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
+                if not pixmap or pixmap.isNull():
+                    if client.logo_path and os.path.exists(client.logo_path):
+                        pixmap = QPixmap(client.logo_path)
+                
+                # عرض الصورة أو أيقونة افتراضية
+                if pixmap and not pixmap.isNull():
                     scaled_pixmap = pixmap.scaled(
                         QSize(50, 50),
                         Qt.AspectRatioMode.KeepAspectRatio,
@@ -346,8 +335,8 @@ class ClientManagerTab(QWidget):
                     )
                     logo_label.setPixmap(scaled_pixmap)
                 else:
-                    logo_label.setText("🚫")
-                    logo_label.setStyleSheet("font-size: 20px; color: #888;")
+                    logo_label.setText("👤")
+                    logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
 
                 self.clients_table.setCellWidget(index, 0, logo_label)
 

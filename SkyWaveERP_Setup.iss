@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "25.12.51"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Sky Wave Ads"
 #define MyAppURL "https://skywaveads.com"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -25,10 +25,12 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 
-; مسارات التثبيت
-DefaultDirName={autopf}\{#MyAppName}
+; مسارات التثبيت - افتراضياً في D: لتجنب مشاكل الصلاحيات
+DefaultDirName=D:\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; السماح للمستخدم بتغيير مسار التثبيت
+DisableDirPage=no
 
 ; ملفات الإخراج
 OutputDir=installer_output
@@ -50,8 +52,8 @@ WizardStyle=modern
 WizardSizePercent=120
 DisableWelcomePage=no
 
-; صلاحيات المدير
-PrivilegesRequired=admin
+; صلاحيات - lowest لأن التثبيت في D: مش محتاج Admin
+PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
 ; إلغاء التثبيت

@@ -245,17 +245,8 @@ class AccountingManagerTab(QWidget):
         pass
     
     def load_accounts_data(self):
-        """
-        تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية
-        
-        يستخدم get_hierarchy_with_balances() لحساب أرصدة المجموعات
-        عن طريق جمع أرصدة الحسابات الفرعية بشكل تكراري
-        """
-        print("INFO: [AccManager] جاري تحميل شجرة الحسابات مع الأرصدة التراكمية...")
-        
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
+        """⚡ تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية"""
+        print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
         
         try:
             # ✨ استخدام الدالة الجديدة للحصول على الأرصدة المحسوبة

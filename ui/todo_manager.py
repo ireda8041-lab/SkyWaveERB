@@ -142,31 +142,36 @@ class TaskService:
         return cls._instance
     
     def __init__(self, repository=None):
-        if self._initialized:
+        # استخدام Repository المُمرر أو الـ class-level repository
+        if repository:
+            self._repository = repository
+            TaskService._repository = repository
+        elif TaskService._repository:
+            self._repository = TaskService._repository
+        
+        if self._initialized and self._repository:
             return
         
         self._initialized = True
         self.tasks: List[Task] = []
         
-        # استخدام Repository المُمرر أو إنشاء واحد جديد
-        if repository:
-            self._repository = repository
-        else:
-            try:
-                from core.repository import Repository
-                self._repository = Repository()
-            except Exception as e:
-                print(f"WARNING: [TaskService] فشل الاتصال بقاعدة البيانات: {e}")
-                self._repository = None
+        if not self._repository:
+            print(f"WARNING: [TaskService] لم يتم تعيين Repository - المهام لن تُحفظ في قاعدة البيانات")
         
-        self.load_tasks()
+        if self._repository:
+            self.load_tasks()
     
     @classmethod
     def set_repository(cls, repository):
         """تعيين Repository من الخارج"""
         cls._repository = repository
         if cls._instance:
-            cls._instance.load_tasks()
+            cls._instance._repository = repository  # تحديث الـ instance أيضاً
+            cls._instance._initialized = True
+            try:
+                cls._instance.load_tasks()
+            except Exception as e:
+                print(f"WARNING: [TaskService] فشل تحميل المهام بعد تعيين Repository: {e}")
     
     def load_tasks(self):
         """تحميل المهام من قاعدة البيانات"""
@@ -266,6 +271,9 @@ class TaskService:
                 task_dict = self._task_to_dict(task)
                 result = self._repository.create_task(task_dict)
                 task.id = result.get('id', task.id)
+                print(f"INFO: [TaskService] تم حفظ المهمة في قاعدة البيانات: {task.title}")
+            else:
+                print(f"WARNING: [TaskService] لا يوجد Repository - المهمة محفوظة محلياً فقط")
             
             self.tasks.append(task)
             # ⚡ إرسال إشارة التحديث
@@ -278,6 +286,8 @@ class TaskService:
             return task
         except Exception as e:
             print(f"ERROR: [TaskService] فشل إضافة المهمة: {e}")
+            import traceback
+            traceback.print_exc()
             return task
     
     def update_task(self, task: Task):
@@ -401,9 +411,11 @@ class TaskItemWidget(QFrame):
     status_changed = pyqtSignal(str, TaskStatus)
     delete_requested = pyqtSignal(str)
     
-    def __init__(self, task: Task, parent=None):
+    def __init__(self, task: Task, parent=None, project_name: str = "", client_name: str = ""):
         super().__init__(parent)
         self.task = task
+        self.project_name = project_name or task.related_project
+        self.client_name = client_name or task.related_client
         self.init_ui()
     
     def init_ui(self):
@@ -561,10 +573,16 @@ class TaskItemWidget(QFrame):
             info_layout.addWidget(due_label)
         
         # المشروع المرتبط
-        if self.task.related_project:
-            project_label = QLabel(f"📋 {self.task.related_project}")
+        if self.project_name:
+            project_label = QLabel(f"📋 {self.project_name}")
             project_label.setStyleSheet(f"color: {COLORS['primary']}; font-size: 10px; background: transparent;")
             info_layout.addWidget(project_label)
+        
+        # العميل المرتبط
+        if self.client_name:
+            client_label = QLabel(f"👤 {self.client_name}")
+            client_label.setStyleSheet(f"color: {COLORS['success']}; font-size: 10px; background: transparent;")
+            info_layout.addWidget(client_label)
         
         info_layout.addStretch()
         
@@ -604,11 +622,18 @@ class TaskItemWidget(QFrame):
 class TaskEditorDialog(QDialog):
     """نافذة إضافة/تعديل مهمة"""
     
-    def __init__(self, task: Optional[Task] = None, parent=None):
+    def __init__(self, task: Optional[Task] = None, parent=None, project_service=None, client_service=None):
         super().__init__(parent)
         self.task = task
         self.is_editing = task is not None
         self.result_task: Optional[Task] = None
+        self.project_service = project_service
+        self.client_service = client_service
+        
+        # تحميل قوائم المشاريع والعملاء
+        self.projects_list = []
+        self.clients_list = []
+        self._load_projects_and_clients()
         
         self.setWindowTitle("تعديل مهمة" if self.is_editing else "مهمة جديدة")
         self.setMinimumWidth(500)
@@ -626,6 +651,22 @@ class TaskEditorDialog(QDialog):
         
         if self.is_editing:
             self.load_task_data()
+    
+    def _load_projects_and_clients(self):
+        """تحميل قوائم المشاريع والعملاء من الخدمات"""
+        try:
+            if self.project_service:
+                projects = self.project_service.get_all_projects()
+                self.projects_list = [(p.id, p.name) for p in projects if hasattr(p, 'id') and hasattr(p, 'name')]
+        except Exception as e:
+            print(f"WARNING: [TaskEditor] فشل تحميل المشاريع: {e}")
+        
+        try:
+            if self.client_service:
+                clients = self.client_service.get_all_clients()
+                self.clients_list = [(c.id, c.name) for c in clients if hasattr(c, 'id') and hasattr(c, 'name')]
+        except Exception as e:
+            print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
     
     def init_ui(self):
         """تهيئة الواجهة"""
@@ -695,17 +736,27 @@ class TaskEditorDialog(QDialog):
         
         form_layout.addRow("تاريخ الاستحقاق:", date_layout)
         
-        # المشروع المرتبط
-        self.project_input = QLineEdit()
-        self.project_input.setPlaceholderText("اسم المشروع (اختياري)...")
-        self.project_input.setStyleSheet(self._get_input_style())
-        form_layout.addRow("المشروع:", self.project_input)
+        # المشروع المرتبط (ComboBox مع إمكانية البحث)
+        self.project_combo = QComboBox()
+        self.project_combo.setEditable(True)
+        self.project_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.project_combo.addItem("-- بدون مشروع --", "")
+        for project_id, project_name in self.projects_list:
+            self.project_combo.addItem(f"📋 {project_name}", project_id)
+        self.project_combo.setStyleSheet(self._get_input_style())
+        self.project_combo.lineEdit().setPlaceholderText("اختر أو ابحث عن مشروع...")
+        form_layout.addRow("المشروع:", self.project_combo)
         
-        # العميل المرتبط
-        self.client_input = QLineEdit()
-        self.client_input.setPlaceholderText("اسم العميل (اختياري)...")
-        self.client_input.setStyleSheet(self._get_input_style())
-        form_layout.addRow("العميل:", self.client_input)
+        # العميل المرتبط (ComboBox مع إمكانية البحث)
+        self.client_combo = QComboBox()
+        self.client_combo.setEditable(True)
+        self.client_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.client_combo.addItem("-- بدون عميل --", "")
+        for client_id, client_name in self.clients_list:
+            self.client_combo.addItem(f"👤 {client_name}", client_id)
+        self.client_combo.setStyleSheet(self._get_input_style())
+        self.client_combo.lineEdit().setPlaceholderText("اختر أو ابحث عن عميل...")
+        form_layout.addRow("العميل:", self.client_combo)
         
         # التذكير
         reminder_layout = QHBoxLayout()
@@ -801,8 +852,20 @@ class TaskEditorDialog(QDialog):
             if len(parts) >= 2:
                 self.due_time_input.setTime(QTime(int(parts[0]), int(parts[1])))
         
-        self.project_input.setText(self.task.related_project)
-        self.client_input.setText(self.task.related_client)
+        # المشروع المرتبط
+        if self.task.related_project:
+            for i in range(self.project_combo.count()):
+                if self.project_combo.itemData(i) == self.task.related_project:
+                    self.project_combo.setCurrentIndex(i)
+                    break
+        
+        # العميل المرتبط
+        if self.task.related_client:
+            for i in range(self.client_combo.count()):
+                if self.client_combo.itemData(i) == self.task.related_client:
+                    self.client_combo.setCurrentIndex(i)
+                    break
+        
         self.reminder_checkbox.setChecked(self.task.reminder)
         self.reminder_minutes.setValue(self.task.reminder_minutes)
     
@@ -830,6 +893,10 @@ class TaskEditorDialog(QDialog):
         due_datetime = datetime.combine(due_date, datetime.min.time())
         due_time = self.due_time_input.time().toString("HH:mm")
         
+        # الحصول على المشروع والعميل المختارين
+        selected_project = self.project_combo.currentData() or ""
+        selected_client = self.client_combo.currentData() or ""
+        
         self.result_task = Task(
             id=task_id,
             title=title,
@@ -841,8 +908,8 @@ class TaskEditorDialog(QDialog):
             due_time=due_time,
             created_at=created_at,
             completed_at=completed_at,
-            related_project=self.project_input.text().strip(),
-            related_client=self.client_input.text().strip(),
+            related_project=selected_project,
+            related_client=selected_client,
             reminder=self.reminder_checkbox.isChecked(),
             reminder_minutes=self.reminder_minutes.value()
         )
@@ -860,12 +927,22 @@ class TodoManagerWidget(QWidget):
     Professional TODO Manager Widget
     """
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, project_service=None, client_service=None):
         super().__init__(parent)
         self.task_service = TaskService()
+        self.project_service = project_service
+        self.client_service = client_service
         self.current_filter = "all"
+        
+        # ⚡ Cache للمشاريع والعملاء (لتجنب تحميلهم في كل مرة)
+        self._projects_cache = {}
+        self._clients_cache = {}
+        self._cache_loaded = False
+        
         self.init_ui()
-        self.load_tasks()
+        
+        # ⚡ تأخير تحميل المهام لتحسين الأداء
+        QTimer.singleShot(100, self._load_cache_and_tasks)
         
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث القائمة أوتوماتيك)
         try:
@@ -874,13 +951,41 @@ class TodoManagerWidget(QWidget):
         except Exception as e:
             print(f"WARNING: [TodoManager] فشل ربط الإشارات: {e}")
         
-        # تحديث دوري للمهام المتأخرة
+        # تحديث دوري للمهام المتأخرة (كل 5 دقائق بدلاً من دقيقة)
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self.check_reminders)
-        self.update_timer.start(60000)  # كل دقيقة
+        self.update_timer.start(300000)  # كل 5 دقائق
+    
+    def _load_cache_and_tasks(self):
+        """تحميل الـ cache ثم المهام"""
+        self._load_projects_clients_cache()
+        self.load_tasks()
+    
+    def _load_projects_clients_cache(self):
+        """تحميل قوائم المشاريع والعملاء مرة واحدة"""
+        if self._cache_loaded:
+            return
+        try:
+            if self.project_service:
+                projects = self.project_service.get_all_projects()
+                self._projects_cache = {p.id: p.name for p in projects if hasattr(p, 'id') and hasattr(p, 'name')}
+        except Exception as e:
+            print(f"WARNING: [TodoManager] فشل تحميل المشاريع: {e}")
+        try:
+            if self.client_service:
+                clients = self.client_service.get_all_clients()
+                self._clients_cache = {c.id: c.name for c in clients if hasattr(c, 'id') and hasattr(c, 'name')}
+        except Exception as e:
+            print(f"WARNING: [TodoManager] فشل تحميل العملاء: {e}")
+        self._cache_loaded = True
     
     def _on_tasks_changed(self):
         """معالج تحديث المهام من مصدر خارجي"""
+        # ⚡ تأخير التحديث لتجنب التجميد
+        QTimer.singleShot(50, self._do_refresh_tasks)
+    
+    def _do_refresh_tasks(self):
+        """تنفيذ تحديث المهام"""
         self.task_service.load_tasks()
         self.load_tasks()
     
@@ -906,6 +1011,28 @@ class TodoManagerWidget(QWidget):
         
         header_layout.addStretch()
         
+        # زر تحديث
+        refresh_btn = QPushButton("🔄 تحديث")
+        refresh_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {COLORS['info']}, stop:1 #7c3aed);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 12px 20px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #7c3aed, stop:1 {COLORS['info']});
+            }}
+        """)
+        refresh_btn.clicked.connect(self.refresh_tasks)
+        header_layout.addWidget(refresh_btn)
+        
         # زر إضافة مهمة
         add_btn = QPushButton("➕ مهمة جديدة")
         add_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -927,6 +1054,28 @@ class TodoManagerWidget(QWidget):
         """)
         add_btn.clicked.connect(self.add_task)
         header_layout.addWidget(add_btn)
+        
+        # زر حذف المهام المكتملة
+        delete_completed_btn = QPushButton("🗑️ حذف المكتملة")
+        delete_completed_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        delete_completed_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {COLORS['danger']}, stop:1 #D430B0);
+                color: white;
+                border: none;
+                border-radius: 10px;
+                padding: 12px 20px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #D430B0, stop:1 {COLORS['danger']});
+            }}
+        """)
+        delete_completed_btn.clicked.connect(self.delete_completed_tasks)
+        header_layout.addWidget(delete_completed_btn)
         
         layout.addLayout(header_layout)
         
@@ -1092,7 +1241,8 @@ class TodoManagerWidget(QWidget):
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
         """إنشاء بطاقة إحصائية"""
         card = QFrame()
-        card.setFixedHeight(100)  # ارتفاع أكبر للوضوح
+        card.setMinimumHeight(80)
+        card.setMaximumHeight(100)
         card.setStyleSheet(f"""
             QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1114,7 +1264,14 @@ class TodoManagerWidget(QWidget):
         
         value_label = QLabel(value)
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold; background: transparent;")
+        # استخدام خط Segoe UI للأرقام لضمان عرض صحيح بدون أقواس
+        value_label.setStyleSheet(f"""
+            color: {color}; 
+            font-size: 28px; 
+            font-weight: bold; 
+            background: transparent;
+            font-family: 'Segoe UI', 'Arial', sans-serif;
+        """)
         card_layout.addWidget(value_label)
         
         return card
@@ -1123,7 +1280,9 @@ class TodoManagerWidget(QWidget):
         """تحديث قيمة بطاقة إحصائية"""
         value_label = card.findChild(QLabel, "value_label")
         if value_label:
-            value_label.setText(value)
+            # التأكد من أن القيمة رقم فقط بدون أي رموز إضافية
+            clean_value = str(value).strip()
+            value_label.setText(clean_value)
     
     def load_tasks(self):
         """تحميل وعرض المهام"""
@@ -1140,6 +1299,10 @@ class TodoManagerWidget(QWidget):
         
         # الحصول على المهام
         tasks = self.task_service.get_all_tasks()
+        
+        # ⚡ استخدام الـ cache بدلاً من تحميل المشاريع والعملاء في كل مرة
+        projects_map = self._projects_cache
+        clients_map = self._clients_cache
         
         # تطبيق فلتر البحث
         search_text = self.search_input.text().strip().lower()
@@ -1176,7 +1339,15 @@ class TodoManagerWidget(QWidget):
             self.tasks_scroll.setVisible(True)
             
             for task in tasks:
-                task_widget = TaskItemWidget(task)
+                # الحصول على أسماء المشروع والعميل
+                project_name = projects_map.get(task.related_project, task.related_project)
+                client_name = clients_map.get(task.related_client, task.related_client)
+                
+                task_widget = TaskItemWidget(
+                    task,
+                    project_name=project_name,
+                    client_name=client_name
+                )
                 task_widget.clicked.connect(self.edit_task)
                 task_widget.status_changed.connect(self.change_task_status)
                 task_widget.delete_requested.connect(self.delete_task)
@@ -1199,7 +1370,11 @@ class TodoManagerWidget(QWidget):
     
     def add_task(self):
         """إضافة مهمة جديدة"""
-        dialog = TaskEditorDialog(parent=self)
+        dialog = TaskEditorDialog(
+            parent=self,
+            project_service=self.project_service,
+            client_service=self.client_service
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             task = dialog.get_task()
             if task:
@@ -1213,7 +1388,12 @@ class TodoManagerWidget(QWidget):
         if not task:
             return
         
-        dialog = TaskEditorDialog(task=task, parent=self)
+        dialog = TaskEditorDialog(
+            task=task,
+            parent=self,
+            project_service=self.project_service,
+            client_service=self.client_service
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             updated_task = dialog.get_task()
             if updated_task:
@@ -1254,6 +1434,44 @@ class TodoManagerWidget(QWidget):
             self.task_service.delete_task(task_id)
             self.load_tasks()
             print(f"INFO: [TodoManager] تم حذف مهمة: {task.title}")
+    
+    def refresh_tasks(self):
+        """تحديث قائمة المهام من قاعدة البيانات"""
+        print("INFO: [TodoManager] جاري تحديث المهام...")
+        # ⚡ تحديث الـ cache أيضاً
+        self._cache_loaded = False
+        self._load_projects_clients_cache()
+        self.task_service.refresh()
+        self.load_tasks()
+        QMessageBox.information(self, "تم", "تم تحديث قائمة المهام بنجاح ✅")
+    
+    def delete_completed_tasks(self):
+        """حذف جميع المهام المكتملة"""
+        completed_tasks = self.task_service.get_tasks_by_status(TaskStatus.COMPLETED)
+        
+        if not completed_tasks:
+            QMessageBox.information(self, "تنبيه", "لا توجد مهام مكتملة للحذف")
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "تأكيد الحذف",
+            f"هل أنت متأكد من حذف {len(completed_tasks)} مهمة مكتملة؟\n\nهذا الإجراء لا يمكن التراجع عنه!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            deleted_count = 0
+            for task in completed_tasks:
+                try:
+                    self.task_service.delete_task(task.id)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"ERROR: فشل حذف المهمة {task.title}: {e}")
+            
+            self.load_tasks()
+            QMessageBox.information(self, "تم", f"تم حذف {deleted_count} مهمة مكتملة ✅")
+            print(f"INFO: [TodoManager] تم حذف {deleted_count} مهمة مكتملة")
     
     def check_reminders(self):
         """فحص التذكيرات"""

@@ -323,10 +323,6 @@ class PaymentsManagerTab(QWidget):
         """تحميل جميع الدفعات"""
         print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
         
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
         try:
             # تحميل الدفعات
             self.payments_list = self.accounting_service.repo.get_all_payments()

@@ -1,14 +1,16 @@
 {
-  "version": "25.12.51",
-  "version_name": "December 2025 - Update Fix",
+  "version": "1.0.0",
+  "version_name": "الإصدار الأول - Sky Wave ERP",
   "release_date": "2025-12-05",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/25.12.51/SkyWave-Setup-25.12.51.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/1.0.0/SkyWave-Setup-1.0.0.exe",
   "changelog": [
-    "إصلاح نظام التحديثات",
-    "تحسينات في الأداء"
+    "الإصدار الأول من البرنامج",
+    "نظام إدارة العملاء والمشاريع",
+    "نظام المحاسبة والفواتير",
+    "المزامنة السحابية"
   ],
   "min_version": "1.0.0",
-  "mandatory": true,
-  "notes_ar": "إصلاح نظام التحديثات",
-  "notes_en": "Update system fix"
+  "mandatory": false,
+  "notes_ar": "الإصدار الأول من Sky Wave ERP",
+  "notes_en": "First release of Sky Wave ERP"
 }

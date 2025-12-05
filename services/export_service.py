@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import csv
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -22,7 +23,15 @@ class ExportService:
     """خدمة التصدير الشاملة"""
     
     def __init__(self):
-        self.export_folder = "exports"
+        # ⚡ حفظ التصدير في مجلد exports داخل مسار التثبيت
+        if getattr(sys, 'frozen', False):
+            # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
+            install_path = os.path.dirname(sys.executable)
+        else:
+            # البرنامج يعمل من Python
+            install_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        self.export_folder = os.path.join(install_path, "exports")
         self._ensure_export_folder()
     
     def _ensure_export_folder(self):

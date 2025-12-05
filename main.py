@@ -80,9 +80,14 @@ class SkyWaveERPApp:
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
         
-        # تهيئة مدير المزامنة
+        # ⚡ تهيئة مدير المزامنة في Background
         self.sync_manager = SyncManager(self.repository)
-        self.sync_manager.load_pending_items()  # تحميل العمليات المعلقة
+        
+        def load_sync_items():
+            self.sync_manager.load_pending_items()
+        import threading
+        sync_thread = threading.Thread(target=load_sync_items, daemon=True)
+        sync_thread.start()
         
         # ⚡ المزامنة التلقائية (Auto Sync) - معطلة عند البدء لتجنب التجميد
         from core.auto_sync import AutoSync
@@ -90,7 +95,6 @@ class SkyWaveERPApp:
         # سيتم تشغيلها يدوياً بعد فتح النافذة الرئيسية
         
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
-        logger.info("تم تهيئة مدير المزامنة")
         logger.info("⚡ المزامنة التلقائية ستبدأ بعد فتح النافذة الرئيسية")
 
         # --- 2. تجهيز "الأقسام" (حقن الاعتمادية) ---
@@ -152,14 +156,19 @@ class SkyWaveERPApp:
         # Advanced Sync Manager
         self.advanced_sync_manager = AdvancedSyncManager(repository=self.repository)
         
-        # ⚡ التحقق من التحديثات عند بدء البرنامج
-        try:
-            from auto_updater import check_for_updates
-            has_update, latest_version, download_url, changelog = check_for_updates()
-            if has_update:
-                logger.info(f"🆕 تحديث جديد متوفر: v{latest_version}")
-        except Exception as e:
-            logger.warning(f"فشل التحقق من التحديثات: {e}")
+        # ⚡ التحقق من التحديثات في Background (لا يعطل البرنامج)
+        def check_updates_background():
+            try:
+                from auto_updater import check_for_updates
+                has_update, latest_version, download_url, changelog = check_for_updates()
+                if has_update:
+                    logger.info(f"🆕 تحديث جديد متوفر: v{latest_version}")
+            except Exception as e:
+                logger.warning(f"فشل التحقق من التحديثات: {e}")
+        
+        import threading
+        update_thread = threading.Thread(target=check_updates_background, daemon=True)
+        update_thread.start()
 
         logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
         logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
@@ -376,13 +385,18 @@ class SkyWaveERPApp:
         # إغلاق splash بعد ظهور النافذة
         splash.finish(main_window)
         
-        # تطبيق التوسيط على كل الجداول
-        from ui.styles import apply_center_alignment_to_all_tables
-        apply_center_alignment_to_all_tables(main_window)
+        # ⚡ تطبيق التوسيط على كل الجداول (في الخلفية بعد 2 ثانية)
+        def apply_styles_later():
+            try:
+                from ui.styles import apply_center_alignment_to_all_tables
+                apply_center_alignment_to_all_tables(main_window)
+            except Exception as e:
+                logger.warning(f"فشل تطبيق التوسيط: {e}")
+        QTimer.singleShot(2000, apply_styles_later)
         
-        # ⚡ تفعيل المزامنة التلقائية لجلب البيانات من السيرفر
-        QTimer.singleShot(2000, lambda: self.auto_sync.start_auto_sync(delay_seconds=1))
-        logger.info("[MainApp] تم تفعيل المزامنة التلقائية")
+        # ⚡ تفعيل المزامنة التلقائية لجلب البيانات من السيرفر (بعد 20 ثانية - لا تعطل البرنامج)
+        QTimer.singleShot(20000, lambda: self.auto_sync.start_auto_sync(delay_seconds=0))
+        logger.info("[MainApp] ⚡ المزامنة التلقائية ستبدأ بعد 20 ثانية (في الخلفية)")
         
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)

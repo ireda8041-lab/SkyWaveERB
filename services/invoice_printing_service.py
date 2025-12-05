@@ -23,19 +23,24 @@ class InvoicePrintingService:
         """
         self.settings_service = settings_service
         
-        # تحديد مسار القوالب
+        # تحديد مسار القوالب ومسار التثبيت
         if getattr(sys, 'frozen', False):
-            # البرنامج مجمع (EXE)
+            # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
             base_path = Path(sys._MEIPASS)
+            # مسار التثبيت الفعلي (مجلد الـ EXE)
+            install_path = Path(sys.executable).parent
         else:
             # البرنامج يعمل من Python
             base_path = Path(__file__).parent.parent
+            install_path = base_path
         
         self.templates_dir = base_path / "assets" / "templates" / "invoices"
-        self.exports_dir = base_path / "exports"
+        
+        # ⚡ حفظ الفواتير في مجلد exports داخل مسار التثبيت
+        self.exports_dir = install_path / "exports"
         
         # إنشاء مجلد الصادرات إذا لم يكن موجوداً
-        self.exports_dir.mkdir(exist_ok=True)
+        self.exports_dir.mkdir(parents=True, exist_ok=True)
         
         # ⚡ تهيئة Jinja2 مع caching للسرعة
         self.env = Environment(

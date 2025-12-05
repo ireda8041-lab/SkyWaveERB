@@ -213,68 +213,35 @@ class MainWindow(QMainWindow):
         if self.printing_service:
             self.printing_service.template_service = self.template_service
 
-        # --- 3. إنشاء التابات (بالترتيب الصح) ---
-        self.dashboard_tab = DashboardTab(self.accounting_service)
-        self.tabs.insertTab(0, self.dashboard_tab, "🏠 الصفحة الرئيسية")
-
-        self.projects_tab = ProjectManagerTab(
-            self.project_service,
-            self.client_service,
-            self.service_service,
-            self.accounting_service,
-            self.printing_service,
-            template_service=self.template_service,
-        )
-        self.tabs.insertTab(1, self.projects_tab, "🚀 المشاريع")
-
-        self.quotes_tab = QuotationManagerTab(
-            self.quotation_service,
-            self.client_service,
-            self.service_service,
-            self.settings_service,
-        )
-        self.tabs.insertTab(2, self.quotes_tab, "📝 عروض الأسعار")
-
-        # (الجديد) إضافة تاب المصروفات (لوحده)
-        self.expense_tab = ExpenseManagerTab(
-            self.expense_service,
-            self.accounting_service,
-            self.project_service,
-        )
-        self.tabs.insertTab(3, self.expense_tab, "💳 المصروفات")
-
-        # (الجديد) إضافة تاب الدفعات (التحصيلات)
-        self.payments_tab = PaymentsManagerTab(
-            self.project_service,
-            self.accounting_service,
-            self.client_service,
-            current_user=self.current_user,
-        )
-        self.tabs.insertTab(4, self.payments_tab, "💰 الدفعات")
-
-        self.clients_tab = ClientManagerTab(self.client_service)
-        self.tabs.insertTab(5, self.clients_tab, "👤 العملاء")
-
-        self.services_tab = ServiceManagerTab(self.service_service)
-        self.tabs.insertTab(6, self.services_tab, "🛠️ الخدمات والباقات")
-
-        # (الجديد) إضافة تاب المحاسبة (الجديد أبو تابات داخلية)
-        self.accounting_tab = AccountingManagerTab(
-            self.expense_service,
-            self.accounting_service,
-            self.project_service,
-        )
-        self.tabs.insertTab(7, self.accounting_tab, "📊 المحاسبة")
+        # --- 3. إنشاء التابات بشكل كسول (Lazy Loading) ---
+        # تخزين حالة التابات المُنشأة
+        self._tabs_initialized = {}
+        self._tab_placeholders = {}
         
-        # (جديد) إضافة تاب إدارة المهام (TODO) - مرتبط بقاعدة البيانات
-        from ui.todo_manager import TodoManagerWidget, TaskService
-        # تمرير Repository لـ TaskService لربط المهام بقاعدة البيانات
-        TaskService.set_repository(self.accounting_service.repo)
-        self.todo_tab = TodoManagerWidget()
-        self.tabs.insertTab(8, self.todo_tab, "📋 المهام")
+        # إنشاء placeholders للتابات (widgets فارغة خفيفة)
+        tab_configs = [
+            ("🏠 الصفحة الرئيسية", "dashboard"),
+            ("🚀 المشاريع", "projects"),
+            ("📝 عروض الأسعار", "quotes"),
+            ("💳 المصروفات", "expenses"),
+            ("💰 الدفعات", "payments"),
+            ("👤 العملاء", "clients"),
+            ("🛠️ الخدمات والباقات", "services"),
+            ("📊 المحاسبة", "accounting"),
+            ("📋 المهام", "todo"),
+            ("🔧 الإعدادات", "settings"),
+        ]
         
-        self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo)
-        self.tabs.insertTab(9, self.settings_tab, "🔧 الإعدادات")
+        for i, (tab_name, tab_key) in enumerate(tab_configs):
+            # إنشاء placeholder widget خفيف
+            placeholder = QWidget()
+            placeholder.setProperty("tab_key", tab_key)
+            self._tab_placeholders[tab_key] = placeholder
+            self._tabs_initialized[tab_key] = False
+            self.tabs.insertTab(i, placeholder, tab_name)
+        
+        # إنشاء التاب الأول فقط (الداشبورد) فوراً
+        self._initialize_tab("dashboard", 0)
 
         # تطبيق الصلاحيات حسب دور المستخدم (بعد إنشاء كل التابات)
         self.apply_permissions()
@@ -294,6 +261,9 @@ class MainWindow(QMainWindow):
             self.advanced_sync_manager.sync_status_changed.connect(self.status_bar.update_sync_status)
             self.advanced_sync_manager.sync_progress.connect(self.status_bar.update_sync_progress)
             self.advanced_sync_manager.notification_ready.connect(self.status_bar.show_notification)
+        
+        # ربط زر تسجيل الخروج
+        self.status_bar.logout_requested.connect(self._handle_logout)
         
         # إنشاء container widget للـ tabs
         central_widget = QWidget()
@@ -335,23 +305,142 @@ class MainWindow(QMainWindow):
         # --- 4. تحميل البيانات في الخلفية ---
         self.tabs.currentChanged.connect(self.on_tab_changed)
         
-        # ✅ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
-        QTimer.singleShot(500, self._load_initial_data_safely)
+        # ⚡ تحميل البيانات فوراً (بدون تأخير)
+        QTimer.singleShot(100, self._load_initial_data_safely)
 
     def on_tab_changed(self, index):
-        """ (معدلة) بالتابات الجديدة - مع حماية من التجميد """
+        """ ⚡ (محسّنة للسرعة القصوى) التنقل السريع بين التابات """
         try:
             tab_name = self.tabs.tabText(index)
-            print(f"INFO: [MainWindow] تغيير إلى التاب: {tab_name}")
             
-            # تأخير قصير لتجنب التجميد
-            QTimer.singleShot(100, lambda: self._load_tab_data_safely(tab_name))
+            # تحديد مفتاح التاب
+            tab_keys = ["dashboard", "projects", "quotes", "expenses", "payments", 
+                       "clients", "services", "accounting", "todo", "settings"]
+            
+            if index < len(tab_keys):
+                tab_key = tab_keys[index]
+                
+                # ⚡ إنشاء التاب فقط إذا لم يكن مُنشأ (Lazy Loading)
+                if not self._tabs_initialized.get(tab_key, False):
+                    self._initialize_tab(tab_key, index)
+                # ⚡ لا نحمل البيانات مرة أخرى - التاب يحملها مرة واحدة فقط
             
         except Exception as e:
             print(f"ERROR: خطأ في تغيير التاب: {e}")
     
-    def _load_tab_data_safely(self, tab_name: str):
-        """تحميل بيانات التاب بأمان"""
+    def _initialize_tab(self, tab_key: str, index: int):
+        """إنشاء التاب عند الحاجة (Lazy Loading)"""
+        try:
+            if self._tabs_initialized.get(tab_key, False):
+                return  # التاب مُنشأ بالفعل
+            
+            print(f"INFO: [MainWindow] إنشاء التاب: {tab_key}")
+            
+            # إنشاء التاب الفعلي حسب المفتاح
+            new_tab = None
+            
+            if tab_key == "dashboard":
+                self.dashboard_tab = DashboardTab(self.accounting_service)
+                new_tab = self.dashboard_tab
+                
+            elif tab_key == "projects":
+                self.projects_tab = ProjectManagerTab(
+                    self.project_service,
+                    self.client_service,
+                    self.service_service,
+                    self.accounting_service,
+                    self.printing_service,
+                    template_service=self.template_service,
+                )
+                new_tab = self.projects_tab
+                
+            elif tab_key == "quotes":
+                self.quotes_tab = QuotationManagerTab(
+                    self.quotation_service,
+                    self.client_service,
+                    self.service_service,
+                    self.settings_service,
+                )
+                new_tab = self.quotes_tab
+                
+            elif tab_key == "expenses":
+                self.expense_tab = ExpenseManagerTab(
+                    self.expense_service,
+                    self.accounting_service,
+                    self.project_service,
+                )
+                new_tab = self.expense_tab
+                
+            elif tab_key == "payments":
+                self.payments_tab = PaymentsManagerTab(
+                    self.project_service,
+                    self.accounting_service,
+                    self.client_service,
+                    current_user=self.current_user,
+                )
+                new_tab = self.payments_tab
+                
+            elif tab_key == "clients":
+                self.clients_tab = ClientManagerTab(self.client_service)
+                new_tab = self.clients_tab
+                
+            elif tab_key == "services":
+                self.services_tab = ServiceManagerTab(self.service_service)
+                new_tab = self.services_tab
+                
+            elif tab_key == "accounting":
+                self.accounting_tab = AccountingManagerTab(
+                    self.expense_service,
+                    self.accounting_service,
+                    self.project_service,
+                )
+                new_tab = self.accounting_tab
+                
+            elif tab_key == "todo":
+                from ui.todo_manager import TodoManagerWidget, TaskService
+                # تعيين الـ Repository وإنشاء TaskService بشكل صحيح
+                TaskService._repository = self.accounting_service.repo
+                TaskService._instance = None  # إعادة تعيين الـ instance لإنشاء واحد جديد
+                # إنشاء TaskService مع الـ repository مباشرة
+                task_service = TaskService(repository=self.accounting_service.repo)
+                self.todo_tab = TodoManagerWidget(
+                    project_service=self.project_service,
+                    client_service=self.client_service
+                )
+                new_tab = self.todo_tab
+                
+            elif tab_key == "settings":
+                self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo)
+                new_tab = self.settings_tab
+            
+            # استبدال الـ placeholder بالتاب الفعلي
+            if new_tab:
+                tab_text = self.tabs.tabText(index)
+                self.tabs.removeTab(index)
+                self.tabs.insertTab(index, new_tab, tab_text)
+                self.tabs.setCurrentIndex(index)
+                self._tabs_initialized[tab_key] = True
+                
+                # ⚡ تحميل البيانات فوراً (بدون تأخير)
+                self._load_tab_data_safely(tab_text)
+                
+                print(f"INFO: [MainWindow] تم إنشاء التاب: {tab_key}")
+            
+        except Exception as e:
+            print(f"ERROR: فشل إنشاء التاب {tab_key}: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ⚡ Cache لتتبع التابات المحملة (لتجنب إعادة التحميل)
+    _tab_data_loaded = {}
+    
+    def _load_tab_data_safely(self, tab_name: str, force_reload: bool = False):
+        """⚡ تحميل بيانات التاب بسرعة (مع caching)"""
+        # ⚡ تجنب إعادة التحميل إذا البيانات محملة بالفعل
+        if not force_reload and self._tab_data_loaded.get(tab_name, False):
+            print(f"INFO: [MainWindow] ⚡ التاب محمل بالفعل: {tab_name}")
+            return
+        
         try:
             if tab_name == "🏠 الصفحة الرئيسية":
                 if hasattr(self, 'dashboard_tab'):
@@ -360,33 +449,38 @@ class MainWindow(QMainWindow):
                 if hasattr(self, 'projects_tab'):
                     self.projects_tab.service_service = self.service_service
                     self.projects_tab.accounting_service = self.accounting_service
-                    QTimer.singleShot(50, self.projects_tab.load_projects_data)
+                    self.projects_tab.load_projects_data()
             elif tab_name == "📝 عروض الأسعار":
                 if hasattr(self, 'quotes_tab'):
                     self.quotes_tab.project_service = self.project_service
-                    QTimer.singleShot(50, self.quotes_tab.load_quotations_data)
+                    self.quotes_tab.load_quotations_data()
             elif tab_name == "💳 المصروفات":
                 if hasattr(self, 'expense_tab'):
-                    QTimer.singleShot(50, self.expense_tab.load_expenses_data)
+                    self.expense_tab.load_expenses_data()
             elif tab_name == "💰 الدفعات":
                 if hasattr(self, 'payments_tab'):
-                    QTimer.singleShot(50, self.payments_tab.load_payments_data)
+                    self.payments_tab.load_payments_data()
             elif tab_name == "👤 العملاء":
                 if hasattr(self, 'clients_tab'):
-                    QTimer.singleShot(50, self.clients_tab.load_clients_data)
+                    self.clients_tab.load_clients_data()
             elif tab_name == "🛠️ الخدمات والباقات":
                 if hasattr(self, 'services_tab'):
-                    QTimer.singleShot(50, self.services_tab.load_services_data)
+                    self.services_tab.load_services_data()
             elif tab_name == "📊 المحاسبة":
                 if hasattr(self, 'accounting_tab'):
                     self.accounting_tab.project_service = self.project_service
-                    QTimer.singleShot(50, self.accounting_tab.load_accounts_data)
+                    self.accounting_tab.load_accounts_data()
+            elif tab_name == "📋 المهام":
+                if hasattr(self, 'todo_tab'):
+                    self.todo_tab.load_tasks()
             elif tab_name == "🔧 الإعدادات":
                 if hasattr(self, 'settings_tab'):
-                    QTimer.singleShot(50, self.settings_tab.load_settings_data)
-                    QTimer.singleShot(100, self.settings_tab.load_users)
-                    
-            print(f"INFO: [MainWindow] تم تحميل بيانات التاب: {tab_name}")
+                    self.settings_tab.load_settings_data()
+                    self.settings_tab.load_users()
+            
+            # ⚡ تسجيل أن التاب محمل
+            self._tab_data_loaded[tab_name] = True
+            print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
             
         except Exception as e:
             print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {e}")
@@ -394,13 +488,13 @@ class MainWindow(QMainWindow):
 
     
     def _load_initial_data_safely(self):
-        """تحميل البيانات الأولية بأمان وبدون تجميد"""
+        """⚡ تحميل البيانات الأولية بسرعة"""
         try:
             print("INFO: [MainWindow] بدء تحميل البيانات الأولية...")
-            # تحميل بيانات الداشبورد فقط (التاب الأول)
+            # ⚡ تحميل بيانات الداشبورد فوراً
             if hasattr(self, 'dashboard_tab'):
                 self.dashboard_tab.refresh_data()
-            print("INFO: [MainWindow] تم تحميل البيانات الأولية بنجاح")
+            print("INFO: [MainWindow] تم تحميل البيانات الأولية")
         except Exception as e:
             print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
     
@@ -416,19 +510,19 @@ class MainWindow(QMainWindow):
     
     def setup_auto_sync(self):
         """
-        إعداد المزامنة التلقائية في الخلفية
+        ⚡ إعداد المزامنة التلقائية في الخلفية (محسّنة)
         """
         from PyQt6.QtCore import QTimer
         
-        # مؤقت للمزامنة التلقائية كل 10 دقائق (600000 ميلي ثانية)
+        # مؤقت للمزامنة التلقائية كل 15 دقيقة
         self.auto_sync_timer = QTimer(self)
         self.auto_sync_timer.timeout.connect(self.trigger_background_sync)
-        self.auto_sync_timer.start(600000)  # 10 دقائق
+        self.auto_sync_timer.start(900000)  # 15 دقيقة
         
-        # تشغيل المزامنة فوراً عند بدء التطبيق (بعد ثانيتين)
-        QTimer.singleShot(2000, self.trigger_background_sync)
+        # ⚡ لا نشغل المزامنة فوراً - ننتظر حتى يستقر البرنامج
+        # المزامنة ستبدأ من main.py بعد 8 ثواني
         
-        print("INFO: تم تفعيل المزامنة التلقائية (كل 10 دقائق)")
+        print("INFO: ⚡ تم تفعيل المزامنة التلقائية (كل 15 دقيقة)")
     
     def trigger_background_sync(self):
         """
@@ -478,6 +572,32 @@ class MainWindow(QMainWindow):
             self.on_tab_changed(current_index)
         except Exception as e:
             print(f"خطأ في تحديث البيانات بعد المزامنة: {e}")
+    
+    def _handle_logout(self):
+        """معالج تسجيل الخروج"""
+        reply = QMessageBox.question(
+            self,
+            "تأكيد تسجيل الخروج",
+            "هل أنت متأكد من تسجيل الخروج؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            print("INFO: [MainWindow] جاري تسجيل الخروج...")
+            
+            # إيقاف المزامنة التلقائية
+            if hasattr(self, 'auto_sync_timer'):
+                self.auto_sync_timer.stop()
+            
+            # إغلاق النافذة الحالية
+            self.close()
+            
+            # إعادة تشغيل التطبيق (عرض نافذة تسجيل الدخول)
+            import sys
+            import os
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
 
 
 
@@ -558,17 +678,18 @@ class MainWindow(QMainWindow):
         role_display = user_role.value if hasattr(user_role, 'value') else str(user_role)
         print(f"INFO: [MainWindow] تطبيق صلاحيات الدور: {role_display}")
         
-        # قائمة التابات مع أسمائها الداخلية
+        # قائمة التابات مع أسمائها الداخلية (محدثة مع تاب المهام)
         tab_permissions = {
             'dashboard': 0,      # الداشبورد
             'projects': 1,       # المشاريع
             'quotes': 2,         # عروض الأسعار
             'expenses': 3,       # المصروفات
-            'payments': 4,       # الدفعات (جديد)
+            'payments': 4,       # الدفعات
             'clients': 5,        # العملاء
             'services': 6,       # الخدمات
             'accounting': 7,     # المحاسبة
-            'settings': 8        # الإعدادات
+            'todo': 8,           # المهام
+            'settings': 9        # الإعدادات
         }
         
         # إخفاء التابات غير المسموحة (باستخدام النظام الجديد)

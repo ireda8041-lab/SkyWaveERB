@@ -148,10 +148,6 @@ class ServiceManagerTab(QWidget):
         """
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
         
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
-        
         try:
             if self.show_archived_checkbox.isChecked():
                 self.services_list = self.service_service.get_archived_services()

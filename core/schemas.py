@@ -127,7 +127,8 @@ class Client(BaseSchema):
     status: ClientStatus = ClientStatus.ACTIVE
     client_type: Optional[str] = "فرد"
     work_field: Optional[str] = None
-    logo_path: Optional[str] = None
+    logo_path: Optional[str] = None  # مسار الصورة المحلي (للتوافق القديم)
+    logo_data: Optional[str] = None  # بيانات الصورة بصيغة base64 (للمزامنة بين الأجهزة)
     client_notes: Optional[str] = None
 
 class Currency(BaseSchema):

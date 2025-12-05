@@ -37,7 +37,7 @@ class AutoSync:
         self._batch_size = 50  # ⚡ حجم الدفعة للمزامنة
         self._sync_thread = None  # ✅ مرجع للـ thread
     
-    def start_auto_sync(self, delay_seconds: int = 3):
+    def start_auto_sync(self, delay_seconds: int = 5):
         """
         ⚡ بدء المزامنة التلقائية في الخلفية (محسّن)
         
@@ -51,8 +51,20 @@ class AutoSync:
             if not self.is_running:
                 print("INFO: [AutoSync] تم إلغاء المزامنة قبل البدء")
                 return
+            
+            # ⚡ انتظار اتصال MongoDB
+            max_wait = 10  # 10 ثواني كحد أقصى
+            waited = 0
+            while not self.repository.online and waited < max_wait:
+                time.sleep(0.5)
+                waited += 0.5
+            
+            if not self.repository.online:
+                print("INFO: [AutoSync] لا يوجد اتصال - تم تأجيل المزامنة")
+                return
+            
             print("INFO: [AutoSync] ⚡ بدء المزامنة السريعة...")
-            self.perform_sync()
+            self.perform_quick_sync()  # ⚡ مزامنة سريعة بدلاً من الكاملة
         
         # تشغيل في thread منفصل بأولوية منخفضة
         self._sync_thread = threading.Thread(
@@ -62,6 +74,78 @@ class AutoSync:
         )
         self._sync_thread.start()
         print(f"INFO: [AutoSync] ⚡ جدولة المزامنة (بعد {delay_seconds} ثانية)")
+    
+    def perform_quick_sync(self):
+        """⚡ مزامنة سريعة - فقط البيانات الأساسية"""
+        if self.is_syncing or not self.is_running:
+            return
+        
+        self.is_syncing = True
+        start_time = time.time()
+        
+        try:
+            if not self.repository.online:
+                print("INFO: [AutoSync] لا يوجد اتصال - تم إلغاء المزامنة السريعة")
+                return
+            
+            print("INFO: [AutoSync] ⚡ مزامنة سريعة...")
+            
+            # ⚡ جلب فقط العملاء والمشاريع (الأهم)
+            pulled = 0
+            pulled += self._quick_pull_clients()
+            pulled += self._quick_pull_projects()
+            
+            elapsed = time.time() - start_time
+            print(f"INFO: [AutoSync] ✅ اكتملت المزامنة السريعة ({pulled} سجل في {elapsed:.1f}ث)")
+            
+        except Exception as e:
+            print(f"ERROR: [AutoSync] فشلت المزامنة السريعة: {e}")
+        finally:
+            self.is_syncing = False
+    
+    def _quick_pull_clients(self) -> int:
+        """⚡ جلب العملاء بسرعة"""
+        try:
+            clients = list(self.repository.mongo_db.clients.find({}, {'_id': 1, 'name': 1, 'status': 1, 'phone': 1, 'email': 1}))
+            count = 0
+            for c in clients:
+                try:
+                    mongo_id = str(c.get('_id'))
+                    self.repository.sqlite_cursor.execute("""
+                        INSERT OR IGNORE INTO clients (_mongo_id, name, status, phone, email, created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, c.get('name'), c.get('status', 'نشط'), c.get('phone'), c.get('email')))
+                    count += 1
+                except:
+                    pass
+            self.repository.sqlite_conn.commit()
+            print(f"  ✅ تم جلب {count} عميل")
+            return count
+        except Exception as e:
+            print(f"  ⚠️ فشل جلب العملاء: {e}")
+            return 0
+    
+    def _quick_pull_projects(self) -> int:
+        """⚡ جلب المشاريع بسرعة"""
+        try:
+            projects = list(self.repository.mongo_db.projects.find({}, {'_id': 1, 'name': 1, 'status': 1, 'client_id': 1, 'total_amount': 1}))
+            count = 0
+            for p in projects:
+                try:
+                    mongo_id = str(p.get('_id'))
+                    self.repository.sqlite_cursor.execute("""
+                        INSERT OR IGNORE INTO projects (_mongo_id, name, status, client_id, total_amount, created_at, last_modified, sync_status)
+                        VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                    """, (mongo_id, p.get('name'), p.get('status', 'نشط'), p.get('client_id'), p.get('total_amount', 0)))
+                    count += 1
+                except:
+                    pass
+            self.repository.sqlite_conn.commit()
+            print(f"  ✅ تم جلب {count} مشروع")
+            return count
+        except Exception as e:
+            print(f"  ⚠️ فشل جلب المشاريع: {e}")
+            return 0
     
     def stop_auto_sync(self):
         """✅ إيقاف المزامنة التلقائية"""
@@ -203,9 +287,9 @@ class AutoSync:
                         self.repository.sqlite_cursor.execute("""
                             INSERT OR REPLACE INTO clients 
                             (_mongo_id, name, company_name, email, phone, address, country,
-                             vat_number, status, client_type, work_field, logo_path,
+                             vat_number, status, client_type, work_field, logo_path, logo_data,
                              client_notes, created_at, last_modified, sync_status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
                         """, (
                             mongo_id,
                             c.get('name'),
@@ -219,6 +303,7 @@ class AutoSync:
                             c.get('client_type'),
                             c.get('work_field'),
                             c.get('logo_path'),
+                            c.get('logo_data'),  # ⚡ صورة العميل بصيغة base64
                             c.get('client_notes'),
                             c.get('created_at'),
                             c.get('last_modified'),

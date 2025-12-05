@@ -37,7 +37,7 @@ class Repository:
     ⚡ المخزن الذكي مع Caching للسرعة القصوى.
     - Cache ذكي للبيانات المتكررة
     - SQLite محسّن للأداء
-    - MongoDB للمزامنة
+    - MongoDB للمزامنة (في background)
     """
     
     def __init__(self):
@@ -45,6 +45,7 @@ class Repository:
         self.mongo_client = None
         self.mongo_db = None
         self._lock = threading.RLock()
+        self._mongo_connecting = False
         
         # ⚡ Cache للبيانات المتكررة
         if CACHE_ENABLED:
@@ -52,27 +53,7 @@ class Repository:
             self._projects_cache = LRUCache(maxsize=500, ttl_seconds=60)
             self._services_cache = LRUCache(maxsize=200, ttl_seconds=120)
         
-        try:
-            # 1. محاولة الاتصال بـ MongoDB (أونلاين) - مهلة أقصر
-            self.mongo_client = pymongo.MongoClient(
-                MONGO_URI,
-                serverSelectionTimeoutMS=3000,  # ⚡ 3 ثواني بدل 5
-                connectTimeoutMS=3000,
-                socketTimeoutMS=5000
-            )
-            self.mongo_client.server_info()
-            self.mongo_db = self.mongo_client[DB_NAME]
-            self.online = True
-            print("INFO: ✅ متصل بـ MongoDB")
-            
-        except pymongo.errors.ServerSelectionTimeoutError:
-            print("WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
-            self.online = False
-        except Exception as e:
-            print(f"WARNING: ⚠️ خطأ في الاتصال: {e}")
-            self.online = False
-        
-        # 2. SQLite (أوفلاين) - محسّن للسرعة
+        # ⚡ 1. SQLite أولاً (سريع جداً) - لا ننتظر MongoDB
         self.sqlite_conn = sqlite3.connect(
             LOCAL_DB_FILE, 
             check_same_thread=False,
@@ -81,16 +62,47 @@ class Repository:
         )
         self.sqlite_conn.row_factory = sqlite3.Row
         self.sqlite_cursor = self.sqlite_conn.cursor()
-        print(f"INFO: متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
+        print(f"INFO: ✅ متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
         
-        # 3. بناء الجداول الأوفلاين لو مش موجودة
+        # 2. بناء الجداول الأوفلاين لو مش موجودة
         self._init_local_db()
+        
+        # ⚡ 3. الاتصال بـ MongoDB في Background Thread (لا يعطل البرنامج)
+        self._start_mongo_connection()
 
+    def _start_mongo_connection(self):
+        """⚡ الاتصال بـ MongoDB في Background Thread"""
+        if self._mongo_connecting:
+            return
+        self._mongo_connecting = True
+        
+        def connect_mongo():
+            try:
+                self.mongo_client = pymongo.MongoClient(
+                    MONGO_URI,
+                    serverSelectionTimeoutMS=2000,  # ⚡ 2 ثواني فقط
+                    connectTimeoutMS=2000,
+                    socketTimeoutMS=3000
+                )
+                self.mongo_client.server_info()
+                self.mongo_db = self.mongo_client[DB_NAME]
+                self.online = True
+                print("INFO: ✅ متصل بـ MongoDB (Background)")
+            except pymongo.errors.ServerSelectionTimeoutError:
+                print("WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
+                self.online = False
+            except Exception as e:
+                print(f"WARNING: ⚠️ خطأ في الاتصال بـ MongoDB: {e}")
+                self.online = False
+            finally:
+                self._mongo_connecting = False
+        
+        # تشغيل الاتصال في thread منفصل
+        mongo_thread = threading.Thread(target=connect_mongo, daemon=True)
+        mongo_thread.start()
+    
     def _init_local_db(self):
-        """
-        دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي 
-        فقط إذا لم تكن موجودة.
-        """
+        """دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي فقط إذا لم تكن موجودة."""
         print("INFO: جاري فحص الجداول المحلية (SQLite)...")
         
         # جدول الحسابات (accounts)
@@ -172,8 +184,17 @@ class Repository:
             client_type TEXT,
             work_field TEXT,
             logo_path TEXT,
+            logo_data TEXT,
             client_notes TEXT
         )""")
+        
+        # إضافة عمود logo_data إذا لم يكن موجوداً (للتوافق مع قواعد البيانات القديمة)
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN logo_data TEXT")
+            self.sqlite_conn.commit()
+            print("INFO: [Repository] تم إضافة عمود logo_data لجدول العملاء")
+        except Exception:
+            pass  # العمود موجود بالفعل
         
         # جدول الخدمات (services)
         self.sqlite_cursor.execute("""
@@ -613,16 +634,16 @@ class Repository:
             INSERT INTO clients (
                 sync_status, created_at, last_modified, name, company_name, email,
                 phone, address, country, vat_number, status,
-                client_type, work_field, logo_path, client_notes
+                client_type, work_field, logo_path, logo_data, client_notes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         self.sqlite_cursor.execute(sql, (
             client_data.sync_status, now, now, client_data.name, client_data.company_name,
             client_data.email, client_data.phone, client_data.address, client_data.country,
             client_data.vat_number, client_data.status.value,
             client_data.client_type, client_data.work_field,
-            client_data.logo_path, client_data.client_notes
+            client_data.logo_path, client_data.logo_data, client_data.client_notes
         ))
         self.sqlite_conn.commit()
         
@@ -668,7 +689,7 @@ class Repository:
                 UPDATE clients SET
                     name = ?, company_name = ?, email = ?, phone = ?, 
                     address = ?, country = ?, vat_number = ?, status = ?,
-                    client_type = ?, work_field = ?, logo_path = ?, client_notes = ?,
+                    client_type = ?, work_field = ?, logo_path = ?, logo_data = ?, client_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ? OR _mongo_id = ?
             """
@@ -677,7 +698,7 @@ class Repository:
                 client_data.phone, client_data.address, client_data.country,
                 client_data.vat_number, client_data.status.value,
                 client_data.client_type, client_data.work_field,
-                client_data.logo_path, client_data.client_notes,
+                client_data.logo_path, client_data.logo_data, client_data.client_notes,
                 now_iso, client_id, client_id
             )
             self.sqlite_cursor.execute(sql, params)
@@ -711,11 +732,21 @@ class Repository:
 
     def get_all_clients(self) -> List[schemas.Client]:
         """
-        ⚡ جلب كل العملاء النشطين (من MongoDB أولاً ثم SQLite)
+        ⚡ جلب كل العملاء النشطين (SQLite أولاً للسرعة)
         """
         active_status = schemas.ClientStatus.ACTIVE.value
         
-        # جلب من MongoDB أولاً لو متصل
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
+            rows = self.sqlite_cursor.fetchall()
+            clients_list = [schemas.Client(**dict(row)) for row in rows]
+            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي.")
+            return clients_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب العملاء من SQLite: {e}")
+        
+        # Fallback إلى MongoDB إذا فشل SQLite
         if self.online:
             try:
                 clients_data = list(self.mongo_db.clients.find({"status": active_status}))
@@ -727,23 +758,13 @@ class Repository:
                         c.pop('mongo_id', None)
                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
                     except Exception as item_err:
-                        print(f"WARNING: تخطي عميل بسبب خطأ: {item_err}")
                         continue
                 print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
                 return clients_list
             except Exception as e:
-                print(f"WARNING: فشل جلب العملاء من MongoDB: {e}. جاري الجلب من SQLite...")
+                print(f"ERROR: فشل جلب العملاء من MongoDB: {e}")
         
-        # جلب من SQLite كـ fallback
-        try:
-            self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
-            rows = self.sqlite_cursor.fetchall()
-            clients_list = [schemas.Client(**dict(row)) for row in rows]
-            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي.")
-            return clients_list
-        except Exception as e:
-            print(f"ERROR: فشل جلب العملاء: {e}")
-            return []
+        return []
 
 
     def get_archived_clients(self) -> List[schemas.Client]:
@@ -1233,17 +1254,19 @@ class Repository:
         return None # لو الحساب مش موجود خالص
 
     def get_all_accounts(self) -> List[schemas.Account]:
-        """ جلب كل الحسابات (بذكاء) - يفضل MongoDB لكن يستخدم SQLite كـ fallback """
-        # ⚡ منع التجميد
+        """ ⚡ جلب كل الحسابات (SQLite أولاً للسرعة) """
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-        except Exception:
-            pass
-            
-        accounts_list = []
-        
-        # محاولة الجلب من MongoDB أولاً
+            self.sqlite_cursor.execute("SELECT * FROM accounts WHERE sync_status != 'deleted'")
+            rows = self.sqlite_cursor.fetchall()
+            if rows:
+                accounts_list = [schemas.Account(**dict(row)) for row in rows]
+                print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
+                return accounts_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب الحسابات من SQLite: {e}")
+
+        # Fallback إلى MongoDB
         if self.online:
             try:
                 accounts_data = list(self.mongo_db.accounts.find())
@@ -1258,18 +1281,8 @@ class Repository:
                     return accounts_list
             except Exception as e:
                 print(f"ERROR: فشل جلب الحسابات من Mongo: {e}")
-
-        # إذا MongoDB فارغة أو فشلت، جلب من SQLite
-        try:
-            self.sqlite_cursor.execute("SELECT * FROM accounts WHERE sync_status != 'deleted'")
-            rows = self.sqlite_cursor.fetchall()
-            if rows:
-                accounts_list = [schemas.Account(**dict(row)) for row in rows]
-                print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
-        except Exception as e:
-            print(f"ERROR: فشل جلب الحسابات من SQLite: {e}")
         
-        return accounts_list
+        return []
 
     def get_account_by_id(self, account_id: str) -> Optional[schemas.Account]:
         """ (جديدة) جلب حساب واحد بالـ ID """
@@ -1782,14 +1795,27 @@ class Repository:
         return entry_data
 
     def get_all_journal_entries(self) -> List[schemas.JournalEntry]:
-        """ جلب كل قيود اليومية (بذكاء) """
-        # ⚡ منع التجميد
+        """ ⚡ جلب كل قيود اليومية (SQLite أولاً للسرعة) """
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-        except Exception:
-            pass
-            
+            self.sqlite_cursor.execute("SELECT * FROM journal_entries ORDER BY date DESC")
+            rows = self.sqlite_cursor.fetchall()
+            entries_list = []
+            for row in rows:
+                row_dict = dict(row)
+                lines_value = row_dict.get("lines")
+                if isinstance(lines_value, str):
+                    try:
+                        row_dict["lines"] = json.loads(lines_value)
+                    except json.JSONDecodeError:
+                        row_dict["lines"] = []
+                entries_list.append(schemas.JournalEntry(**row_dict))
+            print(f"INFO: تم جلب {len(entries_list)} قيد من المحلي.")
+            return entries_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب القيود من SQLite: {e}")
+        
+        # Fallback إلى MongoDB
         if self.online:
             try:
                 entries_data = list(self.mongo_db.journal_entries.find().sort("date", -1))
@@ -1802,18 +1828,9 @@ class Repository:
                 print("INFO: تم جلب قيود اليومية من الأونلاين (MongoDB).")
                 return entries_list
             except Exception as e:
-                print(f"ERROR: فشل جلب قيود اليومية من Mongo: {e}. سيتم الجلب من المحلي.")
+                print(f"ERROR: فشل جلب قيود اليومية من Mongo: {e}")
 
-        self.sqlite_cursor.execute("SELECT * FROM journal_entries ORDER BY date DESC")
-        rows = self.sqlite_cursor.fetchall()
-        entries_list = []
-        for row in rows:
-            row_dict = dict(row)
-            row_dict['lines'] = json.loads(row_dict['lines'])
-            entries_list.append(schemas.JournalEntry(**row_dict))
-
-        print("INFO: تم جلب قيود اليومية من المحلي (SQLite).")
-        return entries_list
+        return []
 
     def get_journal_entry_by_doc_id(self, doc_id: str) -> Optional[schemas.JournalEntry]:
         """ (جديدة) جلب قيد يومية عن طريق ID الفاتورة/المصروف المرتبط به """
@@ -1934,22 +1951,8 @@ class Repository:
             return []
 
     def get_all_payments(self) -> List[schemas.Payment]:
-        """ جلب كل الدفعات """
-        if self.online:
-            try:
-                data = list(self.mongo_db.payments.find())
-                payments = []
-                for d in data:
-                    mongo_id = str(d.pop('_id'))
-                    # حذف _mongo_id و mongo_id من البيانات لتجنب التكرار
-                    d.pop('_mongo_id', None)
-                    d.pop('mongo_id', None)
-                    payments.append(schemas.Payment(**d, _mongo_id=mongo_id))
-                print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
-                return payments
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب الدفعات (Mongo): {e}")
-
+        """ ⚡ جلب كل الدفعات (SQLite أولاً للسرعة) """
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
             self.sqlite_cursor.execute("SELECT * FROM payments ORDER BY date DESC")
             rows = self.sqlite_cursor.fetchall()
@@ -1958,7 +1961,23 @@ class Repository:
             return payments
         except Exception as e:
             print(f"ERROR: [Repo] فشل جلب الدفعات (SQLite): {e}")
-            return []
+
+        # Fallback إلى MongoDB
+        if self.online:
+            try:
+                data = list(self.mongo_db.payments.find())
+                payments = []
+                for d in data:
+                    mongo_id = str(d.pop('_id'))
+                    d.pop('_mongo_id', None)
+                    d.pop('mongo_id', None)
+                    payments.append(schemas.Payment(**d, _mongo_id=mongo_id))
+                print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
+                return payments
+            except Exception as e:
+                print(f"ERROR: [Repo] فشل جلب الدفعات (Mongo): {e}")
+        
+        return []
 
     def update_payment(self, payment_id, payment_data: schemas.Payment) -> bool:
         """ تعديل دفعة موجودة """
@@ -2318,8 +2337,20 @@ class Repository:
         return service_data
 
     def get_all_services(self) -> List[schemas.Service]:
-        """ (معدلة) جلب كل الخدمات "النشطة" فقط (بذكاء) """
+        """ ⚡ جلب كل الخدمات "النشطة" فقط (SQLite أولاً للسرعة) """
         active_status = schemas.ServiceStatus.ACTIVE.value
+        
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (active_status,))
+            rows = self.sqlite_cursor.fetchall()
+            services_list = [schemas.Service(**dict(row)) for row in rows]
+            print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من المحلي.")
+            return services_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب الخدمات من SQLite: {e}")
+
+        # Fallback إلى MongoDB
         if self.online:
             try:
                 services_data = list(self.mongo_db.services.find({"status": active_status}))
@@ -2332,13 +2363,9 @@ class Repository:
                 print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من الأونلاين.")
                 return services_list
             except Exception as e:
-                print(f"ERROR: فشل جلب الخدمات من Mongo: {e}. سيتم الجلب من المحلي.")
-
-        self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (active_status,))
-        rows = self.sqlite_cursor.fetchall()
-        services_list = [schemas.Service(**dict(row)) for row in rows]
-        print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من المحلي.")
-        return services_list
+                print(f"ERROR: فشل جلب الخدمات من Mongo: {e}")
+        
+        return []
 
     def get_service_by_id(self, service_id: str) -> Optional[schemas.Service]:
         """ (جديدة) جلب خدمة واحدة بالـ ID """
@@ -2506,7 +2533,18 @@ class Repository:
         return expense_data
 
     def get_all_expenses(self) -> List[schemas.Expense]:
-        """ جلب كل المصروفات (بذكاء) """
+        """ ⚡ جلب كل المصروفات (SQLite أولاً للسرعة) """
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+            rows = self.sqlite_cursor.fetchall()
+            expenses_list = [schemas.Expense(**dict(row)) for row in rows]
+            print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
+            return expenses_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب المصروفات من SQLite: {e}")
+
+        # Fallback إلى MongoDB
         if self.online:
             try:
                 expenses_data = list(self.mongo_db.expenses.find())
@@ -2519,13 +2557,9 @@ class Repository:
                 print("INFO: تم جلب المصروفات من الأونلاين (MongoDB).")
                 return expenses_list
             except Exception as e:
-                print(f"ERROR: فشل جلب المصروفات من Mongo: {e}. سيتم الجلب من المحلي.")
-
-        self.sqlite_cursor.execute("SELECT * FROM expenses")
-        rows = self.sqlite_cursor.fetchall()
-        expenses_list = [schemas.Expense(**dict(row)) for row in rows]
-        print("INFO: تم جلب المصروفات من المحلي (SQLite).")
-        return expenses_list
+                print(f"ERROR: فشل جلب المصروفات من Mongo: {e}")
+        
+        return []
 
     def update_expense(self, expense_id, expense_data: schemas.Expense) -> bool:
         """ تعديل مصروف موجود """
@@ -2683,32 +2717,42 @@ class Repository:
         return quote_data
 
     def get_all_quotations(self) -> List[schemas.Quotation]:
-        """ جلب كل عروض الأسعار (بذكاء) """
+        """ ⚡ جلب كل عروض الأسعار (SQLite أولاً للسرعة) """
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM quotations ORDER BY issue_date DESC")
+            rows = self.sqlite_cursor.fetchall()
+            data_list = []
+            for row in rows:
+                row_dict = dict(row)
+                items_value = row_dict.get('items')
+                if isinstance(items_value, str):
+                    try:
+                        row_dict['items'] = json.loads(items_value)
+                    except json.JSONDecodeError:
+                        row_dict['items'] = []
+                data_list.append(schemas.Quotation(**row_dict))
+            print(f"INFO: تم جلب {len(data_list)} عرض سعر من المحلي (SQLite).")
+            return data_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب عروض الأسعار من SQLite: {e}")
+
+        # Fallback إلى MongoDB
         if self.online:
             try:
                 data = list(self.mongo_db.quotations.find().sort("issue_date", -1))
                 data_list = []
                 for d in data:
                     mongo_id = str(d.pop('_id'))
-                    # حذف _mongo_id و mongo_id من البيانات لتجنب التكرار
                     d.pop('_mongo_id', None)
                     d.pop('mongo_id', None)
                     data_list.append(schemas.Quotation(**d, _mongo_id=mongo_id))
                 print("INFO: تم جلب عروض الأسعار من الأونلاين (MongoDB).")
                 return data_list
             except Exception as e:
-                print(f"ERROR: فشل جلب عروض الأسعار من Mongo: {e}. سيتم الجلب من المحلي.")
-
-        self.sqlite_cursor.execute("SELECT * FROM quotations ORDER BY issue_date DESC")
-        rows = self.sqlite_cursor.fetchall()
-        data_list = []
-        for row in rows:
-            row_dict = dict(row)
-            row_dict['items'] = json.loads(row_dict['items'])
-            data_list.append(schemas.Quotation(**row_dict))
-
-        print("INFO: تم جلب عروض الأسعار من المحلي (SQLite).")
-        return data_list
+                print(f"ERROR: فشل جلب عروض الأسعار من Mongo: {e}")
+        
+        return []
 
     def get_quotation_by_number(self, quote_number: str) -> Optional[schemas.Quotation]:
         """ (جديدة) جلب عرض سعر واحد برقمه """
@@ -2859,75 +2903,79 @@ class Repository:
         exclude_status: Optional[schemas.ProjectStatus] = None,
     ) -> List[schemas.Project]:
         """
-        (معدلة) جلب كل المشاريع (مع فلترة اختيارية بالحالة أو استثناء حالة)
+        ⚡ جلب كل المشاريع (SQLite أولاً للسرعة)
         """
-        query_filter: Dict[str, Any] = {}
         sql_query = "SELECT * FROM projects"
         sql_params: List[Any] = []
 
         if status:
-            query_filter = {"status": status.value}
             sql_query += " WHERE status = ?"
             sql_params.append(status.value)
         elif exclude_status:
-            query_filter = {"status": {"$ne": exclude_status.value}}
             sql_query += " WHERE status != ?"
             sql_params.append(exclude_status.value)
 
         sql_query += " ORDER BY created_at DESC"
 
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        try:
+            self.sqlite_cursor.execute(sql_query, sql_params)
+            rows = self.sqlite_cursor.fetchall()
+            data_list: List[schemas.Project] = []
+            for row in rows:
+                row_dict = dict(row)
+                items_value = row_dict.get("items")
+                if isinstance(items_value, str):
+                    try:
+                        row_dict["items"] = json.loads(items_value)
+                    except json.JSONDecodeError:
+                        row_dict["items"] = []
+                data_list.append(schemas.Project(**row_dict))
+            print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
+            return data_list
+        except Exception as e:
+            print(f"ERROR: فشل جلب المشاريع من SQLite: {e}")
+
+        # Fallback إلى MongoDB
         if self.online:
             try:
+                query_filter: Dict[str, Any] = {}
+                if status:
+                    query_filter = {"status": status.value}
+                elif exclude_status:
+                    query_filter = {"status": {"$ne": exclude_status.value}}
+                
                 data = list(self.mongo_db.projects.find(query_filter).sort("created_at", -1))
                 data_list = []
                 for d in data:
                     try:
                         mongo_id = str(d.pop('_id'))
-                        # تأكد من وجود الحقول المطلوبة مع قيم افتراضية
                         if 'client_id' not in d or not d['client_id']:
                             d['client_id'] = 'unknown'
                         if 'name' not in d or not d['name']:
-                            continue  # تخطي المشاريع بدون اسم
-                        # تحويل items إذا كان string أو None
+                            continue
                         if 'items' not in d or d['items'] is None:
                             d['items'] = []
                         elif isinstance(d['items'], str):
                             try:
                                 d['items'] = json.loads(d['items'])
-                            except (json.JSONDecodeError, TypeError, ValueError):
+                            except:
                                 d['items'] = []
-                        # إضافة currency افتراضي إذا غير موجود
                         if 'currency' not in d or d['currency'] is None:
                             d['currency'] = 'EGP'
-                        # إضافة status افتراضي
                         if 'status' not in d or d['status'] is None:
                             d['status'] = 'نشط'
-                        # حذف _mongo_id من البيانات إذا كان موجوداً لتجنب التكرار
                         d.pop('_mongo_id', None)
                         d.pop('mongo_id', None)
                         data_list.append(schemas.Project(**d, _mongo_id=mongo_id))
                     except Exception as item_err:
-                        print(f"WARNING: تخطي مشروع بسبب خطأ: {item_err}")
                         continue
                 print(f"INFO: تم جلب {len(data_list)} مشروع من الأونلاين.")
                 return data_list
             except Exception as e:
-                print(f"ERROR: فشل جلب المشاريع من Mongo: {e}. سيتم الجلب من المحلي.")
+                print(f"ERROR: فشل جلب المشاريع من Mongo: {e}")
 
-        self.sqlite_cursor.execute(sql_query, sql_params)
-        rows = self.sqlite_cursor.fetchall()
-        data_list: List[schemas.Project] = []
-        for row in rows:
-            row_dict = dict(row)
-            items_value = row_dict.get("items")
-            if isinstance(items_value, str):
-                try:
-                    row_dict["items"] = json.loads(items_value)
-                except json.JSONDecodeError:
-                    row_dict["items"] = []
-            data_list.append(schemas.Project(**row_dict))
-        print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
-        return data_list
+        return []
 
     def get_project_by_number(self, project_name: str) -> Optional[schemas.Project]:
         """ (جديدة) جلب مشروع واحد باسمه """
@@ -3112,67 +3160,24 @@ class Repository:
             return []
 
     # --- دوال الداشبورد (جديدة) ---
+    
+    # ⚡ Cache للـ Dashboard KPIs
+    _dashboard_cache = None
+    _dashboard_cache_time = 0
+    _DASHBOARD_CACHE_TTL = 30  # 30 ثانية
 
-    def get_dashboard_kpis(self) -> dict:
+    def get_dashboard_kpis(self, force_refresh: bool = False) -> dict:
         """
-        (معدلة) تحسب الأرقام الرئيسية للداشبورد (أونلاين أولاً).
+        ⚡ (محسّنة للسرعة) تحسب الأرقام الرئيسية للداشبورد.
+        SQLite أولاً (سريع جداً) - مع caching لتحسين الأداء.
         """
-        print("INFO: [Repo] جاري حساب أرقام الداشبورد...")
-
-        # --- (الجديد) الوضع الأونلاين ---
-        if self.online:
-            try:
-                print("INFO: [Repo] ... (الوضع الأونلاين: جاري الحساب من MongoDB)")
-                total_collected = 0.0
-                # (هنستخدم الطريقة البسيطة والمضمونة: نجيبهم ونجمعهم هنا)
-                payments = list(self.mongo_db.payments.find({}, {"amount": 1}))
-                for p in payments:
-                    total_collected += p.get("amount", 0)
-
-                total_expenses = 0.0
-                expenses = list(self.mongo_db.expenses.find({}, {"amount": 1}))
-                for e in expenses:
-                    total_expenses += e.get("amount", 0)
-
-                total_outstanding = 0.0
-                # (هنا بنجيب المشاريع اللي لسه مفتوحة ونحسب المتبقي لكل مشروع)
-                projects = list(self.mongo_db.projects.find(
-                    {"status": {"$in": [schemas.ProjectStatus.ACTIVE.value, schemas.ProjectStatus.PLANNING.value, schemas.ProjectStatus.ON_HOLD.value]}},
-                    {"name": 1, "total_amount": 1}
-                ))
-
-                # حساب المتبقي لكل مشروع على حدة
-                for project in projects:
-                    project_name = project.get("name")
-                    project_total = project.get("total_amount", 0)
-                    
-                    # جلب الدفعات الخاصة بهذا المشروع فقط
-                    project_payments = list(self.mongo_db.payments.find(
-                        {"project_id": project_name},
-                        {"amount": 1}
-                    ))
-                    project_paid = sum([p.get("amount", 0) for p in project_payments])
-                    
-                    # المتبقي = الإجمالي - المدفوع
-                    project_remaining = project_total - project_paid
-                    if project_remaining > 0:
-                        total_outstanding += project_remaining
-
-                net_profit_cash = total_collected - total_expenses
-
-                print(f"INFO: [Repo] (Online) Collected: {total_collected}, Expenses: {total_expenses}, Outstanding: {total_outstanding}")
-
-                return {
-                    "total_collected": total_collected,
-                    "total_outstanding": total_outstanding,
-                    "total_expenses": total_expenses,
-                    "net_profit_cash": net_profit_cash
-                }
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل الحساب من MongoDB: {e}. سيتم محاولة الأوفلاين.")
-
-        # --- (القديم) الوضع الأوفلاين (لو النت فاصل) ---
-        print("INFO: [Repo] ... (الوضع الأوفلاين: جاري الحساب من SQLite)")
+        # ⚡ استخدام الـ cache إذا كان صالحاً
+        current_time = time.time()
+        if not force_refresh and Repository._dashboard_cache and (current_time - Repository._dashboard_cache_time) < Repository._DASHBOARD_CACHE_TTL:
+            print("INFO: [Repo] استخدام cache الداشبورد")
+            return Repository._dashboard_cache
+        
+        print("INFO: [Repo] ⚡ جاري حساب أرقام الداشبورد (SQLite - سريع)...")
         total_collected = 0.0
         total_outstanding = 0.0
         total_expenses = 0.0
@@ -3217,12 +3222,16 @@ class Repository:
         except Exception as e:
             print(f"ERROR: [Repo] فشل حساب أرقام الداشبورد (SQLite): {e}")
 
-        return {
+        result = {
             "total_collected": total_collected,
             "total_outstanding": total_outstanding,
             "total_expenses": total_expenses,
             "net_profit_cash": net_profit_cash
         }
+        # ⚡ حفظ في الـ cache
+        Repository._dashboard_cache = result
+        Repository._dashboard_cache_time = time.time()
+        return result
 
     # --- دوال العملات (جديدة) ---
 

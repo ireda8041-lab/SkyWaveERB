@@ -114,12 +114,8 @@ class ExpenseManagerTab(QWidget):
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_expenses_data(self):
-        """تحميل المصروفات"""
+        """⚡ تحميل المصروفات بسرعة"""
         print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
-        
-        # ⚡ منع التجميد - معالجة الأحداث
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
         
         try:
             self.expenses_list = self.expense_service.get_all_expenses()
