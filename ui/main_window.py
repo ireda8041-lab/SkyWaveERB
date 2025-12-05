@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTabWidget, QHBoxLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon
 
 # (الأقسام اللي شغالين بيها)
 from services.settings_service import SettingsService
@@ -85,6 +86,13 @@ class MainWindow(QMainWindow):
 
         role_display = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
         self.setWindowTitle(f"Sky Wave ERP - {current_user.full_name or current_user.username} ({role_display})")
+        
+        # تعيين أيقونة النافذة
+        from core.resource_utils import get_resource_path
+        import os
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # ✅ جعل النافذة متجاوبة مع حجم الشاشة
         from PyQt6.QtWidgets import QApplication

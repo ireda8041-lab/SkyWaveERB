@@ -1440,7 +1440,7 @@ class SettingsTab(QWidget):
         
         self.update_status_label.setText(
             f"🎉 يتوفر إصدار جديد!\n\n"
-            f"الإصدار الجديد: <b>{version}</b>\n"
+            f"الإصدار الجديد: {version}\n"
             f"اضغط على 'تنزيل التحديث' للبدء"
         )
         self.update_status_label.setStyleSheet("""

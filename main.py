@@ -175,6 +175,12 @@ class SkyWaveERPApp:
         
         app = QApplication(sys.argv)
         
+        # === تعيين أيقونة التطبيق ===
+        from PyQt6.QtGui import QIcon
+        icon_path = get_resource_path("icon.ico")
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+        
         # === إخفاء كل النوافذ حتى نعرض الـ splash ===
         app.setQuitOnLastWindowClosed(False)
         

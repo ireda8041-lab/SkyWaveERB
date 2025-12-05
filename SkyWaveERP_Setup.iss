@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "25.12.05"
+#define MyAppVersion "25.12.50"
 #define MyAppPublisher "Sky Wave Ads"
 #define MyAppURL "https://skywaveads.com"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -60,7 +60,6 @@ UninstallDisplayName={#MyAppName}
 
 [Languages]
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
-Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "إنشاء اختصار على سطح المكتب"; GroupDescription: "اختصارات إضافية:"
