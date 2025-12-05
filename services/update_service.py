@@ -157,7 +157,7 @@ class UpdateService:
         # استخدام مجلد AppData لتجنب مشاكل الصلاحيات في Program Files
         app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
         os.makedirs(app_data_dir, exist_ok=True)
-        self.temp_update_path = os.path.join(app_data_dir, "temp_update.zip")
+        self.temp_update_path = os.path.join(app_data_dir, "SkyWave-Setup-Update.exe")
     
     def check_for_updates(self) -> UpdateChecker:
         """
@@ -182,13 +182,12 @@ class UpdateService:
         downloader = UpdateDownloader(download_url, self.temp_update_path)
         return downloader
     
-    def apply_update(self, zip_path: str, executable_name: str = "main.py") -> bool:
+    def apply_update(self, setup_path: str) -> bool:
         """
         تطبيق التحديث عن طريق تشغيل updater.exe
         
         Args:
-            zip_path: مسار ملف ZIP المحمل
-            executable_name: اسم الملف التنفيذي للبرنامج
+            setup_path: مسار ملف Setup (exe) المحمل
         
         Returns:
             True إذا تم تشغيل المحدث بنجاح
@@ -198,12 +197,10 @@ class UpdateService:
             if getattr(sys, 'frozen', False):
                 # البرنامج مجمع (EXE)
                 current_dir = os.path.dirname(sys.executable)
-                app_executable = os.path.basename(sys.executable)
             else:
                 # البرنامج يعمل من Python
                 current_dir = os.path.dirname(os.path.abspath(__file__))
                 current_dir = os.path.dirname(current_dir)  # العودة للمجلد الرئيسي
-                app_executable = "main.py"
             
             # مسار updater.exe أو updater.py
             updater_exe = os.path.join(current_dir, "updater.exe")
@@ -212,10 +209,10 @@ class UpdateService:
             # اختيار المحدث المناسب
             if os.path.exists(updater_exe):
                 updater_path = updater_exe
-                command = [updater_path, current_dir, zip_path, app_executable]
+                command = [updater_path, current_dir, setup_path]
             elif os.path.exists(updater_py):
                 updater_path = updater_py
-                command = [sys.executable, updater_path, current_dir, zip_path, app_executable]
+                command = [sys.executable, updater_path, current_dir, setup_path]
             else:
                 raise FileNotFoundError("لم يتم العثور على updater.exe أو updater.py")
             
