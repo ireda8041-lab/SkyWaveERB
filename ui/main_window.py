@@ -103,10 +103,8 @@ class MainWindow(QMainWindow):
         screen_width = screen.width()
         screen_height = screen.height()
         
-        # تعيين الحد الأدنى للنافذة (80% من حجم الشاشة)
-        min_width = int(screen_width * 0.8)
-        min_height = int(screen_height * 0.8)
-        self.setMinimumSize(QSize(min_width, min_height))
+        # تعيين الحد الأدنى للنافذة (حجم صغير يناسب أي شاشة)
+        self.setMinimumSize(QSize(1024, 600))
         
         # فتح النافذة بحجم الشاشة الكامل
         self.setGeometry(screen)
@@ -160,7 +158,7 @@ class MainWindow(QMainWindow):
         # جعل الـ tabs متجاوبة مع حجم الشاشة بشكل كامل
         from PyQt6.QtWidgets import QSizePolicy
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.tabs.setMinimumSize(QSize(800, 600))  # حد أدنى معقول
+        self.tabs.setMinimumSize(QSize(400, 300))  # حد أدنى صغير للتجاوب
         
         # تحسين شكل التابات (Dark Blue Theme - زي الصورة)
         self.tabs.setStyleSheet("""
@@ -310,7 +308,7 @@ class MainWindow(QMainWindow):
         # جعل الـ central widget متجاوب بشكل كامل
         from PyQt6.QtWidgets import QSizePolicy
         central_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        central_widget.setMinimumSize(QSize(800, 600))
+        central_widget.setMinimumSize(QSize(400, 300))
         
         # ✅ إضافة شريط الحالة في الأسفل باستخدام QStatusBar
         from PyQt6.QtWidgets import QStatusBar
