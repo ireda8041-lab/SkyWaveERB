@@ -1604,7 +1604,19 @@ class SettingsTab(QWidget):
         self.download_update_btn.setEnabled(True)
         self.check_update_btn.setEnabled(True)
         
-        QMessageBox.critical(self, "خطأ", f"فشل تنزيل التحديث:\n{error_message}")
+        # إذا كان الخطأ بسبب الصلاحيات، اعرض خيار فتح صفحة التنزيل
+        if "Permission denied" in error_message or "الصلاحيات" in error_message:
+            reply = QMessageBox.question(
+                self, "خطأ في الصلاحيات",
+                f"فشل تنزيل التحديث بسبب مشكلة في الصلاحيات.\n\n"
+                f"هل تريد فتح صفحة التنزيل في المتصفح لتنزيل التحديث يدوياً؟",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                import webbrowser
+                webbrowser.open(self.update_download_url)
+        else:
+            QMessageBox.critical(self, "خطأ", f"فشل تنزيل التحديث:\n{error_message}")
 
     def install_update(self):
         """تثبيت التحديث"""
