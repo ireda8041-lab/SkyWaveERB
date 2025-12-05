@@ -1309,7 +1309,7 @@ class SettingsTab(QWidget):
         app_name_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
         version_layout.addWidget(app_name_label)
         
-        current_version_label = QLabel(f"الإصدار الحالي: <b>{CURRENT_VERSION}</b>")
+        current_version_label = QLabel(f"الإصدار الحالي: {CURRENT_VERSION}")
         current_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         current_version_label.setStyleSheet("font-size: 16px; color: #0A6CF1; padding: 10px;")
         version_layout.addWidget(current_version_label)
@@ -1464,7 +1464,7 @@ class SettingsTab(QWidget):
         
         self.update_status_label.setText(
             f"✅ أنت تستخدم أحدث إصدار!\n\n"
-            f"الإصدار الحالي: <b>{CURRENT_VERSION}</b>"
+            f"الإصدار الحالي: {CURRENT_VERSION}"
         )
         self.update_status_label.setStyleSheet("""
             background-color: #0A6CF1;
