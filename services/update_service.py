@@ -154,10 +154,10 @@ class UpdateService:
         """
         self.current_version = current_version
         self.check_url = check_url
-        self.temp_update_path = os.path.join(
-            os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__),
-            "temp_update.zip"
-        )
+        # استخدام مجلد AppData لتجنب مشاكل الصلاحيات في Program Files
+        app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+        os.makedirs(app_data_dir, exist_ok=True)
+        self.temp_update_path = os.path.join(app_data_dir, "temp_update.zip")
     
     def check_for_updates(self) -> UpdateChecker:
         """

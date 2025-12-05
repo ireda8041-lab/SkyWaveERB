@@ -1,13 +1,13 @@
 {
-  "version": "25.12.42",
+  "version": "25.12.43",
   "version_name": "December 2025 - Stability Fix",
   "release_date": "2025-12-04",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/25.12.42/SkyWave-Setup-25.12.42.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/25.12.43/SkyWave-Setup-25.12.43.exe",
   "changelog": [
     "اصلاح مشكلة الصلاحيات في Program Files",
+    "اصلاح مشكلة تحميل التحديثات",
     "نقل ملفات البيانات الى AppData",
     "نقل ملفات الـ Logs الى مجلد المستخدم",
-    "نقل ملفات الاعدادات الى مجلد امن",
     "البرنامج يعمل بدون صلاحيات Administrator"
   ],
   "min_version": "1.0.0",
