@@ -1092,7 +1092,7 @@ class TodoManagerWidget(QWidget):
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
         """إنشاء بطاقة إحصائية"""
         card = QFrame()
-        card.setFixedHeight(70)  # ارتفاع ثابت أصغر
+        card.setFixedHeight(100)  # ارتفاع أكبر للوضوح
         card.setStyleSheet(f"""
             QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -1105,16 +1105,16 @@ class TodoManagerWidget(QWidget):
         """)
         
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(2)
-        card_layout.setContentsMargins(8, 5, 8, 5)
+        card_layout.setSpacing(8)
+        card_layout.setContentsMargins(12, 10, 12, 10)
         
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px; background: transparent;")
+        title_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px; background: transparent;")
         card_layout.addWidget(title_label)
         
         value_label = QLabel(value)
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold; background: transparent;")
+        value_label.setStyleSheet(f"color: {color}; font-size: 28px; font-weight: bold; background: transparent;")
         card_layout.addWidget(value_label)
         
         return card
