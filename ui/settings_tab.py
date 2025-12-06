@@ -1640,8 +1640,7 @@ class SettingsTab(QWidget):
         try:
             # تطبيق التحديث
             success = self.update_service.apply_update(
-                self.update_service.temp_update_path,
-                "main.py"  # أو اسم الملف التنفيذي
+                self.update_service.temp_update_path
             )
             
             if success:
