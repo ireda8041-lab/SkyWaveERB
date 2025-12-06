@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('ui', 'ui'), ('services', 'services'), ('core', 'core'), ('assets', 'assets'), ('skywave_settings.json', '.'), ('version.json', '.'), ('version.py', '.'), ('updater.py', '.'), ('update_settings.json', '.'), ('icon.ico', '.'), ('logo.png', '.'), ('site logo.png', '.'), ('skywave_local.db', '.')]
+datas = [('ui', 'ui'), ('services', 'services'), ('core', 'core'), ('assets', 'assets'), ('skywave_settings.json', '.'), ('version.json', '.'), ('version.py', '.'), ('updater.py', '.'), ('update_settings.json', '.'), ('icon.ico', '.'), ('logo.png', '.'), ('site logo.png', '.')]
 binaries = []
 hiddenimports = ['pymongo', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtWebEngineWidgets', 'reportlab', 'PIL', 'openpyxl', 'google.generativeai', 'requests']
 tmp_ret = collect_all('reportlab')

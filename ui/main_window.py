@@ -244,6 +244,9 @@ class MainWindow(QMainWindow):
         # ربط زر تسجيل الخروج
         self.status_bar.logout_requested.connect(self._handle_logout)
 
+        # ربط زرار المزامنة اللحظية
+        self.status_bar.sync_indicator.sync_requested.connect(self._on_instant_sync)
+
         # إنشاء container widget للـ tabs
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
@@ -674,6 +677,43 @@ class MainWindow(QMainWindow):
             self.on_tab_changed(current_index)
         except Exception as e:
             print(f"خطأ في تحديث البيانات بعد المزامنة: {e}")
+
+    def _on_instant_sync(self):
+        """
+        🔄 مزامنة لحظية - يتم تشغيلها عند الضغط على زرار المزامنة
+        """
+        import threading
+
+        try:
+            print("INFO: 🔄 بدء المزامنة اللحظية...")
+
+            # تحديث حالة الشريط
+            self.status_bar.update_sync_status("syncing")
+
+            def do_sync():
+                """تنفيذ المزامنة في thread منفصل"""
+                try:
+                    # استخدام advanced_sync_manager إذا كان متاحاً
+                    if self.advanced_sync_manager:
+                        self.advanced_sync_manager.sync_now()
+                    elif self.sync_manager:
+                        self.sync_manager.start_sync()
+                    else:
+                        print("WARNING: لا يوجد مدير مزامنة متاح")
+                        return
+
+                    print("INFO: ✅ اكتملت المزامنة اللحظية بنجاح")
+
+                except Exception as e:
+                    print(f"ERROR: فشلت المزامنة اللحظية: {e}")
+
+            # تشغيل المزامنة في الخلفية
+            sync_thread = threading.Thread(target=do_sync, daemon=True)
+            sync_thread.start()
+
+        except Exception as e:
+            print(f"ERROR: خطأ في بدء المزامنة اللحظية: {e}")
+            self.status_bar.update_sync_status("error")
 
     def _handle_logout(self):
         """معالج تسجيل الخروج"""

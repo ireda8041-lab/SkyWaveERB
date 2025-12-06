@@ -249,7 +249,10 @@ class ProjectEditorDialog(QDialog):
         self.client_combo.setup_completer(client_names)
 
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("اسم المشروع (سيتم توليده تلقائياً)")
+        self.name_input.setPlaceholderText("اسم المشروع (اختياري - سيتم توليده تلقائياً)")
+
+        # ربط تغيير العميل بتوليد اسم المشروع تلقائياً
+        self.client_combo.currentIndexChanged.connect(self._auto_generate_project_name)
 
         row1.addWidget(QLabel("👤 العميل:"))
         row1.addWidget(self.client_combo, 2)
@@ -1286,6 +1289,23 @@ class ProjectEditorDialog(QDialog):
 
         return None
 
+    def _auto_generate_project_name(self):
+        """توليد اسم المشروع تلقائياً من اسم العميل"""
+        try:
+            # فقط إذا كان حقل الاسم فارغاً
+            if self.name_input.text().strip():
+                return
+
+            selected_client = self.client_combo.currentData()
+            if selected_client:
+                from datetime import datetime
+                # توليد اسم: "مشروع [اسم العميل] - [الشهر/السنة]"
+                month_year = datetime.now().strftime("%m/%Y")
+                auto_name = f"مشروع {selected_client.name} - {month_year}"
+                self.name_input.setText(auto_name)
+        except Exception as e:
+            print(f"WARNING: فشل توليد اسم المشروع تلقائياً: {e}")
+
     def save_project(self):
         """
         (معدلة) تحفظ المشروع + الدفعة المقدمة
@@ -1293,10 +1313,16 @@ class ProjectEditorDialog(QDialog):
         selected_client = self.client_combo.currentData()
         selected_status = self.status_combo.currentData()
 
-        # التحقق من اسم المشروع
-        if not self.name_input.text():
-            QMessageBox.warning(self, "خطأ", "اسم المشروع مطلوب")
-            return
+        # توليد اسم المشروع تلقائياً إذا كان فارغاً
+        if not self.name_input.text().strip():
+            if selected_client:
+                from datetime import datetime
+                month_year = datetime.now().strftime("%m/%Y")
+                auto_name = f"مشروع {selected_client.name} - {month_year}"
+                self.name_input.setText(auto_name)
+            else:
+                QMessageBox.warning(self, "خطأ", "يرجى اختيار العميل أولاً")
+                return
 
         # التحقق من العميل - إذا كان مكتوباً ولكن غير محدد
         if not selected_client:

@@ -33,6 +33,48 @@ _APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('
 os.makedirs(_APP_DATA_DIR, exist_ok=True)
 LOCAL_DB_FILE = os.path.join(_APP_DATA_DIR, "skywave_local.db")
 
+# ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
+def _copy_initial_db():
+    """نسخ قاعدة البيانات الأولية من مجلد البرنامج إذا لم تكن موجودة"""
+    import shutil
+    import sys
+    
+    if os.path.exists(LOCAL_DB_FILE):
+        return  # قاعدة البيانات موجودة بالفعل
+    
+    # البحث عن قاعدة البيانات في مجلد البرنامج
+    possible_paths = []
+    
+    if getattr(sys, 'frozen', False):
+        # التطبيق يعمل كـ EXE
+        exe_dir = os.path.dirname(sys.executable)
+        possible_paths = [
+            os.path.join(exe_dir, "_internal", "skywave_local.db"),
+            os.path.join(exe_dir, "skywave_local.db"),
+        ]
+        if hasattr(sys, '_MEIPASS'):
+            possible_paths.insert(0, os.path.join(sys._MEIPASS, "skywave_local.db"))
+    else:
+        # التطبيق يعمل كـ Python script
+        possible_paths = [
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "skywave_local.db"),
+            "skywave_local.db",
+        ]
+    
+    for src_path in possible_paths:
+        if os.path.exists(src_path):
+            try:
+                shutil.copy2(src_path, LOCAL_DB_FILE)
+                print(f"INFO: ✅ تم نسخ قاعدة البيانات من {src_path} إلى {LOCAL_DB_FILE}")
+                return
+            except Exception as e:
+                print(f"WARNING: فشل نسخ قاعدة البيانات: {e}")
+    
+    print("INFO: لم يتم العثور على قاعدة بيانات أولية - سيتم إنشاء قاعدة جديدة")
+
+# تنفيذ النسخ عند تحميل الموديول
+_copy_initial_db()
+
 
 class Repository:
     """
@@ -1311,7 +1353,7 @@ class Repository:
     # --- دوال التعامل مع الحسابات ---
 
     def create_account(self, account_data: schemas.Account) -> schemas.Account:
-        """ إنشاء حساب جديد (بذكاء) """
+        """ ⚡ إنشاء حساب جديد - محلي أولاً ثم مزامنة في الخلفية """
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
@@ -1319,13 +1361,12 @@ class Repository:
         account_data.last_modified = now_dt
         account_data.sync_status = 'new_offline'
 
-        # 1. الحفظ في SQLite (الأوفلاين أولاً)
+        # ⚡ 1. الحفظ في SQLite فوراً (سريع جداً)
         sql = """
             INSERT INTO accounts (sync_status, created_at, last_modified, name, code, type, parent_id, balance, currency, description)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         currency_value = account_data.currency.value if account_data.currency else 'EGP'
-        # استخدام parent_code أو parent_id (أيهما موجود)
         parent_value = account_data.parent_code or account_data.parent_id
         params = (
             account_data.sync_status, now_iso, now_iso, account_data.name, account_data.code,
@@ -1336,40 +1377,44 @@ class Repository:
         self.sqlite_cursor.execute(sql, params)
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
-        print(f"INFO: تم حفظ الحساب '{account_data.name}' محلياً (ID: {local_id}).")
+        print(f"INFO: ✅ تم حفظ الحساب '{account_data.name}' محلياً (ID: {local_id}).")
 
-        # 2. محاولة الحفظ في MongoDB (الأونلاين)
+        # ⚡ 2. مزامنة مع MongoDB في الخلفية (لا يعطل الواجهة)
         if self.online:
-            try:
-                account_dict = account_data.model_dump(exclude={"_mongo_id"})
-                account_dict['type'] = account_data.type.value
+            def sync_to_mongo():
+                try:
+                    account_dict = account_data.model_dump(exclude={"_mongo_id"})
+                    account_dict['type'] = account_data.type.value
 
-                result = self.mongo_db.accounts.insert_one(account_dict)
-                mongo_id = str(result.inserted_id)
+                    result = self.mongo_db.accounts.insert_one(account_dict)
+                    mongo_id = str(result.inserted_id)
 
-                account_data._mongo_id = mongo_id
-                account_data.sync_status = 'synced'
+                    self.sqlite_cursor.execute(
+                        "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                        (mongo_id, 'synced', local_id)
+                    )
+                    self.sqlite_conn.commit()
+                    print(f"INFO: ✅ تم مزامنة الحساب '{account_data.name}' مع السيرفر (خلفية)")
 
-                self.sqlite_cursor.execute(
-                    "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
-                    (mongo_id, 'synced', local_id)
-                )
-                self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة الحساب '{account_data.name}' أونلاين.")
-
-            except Exception as e:
-                if "E11000 duplicate key" in str(e):
-                    print(f"WARNING: الحساب بكود '{account_data.code}' موجود بالفعل أونلاين.")
-                    existing = self.mongo_db.accounts.find_one({"code": account_data.code})
-                    if existing:
-                        mongo_id = str(existing['_id'])
-                        self.sqlite_cursor.execute(
-                            "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
-                            (mongo_id, 'synced', local_id)
-                        )
-                        self.sqlite_conn.commit()
-                else:
-                    print(f"ERROR: فشل مزامنة الحساب الجديد '{account_data.name}': {e}")
+                except Exception as e:
+                    if "E11000 duplicate key" in str(e):
+                        print(f"WARNING: الحساب بكود '{account_data.code}' موجود بالفعل أونلاين.")
+                        try:
+                            existing = self.mongo_db.accounts.find_one({"code": account_data.code})
+                            if existing:
+                                mongo_id = str(existing['_id'])
+                                self.sqlite_cursor.execute(
+                                    "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                                    (mongo_id, 'synced', local_id)
+                                )
+                                self.sqlite_conn.commit()
+                        except Exception:
+                            pass
+                    else:
+                        print(f"WARNING: فشل مزامنة الحساب '{account_data.name}': {e}")
+            
+            import threading
+            threading.Thread(target=sync_to_mongo, daemon=True).start()
 
         return account_data
 
@@ -1439,25 +1484,13 @@ class Repository:
         return []
 
     def get_account_by_id(self, account_id: str) -> schemas.Account | None:
-        """ (جديدة) جلب حساب واحد بالـ ID """
+        """ ⚡ جلب حساب واحد بالـ ID - SQLite أولاً للسرعة """
         try:
             account_id_num = int(account_id)
         except ValueError:
             account_id_num = 0
 
-        if self.online:
-            try:
-                data = self.mongo_db.accounts.find_one(
-                    {"$or": [{"_id": self._to_objectid(account_id)}, {"_mongo_id": account_id}, {"id": account_id_num}]}
-                )
-                if data:
-                    mongo_id = str(data.pop('_id'))
-                    data.pop('_mongo_id', None)
-                    data.pop('mongo_id', None)
-                    return schemas.Account(**data, _mongo_id=mongo_id)
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب الحساب {account_id} (Mongo): {e}")
-
+        # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
             self.sqlite_cursor.execute("SELECT * FROM accounts WHERE id = ? OR _mongo_id = ?", (account_id_num, account_id))
             row = self.sqlite_cursor.fetchone()
@@ -1698,7 +1731,7 @@ class Repository:
             return []
 
     def update_account(self, account_id: str, account_data: schemas.Account) -> schemas.Account | None:
-        """ (جديدة) تحديث بيانات حساب موجود. """
+        """ ⚡ تحديث بيانات حساب - محلي أولاً ثم مزامنة في الخلفية """
         print(f"INFO: [Repo] جاري تحديث الحساب ID: {account_id}")
 
         now_dt = datetime.now()
@@ -1713,9 +1746,7 @@ class Repository:
             account_id_num = 0
 
         currency_value = account_data.currency.value if account_data.currency else 'EGP'
-        # استخدام parent_id أو parent_code (أيهما موجود)
         parent_value = account_data.parent_id or account_data.parent_code
-
 
         sql = """
             UPDATE accounts SET
@@ -1740,31 +1771,38 @@ class Repository:
         try:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
+            print("INFO: [Repo] ✅ تم تحديث الحساب محلياً")
         except Exception as e:
             print(f"ERROR: [Repo] فشل تحديث الحساب (SQLite): {e}")
 
+        # ⚡ مزامنة مع MongoDB في الخلفية (لا يعطل الواجهة)
         if self.online:
-            try:
-                update_dict = account_data.model_dump(exclude={"_mongo_id", "id", "created_at"})
-                update_dict['type'] = account_data.type.value
-                update_dict['status'] = account_data.status.value
-                update_dict['last_modified'] = now_dt
+            def sync_to_mongo():
+                try:
+                    update_dict = account_data.model_dump(exclude={"_mongo_id", "id", "created_at"})
+                    update_dict['type'] = account_data.type.value
+                    update_dict['status'] = account_data.status.value
+                    update_dict['last_modified'] = now_dt
 
-                self.mongo_db.accounts.update_one(
-                    {"$or": [
-                        {"_id": self._to_objectid(account_id)},
-                        {"_mongo_id": account_id},
-                        {"id": account_id_num},
-                    ]},
-                    {"$set": update_dict},
-                )
-                self.sqlite_cursor.execute(
-                    "UPDATE accounts SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
-                    (account_id_num, account_id),
-                )
-                self.sqlite_conn.commit()
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث الحساب (Mongo): {e}")
+                    self.mongo_db.accounts.update_one(
+                        {"$or": [
+                            {"_id": self._to_objectid(account_id)},
+                            {"_mongo_id": account_id},
+                            {"id": account_id_num},
+                        ]},
+                        {"$set": update_dict},
+                    )
+                    self.sqlite_cursor.execute(
+                        "UPDATE accounts SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                        (account_id_num, account_id),
+                    )
+                    self.sqlite_conn.commit()
+                    print("INFO: [Repo] ✅ تم مزامنة الحساب مع السيرفر (خلفية)")
+                except Exception as e:
+                    print(f"WARNING: [Repo] فشل مزامنة الحساب مع السيرفر: {e}")
+            
+            import threading
+            threading.Thread(target=sync_to_mongo, daemon=True).start()
 
         return account_data
 
@@ -1784,7 +1822,7 @@ class Repository:
             return False
 
     def delete_account_permanently(self, account_id: str) -> bool:
-        """ حذف حساب نهائياً من قاعدة البيانات """
+        """ ⚡ حذف حساب نهائياً - محلي أولاً ثم مزامنة في الخلفية """
         print(f"INFO: [Repo] جاري حذف الحساب نهائياً ID: {account_id}")
         try:
             # محاولة تحويل account_id إلى رقم
@@ -1793,26 +1831,30 @@ class Repository:
             except (ValueError, TypeError):
                 account_id_num = -1
 
-            # حذف من SQLite (بالـ id أو _mongo_id أو code)
+            # ⚡ حذف من SQLite فوراً (سريع جداً)
             self.sqlite_cursor.execute(
                 "DELETE FROM accounts WHERE id = ? OR _mongo_id = ? OR code = ?",
                 (account_id_num, account_id, account_id)
             )
             self.sqlite_conn.commit()
+            print("INFO: [Repo] ✅ تم حذف الحساب من المحلي")
 
-            # حذف من MongoDB
+            # ⚡ حذف من MongoDB في الخلفية (لا يعطل الواجهة)
             if self.online:
-                try:
-                    from bson import ObjectId
+                def delete_from_mongo():
                     try:
-                        self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
-                    except Exception:
-                        self.mongo_db.accounts.delete_one({"code": account_id})
-                    print("INFO: [Repo] تم حذف الحساب من MongoDB")
-                except Exception as e:
-                    print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+                        from bson import ObjectId
+                        try:
+                            self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
+                        except Exception:
+                            self.mongo_db.accounts.delete_one({"code": account_id})
+                        print("INFO: [Repo] ✅ تم حذف الحساب من MongoDB (خلفية)")
+                    except Exception as e:
+                        print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+                
+                import threading
+                threading.Thread(target=delete_from_mongo, daemon=True).start()
 
-            print("INFO: [Repo] تم حذف الحساب نهائياً")
             return True
         except Exception as e:
             print(f"ERROR: [Repo] فشل حذف الحساب: {e}")

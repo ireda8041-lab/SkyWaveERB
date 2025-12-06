@@ -25,6 +25,7 @@ class SyncIndicator(QWidget):
         super().__init__(parent)
         self.sync_status = "offline"
         self.pending_count = 0
+        self._is_syncing = False
         self.init_ui()
 
     def init_ui(self):
@@ -32,6 +33,35 @@ class SyncIndicator(QWidget):
         layout = QHBoxLayout()
         layout.setContentsMargins(5, 2, 5, 2)
         layout.setSpacing(8)
+
+        # زرار المزامنة اللحظية
+        from ui.styles import COLORS
+        self.sync_btn = QPushButton("🔄")
+        self.sync_btn.setFont(QFont("Segoe UI Emoji", 11))
+        self.sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sync_btn.setToolTip("مزامنة لحظية")
+        self.sync_btn.setFixedSize(28, 28)
+        self.sync_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['primary']};
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['primary_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary_dark']};
+            }}
+            QPushButton:disabled {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_secondary']};
+            }}
+        """)
+        self.sync_btn.clicked.connect(self._on_sync_clicked)
+        layout.addWidget(self.sync_btn)
 
         # أيقونة الحالة
         self.status_icon = QLabel("🔴")
@@ -46,14 +76,12 @@ class SyncIndicator(QWidget):
         layout.addWidget(self.status_text)
 
         # عداد العمليات المعلقة
-        from ui.styles import COLORS
         self.pending_label = QLabel("")
         self.pending_label.setFont(QFont("Segoe UI", 8))
         self.pending_label.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold; background-color: transparent; border: none;")
         layout.addWidget(self.pending_label)
 
         # شريط التقدم (مخفي افتراضياً)
-        from ui.styles import COLORS
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumHeight(4)
         self.progress_bar.setTextVisible(False)
@@ -75,6 +103,11 @@ class SyncIndicator(QWidget):
         self.setMaximumHeight(30)
         self.setStyleSheet("background-color: transparent;")
 
+    def _on_sync_clicked(self):
+        """معالج الضغط على زرار المزامنة"""
+        if not self._is_syncing:
+            self.sync_requested.emit()
+
     def update_status(self, status: str, pending_count: int = 0):
         """تحديث حالة المزامنة"""
         from ui.styles import COLORS
@@ -86,21 +119,37 @@ class SyncIndicator(QWidget):
             self.status_icon.setText("🟢")
             self.status_text.setText("متزامن")
             self.status_text.setStyleSheet(f"color: {COLORS['success']}; background-color: transparent; border: none;")
+            self._is_syncing = False
+            self.sync_btn.setEnabled(True)
+            self.sync_btn.setText("🔄")
+            self.sync_btn.setToolTip("مزامنة لحظية")
 
         elif status == "syncing":
             self.status_icon.setText("🟡")
             self.status_text.setText("جاري المزامنة...")
             self.status_text.setStyleSheet(f"color: {COLORS['warning']}; background-color: transparent; border: none;")
+            self._is_syncing = True
+            self.sync_btn.setEnabled(False)
+            self.sync_btn.setText("⏳")
+            self.sync_btn.setToolTip("جاري المزامنة...")
 
         elif status == "offline":
             self.status_icon.setText("🔴")
             self.status_text.setText("غير متصل")
             self.status_text.setStyleSheet(f"color: {COLORS['danger']}; background-color: transparent; border: none;")
+            self._is_syncing = False
+            self.sync_btn.setEnabled(True)
+            self.sync_btn.setText("🔄")
+            self.sync_btn.setToolTip("مزامنة لحظية (غير متصل)")
 
         elif status == "error":
             self.status_icon.setText("❌")
             self.status_text.setText("خطأ في المزامنة")
             self.status_text.setStyleSheet(f"color: {COLORS['danger']}; background-color: transparent; border: none;")
+            self._is_syncing = False
+            self.sync_btn.setEnabled(True)
+            self.sync_btn.setText("🔄")
+            self.sync_btn.setToolTip("إعادة المزامنة")
 
         # تحديث عداد العمليات المعلقة
         if pending_count > 0:

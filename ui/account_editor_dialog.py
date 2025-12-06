@@ -273,17 +273,29 @@ class AccountEditorDialog(QDialog):
             display_text = f"{indent}{acc.code} - {acc.name}"
             self.parent_combo.addItem(display_text, userData=str(acc.code))
 
-    def _is_descendant(self, potential_child_code: str, parent_code: str) -> bool:
-        """التحقق مما إذا كان الحساب من أحفاد حساب آخر"""
-        if not potential_child_code or not parent_code:
+    def _is_descendant(self, potential_child_code: str, ancestor_code: str, visited: set | None = None) -> bool:
+        """التحقق مما إذا كان الحساب من أحفاد حساب آخر (منع الحلقات الدائرية)"""
+        if not potential_child_code or not ancestor_code:
             return False
-        # البحث في الشجرة
+        
+        # منع الحلقات اللانهائية
+        if visited is None:
+            visited = set()
+        
+        if potential_child_code in visited:
+            return False  # اكتشفنا حلقة دائرية، نوقف البحث
+        
+        visited.add(potential_child_code)
+        
+        # البحث في الشجرة - هل potential_child_code هو ابن لـ ancestor_code؟
         for acc in self.all_accounts:
             if acc.code == potential_child_code:
-                if acc.parent_code == parent_code:
-                    return True
+                if acc.parent_code == ancestor_code:
+                    return True  # نعم، هو ابن مباشر
                 elif acc.parent_code:
-                    return self._is_descendant(acc.parent_code, parent_code)
+                    # نتحقق من الأب - هل الأب هو حفيد لـ ancestor_code؟
+                    return self._is_descendant(acc.parent_code, ancestor_code, visited)
+                break  # وجدنا الحساب، لا داعي للاستمرار
         return False
 
     def populate_fields(self):
