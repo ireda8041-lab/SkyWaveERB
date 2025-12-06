@@ -97,6 +97,9 @@ class AutoSync:
             pulled += self._quick_pull_services()
             pulled += self._quick_pull_payments()
             
+            # ✅ التأكد من استعادة أرقام الفواتير بعد كل sync
+            self._restore_invoice_numbers()
+            
             elapsed = time.time() - start_time
             print(f"INFO: [AutoSync] ✅ اكتملت المزامنة السريعة ({pulled} سجل في {elapsed:.1f}ث)")
             
@@ -133,49 +136,117 @@ class AutoSync:
             return 0
     
     def _quick_pull_projects(self) -> int:
-        """⚡ جلب المشاريع بسرعة"""
+        """⚡ جلب المشاريع بسرعة - مع الحفاظ على أرقام الفواتير"""
         try:
             projects = list(self.repository.mongo_db.projects.find())
             count = 0
             for p in projects:
                 try:
                     mongo_id = str(p.get('_id'))
+                    project_name = p.get('name')
                     items_json = json.dumps(p.get('items', []))
-                    self.repository.sqlite_cursor.execute("""
-                        INSERT OR REPLACE INTO projects (_mongo_id, name, status, client_id, total_amount,
-                        description, start_date, end_date, items, subtotal, discount_rate, discount_amount,
-                        tax_rate, tax_amount, currency, project_notes,
-                        created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
-                    """, (mongo_id, p.get('name'), p.get('status', 'نشط'), p.get('client_id'), 
-                          p.get('total_amount', 0), p.get('description'), p.get('start_date'),
-                          p.get('end_date'), items_json, p.get('subtotal', 0), p.get('discount_rate', 0),
-                          p.get('discount_amount', 0), p.get('tax_rate', 0), p.get('tax_amount', 0),
-                          p.get('currency', 'EGP'), p.get('project_notes')))
+                    
+                    # ✅ تحقق من وجود المشروع
+                    self.repository.sqlite_cursor.execute(
+                        "SELECT id, invoice_number FROM projects WHERE _mongo_id = ? OR name = ?",
+                        (mongo_id, project_name)
+                    )
+                    existing = self.repository.sqlite_cursor.fetchone()
+                    
+                    if existing:
+                        # ✅ تحديث المشروع مع الحفاظ على invoice_number
+                        self.repository.sqlite_cursor.execute("""
+                            UPDATE projects SET _mongo_id = ?, name = ?, status = ?, client_id = ?, total_amount = ?,
+                            description = ?, start_date = ?, end_date = ?, items = ?, subtotal = ?, discount_rate = ?,
+                            discount_amount = ?, tax_rate = ?, tax_amount = ?, currency = ?, project_notes = ?,
+                            last_modified = datetime('now'), sync_status = 'synced'
+                            WHERE id = ?
+                        """, (mongo_id, project_name, p.get('status', 'نشط'), p.get('client_id'), 
+                              p.get('total_amount', 0), p.get('description'), p.get('start_date'),
+                              p.get('end_date'), items_json, p.get('subtotal', 0), p.get('discount_rate', 0),
+                              p.get('discount_amount', 0), p.get('tax_rate', 0), p.get('tax_amount', 0),
+                              p.get('currency', 'EGP'), p.get('project_notes'), existing['id']))
+                    else:
+                        # ✅ إدراج مشروع جديد
+                        self.repository.sqlite_cursor.execute("""
+                            INSERT INTO projects (_mongo_id, name, status, client_id, total_amount,
+                            description, start_date, end_date, items, subtotal, discount_rate, discount_amount,
+                            tax_rate, tax_amount, currency, project_notes,
+                            created_at, last_modified, sync_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                        """, (mongo_id, project_name, p.get('status', 'نشط'), p.get('client_id'), 
+                              p.get('total_amount', 0), p.get('description'), p.get('start_date'),
+                              p.get('end_date'), items_json, p.get('subtotal', 0), p.get('discount_rate', 0),
+                              p.get('discount_amount', 0), p.get('tax_rate', 0), p.get('tax_amount', 0),
+                              p.get('currency', 'EGP'), p.get('project_notes')))
                     count += 1
                 except Exception as ex:
                     print(f"    ⚠️ فشل جلب مشروع: {ex}")
             self.repository.sqlite_conn.commit()
+            
+            # ✅ تحديث أرقام الفواتير من جدول invoice_numbers
+            self._restore_invoice_numbers()
+            
             print(f"  ✅ تم جلب {count} مشروع")
             return count
         except Exception as e:
             print(f"  ⚠️ فشل جلب المشاريع: {e}")
             return 0
     
+    def _restore_invoice_numbers(self):
+        """✅ استعادة أرقام الفواتير من جدول invoice_numbers"""
+        try:
+            # استخدم الدالة الموجودة في repository
+            if hasattr(self.repository, 'restore_all_invoice_numbers'):
+                self.repository.restore_all_invoice_numbers()
+            else:
+                # fallback للكود القديم
+                self.repository.sqlite_cursor.execute("""
+                    UPDATE projects SET invoice_number = (
+                        SELECT inv.invoice_number FROM invoice_numbers inv 
+                        WHERE inv.project_name = projects.name
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM invoice_numbers inv WHERE inv.project_name = projects.name
+                    )
+                """)
+                self.repository.sqlite_conn.commit()
+        except Exception as e:
+            print(f"  ⚠️ فشل استعادة أرقام الفواتير: {e}")
+    
     def _quick_pull_services(self) -> int:
-        """⚡ جلب الخدمات بسرعة"""
+        """⚡ جلب الخدمات بسرعة - مع منع التكرار"""
         try:
             services = list(self.repository.mongo_db.services.find())
             count = 0
             for s in services:
                 try:
                     mongo_id = str(s.get('_id'))
-                    self.repository.sqlite_cursor.execute("""
-                        INSERT OR REPLACE INTO services (_mongo_id, name, description, default_price, category, status,
-                        created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
-                    """, (mongo_id, s.get('name'), s.get('description'), s.get('default_price', 0),
-                          s.get('category'), s.get('status', 'نشط')))
+                    service_name = s.get('name')
+                    
+                    # ✅ تحقق من وجود الخدمة بنفس الاسم أو mongo_id
+                    self.repository.sqlite_cursor.execute(
+                        "SELECT id FROM services WHERE name = ? OR _mongo_id = ?",
+                        (service_name, mongo_id)
+                    )
+                    existing = self.repository.sqlite_cursor.fetchone()
+                    
+                    if existing:
+                        # ✅ تحديث الخدمة الموجودة فقط
+                        self.repository.sqlite_cursor.execute("""
+                            UPDATE services SET _mongo_id = ?, description = ?, default_price = ?, 
+                            category = ?, status = ?, last_modified = datetime('now'), sync_status = 'synced'
+                            WHERE id = ?
+                        """, (mongo_id, s.get('description'), s.get('default_price', 0),
+                              s.get('category'), s.get('status', 'نشط'), existing['id']))
+                    else:
+                        # ✅ إدراج خدمة جديدة فقط إذا لم تكن موجودة
+                        self.repository.sqlite_cursor.execute("""
+                            INSERT INTO services (_mongo_id, name, description, default_price, category, status,
+                            created_at, last_modified, sync_status)
+                            VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                        """, (mongo_id, service_name, s.get('description'), s.get('default_price', 0),
+                              s.get('category'), s.get('status', 'نشط')))
                     count += 1
                 except Exception as ex:
                     print(f"    ⚠️ فشل جلب خدمة: {ex}")
@@ -386,13 +457,14 @@ class AutoSync:
             except Exception as e:
                 print(f"  ❌ فشل جلب العملاء: {e}")
             
-            # جلب المشاريع
+            # جلب المشاريع - مع الحفاظ على أرقام الفواتير
             projects = list(self.repository.mongo_db.projects.find())
             projects_pulled = 0
             for proj in projects:
                 try:
                     p = dict(proj)
                     mongo_id = str(p.pop('_id'))
+                    project_name = p.get('name')
                     
                     # تحويل datetime
                     for key in ['created_at', 'last_modified', 'start_date', 'end_date']:
@@ -405,38 +477,81 @@ class AutoSync:
                     # ⚡ جلب قيمة status_manually_set
                     status_manually_set = 1 if p.get('status_manually_set', False) else 0
                     
-                    self.repository.sqlite_cursor.execute("""
-                        INSERT OR REPLACE INTO projects 
-                        (_mongo_id, name, client_id, status, status_manually_set, description, start_date, end_date,
-                         items, subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
-                         total_amount, currency, project_notes, created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-                    """, (
-                        mongo_id,
-                        p.get('name'),
-                        p.get('client_id'),
-                        p.get('status', 'نشط'),
-                        status_manually_set,
-                        p.get('description'),
-                        p.get('start_date'),
-                        p.get('end_date'),
-                        items_json,
-                        p.get('subtotal', 0.0),
-                        p.get('discount_rate', 0.0),
-                        p.get('discount_amount', 0.0),
-                        p.get('tax_rate', 0.0),
-                        p.get('tax_amount', 0.0),
-                        p.get('total_amount', 0.0),
-                        p.get('currency', 'EGP'),
-                        p.get('project_notes'),
-                        p.get('created_at'),
-                        p.get('last_modified'),
-                    ))
+                    # ✅ تحقق من وجود المشروع
+                    self.repository.sqlite_cursor.execute(
+                        "SELECT id, invoice_number FROM projects WHERE _mongo_id = ? OR name = ?",
+                        (mongo_id, project_name)
+                    )
+                    existing = self.repository.sqlite_cursor.fetchone()
+                    
+                    if existing:
+                        # ✅ تحديث المشروع مع الحفاظ على invoice_number
+                        self.repository.sqlite_cursor.execute("""
+                            UPDATE projects SET _mongo_id = ?, name = ?, client_id = ?, status = ?, 
+                            status_manually_set = ?, description = ?, start_date = ?, end_date = ?,
+                            items = ?, subtotal = ?, discount_rate = ?, discount_amount = ?, 
+                            tax_rate = ?, tax_amount = ?, total_amount = ?, currency = ?, 
+                            project_notes = ?, last_modified = ?, sync_status = 'synced'
+                            WHERE id = ?
+                        """, (
+                            mongo_id,
+                            project_name,
+                            p.get('client_id'),
+                            p.get('status', 'نشط'),
+                            status_manually_set,
+                            p.get('description'),
+                            p.get('start_date'),
+                            p.get('end_date'),
+                            items_json,
+                            p.get('subtotal', 0.0),
+                            p.get('discount_rate', 0.0),
+                            p.get('discount_amount', 0.0),
+                            p.get('tax_rate', 0.0),
+                            p.get('tax_amount', 0.0),
+                            p.get('total_amount', 0.0),
+                            p.get('currency', 'EGP'),
+                            p.get('project_notes'),
+                            p.get('last_modified'),
+                            existing['id'],
+                        ))
+                    else:
+                        # ✅ إدراج مشروع جديد
+                        self.repository.sqlite_cursor.execute("""
+                            INSERT INTO projects 
+                            (_mongo_id, name, client_id, status, status_manually_set, description, start_date, end_date,
+                             items, subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
+                             total_amount, currency, project_notes, created_at, last_modified, sync_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+                        """, (
+                            mongo_id,
+                            project_name,
+                            p.get('client_id'),
+                            p.get('status', 'نشط'),
+                            status_manually_set,
+                            p.get('description'),
+                            p.get('start_date'),
+                            p.get('end_date'),
+                            items_json,
+                            p.get('subtotal', 0.0),
+                            p.get('discount_rate', 0.0),
+                            p.get('discount_amount', 0.0),
+                            p.get('tax_rate', 0.0),
+                            p.get('tax_amount', 0.0),
+                            p.get('total_amount', 0.0),
+                            p.get('currency', 'EGP'),
+                            p.get('project_notes'),
+                            p.get('created_at'),
+                            p.get('last_modified'),
+                        ))
                     projects_pulled += 1
                 except Exception as e:
                     print(f"  ⚠️ فشل جلب مشروع: {e}")
             
             self.repository.sqlite_conn.commit()
+            
+            # ✅ استعادة أرقام الفواتير من جدول invoice_numbers
+            self._restore_invoice_numbers()
+            
             total_pulled += projects_pulled
             print(f"  ✅ تم جلب {projects_pulled} مشروع")
             
@@ -571,7 +686,7 @@ class AutoSync:
             except Exception as e:
                 print(f"  ❌ فشل جلب الفواتير: {e}")
             
-            # جلب الخدمات
+            # جلب الخدمات - مع منع التكرار
             try:
                 services = list(self.repository.mongo_db.services.find())
                 services_pulled = 0
@@ -579,27 +694,46 @@ class AutoSync:
                     try:
                         s = dict(srv)
                         mongo_id = str(s.pop('_id'))
+                        service_name = s.get('name')
                         
                         # تحويل datetime
                         for key in ['created_at', 'last_modified']:
                             if key in s and hasattr(s[key], 'isoformat'):
                                 s[key] = s[key].isoformat()
                         
-                        self.repository.sqlite_cursor.execute("""
-                            INSERT OR REPLACE INTO services 
-                            (_mongo_id, name, description, default_price, category, status,
-                             created_at, last_modified, sync_status)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-                        """, (
-                            mongo_id,
-                            s.get('name'),
-                            s.get('description'),
-                            s.get('default_price', 0.0),
-                            s.get('category', 'General'),
-                            s.get('status', 'نشط'),
-                            s.get('created_at'),
-                            s.get('last_modified'),
-                        ))
+                        # ✅ تحقق من وجود الخدمة بنفس الاسم أو mongo_id
+                        self.repository.sqlite_cursor.execute(
+                            "SELECT id FROM services WHERE name = ? OR _mongo_id = ?",
+                            (service_name, mongo_id)
+                        )
+                        existing = self.repository.sqlite_cursor.fetchone()
+                        
+                        if existing:
+                            # ✅ تحديث الخدمة الموجودة فقط
+                            self.repository.sqlite_cursor.execute("""
+                                UPDATE services SET _mongo_id = ?, description = ?, default_price = ?, 
+                                category = ?, status = ?, last_modified = ?, sync_status = 'synced'
+                                WHERE id = ?
+                            """, (mongo_id, s.get('description'), s.get('default_price', 0.0),
+                                  s.get('category', 'General'), s.get('status', 'نشط'),
+                                  s.get('last_modified'), existing['id']))
+                        else:
+                            # ✅ إدراج خدمة جديدة فقط إذا لم تكن موجودة
+                            self.repository.sqlite_cursor.execute("""
+                                INSERT INTO services 
+                                (_mongo_id, name, description, default_price, category, status,
+                                 created_at, last_modified, sync_status)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+                            """, (
+                                mongo_id,
+                                service_name,
+                                s.get('description'),
+                                s.get('default_price', 0.0),
+                                s.get('category', 'General'),
+                                s.get('status', 'نشط'),
+                                s.get('created_at'),
+                                s.get('last_modified'),
+                            ))
                         services_pulled += 1
                     except Exception as e:
                         print(f"  ⚠️ فشل جلب خدمة: {e}")

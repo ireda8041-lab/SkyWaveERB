@@ -1,11 +1,29 @@
 # الملف: core/resource_utils.py
 """
 أدوات إدارة الموارد - Resource Utilities
-يحل مشكلة مسارات الملفات في PyInstaller
+يحل مشكلة مسارات الملفات في PyInstaller (onefile و onedir)
 """
 
 import sys
 import os
+
+
+def get_base_path():
+    """
+    الحصول على المسار الأساسي للتطبيق
+    يعمل مع PyInstaller (onefile و onedir) و Python العادي
+    """
+    if getattr(sys, 'frozen', False):
+        # التطبيق يعمل كـ EXE
+        # في onedir: المسار هو مجلد الـ EXE
+        # في onefile: المسار هو _MEIPASS
+        if hasattr(sys, '_MEIPASS'):
+            return sys._MEIPASS
+        else:
+            return os.path.dirname(sys.executable)
+    else:
+        # التطبيق يعمل كـ Python script
+        return os.path.abspath(".")
 
 
 def get_resource_path(relative_path):
@@ -18,11 +36,21 @@ def get_resource_path(relative_path):
     Returns:
         str: المسار الكامل للملف
     """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+    base_path = get_base_path()
+    
+    # جرب المسارات المختلفة
+    possible_paths = [
+        os.path.join(base_path, "_internal", relative_path),  # PyInstaller onedir
+        os.path.join(base_path, relative_path),  # PyInstaller onefile أو dev
+        os.path.join(os.path.dirname(sys.executable), "_internal", relative_path),
+        relative_path,  # مسار نسبي
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # إرجاع المسار الافتراضي
     return os.path.join(base_path, relative_path)
 
 

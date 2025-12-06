@@ -103,9 +103,11 @@ class SmartSearchService:
             for idx, project in enumerate(projects):
                 score = 0.0
                 
-                # توليد رقم الفاتورة
-                project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', idx + 1))
-                invoice_number = f"SW-{str(project_id)[-4:].zfill(4)}" if project_id else f"SW-{str(idx + 1).zfill(4)}"
+                # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
+                invoice_number = getattr(project, 'invoice_number', None)
+                if not invoice_number:
+                    local_id = getattr(project, 'id', None) or (idx + 1)
+                    invoice_number = f"SW-{97161 + int(local_id)}"
                 
                 # البحث برقم الفاتورة (أعلى أولوية)
                 if query_upper in invoice_number.upper() or query in invoice_number:

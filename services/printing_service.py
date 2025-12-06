@@ -32,6 +32,10 @@ except ImportError as e:
     print(f"WARNING: [PrintingService] PDF libraries not available: {e}")
     print("INFO: Install with: pip install reportlab arabic-reshaper python-bidi")
     PDF_AVAILABLE = False
+    # تعريف قيم افتراضية لتجنب الأخطاء
+    TA_CENTER = 1
+    TA_RIGHT = 2
+    TA_LEFT = 0
 
 # Template support
 try:
@@ -128,7 +132,11 @@ class PDFGenerator:
             return 'Helvetica'
     
     def _create_arabic_paragraph_style(self, name: str, font_size: int = 12, 
-                                     alignment=TA_RIGHT, color=None) -> ParagraphStyle:
+                                     alignment=None, color=None) -> ParagraphStyle:
+        # استخدام TA_RIGHT كـ default إذا لم يتم تحديد alignment
+        if alignment is None:
+            from reportlab.lib.enums import TA_RIGHT
+            alignment = TA_RIGHT
         """إنشاء نمط فقرة للنص العربي"""
         return ParagraphStyle(
             name,
@@ -690,9 +698,13 @@ class PrintingService:
         }
         
         # معلومات الفاتورة
-        project_id = getattr(project, 'id', None) or 1
+        # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
+        invoice_number = getattr(project, 'invoice_number', None)
+        if not invoice_number:
+            local_id = getattr(project, 'id', None) or 1
+            invoice_number = f"SW-{97161 + int(local_id)}"
         invoice_data = {
-            'invoice_number': f"INV-{project_id:06d}",
+            'invoice_number': invoice_number,
             'invoice_date': datetime.now().strftime("%Y-%m-%d"),
             'due_date': project.due_date.strftime("%Y-%m-%d") if hasattr(project, 'due_date') and project.due_date else "غير محدد",
         }

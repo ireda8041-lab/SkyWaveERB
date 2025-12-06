@@ -4,6 +4,7 @@
 """
 
 import os
+import sys
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
@@ -13,6 +14,16 @@ import tempfile
 
 from core.base_service import BaseService
 from core import schemas
+
+
+def get_base_path():
+    """الحصول على المسار الأساسي للتطبيق - يعمل مع PyInstaller و Python العادي"""
+    if getattr(sys, 'frozen', False):
+        # التطبيق يعمل كـ EXE (PyInstaller)
+        return os.path.dirname(sys.executable)
+    else:
+        # التطبيق يعمل كـ Python script
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class TemplateService(BaseService):
@@ -26,11 +37,29 @@ class TemplateService(BaseService):
         super().__init__(repository)
         self.settings_service = settings_service
         
-        # إعداد مجلد القوالب - المسار الصحيح
-        self.templates_dir = os.path.join("assets", "templates", "invoices")
-        if not os.path.exists(self.templates_dir):
-            # إنشاء المجلد إذا لم يكن موجوداً
+        # إعداد مجلد القوالب - المسار الصحيح للـ PyInstaller
+        base_path = get_base_path()
+        
+        # جرب المسارات المختلفة
+        possible_paths = [
+            os.path.join(base_path, "_internal", "assets", "templates", "invoices"),  # PyInstaller onedir
+            os.path.join(base_path, "assets", "templates", "invoices"),  # PyInstaller onefile أو dev
+            os.path.join(os.path.dirname(sys.executable), "_internal", "assets", "templates", "invoices"),
+            os.path.join("assets", "templates", "invoices"),  # مسار نسبي
+        ]
+        
+        self.templates_dir = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                self.templates_dir = path
+                print(f"INFO: [TemplateService] Found templates at: {path}")
+                break
+        
+        if not self.templates_dir:
+            # إنشاء المجلد الافتراضي
+            self.templates_dir = os.path.join("assets", "templates", "invoices")
             os.makedirs(self.templates_dir, exist_ok=True)
+            print(f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}")
         
         # إعداد Jinja2
         self.jinja_env = Environment(
@@ -395,21 +424,46 @@ class TemplateService(BaseService):
                     'total': f"{grand_total:,.0f}"
                 })
             
-            # إنتاج رقم الفاتورة (SW-XXXXX - 5 أرقام فقط، يبدأ من 97162)
+            # ⚡ إنتاج رقم الفاتورة الثابت (يُحفظ في قاعدة البيانات)
             try:
-                # استخدم id المحلي (رقم) فقط
-                local_id = getattr(project, 'id', None)
+                # أولاً: تحقق من وجود رقم فاتورة محفوظ مسبقاً
+                existing_invoice_number = getattr(project, 'invoice_number', None)
                 if isinstance(project, dict):
-                    local_id = project.get('id')
+                    existing_invoice_number = project.get('invoice_number')
                 
-                if local_id:
-                    # ⚡ الصيغة: 97161 + local_id (يبدأ من SW-97162)
-                    invoice_id = f"SW-{97161 + int(local_id)}"
+                if existing_invoice_number:
+                    # استخدم الرقم المحفوظ
+                    invoice_id = existing_invoice_number
+                    print(f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}")
                 else:
-                    # استخدم timestamp كرقم
-                    invoice_id = f"SW-{datetime.now().strftime('%H%M%S')}"
-            except (AttributeError, KeyError, TypeError):
-                invoice_id = f"SW-{datetime.now().strftime('%H%M%S')}"
+                    # ولّد رقم جديد وحاول حفظه
+                    local_id = getattr(project, 'id', None)
+                    if isinstance(project, dict):
+                        local_id = project.get('id')
+                    
+                    if local_id and local_id > 0:
+                        # الصيغة: 97161 + local_id (يبدأ من SW-97162)
+                        invoice_id = f"SW-{97161 + int(local_id)}"
+                        
+                        # حاول حفظ رقم الفاتورة في قاعدة البيانات
+                        try:
+                            if self.repo:
+                                self.repo.sqlite_cursor.execute(
+                                    "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                                    (invoice_id, local_id)
+                                )
+                                self.repo.sqlite_conn.commit()
+                                print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
+                        except Exception as save_error:
+                            print(f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}")
+                    else:
+                        # لا يوجد ID - استخدم رقم افتراضي
+                        invoice_id = "SW-97162"
+                        print(f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}")
+            except (AttributeError, KeyError, TypeError) as e:
+                # في حالة الخطأ، استخدم رقم افتراضي
+                invoice_id = "SW-97162"
+                print(f"ERROR: [TemplateService] خطأ في توليد رقم الفاتورة: {e}")
             
             # تاريخ اليوم
             today = datetime.now().strftime("%Y-%m-%d")
@@ -470,10 +524,24 @@ class TemplateService(BaseService):
             # إضافة معلومات الشركة من الإعدادات
             import base64
             
-            # تحميل اللوجو تلقائياً من site logo.png
+            # تحميل اللوجو تلقائياً من site logo.png - مع دعم PyInstaller
             logo_base64 = ""
-            site_logo_path = "site logo.png"
-            if os.path.exists(site_logo_path):
+            base_path = get_base_path()
+            
+            # جرب المسارات المختلفة للوجو
+            logo_paths = [
+                os.path.join(base_path, "_internal", "site logo.png"),
+                os.path.join(base_path, "site logo.png"),
+                "site logo.png",
+            ]
+            
+            site_logo_path = None
+            for lp in logo_paths:
+                if os.path.exists(lp):
+                    site_logo_path = lp
+                    break
+            
+            if site_logo_path:
                 try:
                     with open(site_logo_path, 'rb') as f:
                         logo_data = f.read()
@@ -512,10 +580,21 @@ class TemplateService(BaseService):
                 'project_duration': f"{getattr(project, 'duration_days', 0)} يوم" if getattr(project, 'duration_days', None) else "غير محدد",
             }
             
-            # ⚡ تحميل العلامة المائية
+            # ⚡ تحميل العلامة المائية - مع دعم PyInstaller
             watermark_base64 = ""
-            watermark_path = "logo.png"
-            if os.path.exists(watermark_path):
+            watermark_paths = [
+                os.path.join(base_path, "_internal", "logo.png"),
+                os.path.join(base_path, "logo.png"),
+                "logo.png",
+            ]
+            
+            watermark_path = None
+            for wp in watermark_paths:
+                if os.path.exists(wp):
+                    watermark_path = wp
+                    break
+            
+            if watermark_path:
                 try:
                     with open(watermark_path, 'rb') as f:
                         watermark_data = f.read()

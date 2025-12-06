@@ -181,6 +181,7 @@ class Project(BaseSchema):
 
     currency: CurrencyCode = CurrencyCode.EGP
     project_notes: Optional[str] = None
+    invoice_number: Optional[str] = None  # ⚡ رقم الفاتورة الثابت
 
 class Expense(BaseSchema):
     """ نموذج المصروفات (من collection 'expenses') """

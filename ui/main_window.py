@@ -678,7 +678,7 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "تأكيد تسجيل الخروج",
-            "هل أنت متأكد من تسجيل الخروج؟",
+            "هل أنت متأكد من تسجيل الخروج؟\n\nسيتم إغلاق البرنامج.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
@@ -690,14 +690,18 @@ class MainWindow(QMainWindow):
             if hasattr(self, 'auto_sync_timer'):
                 self.auto_sync_timer.stop()
             
-            # إغلاق النافذة الحالية
-            self.close()
+            # إيقاف أي عمليات خلفية
+            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
+                try:
+                    self.advanced_sync_manager.stop_auto_sync()
+                except Exception:
+                    pass
             
-            # إعادة تشغيل التطبيق (عرض نافذة تسجيل الدخول)
+            # إغلاق البرنامج نهائياً
             import sys
-            import os
-            python = sys.executable
-            os.execl(python, python, *sys.argv)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.quit()
+            sys.exit(0)
 
 
 

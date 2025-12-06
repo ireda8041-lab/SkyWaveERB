@@ -1094,6 +1094,9 @@ class ProjectManagerTab(QWidget):
         self.projects_table.verticalHeader().setVisible(False)
         self.projects_table.itemSelectionChanged.connect(self.on_project_selection_changed)
         
+        # ⚡ محاذاة رأس الجدول للوسط
+        self.projects_table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        
 
         # إضافة دبل كليك للتعديل
         self.projects_table.itemDoubleClicked.connect(self.open_editor_for_selected)
@@ -1121,6 +1124,8 @@ class ProjectManagerTab(QWidget):
         self.preview_payments_table.setColumnCount(3)
         self.preview_payments_table.setHorizontalHeaderLabels(["التاريخ", "المبلغ", "الحساب"])
         self.preview_payments_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.preview_payments_table.verticalHeader().setDefaultSectionSize(40)  # ⚡ ارتفاع الصفوف
+        self.preview_payments_table.verticalHeader().setVisible(False)
         self.preview_payments_table.setMaximumHeight(150)
         preview_layout.addWidget(self.preview_payments_table)
 
@@ -1129,6 +1134,8 @@ class ProjectManagerTab(QWidget):
         self.preview_expenses_table.setColumnCount(3)
         self.preview_expenses_table.setHorizontalHeaderLabels(["التاريخ", "الوصف", "المبلغ"])
         self.preview_expenses_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.preview_expenses_table.verticalHeader().setDefaultSectionSize(40)  # ⚡ ارتفاع الصفوف
+        self.preview_expenses_table.verticalHeader().setVisible(False)
         preview_layout.addWidget(self.preview_expenses_table)
 
         # جدول المهام المرتبطة بالمشروع
@@ -1159,7 +1166,9 @@ class ProjectManagerTab(QWidget):
         self.preview_tasks_table.setColumnCount(4)
         self.preview_tasks_table.setHorizontalHeaderLabels(["المهمة", "الأولوية", "الحالة", "تاريخ الاستحقاق"])
         self.preview_tasks_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.preview_tasks_table.setMaximumHeight(120)
+        self.preview_tasks_table.verticalHeader().setDefaultSectionSize(40)  # ⚡ ارتفاع الصفوف
+        self.preview_tasks_table.verticalHeader().setVisible(False)
+        self.preview_tasks_table.setMaximumHeight(150)
         self.preview_tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.preview_tasks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         preview_layout.addWidget(self.preview_tasks_table)
@@ -1369,17 +1378,25 @@ class ProjectManagerTab(QWidget):
             try:
                 self.projects_list = projects
                 
+                # إنشاء العناصر مع محاذاة للوسط
+                def create_centered_item(text):
+                    item = QTableWidgetItem(str(text) if text else "")
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    return item
+                
                 # تحميل البيانات على دفعات
                 batch_size = 15
                 for row, project in enumerate(self.projects_list):
                     self.projects_table.insertRow(row)
-                    local_id = getattr(project, 'id', None) or (row + 1)
-                    invoice_number = f"SW-{97161 + int(local_id)}"
-                    self.projects_table.setItem(row, 0, QTableWidgetItem(invoice_number))
-                    self.projects_table.setItem(row, 1, QTableWidgetItem(project.name))
-                    self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
-                    self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
-                    self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
+                    
+                    # ⚡ جلب رقم الفاتورة مباشرة من المشروع
+                    invoice_number = getattr(project, 'invoice_number', None) or ""
+                    
+                    self.projects_table.setItem(row, 0, create_centered_item(invoice_number))
+                    self.projects_table.setItem(row, 1, create_centered_item(project.name))
+                    self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
+                    self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
+                    self.projects_table.setItem(row, 4, create_centered_item(self._format_date(project.start_date)))
                     
                     # معالجة الأحداث كل batch_size صف
                     if (row + 1) % batch_size == 0:
@@ -1666,9 +1683,11 @@ class ProjectManagerTab(QWidget):
             
             # Fallback: استخدام InvoicePrintingService
             # Step D: Prepare the complete data dictionary
-            # توليد رقم الفاتورة من ID المشروع (5 أرقام - يبدأ من 97162)
-            local_id = getattr(project, 'id', None) or 1
-            invoice_number = f"SW-{97161 + int(local_id)}"
+            # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
+            invoice_number = getattr(project, 'invoice_number', None)
+            if not invoice_number:
+                local_id = getattr(project, 'id', None) or 1
+                invoice_number = f"SW-{97161 + int(local_id)}"
             
             invoice_data = {
                 "invoice_number": invoice_number,

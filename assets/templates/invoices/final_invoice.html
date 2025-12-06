@@ -197,6 +197,7 @@
             border-collapse: separate;
             border-spacing: 0 3px;
             margin-bottom: 12px;
+            table-layout: fixed; /* ⚡ مقاس الصفوف ثابت */
         }
         
         th {
@@ -207,6 +208,8 @@
             font-size: 12px;
             border: none;
             height: 36px;
+            min-height: 36px; /* ⚡ ارتفاع ثابت */
+            max-height: 36px;
         }
         
         th:first-child {
@@ -236,6 +239,11 @@
             border-top: 1px solid #f0f0f0;
             border-bottom: 1px solid #f0f0f0;
             height: 32px;
+            min-height: 32px; /* ⚡ ارتفاع ثابت */
+            max-height: 32px;
+            overflow: hidden; /* ⚡ إخفاء النص الزائد */
+            text-overflow: ellipsis; /* ⚡ إضافة ... للنص الطويل */
+            white-space: nowrap; /* ⚡ منع التفاف النص */
         }
         
         .data-row td:first-child {

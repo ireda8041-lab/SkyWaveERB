@@ -165,6 +165,79 @@ class Repository:
         except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
         
+        # Migration: إضافة عمود invoice_number للمشاريع (رقم الفاتورة الثابت)
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE projects ADD COLUMN invoice_number TEXT")
+            self.sqlite_conn.commit()
+            print("INFO: [Repository] تم إضافة عمود invoice_number لجدول المشاريع")
+        except sqlite3.OperationalError:
+            pass  # العمود موجود بالفعل
+        
+        # ⚡ جدول أرقام الفواتير الثابتة (مرتبط باسم المشروع وليس الـ ID)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_numbers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL UNIQUE,
+            invoice_number TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        )
+        """)
+        self.sqlite_conn.commit()
+        
+        # ⚡ Migration: توليد أرقام فواتير للمشاريع القديمة اللي مش عندها invoice_number
+        try:
+            # جلب المشاريع اللي مش عندها رقم فاتورة
+            self.sqlite_cursor.execute("""
+                SELECT p.id, p.name FROM projects p 
+                WHERE p.invoice_number IS NULL OR p.invoice_number = ''
+            """)
+            projects_without_invoice = self.sqlite_cursor.fetchall()
+            
+            if projects_without_invoice:
+                print(f"INFO: [Repository] توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع...")
+                
+                for row in projects_without_invoice:
+                    project_id = row[0]
+                    project_name = row[1]
+                    
+                    # أولاً: تحقق من وجود رقم محفوظ مسبقاً لهذا المشروع
+                    self.sqlite_cursor.execute(
+                        "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
+                        (project_name,)
+                    )
+                    existing = self.sqlite_cursor.fetchone()
+                    
+                    if existing:
+                        # استخدم الرقم المحفوظ
+                        invoice_number = existing[0]
+                        print(f"  ✓ استخدام رقم محفوظ: {project_name} -> {invoice_number}")
+                    else:
+                        # ولّد رقم جديد
+                        self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
+                        max_id = self.sqlite_cursor.fetchone()[0] or 0
+                        new_seq = max_id + 1
+                        invoice_number = f"SW-{97161 + new_seq}"
+                        
+                        # احفظ الرقم الجديد
+                        self.sqlite_cursor.execute(
+                            "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
+                            (project_name, invoice_number, datetime.now().isoformat())
+                        )
+                        print(f"  + رقم جديد: {project_name} -> {invoice_number}")
+                    
+                    # حدّث المشروع
+                    self.sqlite_cursor.execute(
+                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                        (invoice_number, project_id)
+                    )
+                
+                self.sqlite_conn.commit()
+                print(f"INFO: [Repository] ✅ تم توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع")
+        except Exception as e:
+            print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
+            import traceback
+            traceback.print_exc()
+        
         # جدول العملاء (clients)
         self.sqlite_cursor.execute("""
         CREATE TABLE IF NOT EXISTS clients (
@@ -2287,6 +2360,13 @@ class Repository:
 
     def create_service(self, service_data: schemas.Service) -> schemas.Service:
         """ (معدلة) إنشاء خدمة جديدة (بإصلاح حفظ الحالة في مونجو) """
+        # ⚡ فحص التكرار قبل الإضافة
+        self.sqlite_cursor.execute("SELECT id FROM services WHERE name = ?", (service_data.name,))
+        existing = self.sqlite_cursor.fetchone()
+        if existing:
+            print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل!")
+            raise Exception(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
+        
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
         service_data.created_at = now_dt
@@ -2865,7 +2945,49 @@ class Repository:
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
         project_data.id = local_id
-        print(f"INFO: تم حفظ المشروع '{project_data.name}' محلياً (ID: {local_id}).")
+        
+        # ⚡ توليد وحفظ رقم الفاتورة الثابت فوراً (في جدول منفصل للثبات)
+        try:
+            # تحقق من وجود رقم محفوظ مسبقاً لهذا المشروع
+            self.sqlite_cursor.execute(
+                "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
+                (project_data.name,)
+            )
+            existing = self.sqlite_cursor.fetchone()
+            
+            if existing:
+                invoice_number = existing[0]
+            else:
+                # ولّد رقم جديد
+                self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
+                max_id = self.sqlite_cursor.fetchone()[0] or 0
+                new_seq = max_id + 1
+                invoice_number = f"SW-{97161 + new_seq}"
+                
+                # احفظ الرقم الجديد في جدول الأرقام الثابتة
+                self.sqlite_cursor.execute(
+                    "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
+                    (project_data.name, invoice_number, datetime.now().isoformat())
+                )
+            
+            # حدّث المشروع
+            self.sqlite_cursor.execute(
+                "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                (invoice_number, local_id)
+            )
+            self.sqlite_conn.commit()
+            project_data.invoice_number = invoice_number
+        except Exception as e:
+            # fallback للطريقة القديمة
+            invoice_number = f"SW-{97161 + int(local_id)}"
+            self.sqlite_cursor.execute(
+                "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                (invoice_number, local_id)
+            )
+            self.sqlite_conn.commit()
+            project_data.invoice_number = invoice_number
+        
+        print(f"INFO: تم حفظ المشروع '{project_data.name}' محلياً (ID: {local_id}, Invoice: {invoice_number}).")
 
         if self.online:
             try:
@@ -4155,3 +4277,107 @@ if __name__ == "__main__":
         """
         import uuid
         return str(uuid.uuid4())[:8]
+
+    # ⚡ دوال أرقام الفواتير الثابتة
+    def get_invoice_number_for_project(self, project_name: str) -> str:
+        """
+        جلب رقم الفاتورة الثابت للمشروع من جدول invoice_numbers
+        """
+        try:
+            self.sqlite_cursor.execute(
+                "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
+                (project_name,)
+            )
+            row = self.sqlite_cursor.fetchone()
+            if row:
+                return row[0]
+            return ""
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب رقم الفاتورة: {e}")
+            return ""
+    
+    def get_all_invoice_numbers(self) -> dict:
+        """
+        جلب كل أرقام الفواتير كـ dict {project_name: invoice_number}
+        """
+        try:
+            self.sqlite_cursor.execute("SELECT project_name, invoice_number FROM invoice_numbers")
+            rows = self.sqlite_cursor.fetchall()
+            return {row[0]: row[1] for row in rows}
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل جلب أرقام الفواتير: {e}")
+            return {}
+    
+    def ensure_invoice_number(self, project_name: str) -> str:
+        """
+        التأكد من وجود رقم فاتورة للمشروع، وإنشاء واحد جديد إذا لم يكن موجوداً
+        """
+        try:
+            # تحقق من وجود رقم محفوظ
+            existing = self.get_invoice_number_for_project(project_name)
+            if existing:
+                return existing
+            
+            # ولّد رقم جديد
+            self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
+            max_id = self.sqlite_cursor.fetchone()[0] or 0
+            new_seq = max_id + 1
+            invoice_number = f"SW-{97161 + new_seq}"
+            
+            # احفظ الرقم الجديد
+            self.sqlite_cursor.execute(
+                "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
+                (project_name, invoice_number, datetime.now().isoformat())
+            )
+            self.sqlite_conn.commit()
+            
+            print(f"INFO: [Repo] تم إنشاء رقم فاتورة جديد: {project_name} -> {invoice_number}")
+            return invoice_number
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل إنشاء رقم الفاتورة: {e}")
+            return ""
+
+    def restore_all_invoice_numbers(self):
+        """
+        ✅ استعادة كل أرقام الفواتير من جدول invoice_numbers إلى جدول projects
+        يُستدعى بعد كل sync للتأكد من عدم فقدان الأرقام
+        """
+        try:
+            # تحديث كل المشاريع بأرقام الفواتير المحفوظة
+            self.sqlite_cursor.execute("""
+                UPDATE projects SET invoice_number = (
+                    SELECT inv.invoice_number FROM invoice_numbers inv 
+                    WHERE inv.project_name = projects.name
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM invoice_numbers inv WHERE inv.project_name = projects.name
+                )
+            """)
+            updated = self.sqlite_cursor.rowcount
+            self.sqlite_conn.commit()
+            
+            # إنشاء أرقام للمشاريع الجديدة اللي مش عندها رقم
+            self.sqlite_cursor.execute("""
+                SELECT id, name FROM projects 
+                WHERE invoice_number IS NULL OR invoice_number = ''
+            """)
+            new_projects = self.sqlite_cursor.fetchall()
+            
+            for row in new_projects:
+                project_id = row[0]
+                project_name = row[1]
+                invoice_number = self.ensure_invoice_number(project_name)
+                if invoice_number:
+                    self.sqlite_cursor.execute(
+                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                        (invoice_number, project_id)
+                    )
+            
+            if new_projects:
+                self.sqlite_conn.commit()
+            
+            print(f"INFO: [Repo] ✅ تم استعادة أرقام الفواتير ({updated} محدث, {len(new_projects)} جديد)")
+            return True
+        except Exception as e:
+            print(f"ERROR: [Repo] فشل استعادة أرقام الفواتير: {e}")
+            return False
