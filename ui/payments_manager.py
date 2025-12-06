@@ -320,7 +320,7 @@ class PaymentsManagerTab(QWidget):
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_payments_data(self):
-        """تحميل جميع الدفعات"""
+        """تحميل جميع الدفعات - مع منع التجميد"""
         print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
         
         try:
@@ -330,9 +330,11 @@ class PaymentsManagerTab(QWidget):
             
             # ⚡ تعطيل التحديثات للسرعة
             self.payments_table.setUpdatesEnabled(False)
+            self.payments_table.blockSignals(True)  # ⚡ منع الإشارات
             
             # تحميل الدفعات
             self.payments_list = self.accounting_service.repo.get_all_payments()
+            QApplication.processEvents()  # ⚡ منع التجميد
             
             # تحميل الحسابات للـ cache (لعرض الأسماء بدل الأكواد)
             all_accounts = self.accounting_service.repo.get_all_accounts()
@@ -438,11 +440,17 @@ class PaymentsManagerTab(QWidget):
             self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
             print(f"INFO: [PaymentsManager] تم جلب {len(self.payments_list)} دفعة.")
             
-            # ⚡ إعادة تفعيل التحديثات
+            # ⚡ إعادة تفعيل كل شيء
+            self.payments_table.blockSignals(False)
             self.payments_table.setUpdatesEnabled(True)
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
 
         except Exception as e:
             print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {e}")
+            import traceback
+            traceback.print_exc()
+            self.payments_table.blockSignals(False)
             self.payments_table.setUpdatesEnabled(True)
 
     def _on_payments_changed(self):

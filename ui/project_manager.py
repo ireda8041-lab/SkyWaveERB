@@ -1350,13 +1350,19 @@ class ProjectManagerTab(QWidget):
             # ⚡ تعطيل الترتيب والتحديثات مؤقتاً أثناء التحميل (للسرعة)
             self.projects_table.setSortingEnabled(False)
             self.projects_table.setUpdatesEnabled(False)
+            self.projects_table.blockSignals(True)  # ⚡ منع الإشارات أثناء التحميل
             
             if self.show_archived_checkbox.isChecked():
                 self.projects_list = self.project_service.get_archived_projects()
             else:
                 self.projects_list = self.project_service.get_all_projects()
 
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
+            
             self.projects_table.setRowCount(0)
+            
+            # ⚡ تحميل البيانات على دفعات لمنع التجميد
+            batch_size = 20
             for row, project in enumerate(self.projects_list):
                 self.projects_table.insertRow(row)
                 # توليد رقم الفاتورة من ID المشروع (يبدأ من 97162)
@@ -1367,15 +1373,25 @@ class ProjectManagerTab(QWidget):
                 self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
                 self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
                 self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
+                
+                # ⚡ معالجة الأحداث كل batch_size صف
+                if (row + 1) % batch_size == 0:
+                    QApplication.processEvents()
 
-            # ⚡ إعادة تفعيل التحديثات والترتيب بعد التحميل
+            # ⚡ إعادة تفعيل كل شيء بعد التحميل
+            self.projects_table.blockSignals(False)
             self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
             
+            QApplication.processEvents()  # ⚡ منع التجميد
             self.on_project_selection_changed()
+            
         except Exception as e:
             print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {e}")
+            import traceback
+            traceback.print_exc()
             # ⚡ إعادة تفعيل التحديثات والترتيب حتى في حالة الخطأ
+            self.projects_table.blockSignals(False)
             self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
 

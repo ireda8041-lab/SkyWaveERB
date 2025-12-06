@@ -144,7 +144,7 @@ class ServiceManagerTab(QWidget):
 
     def load_services_data(self) -> None:
         """
-        تحميل بيانات الخدمات من قاعدة البيانات وعرضها في الجدول
+        تحميل بيانات الخدمات من قاعدة البيانات وعرضها في الجدول - مع منع التجميد
         """
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
         
@@ -155,13 +155,17 @@ class ServiceManagerTab(QWidget):
             
             # ⚡ تعطيل التحديثات للسرعة
             self.services_table.setUpdatesEnabled(False)
+            self.services_table.blockSignals(True)  # ⚡ منع الإشارات
             
             if self.show_archived_checkbox.isChecked():
                 self.services_list = self.service_service.get_archived_services()
             else:
                 self.services_list = self.service_service.get_all_services()
 
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
+            
             self.services_table.setRowCount(0)
+            batch_size = 20  # ⚡ تحميل على دفعات
             for index, service in enumerate(self.services_list):
                 self.services_table.insertRow(index)
                 
@@ -190,14 +194,21 @@ class ServiceManagerTab(QWidget):
                 
                 # Set row height for breathing room
                 self.services_table.setRowHeight(index, 40)
+                
+                # ⚡ معالجة الأحداث كل batch_size صف
+                if (index + 1) % batch_size == 0:
+                    QApplication.processEvents()
 
             logger.info(f"[ServiceManager] تم جلب {len(self.services_list)} خدمة")
             
-            # ⚡ إعادة تفعيل التحديثات
+            # ⚡ إعادة تفعيل كل شيء
+            self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
+            QApplication.processEvents()
             self.update_buttons_state(False)
         except Exception as e:
             logger.error(f"[ServiceManager] فشل تحميل الخدمات: {e}", exc_info=True)
+            self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
 
     def _on_services_changed(self):

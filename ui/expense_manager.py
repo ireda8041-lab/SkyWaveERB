@@ -114,7 +114,7 @@ class ExpenseManagerTab(QWidget):
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_expenses_data(self):
-        """⚡ تحميل المصروفات بسرعة"""
+        """⚡ تحميل المصروفات بسرعة - مع منع التجميد"""
         print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
         
         try:
@@ -124,11 +124,15 @@ class ExpenseManagerTab(QWidget):
             
             # ⚡ تعطيل التحديثات للسرعة
             self.expenses_table.setUpdatesEnabled(False)
+            self.expenses_table.blockSignals(True)  # ⚡ منع الإشارات
             
             self.expenses_list = self.expense_service.get_all_expenses()
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
+            
             self.expenses_table.setRowCount(0)
 
             total_sum = 0.0
+            batch_size = 20  # ⚡ تحميل على دفعات
             for i, exp in enumerate(self.expenses_list):
                 self.expenses_table.insertRow(i)
                 
@@ -156,15 +160,24 @@ class ExpenseManagerTab(QWidget):
                 self.expenses_table.setItem(i, 5, amount_item)
                 
                 total_sum += exp.amount
+                
+                # ⚡ معالجة الأحداث كل batch_size صف
+                if (i + 1) % batch_size == 0:
+                    QApplication.processEvents()
 
             self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
             print(f"INFO: [ExpenseManager] تم جلب {len(self.expenses_list)} مصروف.")
             
-            # ⚡ إعادة تفعيل التحديثات
+            # ⚡ إعادة تفعيل كل شيء
+            self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
+            QApplication.processEvents()
 
         except Exception as e:
             print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {e}")
+            import traceback
+            traceback.print_exc()
+            self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
 
     def _on_expenses_changed(self):

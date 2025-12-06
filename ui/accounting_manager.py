@@ -245,7 +245,7 @@ class AccountingManagerTab(QWidget):
         pass
     
     def load_accounts_data(self):
-        """⚡ تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية"""
+        """⚡ تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية - مع منع التجميد"""
         print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
         
         try:
@@ -255,6 +255,7 @@ class AccountingManagerTab(QWidget):
             
             # ✨ استخدام الدالة الجديدة للحصول على الأرصدة المحسوبة
             tree_map = self.accounting_service.get_hierarchy_with_balances()
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
             
             # تحديث قائمة الحسابات للاستخدام في أماكن أخرى
             self.all_accounts_list = self.accounting_service.repo.get_all_accounts()

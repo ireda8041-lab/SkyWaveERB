@@ -255,7 +255,7 @@ class ClientManagerTab(QWidget):
         self.update_buttons_state(False)
 
     def load_clients_data(self):
-        """⚡ تحميل بيانات العملاء بشكل محسّن للسرعة"""
+        """⚡ تحميل بيانات العملاء بشكل محسّن للسرعة - مع منع التجميد"""
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
         
         try:
@@ -268,9 +268,12 @@ class ClientManagerTab(QWidget):
             else:
                 self.clients_list = self.client_service.get_all_clients()
 
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
+            
             # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
             self.clients_table.setSortingEnabled(False)
             self.clients_table.setUpdatesEnabled(False)  # ⚡ تعطيل التحديثات للسرعة
+            self.clients_table.blockSignals(True)  # ⚡ منع الإشارات أثناء التحميل
             self.clients_table.setRowCount(0)
 
             # ⚡ استعلامات SQL مبسطة للسرعة
@@ -288,6 +291,8 @@ class ClientManagerTab(QWidget):
                 client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 
+                QApplication.processEvents()  # ⚡ منع التجميد
+                
                 # ⚡ استعلام بسيط لإجمالي المدفوعات
                 self.client_service.repo.sqlite_cursor.execute("""
                     SELECT client_id, SUM(amount) as total_paid
@@ -297,11 +302,15 @@ class ClientManagerTab(QWidget):
                 """)
                 client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
                                         for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                
+                QApplication.processEvents()  # ⚡ منع التجميد
             except Exception as e:
                 print(f"ERROR: فشل حساب الإجماليات: {e}")
                 import traceback
                 traceback.print_exc()
 
+            # ⚡ تحميل البيانات على دفعات لمنع التجميد
+            batch_size = 15
             for index, client in enumerate(self.clients_list):
                 self.clients_table.insertRow(index)
 
@@ -323,7 +332,7 @@ class ClientManagerTab(QWidget):
                         pixmap = QPixmap()
                         pixmap.loadFromData(img_bytes)
                     except Exception as e:
-                        print(f"WARNING: فشل تحميل صورة العميل من base64: {e}")
+                        # ⚡ تجاهل الخطأ بصمت لتجنب البطء
                         pixmap = None
                 
                 # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
@@ -344,6 +353,10 @@ class ClientManagerTab(QWidget):
                     logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
 
                 self.clients_table.setCellWidget(index, 0, logo_label)
+                
+                # ⚡ معالجة الأحداث كل batch_size صف
+                if (index + 1) % batch_size == 0:
+                    QApplication.processEvents()
 
                 self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
                 self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
@@ -388,16 +401,23 @@ class ClientManagerTab(QWidget):
 
             print(f"INFO: [ClientManager] تم جلب {len(self.clients_list)} عميل.")
             
-            # ⚡ إعادة تفعيل التحديثات والترتيب بعد التحميل
+            # ⚡ إعادة تفعيل كل شيء بعد التحميل
+            self.clients_table.blockSignals(False)
             self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
+            
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()  # ⚡ منع التجميد
             
             self.selected_client = None
             self.update_buttons_state(False)
 
         except Exception as e:
             print(f"ERROR: [ClientManager] فشل تحميل العملاء: {e}")
-            # ⚡ إعادة تفعيل التحديثات والترتيب حتى في حالة الخطأ
+            import traceback
+            traceback.print_exc()
+            # ⚡ إعادة تفعيل كل شيء حتى في حالة الخطأ
+            self.clients_table.blockSignals(False)
             self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
 

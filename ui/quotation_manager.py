@@ -114,8 +114,11 @@ class QuotationManagerTab(QWidget):
             
             # ⚡ تعطيل التحديثات للسرعة
             self.quotes_table.setUpdatesEnabled(False)
+            self.quotes_table.blockSignals(True)  # ⚡ منع الإشارات
             
             self.quotations_list = self.quotation_service.get_all_quotations()
+            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
+            
             self.quotes_table.setRowCount(0)
 
             colors_map = {
@@ -125,6 +128,7 @@ class QuotationManagerTab(QWidget):
                 schemas.QuotationStatus.REJECTED: QColor("#ef4444"),
             }
 
+            batch_size = 20  # ⚡ تحميل على دفعات
             for index, quote in enumerate(self.quotations_list):
                 self.quotes_table.insertRow(index)
 
@@ -149,14 +153,23 @@ class QuotationManagerTab(QWidget):
                 self.quotes_table.setItem(index, 3, date_item)
                 self.quotes_table.setItem(index, 4, expiry_item)
                 self.quotes_table.setItem(index, 5, total_item)
+                
+                # ⚡ معالجة الأحداث كل batch_size صف
+                if (index + 1) % batch_size == 0:
+                    QApplication.processEvents()
 
             print(f"INFO: [QuoteManager] تم جلب {len(self.quotations_list)} عرض سعر.")
             
-            # ⚡ إعادة تفعيل التحديثات
+            # ⚡ إعادة تفعيل كل شيء
+            self.quotes_table.blockSignals(False)
             self.quotes_table.setUpdatesEnabled(True)
+            QApplication.processEvents()
 
         except Exception as e:
             print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {e}")
+            import traceback
+            traceback.print_exc()
+            self.quotes_table.blockSignals(False)
             self.quotes_table.setUpdatesEnabled(True)
 
     def _on_quotations_changed(self):

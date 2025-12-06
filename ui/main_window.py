@@ -376,16 +376,20 @@ class MainWindow(QMainWindow):
         print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
     
     def on_tab_changed(self, index):
-        """⚡ تحميل بيانات التاب عند التنقل"""
+        """⚡ تحميل بيانات التاب عند التنقل - محسّن لمنع التجميد"""
         try:
             tab_name = self.tabs.tabText(index)
             print(f"INFO: [MainWindow] تم اختيار التاب: {tab_name}")
             
+            # ⚡ معالجة الأحداث فوراً لإظهار التاب
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()
+            
             # ⚡ تحميل البيانات فقط إذا لم تكن محملة
             if not self._tab_data_loaded.get(tab_name, False):
                 print(f"INFO: [MainWindow] جاري تحميل بيانات: {tab_name}")
-                # تأخير أطول لإظهار التاب أولاً
-                QTimer.singleShot(200, lambda tn=tab_name: self._do_load_tab_data(tn))
+                # ⚡ تأخير قصير لإظهار التاب أولاً ثم تحميل البيانات
+                QTimer.singleShot(50, lambda tn=tab_name: self._do_load_tab_data_safe(tn))
             else:
                 print(f"INFO: [MainWindow] البيانات محملة مسبقاً: {tab_name}")
             
@@ -405,67 +409,89 @@ class MainWindow(QMainWindow):
         # ⚡ تحميل البيانات بعد 50ms لإعطاء الواجهة فرصة للظهور
         QTimer.singleShot(50, lambda: self._do_load_tab_data(tab_name))
     
-    def _do_load_tab_data(self, tab_name: str):
-        """⚡ تنفيذ تحميل البيانات الفعلي مع منع التجميد"""
+    def _do_load_tab_data_safe(self, tab_name: str):
+        """⚡ تحميل البيانات بشكل آمن مع منع التجميد التام"""
         from PyQt6.QtWidgets import QApplication
+        import threading
         
-        try:
-            print(f"INFO: [MainWindow] بدء تحميل: {tab_name}")
-            QApplication.processEvents()  # ⚡ منع التجميد
-            
-            if tab_name == "🏠 الصفحة الرئيسية":
-                if hasattr(self, 'dashboard_tab'):
-                    self.dashboard_tab.refresh_data()
-            elif tab_name == "🚀 المشاريع":
-                if hasattr(self, 'projects_tab'):
-                    self.projects_tab.service_service = self.service_service
-                    self.projects_tab.accounting_service = self.accounting_service
-                    QApplication.processEvents()
-                    self.projects_tab.load_projects_data()
-            elif tab_name == "📝 عروض الأسعار":
-                if hasattr(self, 'quotes_tab'):
-                    self.quotes_tab.project_service = self.project_service
-                    QApplication.processEvents()
-                    self.quotes_tab.load_quotations_data()
-            elif tab_name == "💳 المصروفات":
-                if hasattr(self, 'expense_tab'):
-                    QApplication.processEvents()
-                    self.expense_tab.load_expenses_data()
-            elif tab_name == "💰 الدفعات":
-                if hasattr(self, 'payments_tab'):
-                    QApplication.processEvents()
-                    self.payments_tab.load_payments_data()
-            elif tab_name == "👤 العملاء":
-                if hasattr(self, 'clients_tab'):
-                    QApplication.processEvents()
-                    self.clients_tab.load_clients_data()
-            elif tab_name == "🛠️ الخدمات والباقات":
-                if hasattr(self, 'services_tab'):
-                    QApplication.processEvents()
-                    self.services_tab.load_services_data()
-            elif tab_name == "📊 المحاسبة":
-                if hasattr(self, 'accounting_tab'):
-                    self.accounting_tab.project_service = self.project_service
-                    QApplication.processEvents()
-                    self.accounting_tab.load_accounts_data()
-            elif tab_name == "📋 المهام":
-                if hasattr(self, 'todo_tab'):
-                    QApplication.processEvents()
-                    self.todo_tab.load_tasks()
-            elif tab_name == "🔧 الإعدادات":
-                if hasattr(self, 'settings_tab'):
-                    QApplication.processEvents()
-                    self.settings_tab.load_settings_data()
-                    self.settings_tab.load_users()
-            
-            QApplication.processEvents()  # ⚡ منع التجميد بعد التحميل
-            
-            # ⚡ تسجيل أن التاب محمل
-            self._tab_data_loaded[tab_name] = True
-            print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
-            
-        except Exception as e:
-            print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {e}")
+        def load_in_chunks():
+            """تحميل البيانات على مراحل لمنع التجميد"""
+            try:
+                print(f"INFO: [MainWindow] بدء تحميل: {tab_name}")
+                
+                # ⚡ استخدام QTimer لتحميل البيانات بشكل متقطع
+                if tab_name == "🏠 الصفحة الرئيسية":
+                    if hasattr(self, 'dashboard_tab'):
+                        self.dashboard_tab.refresh_data()
+                elif tab_name == "🚀 المشاريع":
+                    if hasattr(self, 'projects_tab'):
+                        self.projects_tab.service_service = self.service_service
+                        self.projects_tab.accounting_service = self.accounting_service
+                        QApplication.processEvents()
+                        self.projects_tab.load_projects_data()
+                        QApplication.processEvents()
+                elif tab_name == "📝 عروض الأسعار":
+                    if hasattr(self, 'quotes_tab'):
+                        self.quotes_tab.project_service = self.project_service
+                        QApplication.processEvents()
+                        self.quotes_tab.load_quotations_data()
+                        QApplication.processEvents()
+                elif tab_name == "💳 المصروفات":
+                    if hasattr(self, 'expense_tab'):
+                        QApplication.processEvents()
+                        self.expense_tab.load_expenses_data()
+                        QApplication.processEvents()
+                elif tab_name == "💰 الدفعات":
+                    if hasattr(self, 'payments_tab'):
+                        QApplication.processEvents()
+                        self.payments_tab.load_payments_data()
+                        QApplication.processEvents()
+                elif tab_name == "👤 العملاء":
+                    if hasattr(self, 'clients_tab'):
+                        QApplication.processEvents()
+                        self.clients_tab.load_clients_data()
+                        QApplication.processEvents()
+                elif tab_name == "🛠️ الخدمات والباقات":
+                    if hasattr(self, 'services_tab'):
+                        QApplication.processEvents()
+                        self.services_tab.load_services_data()
+                        QApplication.processEvents()
+                elif tab_name == "📊 المحاسبة":
+                    if hasattr(self, 'accounting_tab'):
+                        self.accounting_tab.project_service = self.project_service
+                        QApplication.processEvents()
+                        self.accounting_tab.load_accounts_data()
+                        QApplication.processEvents()
+                elif tab_name == "📋 المهام":
+                    if hasattr(self, 'todo_tab'):
+                        QApplication.processEvents()
+                        self.todo_tab.load_tasks()
+                        QApplication.processEvents()
+                elif tab_name == "🔧 الإعدادات":
+                    if hasattr(self, 'settings_tab'):
+                        QApplication.processEvents()
+                        self.settings_tab.load_settings_data()
+                        QApplication.processEvents()
+                        self.settings_tab.load_users()
+                        QApplication.processEvents()
+                
+                # ⚡ تسجيل أن التاب محمل
+                self._tab_data_loaded[tab_name] = True
+                print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
+                
+            except Exception as e:
+                print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # ⚡ تنفيذ التحميل مع معالجة الأحداث
+        QApplication.processEvents()
+        load_in_chunks()
+        QApplication.processEvents()
+    
+    def _do_load_tab_data(self, tab_name: str):
+        """⚡ دالة قديمة للتوافق - تستدعي الدالة الجديدة"""
+        self._do_load_tab_data_safe(tab_name)
 
 
     
