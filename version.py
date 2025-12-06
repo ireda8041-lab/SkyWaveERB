@@ -1,13 +1,11 @@
-# -*- coding: utf-8 -*-
 """
 ⚡ نظام إدارة الإصدارات - Sky Wave ERP
 الإصدار بصيغة: YY.MM.DD (السنة.الشهر.اليوم)
 مثال: 25.12.04 = 4 ديسمبر 2025
 """
 
-from datetime import datetime
-import os
 import json
+from datetime import datetime
 
 # ==================== معلومات الإصدار ====================
 # صيغة الإصدار: YY.MM.DD (السنة.الشهر.اليوم)
@@ -18,7 +16,7 @@ def _get_today_version() -> str:
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = "1.0.3"  # الإصدار الثابت
+CURRENT_VERSION = "1.0.5"  # الإصدار الثابت
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 
@@ -56,7 +54,7 @@ def parse_version_date(version: str) -> str:
     return version
 
 
-def generate_version_from_date(date: datetime = None) -> str:
+def generate_version_from_date(date: datetime | None = None) -> str:
     """توليد رقم إصدار من تاريخ"""
     if date is None:
         date = datetime.now()
@@ -71,8 +69,8 @@ def compare_versions(v1: str, v2: str) -> int:
     try:
         parts1 = [int(x) for x in v1.split(".")]
         parts2 = [int(x) for x in v2.split(".")]
-        
-        for p1, p2 in zip(parts1, parts2):
+
+        for p1, p2 in zip(parts1, parts2, strict=False):
             if p1 > p2:
                 return 1
             elif p1 < p2:
@@ -97,7 +95,7 @@ def update_version_file():
         ],
         "release_date": datetime.now().strftime("%Y-%m-%d")
     }
-    
+
     try:
         with open("version.json", "w", encoding="utf-8") as f:
             json.dump(version_data, f, ensure_ascii=False, indent=2)
