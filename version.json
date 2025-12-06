@@ -1,17 +1,17 @@
 {
   "version": "1.0.3",
-  "version_name": "إصلاحات مهمة - Sky Wave ERP",
+  "version_name": "Important Fixes - Sky Wave ERP",
   "release_date": "2025-12-06",
   "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/1.0.3/SkyWave-Setup-1.0.3.exe",
   "changelog": [
-    "إصلاح مشكلة تغير أرقام الفواتير",
-    "إصلاح مشكلة تكرار الخدمات",
-    "إصلاح مشكلة زرار تسجيل الخروج",
-    "تحسين ارتفاع الصفوف في الجداول",
-    "تحسين أداء المزامنة"
+    "Fix invoice numbers changing issue",
+    "Fix duplicate services issue",
+    "Fix logout button reopening app",
+    "Improve table row heights",
+    "Improve sync performance"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "إصلاحات مهمة لأرقام الفواتير والخدمات المكررة",
+  "notes_ar": "Important fixes for invoice numbers and duplicate services",
   "notes_en": "Important fixes for invoice numbers and duplicate services"
 }
