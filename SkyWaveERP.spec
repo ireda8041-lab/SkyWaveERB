@@ -19,6 +19,7 @@ added_files = [
     ('Sky Wave template.jpg', '.'),
     ('version.json', '.'),
     ('skywave_settings.json', '.'),
+    ('updater.exe', '.'),  # ملف التحديث
     
     # مجلد assets بالكامل مع كل المحتويات
     ('assets/arrow.png', 'assets'),
