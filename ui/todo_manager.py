@@ -1285,13 +1285,43 @@ class TodoManagerWidget(QWidget):
             value_label.setText(clean_value)
     
     def load_tasks(self):
-        """تحميل وعرض المهام"""
-        # ⚡ معالجة الأحداث لمنع التجميد
+        """⚡ تحميل وعرض المهام في الخلفية لمنع التجميد"""
+        from core.data_loader import get_data_loader
         from PyQt6.QtWidgets import QApplication
+        
         QApplication.processEvents()
         
-        self.filter_tasks()
-        self.update_statistics()
+        # دالة جلب البيانات
+        def fetch_tasks():
+            try:
+                tasks = self.task_service.get_all_tasks()
+                stats = self.task_service.get_statistics()
+                return {'tasks': tasks, 'stats': stats}
+            except Exception as e:
+                print(f"ERROR: [TodoManager] فشل جلب المهام: {e}")
+                return {'tasks': [], 'stats': {}}
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(data):
+            try:
+                self.filter_tasks()
+                self.update_statistics()
+                print("INFO: [TodoManager] ✅ تم تحميل المهام")
+            except Exception as e:
+                print(f"ERROR: [TodoManager] فشل تحديث الواجهة: {e}")
+        
+        def on_error(error_msg):
+            print(f"ERROR: [TodoManager] فشل تحميل المهام: {error_msg}")
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="tasks_list",
+            load_function=fetch_tasks,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
     
     def filter_tasks(self):
         """فلترة وعرض المهام"""

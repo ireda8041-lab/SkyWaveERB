@@ -113,25 +113,45 @@ class DashboardTab(QWidget):
         return card
 
     def refresh_data(self):
-        """
-        (جديدة) تجلب الأرقام من الـ Service وتحدّث الكروت
-        """
+        """⚡ تحديث أرقام الداشبورد في الخلفية لمنع التجميد"""
         print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            kpis = self.accounting_service.get_dashboard_kpis()
-
-            self.update_card_value(self.collected_card, kpis.get("total_collected", 0))
-            self.update_card_value(self.outstanding_card, kpis.get("total_outstanding", 0))
-            self.update_card_value(self.expenses_card, kpis.get("total_expenses", 0))
-            self.update_card_value(self.net_profit_card, kpis.get("net_profit_cash", 0))
-
-        except Exception as e:
-            print(f"ERROR: [Dashboard] فشل تحديث الأرقام: {e}")
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_kpis():
+            try:
+                return self.accounting_service.get_dashboard_kpis()
+            except Exception as e:
+                print(f"ERROR: [Dashboard] فشل جلب KPIs: {e}")
+                return {}
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(kpis):
+            try:
+                self.update_card_value(self.collected_card, kpis.get("total_collected", 0))
+                self.update_card_value(self.outstanding_card, kpis.get("total_outstanding", 0))
+                self.update_card_value(self.expenses_card, kpis.get("total_expenses", 0))
+                self.update_card_value(self.net_profit_card, kpis.get("net_profit_cash", 0))
+                print("INFO: [Dashboard] ✅ تم تحديث أرقام الداشبورد")
+            except Exception as e:
+                print(f"ERROR: [Dashboard] فشل تحديث الكروت: {e}")
+        
+        def on_error(error_msg):
+            print(f"ERROR: [Dashboard] فشل تحديث الأرقام: {error_msg}")
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="dashboard_kpis",
+            load_function=fetch_kpis,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def update_card_value(self, card: QFrame, value: float):
         """ (جديدة) دالة مساعدة لتحديث الرقم جوه الكارت """

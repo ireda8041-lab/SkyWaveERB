@@ -255,171 +255,195 @@ class ClientManagerTab(QWidget):
         self.update_buttons_state(False)
 
     def load_clients_data(self):
-        """⚡ تحميل بيانات العملاء بشكل محسّن للسرعة - مع منع التجميد"""
+        """⚡ تحميل بيانات العملاء في الخلفية لمنع التجميد"""
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            if self.show_archived_checkbox.isChecked():
-                self.clients_list = self.client_service.get_archived_clients()
-            else:
-                self.clients_list = self.client_service.get_all_clients()
-
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            # ⚡ تعطيل الترتيب مؤقتاً أثناء التحميل (للسرعة)
-            self.clients_table.setSortingEnabled(False)
-            self.clients_table.setUpdatesEnabled(False)  # ⚡ تعطيل التحديثات للسرعة
-            self.clients_table.blockSignals(True)  # ⚡ منع الإشارات أثناء التحميل
-            self.clients_table.setRowCount(0)
-
-            # ⚡ استعلامات SQL مبسطة للسرعة
-            client_invoices_total = {}
-            client_payments_total = {}
-            
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.clients_table.setSortingEnabled(False)
+        self.clients_table.setUpdatesEnabled(False)
+        self.clients_table.blockSignals(True)
+        self.clients_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات (تعمل في الخلفية)
+        def fetch_clients():
             try:
-                # ⚡ استعلام بسيط لإجمالي المشاريع
-                self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT client_id, SUM(total_amount) as total_projects
-                    FROM projects
-                    WHERE status != 'مؤرشف' AND status != 'ملغي'
-                    GROUP BY client_id
-                """)
-                client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
-                                        for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                # جلب العملاء
+                if self.show_archived_checkbox.isChecked():
+                    clients = self.client_service.get_archived_clients()
+                else:
+                    clients = self.client_service.get_all_clients()
                 
-                QApplication.processEvents()  # ⚡ منع التجميد
+                # جلب الإجماليات
+                client_invoices_total = {}
+                client_payments_total = {}
                 
-                # ⚡ استعلام بسيط لإجمالي المدفوعات
-                self.client_service.repo.sqlite_cursor.execute("""
-                    SELECT client_id, SUM(amount) as total_paid
-                    FROM payments
-                    WHERE client_id IS NOT NULL AND client_id != ''
-                    GROUP BY client_id
-                """)
-                client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
-                                        for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                try:
+                    self.client_service.repo.sqlite_cursor.execute("""
+                        SELECT client_id, SUM(total_amount) as total_projects
+                        FROM projects
+                        WHERE status != 'مؤرشف' AND status != 'ملغي'
+                        GROUP BY client_id
+                    """)
+                    client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                                            for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                    
+                    self.client_service.repo.sqlite_cursor.execute("""
+                        SELECT client_id, SUM(amount) as total_paid
+                        FROM payments
+                        WHERE client_id IS NOT NULL AND client_id != ''
+                        GROUP BY client_id
+                    """)
+                    client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                                            for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                except Exception as e:
+                    print(f"ERROR: فشل حساب الإجماليات: {e}")
                 
-                QApplication.processEvents()  # ⚡ منع التجميد
+                return {
+                    'clients': clients,
+                    'invoices_total': client_invoices_total,
+                    'payments_total': client_payments_total
+                }
             except Exception as e:
-                print(f"ERROR: فشل حساب الإجماليات: {e}")
+                print(f"ERROR: [ClientManager] فشل جلب العملاء: {e}")
+                return {'clients': [], 'invoices_total': {}, 'payments_total': {}}
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(data):
+            try:
+                self.clients_list = data['clients']
+                client_invoices_total = data['invoices_total']
+                client_payments_total = data['payments_total']
+                
+                self._populate_clients_table(client_invoices_total, client_payments_total)
+                
+            except Exception as e:
+                print(f"ERROR: [ClientManager] فشل تحديث الجدول: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                self.clients_table.blockSignals(False)
+                self.clients_table.setUpdatesEnabled(True)
+                self.clients_table.setSortingEnabled(True)
+        
+        def on_error(error_msg):
+            print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
+            self.clients_table.blockSignals(False)
+            self.clients_table.setUpdatesEnabled(True)
+            self.clients_table.setSortingEnabled(True)
+        
+        # تحميل البيانات في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="clients_list",
+            load_function=fetch_clients,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
+    
+    def _populate_clients_table(self, client_invoices_total, client_payments_total):
+        """ملء جدول العملاء بالبيانات"""
+        from PyQt6.QtWidgets import QApplication
+        
+        # ⚡ تحميل البيانات على دفعات لمنع التجميد
+        batch_size = 15
+        for index, client in enumerate(self.clients_list):
+            self.clients_table.insertRow(index)
 
-            # ⚡ تحميل البيانات على دفعات لمنع التجميد
-            batch_size = 15
-            for index, client in enumerate(self.clients_list):
-                self.clients_table.insertRow(index)
-
-                logo_label = QLabel()
-                logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-                pixmap = None
-                
-                # أولاً: محاولة تحميل الصورة من base64 (للمزامنة بين الأجهزة)
-                if hasattr(client, 'logo_data') and client.logo_data:
-                    try:
-                        import base64
-                        # إزالة prefix إذا وجد
-                        logo_data = client.logo_data
-                        if ',' in logo_data:
-                            logo_data = logo_data.split(',')[1]
-                        
-                        img_bytes = base64.b64decode(logo_data)
-                        pixmap = QPixmap()
-                        pixmap.loadFromData(img_bytes)
-                    except Exception as e:
-                        # ⚡ تجاهل الخطأ بصمت لتجنب البطء
-                        pixmap = None
-                
-                # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
-                if not pixmap or pixmap.isNull():
-                    if client.logo_path and os.path.exists(client.logo_path):
-                        pixmap = QPixmap(client.logo_path)
-                
-                # عرض الصورة أو أيقونة افتراضية
-                if pixmap and not pixmap.isNull():
-                    scaled_pixmap = pixmap.scaled(
-                        QSize(50, 50),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    logo_label.setPixmap(scaled_pixmap)
-                else:
-                    logo_label.setText("👤")
-                    logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
-
-                self.clients_table.setCellWidget(index, 0, logo_label)
-                
-                # ⚡ معالجة الأحداث كل batch_size صف
-                if (index + 1) % batch_size == 0:
-                    QApplication.processEvents()
-
-                self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
-                self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
-                self.clients_table.setItem(index, 3, QTableWidgetItem(client.phone or ""))
-                self.clients_table.setItem(index, 4, QTableWidgetItem(client.email or ""))
-
-                # ⚡ جلب إجماليات العميل - client_id في المشاريع = اسم العميل
-                client_name = client.name
-                
-                # البحث بالاسم أولاً (الطريقة الأساسية)
-                total_invoices = client_invoices_total.get(client_name, 0.0)
-                total_payments = client_payments_total.get(client_name, 0.0)
-                
-                # عرض إجمالي الفواتير (المبلغ الإجمالي)
-                total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
-                total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)  # ⚡ للترتيب الرقمي
-                total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                total_item.setForeground(QColor("#2454a5"))
-                total_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
-                self.clients_table.setItem(index, 5, total_item)
-
-                # عرض إجمالي المدفوعات
-                payment_item = QTableWidgetItem(f"{total_payments:,.0f} ج.م")
-                payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)  # ⚡ للترتيب الرقمي
-                payment_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                payment_item.setForeground(QColor("#00a876"))
-                payment_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
-                self.clients_table.setItem(index, 6, payment_item)
-
-                status_item = QTableWidgetItem(client.status.value)
+            logo_label = QLabel()
+            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+            pixmap = None
+            
+            # أولاً: محاولة تحميل الصورة من base64 (للمزامنة بين الأجهزة)
+            if hasattr(client, 'logo_data') and client.logo_data:
                 try:
-                    if client.status == schemas.ClientStatus.ARCHIVED:
-                        status_item.setBackground(QColor("#ef4444"))
-                        status_item.setForeground(QColor("white"))
-                    else:
-                        status_item.setBackground(QColor("#0A6CF1"))
-                        status_item.setForeground(QColor("white"))
+                    import base64
+                    # إزالة prefix إذا وجد
+                    logo_data = client.logo_data
+                    if ',' in logo_data:
+                        logo_data = logo_data.split(',')[1]
+                    
+                    img_bytes = base64.b64decode(logo_data)
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(img_bytes)
                 except Exception as e:
-                    print(f"WARNING: فشل تعيين لون الخلفية: {e}")
-                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.clients_table.setItem(index, 7, status_item)
+                    # ⚡ تجاهل الخطأ بصمت لتجنب البطء
+                    pixmap = None
+            
+            # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
+            if not pixmap or pixmap.isNull():
+                if client.logo_path and os.path.exists(client.logo_path):
+                    pixmap = QPixmap(client.logo_path)
+            
+            # عرض الصورة أو أيقونة افتراضية
+            if pixmap and not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(
+                    QSize(50, 50),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                logo_label.setPixmap(scaled_pixmap)
+            else:
+                logo_label.setText("👤")
+                logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
 
-            print(f"INFO: [ClientManager] تم جلب {len(self.clients_list)} عميل.")
+            self.clients_table.setCellWidget(index, 0, logo_label)
             
-            # ⚡ إعادة تفعيل كل شيء بعد التحميل
-            self.clients_table.blockSignals(False)
-            self.clients_table.setUpdatesEnabled(True)
-            self.clients_table.setSortingEnabled(True)
-            
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()  # ⚡ منع التجميد
-            
-            self.selected_client = None
-            self.update_buttons_state(False)
+            # ⚡ معالجة الأحداث كل batch_size صف
+            if (index + 1) % batch_size == 0:
+                QApplication.processEvents()
 
-        except Exception as e:
-            print(f"ERROR: [ClientManager] فشل تحميل العملاء: {e}")
-            import traceback
-            traceback.print_exc()
-            # ⚡ إعادة تفعيل كل شيء حتى في حالة الخطأ
-            self.clients_table.blockSignals(False)
-            self.clients_table.setUpdatesEnabled(True)
-            self.clients_table.setSortingEnabled(True)
+            self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
+            self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
+            self.clients_table.setItem(index, 3, QTableWidgetItem(client.phone or ""))
+            self.clients_table.setItem(index, 4, QTableWidgetItem(client.email or ""))
+
+            # ⚡ جلب إجماليات العميل
+            client_name = client.name
+            total_invoices = client_invoices_total.get(client_name, 0.0)
+            total_payments = client_payments_total.get(client_name, 0.0)
+            
+            # عرض إجمالي الفواتير
+            total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
+            total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            total_item.setForeground(QColor("#2454a5"))
+            total_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
+            self.clients_table.setItem(index, 5, total_item)
+
+            # عرض إجمالي المدفوعات
+            payment_item = QTableWidgetItem(f"{total_payments:,.0f} ج.م")
+            payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)
+            payment_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            payment_item.setForeground(QColor("#00a876"))
+            payment_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
+            self.clients_table.setItem(index, 6, payment_item)
+
+            status_item = QTableWidgetItem(client.status.value)
+            try:
+                if client.status == schemas.ClientStatus.ARCHIVED:
+                    status_item.setBackground(QColor("#ef4444"))
+                    status_item.setForeground(QColor("white"))
+                else:
+                    status_item.setBackground(QColor("#0A6CF1"))
+                    status_item.setForeground(QColor("white"))
+            except Exception as e:
+                print(f"WARNING: فشل تعيين لون الخلفية: {e}")
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.clients_table.setItem(index, 7, status_item)
+
+        print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
+        
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        
+        self.selected_client = None
+        self.update_buttons_state(False)
 
     def _on_clients_changed(self):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""

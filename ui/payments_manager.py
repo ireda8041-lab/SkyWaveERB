@@ -320,138 +320,143 @@ class PaymentsManagerTab(QWidget):
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_payments_data(self):
-        """تحميل جميع الدفعات - مع منع التجميد"""
+        """⚡ تحميل الدفعات في الخلفية لمنع التجميد"""
         print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ⚡ تعطيل التحديثات للسرعة
-            self.payments_table.setUpdatesEnabled(False)
-            self.payments_table.blockSignals(True)  # ⚡ منع الإشارات
-            
-            # تحميل الدفعات
-            self.payments_list = self.accounting_service.repo.get_all_payments()
-            QApplication.processEvents()  # ⚡ منع التجميد
-            
-            # تحميل الحسابات للـ cache (لعرض الأسماء بدل الأكواد)
-            all_accounts = self.accounting_service.repo.get_all_accounts()
-            accounts_cache = {acc.code: acc for acc in all_accounts}
-            
-            # تحميل المشاريع للـ cache (لعرض أسماء العملاء)
-            all_projects = self.project_service.get_all_projects()
-            projects_cache = {proj.name: proj for proj in all_projects}
-            
-            # تحميل العملاء للـ cache
-            clients = self.client_service.get_all_clients()
-            clients_cache = {}
-            for c in clients:
-                # إضافة العميل بكل الطرق الممكنة للبحث
-                clients_cache[c.name] = c  # بالاسم
-                if c._mongo_id:
-                    clients_cache[c._mongo_id] = c  # بالـ mongo_id
-                if c.id:
-                    clients_cache[str(c.id)] = c  # بالـ id
-
-            self.payments_table.setRowCount(0)
-            total_sum = 0.0
-
-            for i, payment in enumerate(self.payments_list):
-                self.payments_table.insertRow(i)
-
-                # الرقم
-                num_item = QTableWidgetItem(str(i + 1))
-                num_item.setData(Qt.ItemDataRole.UserRole, payment)
-                num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.payments_table.setItem(i, 0, num_item)
-
-                # التاريخ
-                date_str = payment.date.strftime("%Y-%m-%d") if payment.date else ""
-                date_item = QTableWidgetItem(date_str)
-                date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.payments_table.setItem(i, 1, date_item)
-
-                # النوع (دائماً تحصيل/وارد للدفعات)
-                type_item = QTableWidgetItem("💰 وارد")
-                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                type_item.setForeground(QColor("#0A6CF1"))
-                self.payments_table.setItem(i, 2, type_item)
-
-                # العميل/المشروع - عرض اسم العميل الحقيقي واسم المشروع
-                entity_text = "---"
-                client_name = "عميل غير محدد"
-                project_name = payment.project_id or "مشروع غير محدد"
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.payments_table.setUpdatesEnabled(False)
+        self.payments_table.blockSignals(True)
+        self.payments_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_payments():
+            try:
+                payments = self.accounting_service.repo.get_all_payments()
+                all_accounts = self.accounting_service.repo.get_all_accounts()
+                accounts_cache = {acc.code: acc for acc in all_accounts}
                 
-                # البحث عن المشروع
-                if payment.project_id and payment.project_id in projects_cache:
-                    project = projects_cache[payment.project_id]
-                    project_name = project.name  # اسم المشروع الحقيقي
+                all_projects = self.project_service.get_all_projects()
+                projects_cache = {proj.name: proj for proj in all_projects}
+                
+                clients = self.client_service.get_all_clients()
+                clients_cache = {}
+                for c in clients:
+                    clients_cache[c.name] = c
+                    if c._mongo_id:
+                        clients_cache[c._mongo_id] = c
+                    if c.id:
+                        clients_cache[str(c.id)] = c
+                
+                return {
+                    'payments': payments,
+                    'accounts_cache': accounts_cache,
+                    'projects_cache': projects_cache,
+                    'clients_cache': clients_cache
+                }
+            except Exception as e:
+                print(f"ERROR: [PaymentsManager] فشل جلب الدفعات: {e}")
+                return {'payments': [], 'accounts_cache': {}, 'projects_cache': {}, 'clients_cache': {}}
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(data):
+            try:
+                self.payments_list = data['payments']
+                accounts_cache = data['accounts_cache']
+                projects_cache = data['projects_cache']
+                clients_cache = data['clients_cache']
+                
+                total_sum = 0.0
+                batch_size = 15
+                
+                for i, payment in enumerate(self.payments_list):
+                    self.payments_table.insertRow(i)
                     
-                    # البحث عن العميل
-                    client_id = project.client_id
-                    if client_id and client_id in clients_cache:
-                        client_name = clients_cache[client_id].name
-                    elif client_id:
-                        # محاولة البحث بطرق أخرى
-                        for client in clients_cache.values():
-                            if (client._mongo_id == client_id or 
-                                str(client.id) == client_id or 
-                                client.name == client_id):
-                                client_name = client.name
-                                break
+                    num_item = QTableWidgetItem(str(i + 1))
+                    num_item.setData(Qt.ItemDataRole.UserRole, payment)
+                    num_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.payments_table.setItem(i, 0, num_item)
+                    
+                    date_str = payment.date.strftime("%Y-%m-%d") if payment.date else ""
+                    date_item = QTableWidgetItem(date_str)
+                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.payments_table.setItem(i, 1, date_item)
+                    
+                    type_item = QTableWidgetItem("💰 وارد")
+                    type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    type_item.setForeground(QColor("#0A6CF1"))
+                    self.payments_table.setItem(i, 2, type_item)
+                    
+                    client_name = "عميل غير محدد"
+                    project_name = payment.project_id or "مشروع غير محدد"
+                    
+                    if payment.project_id and payment.project_id in projects_cache:
+                        project = projects_cache[payment.project_id]
+                        project_name = project.name
+                        client_id = project.client_id
+                        if client_id and client_id in clients_cache:
+                            client_name = clients_cache[client_id].name
+                    
+                    entity_item = QTableWidgetItem(f"{client_name} - {project_name}")
+                    entity_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.payments_table.setItem(i, 3, entity_item)
+                    
+                    amount_item = QTableWidgetItem(f"{payment.amount:,.2f}")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(QColor("#0A6CF1"))
+                    self.payments_table.setItem(i, 4, amount_item)
+                    
+                    payment_method = self._get_payment_method_from_account(payment.account_id, accounts_cache)
+                    method_item = QTableWidgetItem(payment_method)
+                    method_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.payments_table.setItem(i, 5, method_item)
+                    
+                    account_display = "---"
+                    if payment.account_id and payment.account_id in accounts_cache:
+                        account = accounts_cache[payment.account_id]
+                        account_display = f"{account.name} ({account.code})"
+                    elif payment.account_id:
+                        account_display = payment.account_id
+                    
+                    account_item = QTableWidgetItem(account_display)
+                    account_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.payments_table.setItem(i, 6, account_item)
+                    
+                    self.payments_table.setRowHeight(i, 40)
+                    total_sum += payment.amount
+                    
+                    if (i + 1) % batch_size == 0:
+                        QApplication.processEvents()
                 
-                entity_text = f"{client_name} - {project_name}"
+                self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
+                print(f"INFO: [PaymentsManager] ✅ تم تحميل {len(self.payments_list)} دفعة.")
                 
-                entity_item = QTableWidgetItem(entity_text)
-                entity_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.payments_table.setItem(i, 3, entity_item)
-
-                # المبلغ
-                amount_item = QTableWidgetItem(f"{payment.amount:,.2f}")
-                amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                amount_item.setForeground(QColor("#0A6CF1"))
-                self.payments_table.setItem(i, 4, amount_item)
-
-                # طريقة الدفع - حساب من الحساب المستلم
-                payment_method = self._get_payment_method_from_account(payment.account_id, accounts_cache)
-                method_item = QTableWidgetItem(payment_method)
-                method_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.payments_table.setItem(i, 5, method_item)
-
-                # الحساب - عرض الاسم بدل الكود
-                account_display = "---"
-                if payment.account_id and payment.account_id in accounts_cache:
-                    account = accounts_cache[payment.account_id]
-                    account_display = f"{account.name} ({account.code})"
-                elif payment.account_id:
-                    account_display = payment.account_id
-                
-                account_item = QTableWidgetItem(account_display)
-                account_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.payments_table.setItem(i, 6, account_item)
-
-                # ارتفاع الصف
-                self.payments_table.setRowHeight(i, 40)
-
-                total_sum += payment.amount
-
-            self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
-            print(f"INFO: [PaymentsManager] تم جلب {len(self.payments_list)} دفعة.")
-            
-            # ⚡ إعادة تفعيل كل شيء
+            except Exception as e:
+                print(f"ERROR: [PaymentsManager] فشل تحديث الجدول: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.payments_table.blockSignals(False)
+                self.payments_table.setUpdatesEnabled(True)
+                QApplication.processEvents()
+        
+        def on_error(error_msg):
+            print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")
             self.payments_table.blockSignals(False)
             self.payments_table.setUpdatesEnabled(True)
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-
-        except Exception as e:
-            print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {e}")
-            import traceback
-            traceback.print_exc()
-            self.payments_table.blockSignals(False)
-            self.payments_table.setUpdatesEnabled(True)
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="payments_list",
+            load_function=fetch_payments,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""

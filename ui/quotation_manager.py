@@ -106,71 +106,83 @@ class QuotationManagerTab(QWidget):
         layout.addWidget(self.quotes_table)
 
     def load_quotations_data(self):
+        """⚡ تحميل عروض الأسعار في الخلفية لمنع التجميد"""
         print("INFO: [QuoteManager] جاري تحميل عروض الأسعار...")
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ⚡ تعطيل التحديثات للسرعة
-            self.quotes_table.setUpdatesEnabled(False)
-            self.quotes_table.blockSignals(True)  # ⚡ منع الإشارات
-            
-            self.quotations_list = self.quotation_service.get_all_quotations()
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            self.quotes_table.setRowCount(0)
-
-            colors_map = {
-                schemas.QuotationStatus.ACCEPTED: QColor("#0A6CF1"),
-                schemas.QuotationStatus.SENT: QColor("#3b82f6"),
-                schemas.QuotationStatus.DRAFT: QColor("#9ca3af"),
-                schemas.QuotationStatus.REJECTED: QColor("#ef4444"),
-            }
-
-            batch_size = 20  # ⚡ تحميل على دفعات
-            for index, quote in enumerate(self.quotations_list):
-                self.quotes_table.insertRow(index)
-
-                status_item = QTableWidgetItem(quote.status.value)
-                status_color = colors_map.get(
-                    quote.status, colors_map[schemas.QuotationStatus.DRAFT]
-                )
-                status_item.setBackground(status_color)
-                if quote.status != schemas.QuotationStatus.DRAFT:
-                    status_item.setForeground(QColor("white"))
-
-                quote_num_item = QTableWidgetItem(quote.quote_number)
-                client_name_item = QTableWidgetItem(quote.client_id)
-                date_item = QTableWidgetItem(quote.issue_date.strftime("%Y-%m-%d"))
-                expiry_item = QTableWidgetItem(quote.expiry_date.strftime("%Y-%m-%d"))
-                total_str = f"{quote.total_amount:,.2f} {quote.currency.value}"
-                total_item = QTableWidgetItem(total_str)
-
-                self.quotes_table.setItem(index, 0, status_item)
-                self.quotes_table.setItem(index, 1, quote_num_item)
-                self.quotes_table.setItem(index, 2, client_name_item)
-                self.quotes_table.setItem(index, 3, date_item)
-                self.quotes_table.setItem(index, 4, expiry_item)
-                self.quotes_table.setItem(index, 5, total_item)
+        
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.quotes_table.setUpdatesEnabled(False)
+        self.quotes_table.blockSignals(True)
+        self.quotes_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_quotations():
+            try:
+                return self.quotation_service.get_all_quotations()
+            except Exception as e:
+                print(f"ERROR: [QuoteManager] فشل جلب عروض الأسعار: {e}")
+                return []
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(quotations):
+            try:
+                self.quotations_list = quotations
                 
-                # ⚡ معالجة الأحداث كل batch_size صف
-                if (index + 1) % batch_size == 0:
-                    QApplication.processEvents()
-
-            print(f"INFO: [QuoteManager] تم جلب {len(self.quotations_list)} عرض سعر.")
-            
-            # ⚡ إعادة تفعيل كل شيء
+                colors_map = {
+                    schemas.QuotationStatus.ACCEPTED: QColor("#0A6CF1"),
+                    schemas.QuotationStatus.SENT: QColor("#3b82f6"),
+                    schemas.QuotationStatus.DRAFT: QColor("#9ca3af"),
+                    schemas.QuotationStatus.REJECTED: QColor("#ef4444"),
+                }
+                
+                batch_size = 15
+                for index, quote in enumerate(self.quotations_list):
+                    self.quotes_table.insertRow(index)
+                    
+                    status_item = QTableWidgetItem(quote.status.value)
+                    status_color = colors_map.get(quote.status, colors_map[schemas.QuotationStatus.DRAFT])
+                    status_item.setBackground(status_color)
+                    if quote.status != schemas.QuotationStatus.DRAFT:
+                        status_item.setForeground(QColor("white"))
+                    
+                    self.quotes_table.setItem(index, 0, status_item)
+                    self.quotes_table.setItem(index, 1, QTableWidgetItem(quote.quote_number))
+                    self.quotes_table.setItem(index, 2, QTableWidgetItem(quote.client_id))
+                    self.quotes_table.setItem(index, 3, QTableWidgetItem(quote.issue_date.strftime("%Y-%m-%d")))
+                    self.quotes_table.setItem(index, 4, QTableWidgetItem(quote.expiry_date.strftime("%Y-%m-%d")))
+                    self.quotes_table.setItem(index, 5, QTableWidgetItem(f"{quote.total_amount:,.2f} {quote.currency.value}"))
+                    
+                    if (index + 1) % batch_size == 0:
+                        QApplication.processEvents()
+                
+                print(f"INFO: [QuoteManager] ✅ تم تحميل {len(self.quotations_list)} عرض سعر.")
+                
+            except Exception as e:
+                print(f"ERROR: [QuoteManager] فشل تحديث الجدول: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                self.quotes_table.blockSignals(False)
+                self.quotes_table.setUpdatesEnabled(True)
+                QApplication.processEvents()
+        
+        def on_error(error_msg):
+            print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {error_msg}")
             self.quotes_table.blockSignals(False)
             self.quotes_table.setUpdatesEnabled(True)
-            QApplication.processEvents()
-
-        except Exception as e:
-            print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {e}")
-            import traceback
-            traceback.print_exc()
-            self.quotes_table.blockSignals(False)
-            self.quotes_table.setUpdatesEnabled(True)
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="quotations_list",
+            load_function=fetch_quotations,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _on_quotations_changed(self):
         """⚡ استجابة لإشارة تحديث عروض الأسعار - تحديث الجدول أوتوماتيك"""

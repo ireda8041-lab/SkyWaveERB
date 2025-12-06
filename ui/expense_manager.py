@@ -114,71 +114,79 @@ class ExpenseManagerTab(QWidget):
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
 
     def load_expenses_data(self):
-        """⚡ تحميل المصروفات بسرعة - مع منع التجميد"""
+        """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
         print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ⚡ تعطيل التحديثات للسرعة
-            self.expenses_table.setUpdatesEnabled(False)
-            self.expenses_table.blockSignals(True)  # ⚡ منع الإشارات
-            
-            self.expenses_list = self.expense_service.get_all_expenses()
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            self.expenses_table.setRowCount(0)
-
-            total_sum = 0.0
-            batch_size = 20  # ⚡ تحميل على دفعات
-            for i, exp in enumerate(self.expenses_list):
-                self.expenses_table.insertRow(i)
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.expenses_table.setUpdatesEnabled(False)
+        self.expenses_table.blockSignals(True)
+        self.expenses_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_expenses():
+            try:
+                return self.expense_service.get_all_expenses()
+            except Exception as e:
+                print(f"ERROR: [ExpenseManager] فشل جلب المصروفات: {e}")
+                return []
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(expenses):
+            try:
+                self.expenses_list = expenses
+                total_sum = 0.0
+                batch_size = 15
                 
-                # الرقم
-                num_item = QTableWidgetItem(str(i + 1))
-                num_item.setData(Qt.ItemDataRole.UserRole, exp)
-                self.expenses_table.setItem(i, 0, num_item)
+                for i, exp in enumerate(self.expenses_list):
+                    self.expenses_table.insertRow(i)
+                    
+                    num_item = QTableWidgetItem(str(i + 1))
+                    num_item.setData(Qt.ItemDataRole.UserRole, exp)
+                    self.expenses_table.setItem(i, 0, num_item)
+                    
+                    date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
+                    self.expenses_table.setItem(i, 1, QTableWidgetItem(date_str))
+                    self.expenses_table.setItem(i, 2, QTableWidgetItem(exp.category or ""))
+                    self.expenses_table.setItem(i, 3, QTableWidgetItem(exp.description or ""))
+                    self.expenses_table.setItem(i, 4, QTableWidgetItem(exp.project_id or "---"))
+                    
+                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
+                    amount_item.setForeground(QColor("#ef4444"))
+                    self.expenses_table.setItem(i, 5, amount_item)
+                    
+                    total_sum += exp.amount
+                    
+                    if (i + 1) % batch_size == 0:
+                        QApplication.processEvents()
                 
-                # التاريخ
-                date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
-                self.expenses_table.setItem(i, 1, QTableWidgetItem(date_str))
+                self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
+                print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
                 
-                # الفئة
-                self.expenses_table.setItem(i, 2, QTableWidgetItem(exp.category or ""))
-                
-                # الوصف
-                self.expenses_table.setItem(i, 3, QTableWidgetItem(exp.description or ""))
-                
-                # المشروع
-                self.expenses_table.setItem(i, 4, QTableWidgetItem(exp.project_id or "---"))
-                
-                # المبلغ
-                amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
-                amount_item.setForeground(QColor("#ef4444"))
-                self.expenses_table.setItem(i, 5, amount_item)
-                
-                total_sum += exp.amount
-                
-                # ⚡ معالجة الأحداث كل batch_size صف
-                if (i + 1) % batch_size == 0:
-                    QApplication.processEvents()
-
-            self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
-            print(f"INFO: [ExpenseManager] تم جلب {len(self.expenses_list)} مصروف.")
-            
-            # ⚡ إعادة تفعيل كل شيء
+            except Exception as e:
+                print(f"ERROR: [ExpenseManager] فشل تحديث الجدول: {e}")
+            finally:
+                self.expenses_table.blockSignals(False)
+                self.expenses_table.setUpdatesEnabled(True)
+                QApplication.processEvents()
+        
+        def on_error(error_msg):
+            print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")
             self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
-            QApplication.processEvents()
-
-        except Exception as e:
-            print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {e}")
-            import traceback
-            traceback.print_exc()
-            self.expenses_table.blockSignals(False)
-            self.expenses_table.setUpdatesEnabled(True)
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="expenses_list",
+            load_function=fetch_expenses,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""

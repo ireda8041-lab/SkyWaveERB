@@ -143,73 +143,86 @@ class ServiceManagerTab(QWidget):
         self.update_buttons_state(False)
 
     def load_services_data(self) -> None:
-        """
-        تحميل بيانات الخدمات من قاعدة البيانات وعرضها في الجدول - مع منع التجميد
-        """
+        """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ⚡ تعطيل التحديثات للسرعة
-            self.services_table.setUpdatesEnabled(False)
-            self.services_table.blockSignals(True)  # ⚡ منع الإشارات
-            
-            if self.show_archived_checkbox.isChecked():
-                self.services_list = self.service_service.get_archived_services()
-            else:
-                self.services_list = self.service_service.get_all_services()
-
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            self.services_table.setRowCount(0)
-            batch_size = 20  # ⚡ تحميل على دفعات
-            for index, service in enumerate(self.services_list):
-                self.services_table.insertRow(index)
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.services_table.setUpdatesEnabled(False)
+        self.services_table.blockSignals(True)
+        self.services_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_services():
+            try:
+                if self.show_archived_checkbox.isChecked():
+                    return self.service_service.get_archived_services()
+                else:
+                    return self.service_service.get_all_services()
+            except Exception as e:
+                logger.error(f"[ServiceManager] فشل جلب الخدمات: {e}")
+                return []
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(services):
+            try:
+                self.services_list = services
+                batch_size = 15
                 
-                # Name item - centered
-                name_item = QTableWidgetItem(service.name)
-                name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.services_table.setItem(index, 0, name_item)
+                for index, service in enumerate(self.services_list):
+                    self.services_table.insertRow(index)
+                    
+                    name_item = QTableWidgetItem(service.name)
+                    name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.services_table.setItem(index, 0, name_item)
+                    
+                    category_item = QTableWidgetItem(service.category or "")
+                    category_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.services_table.setItem(index, 1, category_item)
+                    
+                    price_item = QTableWidgetItem(f"{service.default_price:,.2f}")
+                    price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.services_table.setItem(index, 2, price_item)
+                    
+                    status_item = QTableWidgetItem(service.status.value)
+                    status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    if service.status == schemas.ServiceStatus.ARCHIVED:
+                        status_item.setBackground(QColor("#ef4444"))
+                        status_item.setForeground(QColor("white"))
+                    self.services_table.setItem(index, 3, status_item)
+                    
+                    self.services_table.setRowHeight(index, 40)
+                    
+                    if (index + 1) % batch_size == 0:
+                        QApplication.processEvents()
                 
-                # Category item - centered
-                category_item = QTableWidgetItem(service.category or "")
-                category_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.services_table.setItem(index, 1, category_item)
+                logger.info(f"[ServiceManager] ✅ تم تحميل {len(self.services_list)} خدمة")
+                self.update_buttons_state(False)
                 
-                # Price item - centered
-                price_item = QTableWidgetItem(f"{service.default_price:,.2f}")
-                price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.services_table.setItem(index, 2, price_item)
-
-                # Status item - centered
-                status_item = QTableWidgetItem(service.status.value)
-                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                if service.status == schemas.ServiceStatus.ARCHIVED:
-                    status_item.setBackground(QColor("#ef4444"))
-                    status_item.setForeground(QColor("white"))
-                self.services_table.setItem(index, 3, status_item)
-                
-                # Set row height for breathing room
-                self.services_table.setRowHeight(index, 40)
-                
-                # ⚡ معالجة الأحداث كل batch_size صف
-                if (index + 1) % batch_size == 0:
-                    QApplication.processEvents()
-
-            logger.info(f"[ServiceManager] تم جلب {len(self.services_list)} خدمة")
-            
-            # ⚡ إعادة تفعيل كل شيء
+            except Exception as e:
+                logger.error(f"[ServiceManager] فشل تحديث الجدول: {e}", exc_info=True)
+            finally:
+                self.services_table.blockSignals(False)
+                self.services_table.setUpdatesEnabled(True)
+                QApplication.processEvents()
+        
+        def on_error(error_msg):
+            logger.error(f"[ServiceManager] فشل تحميل الخدمات: {error_msg}")
             self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
-            QApplication.processEvents()
-            self.update_buttons_state(False)
-        except Exception as e:
-            logger.error(f"[ServiceManager] فشل تحميل الخدمات: {e}", exc_info=True)
-            self.services_table.blockSignals(False)
-            self.services_table.setUpdatesEnabled(True)
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="services_list",
+            load_function=fetch_services,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""

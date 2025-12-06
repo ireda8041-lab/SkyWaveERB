@@ -1340,60 +1340,84 @@ class ProjectManagerTab(QWidget):
         self.preview_groupbox.setVisible(False)
 
     def load_projects_data(self):
+        """⚡ تحميل بيانات المشاريع في الخلفية لمنع التجميد"""
         print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ⚡ تعطيل الترتيب والتحديثات مؤقتاً أثناء التحميل (للسرعة)
-            self.projects_table.setSortingEnabled(False)
-            self.projects_table.setUpdatesEnabled(False)
-            self.projects_table.blockSignals(True)  # ⚡ منع الإشارات أثناء التحميل
-            
-            if self.show_archived_checkbox.isChecked():
-                self.projects_list = self.project_service.get_archived_projects()
-            else:
-                self.projects_list = self.project_service.get_all_projects()
-
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            self.projects_table.setRowCount(0)
-            
-            # ⚡ تحميل البيانات على دفعات لمنع التجميد
-            batch_size = 20
-            for row, project in enumerate(self.projects_list):
-                self.projects_table.insertRow(row)
-                # توليد رقم الفاتورة من ID المشروع (يبدأ من 97162)
-                local_id = getattr(project, 'id', None) or (row + 1)
-                invoice_number = f"SW-{97161 + int(local_id)}"
-                self.projects_table.setItem(row, 0, QTableWidgetItem(invoice_number))
-                self.projects_table.setItem(row, 1, QTableWidgetItem(project.name))
-                self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
-                self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
-                self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        # تحضير الجدول
+        self.projects_table.setSortingEnabled(False)
+        self.projects_table.setUpdatesEnabled(False)
+        self.projects_table.blockSignals(True)
+        self.projects_table.setRowCount(0)
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات (تعمل في الخلفية)
+        def fetch_projects():
+            try:
+                if self.show_archived_checkbox.isChecked():
+                    return self.project_service.get_archived_projects()
+                else:
+                    return self.project_service.get_all_projects()
+            except Exception as e:
+                print(f"ERROR: [ProjectManager] فشل جلب المشاريع: {e}")
+                return []
+        
+        # دالة تحديث الواجهة (تعمل على main thread)
+        def on_data_loaded(projects):
+            try:
+                self.projects_list = projects
                 
-                # ⚡ معالجة الأحداث كل batch_size صف
-                if (row + 1) % batch_size == 0:
-                    QApplication.processEvents()
-
-            # ⚡ إعادة تفعيل كل شيء بعد التحميل
+                # تحميل البيانات على دفعات
+                batch_size = 15
+                for row, project in enumerate(self.projects_list):
+                    self.projects_table.insertRow(row)
+                    local_id = getattr(project, 'id', None) or (row + 1)
+                    invoice_number = f"SW-{97161 + int(local_id)}"
+                    self.projects_table.setItem(row, 0, QTableWidgetItem(invoice_number))
+                    self.projects_table.setItem(row, 1, QTableWidgetItem(project.name))
+                    self.projects_table.setItem(row, 2, QTableWidgetItem(project.client_id))
+                    self.projects_table.setItem(row, 3, QTableWidgetItem(project.status.value))
+                    self.projects_table.setItem(row, 4, QTableWidgetItem(self._format_date(project.start_date)))
+                    
+                    # معالجة الأحداث كل batch_size صف
+                    if (row + 1) % batch_size == 0:
+                        QApplication.processEvents()
+                
+                # إعادة تفعيل الجدول
+                self.projects_table.blockSignals(False)
+                self.projects_table.setUpdatesEnabled(True)
+                self.projects_table.setSortingEnabled(True)
+                QApplication.processEvents()
+                
+                self.on_project_selection_changed()
+                print(f"INFO: [ProjectManager] ✅ تم تحميل {len(projects)} مشروع")
+                
+            except Exception as e:
+                print(f"ERROR: [ProjectManager] فشل تحديث الجدول: {e}")
+                import traceback
+                traceback.print_exc()
+                # إعادة تفعيل الجدول حتى في حالة الخطأ
+                self.projects_table.blockSignals(False)
+                self.projects_table.setUpdatesEnabled(True)
+                self.projects_table.setSortingEnabled(True)
+        
+        def on_error(error_msg):
+            print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {error_msg}")
             self.projects_table.blockSignals(False)
             self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
-            
-            QApplication.processEvents()  # ⚡ منع التجميد
-            self.on_project_selection_changed()
-            
-        except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {e}")
-            import traceback
-            traceback.print_exc()
-            # ⚡ إعادة تفعيل التحديثات والترتيب حتى في حالة الخطأ
-            self.projects_table.blockSignals(False)
-            self.projects_table.setUpdatesEnabled(True)
-            self.projects_table.setSortingEnabled(True)
+        
+        # تحميل البيانات في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="projects_list",
+            load_function=fetch_projects,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _on_projects_changed(self):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""

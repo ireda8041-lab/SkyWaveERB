@@ -39,6 +39,14 @@ hidden_imports = [
     'colorlog',
     'dns',
     'dns.resolver',
+    # ⚡ إضافات للـ threading
+    'concurrent.futures',
+    'threading',
+    'queue',
+    # Core modules
+    'core.data_loader',
+    'core.advanced_sync_manager',
+    'core.auto_sync',
 ]
 
 a = Analysis(

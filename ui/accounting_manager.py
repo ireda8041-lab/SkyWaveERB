@@ -245,142 +245,147 @@ class AccountingManagerTab(QWidget):
         pass
     
     def load_accounts_data(self):
-        """⚡ تحميل الحسابات في شكل شجري متداخل مع حساب الأرصدة التراكمية - مع منع التجميد"""
+        """⚡ تحميل الحسابات في الخلفية لمنع التجميد"""
         print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
         
-        try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-            
-            # ✨ استخدام الدالة الجديدة للحصول على الأرصدة المحسوبة
-            tree_map = self.accounting_service.get_hierarchy_with_balances()
-            QApplication.processEvents()  # ⚡ منع التجميد بعد جلب البيانات
-            
-            # تحديث قائمة الحسابات للاستخدام في أماكن أخرى
-            self.all_accounts_list = self.accounting_service.repo.get_all_accounts()
-            
-            self.accounts_model.clear()
-            self.accounts_model.setHorizontalHeaderLabels([
-                "الكود", "اسم الحساب", "النوع", "العملة", "الرصيد", "الحالة"
-            ])
+        from core.data_loader import get_data_loader
+        from PyQt6.QtWidgets import QApplication
+        
+        QApplication.processEvents()
+        
+        # دالة جلب البيانات
+        def fetch_accounts():
+            try:
+                tree_map = self.accounting_service.get_hierarchy_with_balances()
+                all_accounts = self.accounting_service.repo.get_all_accounts()
+                return {'tree_map': tree_map, 'all_accounts': all_accounts}
+            except Exception as e:
+                print(f"ERROR: [AccManager] فشل جلب الحسابات: {e}")
+                return {'tree_map': {}, 'all_accounts': []}
+        
+        # دالة تحديث الواجهة
+        def on_data_loaded(data):
+            try:
+                tree_map = data['tree_map']
+                self.all_accounts_list = data['all_accounts']
+                self._render_accounts_tree(tree_map)
+                print(f"INFO: [AccManager] ✅ تم تحميل {len(self.all_accounts_list)} حساب")
+            except Exception as e:
+                print(f"ERROR: [AccManager] فشل تحديث الشجرة: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        def on_error(error_msg):
+            print(f"ERROR: [AccManager] فشل تحميل الحسابات: {error_msg}")
+        
+        # تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="accounts_tree",
+            load_function=fetch_accounts,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
+    
+    def _render_accounts_tree(self, tree_map):
+        """عرض شجرة الحسابات"""
+        from PyQt6.QtWidgets import QApplication
+        
+        self.accounts_model.clear()
+        self.accounts_model.setHorizontalHeaderLabels([
+            "الكود", "اسم الحساب", "النوع", "العملة", "الرصيد", "الحالة"
+        ])
 
-            root = self.accounts_model.invisibleRootItem()
+        root = self.accounts_model.invisibleRootItem()
+        
+        # دالة تكرارية لعرض العقد
+        def render_node(node: dict, parent_item):
+            """عرض عقدة وأبنائها بشكل تكراري"""
+            acc = node['obj']
+            calculated_balance = node['total']
+            is_group = bool(node['children'])
             
-            # دالة تكرارية لعرض العقد
-            def render_node(node: dict, parent_item):
-                """عرض عقدة وأبنائها بشكل تكراري"""
-                acc = node['obj']
-                calculated_balance = node['total']  # الرصيد المحسوب (تراكمي للمجموعات)
-                is_group = bool(node['children'])  # مجموعة إذا كان لها أبناء
-                
-                # إنشاء عناصر الصف
-                code_item = QStandardItem(acc.code or "")
-                code_item.setEditable(False)
-                code_item.setData(acc, Qt.ItemDataRole.UserRole)  # تخزين الحساب في عمود الكود
-                code_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                name_item = QStandardItem(f"{'📁 ' if is_group else '📄 '}{acc.name}")
-                name_item.setEditable(False)
-                name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                # ✅ عرض النوع بشكل واضح ومقروء
-                type_display = {
-                    'ASSET': 'أصول',
-                    'CASH': 'أصول نقدية',
-                    'LIABILITY': 'خصوم',
-                    'EQUITY': 'حقوق ملكية',
-                    'REVENUE': 'إيرادات',
-                    'EXPENSE': 'مصروفات',
-                    'أصول': 'أصول',
-                    'أصول نقدية': 'أصول نقدية',
-                    'خصوم': 'خصوم',
-                    'حقوق ملكية': 'حقوق ملكية',
-                    'إيرادات': 'إيرادات',
-                    'مصروفات': 'مصروفات'
-                }
-                type_text = type_display.get(acc.type.value if acc.type else acc.type, acc.type.value if acc.type else "")
-                type_item = QStandardItem(type_text)
-                type_item.setEditable(False)
-                type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                currency = acc.currency.value if acc.currency else "EGP"
-                currency_item = QStandardItem(currency)
-                currency_item.setEditable(False)
-                currency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                # ✨ استخدام الرصيد المحسوب (التراكمي للمجموعات) مع تنسيق واضح
-                balance_text = f"{abs(calculated_balance):,.2f}"
-                balance_item = QStandardItem(balance_text)
-                balance_item.setEditable(False)
-                balance_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                status_text = "✅ نشط" if acc.status == schemas.AccountStatus.ACTIVE else "❌ مؤرشف"
-                status_item = QStandardItem(status_text)
-                status_item.setEditable(False)
-                status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                
-                row = [code_item, name_item, type_item, currency_item, balance_item, status_item]
-                
-                # تطبيق التنسيق حسب النوع (مجموعة أم حساب فرعي)
-                if is_group:
-                    # حساب مجموعة - خط عريض، خلفية داكنة (ألوان SkyWave Brand)
-                    for item in row:
-                        item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-                        item.setBackground(QColor(COLORS['bg_light']))
-                        item.setForeground(QColor(COLORS['text_primary']))
-                else:
-                    # حساب فرعي - خط عادي (ألوان SkyWave Brand)
-                    for item in row:
-                        item.setFont(QFont("Segoe UI", 9))
-                        item.setBackground(QColor(COLORS['bg_medium']))
-                        item.setForeground(QColor(COLORS['text_secondary']))
-                
-                # ✨ تلوين الرصيد حسب القيمة - ألوان واضحة
-                if calculated_balance < 0:
-                    balance_item.setForeground(QColor("#ff6b6b"))  # أحمر فاتح للسالب
-                elif calculated_balance > 0:
-                    balance_item.setForeground(QColor("#51cf66"))  # أخضر فاتح للموجب
-                else:
-                    balance_item.setForeground(QColor("#adb5bd"))  # رمادي فاتح للصفر
-                
-                # إضافة الصف للأب
-                parent_item.appendRow(row)
-                
-                # ترتيب الأبناء حسب الكود ثم عرضهم
-                sorted_children = sorted(node['children'], key=lambda x: str(x['obj'].code or ""))
-                for child in sorted_children:
-                    render_node(child, code_item)
+            code_item = QStandardItem(acc.code or "")
+            code_item.setEditable(False)
+            code_item.setData(acc, Qt.ItemDataRole.UserRole)
+            code_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             
-            # تحديد الجذور (الحسابات بدون أب)
-            roots = []
-            for code, node in tree_map.items():
-                acc = node['obj']
-                # استخدام parent_id أو parent_code
-                parent = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
-                if not parent:
-                    roots.append(node)
+            name_item = QStandardItem(f"{'📁 ' if is_group else '📄 '}{acc.name}")
+            name_item.setEditable(False)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             
-            # ترتيب الجذور حسب الكود
-            roots.sort(key=lambda x: str(x['obj'].code or ""))
+            type_display = {
+                'ASSET': 'أصول', 'CASH': 'أصول نقدية', 'LIABILITY': 'خصوم',
+                'EQUITY': 'حقوق ملكية', 'REVENUE': 'إيرادات', 'EXPENSE': 'مصروفات',
+                'أصول': 'أصول', 'أصول نقدية': 'أصول نقدية', 'خصوم': 'خصوم',
+                'حقوق ملكية': 'حقوق ملكية', 'إيرادات': 'إيرادات', 'مصروفات': 'مصروفات'
+            }
+            type_text = type_display.get(acc.type.value if acc.type else acc.type, acc.type.value if acc.type else "")
+            type_item = QStandardItem(type_text)
+            type_item.setEditable(False)
+            type_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
             
-            # عرض الشجرة من الجذور
-            for root_node in roots:
-                render_node(root_node, root)
+            currency = acc.currency.value if acc.currency else "EGP"
+            currency_item = QStandardItem(currency)
+            currency_item.setEditable(False)
+            currency_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            
+            balance_text = f"{abs(calculated_balance):,.2f}"
+            balance_item = QStandardItem(balance_text)
+            balance_item.setEditable(False)
+            balance_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            
+            status_text = "✅ نشط" if acc.status == schemas.AccountStatus.ACTIVE else "❌ مؤرشف"
+            status_item = QStandardItem(status_text)
+            status_item.setEditable(False)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            
+            row = [code_item, name_item, type_item, currency_item, balance_item, status_item]
+            
+            if is_group:
+                for item in row:
+                    item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                    item.setBackground(QColor(COLORS['bg_light']))
+                    item.setForeground(QColor(COLORS['text_primary']))
+            else:
+                for item in row:
+                    item.setFont(QFont("Segoe UI", 9))
+                    item.setBackground(QColor(COLORS['bg_medium']))
+                    item.setForeground(QColor(COLORS['text_secondary']))
+            
+            if calculated_balance < 0:
+                balance_item.setForeground(QColor("#ff6b6b"))
+            elif calculated_balance > 0:
+                balance_item.setForeground(QColor("#51cf66"))
+            else:
+                balance_item.setForeground(QColor("#adb5bd"))
+            
+            parent_item.appendRow(row)
+            
+            sorted_children = sorted(node['children'], key=lambda x: str(x['obj'].code or ""))
+            for child in sorted_children:
+                render_node(child, code_item)
+        
+        # تحديد الجذور
+        roots = []
+        for code, node in tree_map.items():
+            acc = node['obj']
+            parent = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+            if not parent:
+                roots.append(node)
+        
+        roots.sort(key=lambda x: str(x['obj'].code or ""))
+        
+        for root_node in roots:
+            render_node(root_node, root)
 
-            # توسيع جميع المجموعات
-            self.accounts_tree.expandAll()
-            
-            print(f"INFO: [AccManager] تم عرض {len(self.all_accounts_list)} حساب مع الأرصدة التراكمية.")
-            print(f"DEBUG: [AccManager] tree_map keys: {list(tree_map.keys())[:10]}")
-            
-            # ✨ تحديث لوحة الملخص باستخدام الأرصدة المحسوبة
-            self.update_summary_labels(tree_map)
-            
-        except Exception as e:
-            print(f"ERROR: [AccManager] فشل تحميل الحسابات: {e}")
-            import traceback
-            traceback.print_exc()
+        self.accounts_tree.expandAll()
+        
+        print(f"INFO: [AccManager] تم عرض {len(self.all_accounts_list)} حساب")
+        
+        self.update_summary_labels(tree_map)
+        QApplication.processEvents()
     
     def _is_group_account(self, code: str, all_accounts) -> bool:
         """Check if account is a group (has children)"""
