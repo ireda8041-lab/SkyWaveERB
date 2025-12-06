@@ -1,28 +1,27 @@
 """الملف: ui/service_manager.py"""
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QHBoxLayout,
-    QVBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
-    QHeaderView,
-    QPushButton,
-    QLabel,
-    QMessageBox,
-    QGroupBox,
-    QCheckBox,
-    QDialog,
-)
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
-from services.service_service import ServiceService
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
 from core import schemas
 from core.logger import get_logger
-from typing import List, Optional
-
+from services.service_service import ServiceService
 from ui.service_editor_dialog import ServiceEditorDialog
-from ui.styles import BUTTON_STYLES, TABLE_STYLE
+from ui.styles import BUTTON_STYLES
 
 logger = get_logger(__name__)
 
@@ -35,7 +34,7 @@ class ServiceManagerTab(QWidget):
     def __init__(self, service_service: ServiceService, parent=None):
         """
         تهيئة تاب إدارة الخدمات
-        
+
         Args:
             service_service: خدمة الخدمات للتعامل مع البيانات
             parent: الويدجت الأب
@@ -43,8 +42,8 @@ class ServiceManagerTab(QWidget):
         super().__init__(parent)
 
         self.service_service = service_service
-        self.services_list: List[schemas.Service] = []
-        self.selected_service: Optional[schemas.Service] = None
+        self.services_list: list[schemas.Service] = []
+        self.selected_service: schemas.Service | None = None
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -52,7 +51,7 @@ class ServiceManagerTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
         app_signals.services_changed.connect(self._on_services_changed)
@@ -97,7 +96,7 @@ class ServiceManagerTab(QWidget):
         self.services_table.setHorizontalHeaderLabels(
             ["الاسم", "الفئة", "السعر الافتراضي", "الحالة"]
         )
-        
+
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
         self.search_bar = UniversalSearchBar(
@@ -106,17 +105,19 @@ class ServiceManagerTab(QWidget):
         )
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
-        
+
         self.services_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.services_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.services_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.services_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.Stretch
-        )
-        self.services_table.verticalHeader().setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
-        self.services_table.verticalHeader().setVisible(False)
+        h_header = self.services_table.horizontalHeader()
+        v_header = self.services_table.verticalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        if v_header is not None:
+            v_header.setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
+            v_header.setVisible(False)
         self.services_table.itemSelectionChanged.connect(self.on_service_selection_changed)
-        
+
         # إضافة دبل كليك للتعديل
         self.services_table.itemDoubleClicked.connect(self.open_editor_for_selected)
 
@@ -145,16 +146,17 @@ class ServiceManagerTab(QWidget):
     def load_services_data(self) -> None:
         """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
-        
-        from core.data_loader import get_data_loader
+
         from PyQt6.QtWidgets import QApplication
-        
+
+        from core.data_loader import get_data_loader
+
         # تحضير الجدول
         self.services_table.setUpdatesEnabled(False)
         self.services_table.blockSignals(True)
         self.services_table.setRowCount(0)
         QApplication.processEvents()
-        
+
         # دالة جلب البيانات
         def fetch_services():
             try:
@@ -165,55 +167,55 @@ class ServiceManagerTab(QWidget):
             except Exception as e:
                 logger.error(f"[ServiceManager] فشل جلب الخدمات: {e}")
                 return []
-        
+
         # دالة تحديث الواجهة
         def on_data_loaded(services):
             try:
                 self.services_list = services
                 batch_size = 15
-                
+
                 for index, service in enumerate(self.services_list):
                     self.services_table.insertRow(index)
-                    
+
                     name_item = QTableWidgetItem(service.name)
                     name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.services_table.setItem(index, 0, name_item)
-                    
+
                     category_item = QTableWidgetItem(service.category or "")
                     category_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.services_table.setItem(index, 1, category_item)
-                    
+
                     price_item = QTableWidgetItem(f"{service.default_price:,.2f}")
                     price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     self.services_table.setItem(index, 2, price_item)
-                    
+
                     status_item = QTableWidgetItem(service.status.value)
                     status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if service.status == schemas.ServiceStatus.ARCHIVED:
                         status_item.setBackground(QColor("#ef4444"))
                         status_item.setForeground(QColor("white"))
                     self.services_table.setItem(index, 3, status_item)
-                    
+
                     self.services_table.setRowHeight(index, 40)
-                    
+
                     if (index + 1) % batch_size == 0:
                         QApplication.processEvents()
-                
+
                 logger.info(f"[ServiceManager] ✅ تم تحميل {len(self.services_list)} خدمة")
                 self.update_buttons_state(False)
-                
+
             except Exception as e:
                 logger.error(f"[ServiceManager] فشل تحديث الجدول: {e}", exc_info=True)
             finally:
                 self.services_table.blockSignals(False)
                 self.services_table.setUpdatesEnabled(True)
                 QApplication.processEvents()
-        
+
         def on_error(error_msg):
             logger.error(f"[ServiceManager] فشل تحميل الخدمات: {error_msg}")
             self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
-        
+
         # تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -229,7 +231,7 @@ class ServiceManagerTab(QWidget):
         print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
         self.load_services_data()
 
-    def open_editor(self, service_to_edit: Optional[schemas.Service]):
+    def open_editor(self, service_to_edit: schemas.Service | None):
         dialog = ServiceEditorDialog(
             service_service=self.service_service,
             service_to_edit=service_to_edit,

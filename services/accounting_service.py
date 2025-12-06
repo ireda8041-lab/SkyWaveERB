@@ -1,12 +1,13 @@
 # الملف: services/accounting_service.py
 
-from core.repository import Repository
-from core.event_bus import EventBus
-from core import schemas
-from core.signals import app_signals
-from core.logger import get_logger
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import Any
+
+from core import schemas
+from core.event_bus import EventBus
+from core.logger import get_logger
+from core.repository import Repository
+from core.signals import app_signals
 
 logger = get_logger(__name__)
 
@@ -14,17 +15,33 @@ logger = get_logger(__name__)
 class AccountingService:
     """
     الروبوت المحاسبي (Service Layer).
-    يستمع للأحداث المالية (زي إنشاء فاتورة) 
+    يستمع للأحداث المالية (زي إنشاء فاتورة)
     ويقوم بإنشاء قيود اليومية المحاسبية أوتوماتيكياً.
     """
-    
-    # تعريف أكواد الحسابات الرئيسية (وكالة التسويق الرقمي)
-    ACC_RECEIVABLE_CODE = "1200"  # حساب العملاء - مستحقات (مدين)
-    SERVICE_REVENUE_CODE = "4100"  # حساب إيرادات سوشيال ميديا (دائن)
-    DISCOUNT_ALLOWED_CODE = "4300"  # حساب إيرادات حملات إعلانية
-    VAT_PAYABLE_CODE = "2100"  # حساب ضريبة القيمة المضافة (دائن - خصوم)
-    CASH_ACCOUNT_CODE = "1101"  # حساب الخزنة الرئيسية (مدين عند التحصيل)
-    
+
+    # ==================== أكواد الحسابات الرئيسية (Enterprise 6-Digit System) ====================
+    # الأصول
+    ACC_RECEIVABLE_CODE = "112100"      # حساب العملاء التجاريين - مستحقات (مدين)
+    CASH_ACCOUNT_CODE = "111101"        # حساب الخزنة الرئيسية (مدين عند التحصيل)
+
+    # الإيرادات
+    SERVICE_REVENUE_CODE = "410100"     # حساب إيرادات التسويق الرقمي (دائن)
+    DISCOUNT_ALLOWED_CODE = "610002"    # خصم مسموح به (مصروف)
+
+    # الخصوم
+    VAT_PAYABLE_CODE = "212200"         # حساب ضريبة القيمة المضافة (دائن - خصوم)
+    UNEARNED_REVENUE_CODE = "212100"    # دفعات مقدمة من العملاء (التزام)
+
+    # تكاليف الإيرادات (COGS) - كود 5
+    COGS_ADS_CODE = "510001"            # ميزانية إعلانات
+    COGS_HOSTING_CODE = "510002"        # تكلفة استضافة
+    COGS_OUTSOURCING_CODE = "510003"    # أجور مستقلين
+
+    # المصروفات التشغيلية (OPEX) - كود 6
+    OPEX_SALARIES_CODE = "620001"       # رواتب الموظفين
+    OPEX_RENT_CODE = "620002"           # إيجار ومرافق
+    OPEX_BANK_FEES_CODE = "630001"      # رسوم بنكية
+
     # ⚡ Cache للشجرة المحاسبية
     _hierarchy_cache = None
     _hierarchy_cache_time = 0
@@ -33,7 +50,7 @@ class AccountingService:
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
         تهيئة الروبوت المحاسبي
-        
+
         Args:
             repository: مخزن البيانات الرئيسي
             event_bus: نظام الأحداث للتواصل بين الخدمات
@@ -41,7 +58,7 @@ class AccountingService:
         self.repo = repository
         self.bus = event_bus
         logger.info("الروبوت المحاسبي (AccountingService) جاهز")
-        
+
         # أهم خطوة: الروبوت بيشترك في الأحداث أول ما يشتغل
         self._subscribe_to_events()
 
@@ -62,10 +79,10 @@ class AccountingService:
         self.bus.subscribe('PROJECT_EDITED', self.handle_edited_project)  # ✅ تعديل المشروع
         logger.info("[AccountingService] تم الاشتراك في جميع الأحداث المالية")
 
-    def get_all_journal_entries(self) -> List[schemas.JournalEntry]:
+    def get_all_journal_entries(self) -> list[schemas.JournalEntry]:
         """
         جلب كل قيود اليومية
-        
+
         Returns:
             قائمة بجميع قيود اليومية
         """
@@ -75,33 +92,122 @@ class AccountingService:
             logger.error(f"[AccountingService] فشل جلب قيود اليومية: {e}", exc_info=True)
             return []
 
-    def get_hierarchy_with_balances(self, force_refresh: bool = False) -> Dict[str, dict]:
+    def recalculate_all_balances(self) -> bool:
+        """
+        🔄 إعادة حساب جميع أرصدة الحسابات من القيود المحاسبية
+
+        هذه الدالة تُستخدم لإصلاح الأرصدة في حالة عدم تطابقها مع القيود
+
+        Returns:
+            True إذا نجحت العملية
+        """
+        print("INFO: [AccountingService] 🔄 جاري إعادة حساب جميع الأرصدة من القيود...")
+
+        try:
+            # 1. جلب جميع الحسابات
+            accounts = self.repo.get_all_accounts()
+            if not accounts:
+                print("WARNING: [AccountingService] لا توجد حسابات")
+                return False
+
+            # 2. جلب جميع القيود
+            journal_entries = self.repo.get_all_journal_entries()
+            print(f"INFO: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
+
+            # 3. حساب الحركات لكل حساب
+            account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
+
+            # إنشاء قاموس لربط account_id بـ account_code
+            account_id_to_code = {}
+            for acc in accounts:
+                if acc.code:
+                    if hasattr(acc, '_mongo_id') and acc._mongo_id:
+                        account_id_to_code[str(acc._mongo_id)] = acc.code
+                    if hasattr(acc, 'id') and acc.id:
+                        account_id_to_code[str(acc.id)] = acc.code
+                    account_id_to_code[acc.code] = acc.code
+
+            for entry in journal_entries:
+                for line in entry.lines:
+                    code = getattr(line, 'account_code', None)
+                    if not code:
+                        acc_id = getattr(line, 'account_id', None)
+                        if acc_id:
+                            code = account_id_to_code.get(str(acc_id))
+
+                    if not code:
+                        continue
+
+                    if code not in account_movements:
+                        account_movements[code] = {'debit': 0.0, 'credit': 0.0}
+                    account_movements[code]['debit'] += getattr(line, 'debit', 0) or 0.0
+                    account_movements[code]['credit'] += getattr(line, 'credit', 0) or 0.0
+
+            # 4. تحديث أرصدة الحسابات
+            updated_count = 0
+            asset_types = [schemas.AccountType.ASSET, schemas.AccountType.CASH, schemas.AccountType.EXPENSE]
+
+            for acc in accounts:
+                if not acc.code:
+                    continue
+
+                movements = account_movements.get(acc.code, {'debit': 0.0, 'credit': 0.0})
+                debit_total = movements['debit']
+                credit_total = movements['credit']
+
+                # حساب الرصيد حسب طبيعة الحساب
+                if acc.type in asset_types:
+                    new_balance = debit_total - credit_total
+                else:
+                    new_balance = credit_total - debit_total
+
+                # تحديث الرصيد إذا تغير
+                if abs(acc.balance - new_balance) > 0.01:
+                    print(f"INFO: تحديث {acc.code} ({acc.name}): {acc.balance} -> {new_balance}")
+                    account_id = acc._mongo_id or str(acc.id)
+                    self.repo.update_account(account_id, acc.model_copy(update={"balance": new_balance}))
+                    updated_count += 1
+
+            # 5. إبطال الـ cache
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+
+            print(f"SUCCESS: [AccountingService] ✅ تم تحديث {updated_count} حساب")
+            return True
+
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def get_hierarchy_with_balances(self, force_refresh: bool = False) -> dict[str, dict]:
         """
         ⚡ جلب شجرة الحسابات مع حساب الأرصدة التراكمية للمجموعات (مع cache)
-        
+
         Returns:
             Dict[code, {obj: Account, total: float, children: []}]
         """
         import time
-        
+
         # ⚡ استخدام الـ cache إذا كان صالحاً
         current_time = time.time()
         if not force_refresh and AccountingService._hierarchy_cache and (current_time - AccountingService._hierarchy_cache_time) < AccountingService._HIERARCHY_CACHE_TTL:
             print("INFO: [AccountingService] استخدام cache الشجرة المحاسبية")
             return AccountingService._hierarchy_cache
-        
+
         print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
-        
+
         try:
             accounts = self.repo.get_all_accounts()
-            
+
             if not accounts:
                 print("WARNING: [AccountingService] لا توجد حسابات")
                 return {}
-            
+
             # 1. حساب الأرصدة من القيود المحاسبية
             account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
-            
+
             # إنشاء قاموس لربط account_id بـ account_code
             account_id_to_code = {}
             for acc in accounts:
@@ -114,12 +220,12 @@ class AccountingService:
                         account_id_to_code[str(acc.id)] = acc.code
                     # ربط بالكود نفسه
                     account_id_to_code[acc.code] = acc.code
-            
+
             try:
                 # جلب القيود بالطريقة العادية (أكثر موثوقية)
                 journal_entries = self.repo.get_all_journal_entries()
                 print(f"DEBUG: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
-                
+
                 for entry in journal_entries:
                     for line in entry.lines:
                         # محاولة الحصول على الكود من account_code أو account_id
@@ -129,26 +235,26 @@ class AccountingService:
                             acc_id = getattr(line, 'account_id', None)
                             if acc_id:
                                 code = account_id_to_code.get(str(acc_id))
-                        
+
                         if not code:
                             continue
-                            
+
                         if code not in account_movements:
                             account_movements[code] = {'debit': 0.0, 'credit': 0.0}
                         account_movements[code]['debit'] += getattr(line, 'debit', 0) or 0.0
                         account_movements[code]['credit'] += getattr(line, 'credit', 0) or 0.0
-                
+
                 print(f"DEBUG: [AccountingService] تم حساب حركات {len(account_movements)} حساب")
                 for code, mov in list(account_movements.items())[:5]:
                     print(f"  - {code}: مدين={mov['debit']}, دائن={mov['credit']}")
-                    
+
             except Exception as e:
                 print(f"ERROR: [AccountingService] فشل جلب القيود: {e}")
                 import traceback
                 traceback.print_exc()
-            
+
             # 2. إنشاء قاموس للوصول السريع O(1)
-            tree_map: Dict[str, dict] = {}
+            tree_map: dict[str, dict] = {}
             for acc in accounts:
                 if acc.code:
                     tree_map[acc.code] = {
@@ -157,111 +263,190 @@ class AccountingService:
                         'children': [],
                         'is_group': getattr(acc, 'is_group', False)
                     }
-            
+
             # 3. بناء هيكل الشجرة وحساب الأرصدة من القيود
-            def get_parent_code_from_code(code: str) -> str:
-                """استنتاج كود الأب من كود الحساب تلقائياً"""
-                if not code or len(code) < 4:
+            def get_parent_code_from_code(code: str) -> str | None:
+                """
+                استنتاج كود الأب من كود الحساب تلقائياً
+                يدعم نظام 4 أرقام (القديم) و 6 أرقام (Enterprise)
+                """
+                if not code:
                     return None
-                # أمثلة: 1101 -> 1100, 1100 -> 1000, 5201 -> 5200
-                if code.endswith('00'):
-                    # حساب مجموعة مثل 1100 -> 1000
-                    return code[0] + '000'
-                else:
-                    # حساب فرعي مثل 1101 -> 1100
-                    return code[:2] + '00'
-            
+
+                code_len = len(code)
+
+                # نظام 6 أرقام (Enterprise)
+                if code_len == 6:
+                    # أمثلة: 111101 -> 111100, 111100 -> 111000, 111000 -> 110000, 110000 -> 100000
+                    if code.endswith('00000'):
+                        return None  # جذر (100000, 200000, ...)
+                    elif code.endswith('0000'):
+                        return code[0] + '00000'  # 110000 -> 100000
+                    elif code.endswith('000'):
+                        return code[:2] + '0000'  # 111000 -> 110000
+                    elif code.endswith('00'):
+                        return code[:3] + '000'   # 111100 -> 111000
+                    else:
+                        return code[:4] + '00'    # 111101 -> 111100
+
+                # نظام 4 أرقام (القديم - للتوافق)
+                elif code_len == 4:
+                    if code.endswith('000'):
+                        return None  # جذر (1000, 2000, ...)
+                    elif code.endswith('00'):
+                        return code[0] + '000'    # 1100 -> 1000
+                    else:
+                        return code[:2] + '00'    # 1101 -> 1100
+
+                return None
+
             for acc in accounts:
                 if not acc.code:
                     continue
-                    
+
                 node = tree_map[acc.code]
-                
-                # استخدام الرصيد المخزن في الحساب مباشرة (بدون حساب من القيود)
-                # لأن القيود تُنشأ عند تسجيل الدفعات وتُحدث الرصيد تلقائياً
-                opening_balance = getattr(acc, 'balance', 0.0) or 0.0
-                node['total'] = opening_balance
-            
+
+                # حساب الرصيد من القيود المحاسبية
+                movements = account_movements.get(acc.code, {'debit': 0.0, 'credit': 0.0})
+                debit_total = movements['debit']
+                credit_total = movements['credit']
+
+                # حساب الرصيد حسب طبيعة الحساب
+                # الأصول والمصروفات: مدين بطبيعته (الرصيد = مدين - دائن)
+                # الخصوم والإيرادات وحقوق الملكية: دائن بطبيعته (الرصيد = دائن - مدين)
+                asset_types = [schemas.AccountType.ASSET, schemas.AccountType.CASH, schemas.AccountType.EXPENSE]
+
+                if acc.type in asset_types:
+                    calculated_balance = debit_total - credit_total
+                else:
+                    calculated_balance = credit_total - debit_total
+
+                # إذا لم توجد حركات، استخدم الرصيد المخزن كـ fallback
+                if debit_total == 0 and credit_total == 0:
+                    calculated_balance = getattr(acc, 'balance', 0.0) or 0.0
+
+                node['total'] = calculated_balance
+
+                # طباعة للتأكد (للحسابات التي لها حركات)
+                if debit_total > 0 or credit_total > 0:
+                    print(f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}")
+
             # ربط الحسابات بالآباء تلقائياً بناءً على الكود
             for acc in accounts:
-                if not acc.code or acc.code.endswith('000'):
-                    continue  # الحسابات الجذرية (1000, 2000, ...) ليس لها أب
-                
+                if not acc.code:
+                    continue
+
+                code_len = len(acc.code)
+
+                # تحديد الجذور حسب طول الكود
+                if code_len == 6 and acc.code.endswith('00000'):
+                    continue  # جذر نظام 6 أرقام (100000, 200000, ...)
+                elif code_len == 4 and acc.code.endswith('000'):
+                    continue  # جذر نظام 4 أرقام (1000, 2000, ...)
+
                 # استنتاج الأب من الكود
                 parent_code = get_parent_code_from_code(acc.code)
-                
+
                 # التحقق من وجود الأب في الشجرة
                 if parent_code and parent_code in tree_map and parent_code != acc.code:
                     tree_map[parent_code]['children'].append(tree_map[acc.code])
                     print(f"DEBUG: ربط {acc.code} -> {parent_code}")
-            
-            # طباعة الأبناء لكل حساب رئيسي
-            for code in ['1000', '1100', '2000', '3000', '4000', '5000']:
+
+            # طباعة الأبناء لكل حساب رئيسي (يدعم نظام 4 و 6 أرقام)
+            root_codes = ['100000', '200000', '300000', '400000', '500000', '600000',  # 6 أرقام
+                          '1000', '2000', '3000', '4000', '5000']  # 4 أرقام (للتوافق)
+            for code in root_codes:
                 if code in tree_map:
                     children = [c['obj'].code for c in tree_map[code]['children']]
-                    print(f"DEBUG: {code} أبناؤه: {children}")
-            
+                    if children:
+                        print(f"DEBUG: {code} أبناؤه: {children}")
+
             # 4. حساب الأرصدة التراكمية للمجموعات (من الأوراق للجذور)
             def calculate_total(node: dict) -> float:
                 """حساب إجمالي العقدة بشكل تكراري"""
-                # إذا لم يكن له أبناء، أرجع رصيده الخاص (بالقيمة المطلقة للأصول)
+                # إذا لم يكن له أبناء، أرجع رصيده الخاص
                 if not node['children']:
-                    return abs(node['total'])
-                
-                # حساب أرصدة الأبناء (بالقيمة المطلقة)
-                total = sum(abs(calculate_total(child)) for child in node['children'])
+                    return float(node['total'])
+
+                # حساب أرصدة الأبناء (مجموع الأرصدة الفعلية)
+                total = sum(calculate_total(child) for child in node['children'])
                 node['total'] = total
-                return total
-            
-            # حساب من الجذور
-            for code in ['1000', '2000', '3000', '4000', '5000']:
+                return float(total)
+
+            # حساب من الجذور (يدعم نظام 4 و 6 أرقام)
+            root_codes_to_calculate = [
+                '100000', '200000', '300000', '400000', '500000', '600000',  # 6 أرقام
+                '1000', '2000', '3000', '4000', '5000'  # 4 أرقام (للتوافق)
+            ]
+            for code in root_codes_to_calculate:
                 if code in tree_map:
                     calculate_total(tree_map[code])
-            
+
             # طباعة ملخص للتأكد
             print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")
-            
+
             # ⚡ حفظ في الـ cache
             AccountingService._hierarchy_cache = tree_map
-            AccountingService._hierarchy_cache_time = time.time()
-            
+            AccountingService._hierarchy_cache_time = int(time.time())
+
             return tree_map
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل حساب الأرصدة التراكمية: {e}")
             import traceback
             traceback.print_exc()
             return {}
 
-    def get_financial_summary(self) -> Dict[str, float]:
+    def get_financial_summary(self) -> dict[str, float]:
         """
         جلب ملخص مالي سريع (الأصول، الخصوم، الإيرادات، المصروفات، صافي الربح)
-        
+
+        يدعم نظام 4 أرقام (القديم) و 6 أرقام (Enterprise)
+
         Returns:
-            Dict مع المفاتيح: assets, liabilities, equity, revenue, expenses, net_profit
+            Dict مع المفاتيح: assets, liabilities, equity, revenue, expenses, cogs, opex, gross_profit, net_profit
         """
         try:
             tree_map = self.get_hierarchy_with_balances()
-            
-            # استخراج الأرصدة من الحسابات الرئيسية
-            assets = tree_map.get('1000', {}).get('total', 0.0)
-            liabilities = tree_map.get('2000', {}).get('total', 0.0)
-            equity = tree_map.get('3000', {}).get('total', 0.0)
-            revenue = tree_map.get('4000', {}).get('total', 0.0)
-            expenses = tree_map.get('5000', {}).get('total', 0.0)
-            
-            # صافي الربح = الإيرادات - المصروفات
-            net_profit = revenue - expenses
-            
+
+            # استخراج الأرصدة من الحسابات الرئيسية (يدعم 4 و 6 أرقام)
+            # نظام 6 أرقام (Enterprise)
+            assets = tree_map.get('100000', {}).get('total', 0.0) or tree_map.get('1000', {}).get('total', 0.0)
+            liabilities = tree_map.get('200000', {}).get('total', 0.0) or tree_map.get('2000', {}).get('total', 0.0)
+            equity = tree_map.get('300000', {}).get('total', 0.0) or tree_map.get('3000', {}).get('total', 0.0)
+            revenue = tree_map.get('400000', {}).get('total', 0.0) or tree_map.get('4000', {}).get('total', 0.0)
+
+            # ⚡ Enterprise: فصل COGS عن OPEX
+            cogs = tree_map.get('500000', {}).get('total', 0.0)  # تكاليف الإيرادات المباشرة
+            opex = tree_map.get('600000', {}).get('total', 0.0)  # المصروفات التشغيلية
+
+            # للتوافق مع النظام القديم (4 أرقام)
+            if cogs == 0 and opex == 0:
+                expenses = tree_map.get('5000', {}).get('total', 0.0)
+                cogs = expenses
+                opex = 0
+
+            # إجمالي المصروفات
+            total_expenses = cogs + opex
+
+            # ⚡ Enterprise: هامش الربح الإجمالي (Gross Profit)
+            gross_profit = revenue - cogs
+
+            # صافي الربح = الإيرادات - (COGS + OPEX)
+            net_profit = revenue - total_expenses
+
             return {
                 'assets': assets,
                 'liabilities': liabilities,
                 'equity': equity,
                 'revenue': revenue,
-                'expenses': expenses,
+                'cogs': cogs,              # ⚡ تكاليف الإيرادات (500000)
+                'opex': opex,              # ⚡ المصروفات التشغيلية (600000)
+                'expenses': total_expenses,
+                'gross_profit': gross_profit,  # ⚡ هامش الربح الإجمالي
                 'net_profit': net_profit
             }
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل جلب الملخص المالي: {e}")
             return {
@@ -269,14 +454,17 @@ class AccountingService:
                 'liabilities': 0.0,
                 'equity': 0.0,
                 'revenue': 0.0,
+                'cogs': 0.0,
+                'opex': 0.0,
                 'expenses': 0.0,
+                'gross_profit': 0.0,
                 'net_profit': 0.0
             }
 
     def handle_new_invoice(self, data: dict):
         """
         معالج إنشاء فاتورة جديدة - ينشئ قيد يومية تلقائياً
-        
+
         القيد المحاسبي للفاتورة:
         - مدين: حساب العملاء (1140) - يزيد المستحقات
         - دائن: حساب الإيرادات (4110) - يزيد الإيرادات
@@ -287,10 +475,10 @@ class AccountingService:
         try:
             # إنشاء معرف الفاتورة
             invoice_id = getattr(invoice, '_mongo_id', None) or str(getattr(invoice, 'id', '')) or invoice.invoice_number
-            
+
             # إنشاء القيد المحاسبي الرئيسي (العملاء مدين، الإيرادات دائن)
             success = self.post_journal_entry(
-                date=invoice.date or datetime.now(),
+                date=invoice.issue_date or datetime.now(),
                 description=f"فاتورة مبيعات: {invoice.invoice_number}",
                 ref_type="invoice",
                 ref_id=invoice_id,
@@ -298,7 +486,7 @@ class AccountingService:
                 credit_account_code=self.SERVICE_REVENUE_CODE,  # حساب الإيرادات (دائن)
                 amount=invoice.total_amount
             )
-            
+
             if success:
                 print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للفاتورة {invoice.invoice_number}")
             else:
@@ -313,7 +501,7 @@ class AccountingService:
         """
         ✅ معالج إنشاء مشروع جديد (المشروع = الفاتورة في النظام)
         ينشئ قيد يومية تلقائياً عند إنشاء مشروع جديد
-        
+
         القيد المحاسبي للمشروع:
         - مدين: حساب العملاء (1200) - يزيد المستحقات
         - دائن: حساب الإيرادات (4100) - يزيد الإيرادات
@@ -326,10 +514,10 @@ class AccountingService:
             if not project.total_amount or project.total_amount <= 0:
                 print(f"INFO: [AccountingService] المشروع {project.name} بدون قيمة - لن يتم إنشاء قيد")
                 return
-            
+
             # إنشاء معرف المشروع
             project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '')) or project.name
-            
+
             # إنشاء القيد المحاسبي الرئيسي (العملاء مدين، الإيرادات دائن)
             success = self.post_journal_entry(
                 date=project.start_date or datetime.now(),
@@ -340,7 +528,7 @@ class AccountingService:
                 credit_account_code=self.SERVICE_REVENUE_CODE,  # حساب الإيرادات (دائن)
                 amount=project.total_amount
             )
-            
+
             if success:
                 print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}")
             else:
@@ -354,7 +542,7 @@ class AccountingService:
     def handle_edited_project(self, data: dict):
         """
         ✅ معالج تعديل مشروع - يحدث القيد المحاسبي
-        
+
         عند تعديل قيمة المشروع، يتم:
         1. البحث عن القيد الأصلي
         2. تحديث القيد بالقيمة الجديدة
@@ -364,25 +552,25 @@ class AccountingService:
 
         try:
             project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '')) or project.name
-            
+
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(project_id)
-            
+
             if not original_entry:
                 # لا يوجد قيد أصلي - إنشاء قيد جديد إذا كان المشروع له قيمة
                 if project.total_amount and project.total_amount > 0:
                     print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمشروع {project.name} - إنشاء قيد جديد")
                     self.handle_new_project(data)
                 return
-            
+
             # تحديث القيد بالقيمة الجديدة
             ar_account = self.repo.get_account_by_code(self.ACC_RECEIVABLE_CODE)
             rev_account = self.repo.get_account_by_code(self.SERVICE_REVENUE_CODE)
-            
+
             if not ar_account or not rev_account:
-                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
                 return
-            
+
             new_lines = [
                 schemas.JournalEntryLine(
                     account_id=ar_account.code,
@@ -401,13 +589,13 @@ class AccountingService:
                     description=f"دائن: {rev_account.name}"
                 )
             ]
-            
+
             success = self.repo.update_journal_entry_by_doc_id(
                 doc_id=project_id,
                 new_lines=new_lines,
                 new_description=f"تعديل مشروع/فاتورة: {project.name}"
             )
-            
+
             if success:
                 print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمشروع {project.name}")
             else:
@@ -421,7 +609,7 @@ class AccountingService:
     def handle_new_expense(self, data):
         """
         معالج إنشاء مصروف جديد - ينشئ قيد يومية تلقائياً
-        
+
         القيد المحاسبي للمصروف:
         - مدين: حساب المصروف (5xxx) - يزيد المصروفات
         - دائن: حساب الدفع (11xx) - ينقص النقدية
@@ -433,7 +621,7 @@ class AccountingService:
                 expense = schemas.Expense(**expense)
         else:
             expense = data
-            
+
         print(f"INFO: [AccountingService] تم استقبال حدث مصروف جديد: {expense.category} - {expense.amount} جنيه")
         print(f"INFO: [AccountingService] حساب المصروف: {expense.account_id}, حساب الدفع: {expense.payment_account_id}")
 
@@ -441,18 +629,18 @@ class AccountingService:
             # التحقق من وجود الحسابات المطلوبة
             expense_account_code = getattr(expense, 'account_id', None)
             payment_account_code = getattr(expense, 'payment_account_id', None)
-            
+
             if not expense_account_code:
-                print(f"WARNING: [AccountingService] لم يتم تحديد حساب المصروف، سيتم استخدام الحساب الافتراضي 5900")
+                print("WARNING: [AccountingService] لم يتم تحديد حساب المصروف، سيتم استخدام الحساب الافتراضي 5900")
                 expense_account_code = "5900"  # مصروفات متنوعة
-            
+
             if not payment_account_code:
-                print(f"WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111")
+                print("WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111")
                 payment_account_code = self.CASH_ACCOUNT_CODE  # الخزنة الرئيسية
-            
+
             # إنشاء معرف المصروف
             expense_id = getattr(expense, '_mongo_id', None) or str(getattr(expense, 'id', '')) or f"EXP-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            
+
             # إنشاء القيد المحاسبي
             success = self.post_journal_entry(
                 date=expense.date or datetime.now(),
@@ -463,7 +651,7 @@ class AccountingService:
                 credit_account_code=payment_account_code,  # حساب الدفع (دائن)
                 amount=expense.amount
             )
-            
+
             if success:
                 print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمصروف {expense.category}")
             else:
@@ -485,30 +673,30 @@ class AccountingService:
                     expense = schemas.Expense(**expense)
             else:
                 expense = data
-            
+
             print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
-            
+
             expense_id = getattr(expense, '_mongo_id', None) or str(getattr(expense, 'id', ''))
-            
+
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(expense_id)
-            
+
             if not original_entry:
-                print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
+                print("INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
                 self.handle_new_expense(data)
                 return
-            
+
             # تحديث القيد بالقيمة الجديدة
             expense_account_code = getattr(expense, 'account_id', None) or "5900"
             payment_account_code = getattr(expense, 'payment_account_id', None) or self.CASH_ACCOUNT_CODE
-            
+
             expense_account = self.repo.get_account_by_code(expense_account_code)
             payment_account = self.repo.get_account_by_code(payment_account_code)
-            
+
             if not expense_account or not payment_account:
-                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
                 return
-            
+
             new_lines = [
                 schemas.JournalEntryLine(
                     account_id=expense_account.code,
@@ -527,18 +715,18 @@ class AccountingService:
                     description=f"دائن: {payment_account.name}"
                 )
             ]
-            
+
             success = self.repo.update_journal_entry_by_doc_id(
                 doc_id=expense_id,
                 new_lines=new_lines,
                 new_description=f"تعديل مصروف: {expense.category}"
             )
-            
+
             if success:
-                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
+                print("SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
             else:
-                print(f"WARNING: [AccountingService] فشل تحديث القيد للمصروف")
-                
+                print("WARNING: [AccountingService] فشل تحديث القيد للمصروف")
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل تعديل قيد المصروف: {e}")
             import traceback
@@ -551,18 +739,18 @@ class AccountingService:
         try:
             expense_id = data.get('id')
             if not expense_id:
-                print(f"WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
+                print("WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
                 return
-            
+
             print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
-            
+
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(str(expense_id))
-            
+
             if not original_entry:
-                print(f"INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
+                print("INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
                 return
-            
+
             # إنشاء قيد عكسي
             reversed_lines = []
             for line in original_entry.lines:
@@ -576,17 +764,17 @@ class AccountingService:
                         description=f"عكس قيد: {line.description}"
                     )
                 )
-            
+
             journal_entry_data = schemas.JournalEntry(
                 date=datetime.now(),
-                description=f"قيد عكسي لحذف مصروف",
+                description="قيد عكسي لحذف مصروف",
                 lines=reversed_lines,
                 related_document_id=f"DEL-{expense_id}"
             )
-            
+
             self.repo.create_journal_entry(journal_entry_data)
-            print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
-            
+            print("SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للمصروف: {e}")
             import traceback
@@ -595,7 +783,7 @@ class AccountingService:
     def handle_new_payment(self, data: dict):
         """
         معالج استلام دفعة جديدة - ينشئ قيد يومية تلقائياً
-        
+
         القيد المحاسبي للدفعة (تحصيل من عميل):
         - مدين: حساب النقدية/البنك (11xx) - يزيد النقدية
         - دائن: حساب العملاء (1140) - ينقص المستحقات
@@ -604,26 +792,26 @@ class AccountingService:
         # دعم المشاريع والفواتير
         project = data.get("project")
         invoice = data.get("invoice")
-        
+
         print(f"INFO: [AccountingService] تم استقبال حدث دفعة جديدة: {payment.amount} جنيه")
 
         try:
             # تحديد حساب الاستلام (الخزينة أو البنك)
             receiving_account_code = getattr(payment, 'account_id', None) or self.CASH_ACCOUNT_CODE
-            
+
             # تحديد حساب العميل (المستحقات)
             client_account_code = self.ACC_RECEIVABLE_CODE  # حساب العملاء
-            
+
             # إنشاء معرف الدفعة
             payment_id = getattr(payment, '_mongo_id', None) or str(getattr(payment, 'id', '')) or f"PAY-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            
+
             # وصف الدفعة
             description = f"تحصيل دفعة: {payment.amount} جنيه"
             if invoice:
                 description = f"تحصيل دفعة للفاتورة {getattr(invoice, 'invoice_number', '')}: {payment.amount} جنيه"
             elif project:
                 description = f"تحصيل دفعة للمشروع {getattr(project, 'name', '')}: {payment.amount} جنيه"
-            
+
             # إنشاء القيد المحاسبي
             success = self.post_journal_entry(
                 date=payment.date or datetime.now(),
@@ -634,11 +822,11 @@ class AccountingService:
                 credit_account_code=client_account_code,    # حساب العملاء (دائن)
                 amount=payment.amount
             )
-            
+
             if success:
                 print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للدفعة {payment.amount} جنيه")
             else:
-                print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للدفعة")
+                print("ERROR: [AccountingService] فشل إنشاء قيد اليومية للدفعة")
 
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
@@ -652,28 +840,28 @@ class AccountingService:
         try:
             payment: schemas.Payment = data["payment"]
             print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
-            
+
             payment_id = getattr(payment, '_mongo_id', None) or str(getattr(payment, 'id', ''))
-            
+
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(payment_id)
-            
+
             if not original_entry:
-                print(f"INFO: [AccountingService] لا يوجد قيد أصلي للدفعة - إنشاء قيد جديد")
+                print("INFO: [AccountingService] لا يوجد قيد أصلي للدفعة - إنشاء قيد جديد")
                 self.handle_new_payment(data)
                 return
-            
+
             # تحديد الحسابات
             receiving_account_code = getattr(payment, 'account_id', None) or self.CASH_ACCOUNT_CODE
             client_account_code = self.ACC_RECEIVABLE_CODE
-            
+
             receiving_account = self.repo.get_account_by_code(receiving_account_code)
             client_account = self.repo.get_account_by_code(client_account_code)
-            
+
             if not receiving_account or not client_account:
-                print(f"ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
                 return
-            
+
             new_lines = [
                 schemas.JournalEntryLine(
                     account_id=receiving_account.code,
@@ -692,18 +880,18 @@ class AccountingService:
                     description=f"دائن: {client_account.name}"
                 )
             ]
-            
+
             success = self.repo.update_journal_entry_by_doc_id(
                 doc_id=payment_id,
                 new_lines=new_lines,
                 new_description=f"تعديل دفعة: {payment.amount} جنيه"
             )
-            
+
             if success:
-                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للدفعة")
+                print("SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للدفعة")
             else:
-                print(f"WARNING: [AccountingService] فشل تحديث القيد للدفعة")
-                
+                print("WARNING: [AccountingService] فشل تحديث القيد للدفعة")
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل تعديل قيد الدفعة: {e}")
             import traceback
@@ -715,21 +903,21 @@ class AccountingService:
         """
         try:
             payment_id = data.get('payment_id')
-            payment = data.get('payment')
-            
+            data.get('payment')
+
             if not payment_id:
-                print(f"WARNING: [AccountingService] لم يتم تحديد معرف الدفعة المحذوفة")
+                print("WARNING: [AccountingService] لم يتم تحديد معرف الدفعة المحذوفة")
                 return
-            
+
             print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
-            
+
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(str(payment_id))
-            
+
             if not original_entry:
-                print(f"INFO: [AccountingService] لا يوجد قيد محاسبي للدفعة المحذوفة")
+                print("INFO: [AccountingService] لا يوجد قيد محاسبي للدفعة المحذوفة")
                 return
-            
+
             # إنشاء قيد عكسي
             reversed_lines = []
             for line in original_entry.lines:
@@ -743,17 +931,17 @@ class AccountingService:
                         description=f"عكس قيد: {line.description}"
                     )
                 )
-            
+
             journal_entry_data = schemas.JournalEntry(
                 date=datetime.now(),
-                description=f"قيد عكسي لحذف دفعة",
+                description="قيد عكسي لحذف دفعة",
                 lines=reversed_lines,
                 related_document_id=f"DEL-PAY-{payment_id}"
             )
-            
+
             self.repo.create_journal_entry(journal_entry_data)
-            print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للدفعة المحذوفة")
-            
+            print("SUCCESS: [AccountingService] تم إنشاء القيد العكسي للدفعة المحذوفة")
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للدفعة: {e}")
             import traceback
@@ -765,19 +953,24 @@ class AccountingService:
             # الأصول والمصروفات: المدين يزيد، الدائن ينقص
             # الخصوم والإيرادات وحقوق الملكية: الدائن يزيد، المدين ينقص
             asset_types = [schemas.AccountType.ASSET, schemas.AccountType.CASH, schemas.AccountType.EXPENSE]
-            
+
             if account.type in asset_types:
                 new_balance = account.balance + amount if is_debit else account.balance - amount
             else:
                 new_balance = account.balance - amount if is_debit else account.balance + amount
-            
+
             account_id = account._mongo_id or str(account.id)
             self.repo.update_account(account_id, account.model_copy(update={"balance": new_balance}))
+
+            # إبطال الـ cache لإعادة حساب الأرصدة
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+
             print(f"INFO: [AccountingService] تم تحديث رصيد {account.name}: {new_balance}")
         except Exception as e:
             print(f"WARNING: [AccountingService] فشل تحديث رصيد الحساب: {e}")
 
-    def get_profit_and_loss(self, start_date: datetime, end_date: datetime) -> Dict:
+    def get_profit_and_loss(self, start_date: datetime, end_date: datetime) -> dict:
         """حساب تقرير الأرباح والخسائر لفترة محددة مع التفاصيل"""
         print(f"INFO: [AccountingService] جاري حساب P&L من {start_date} إلى {end_date}")
         try:
@@ -802,12 +995,12 @@ class AccountingService:
                 if hasattr(entry_date, 'replace'):
                     # تأكد من أن التاريخ بدون timezone
                     pass
-                
+
                 if start_date <= entry_date <= end_date:
                     for line in entry.lines:
                         acc_id = str(line.account_id)
                         acc_data = account_info.get(acc_id)
-                        
+
                         if not acc_data:
                             continue
 
@@ -819,7 +1012,7 @@ class AccountingService:
                             if acc_name not in revenue_breakdown:
                                 revenue_breakdown[acc_name] = 0.0
                             revenue_breakdown[acc_name] += line.credit
-                            
+
                         elif acc_type == schemas.AccountType.EXPENSE:
                             total_expenses += line.debit
                             if acc_name not in expense_breakdown:
@@ -897,7 +1090,7 @@ class AccountingService:
             discount_account = self.repo.get_account_by_code(self.DISCOUNT_ALLOWED_CODE)
             vat_account = self.repo.get_account_by_code(self.VAT_PAYABLE_CODE)
 
-            if not all([ar_account, rev_account, discount_account, vat_account]):
+            if ar_account is None or rev_account is None or discount_account is None or vat_account is None:
                 print("CRITICAL_ERROR: [AccountingService] لا يمكن إيجاد كل الحسابات المحاسبية (للتعديل).")
                 return
 
@@ -972,6 +1165,79 @@ class AccountingService:
                 "net_profit_cash": 0,
             }
 
+    def get_dashboard_stats(self) -> dict:
+        """
+        مصدر موحد للبيانات لضمان تطابق الأرقام في الداشبورد 100%
+
+        Returns:
+            dict مع: total_sales, cash_collected, receivables, expenses, net_profit
+        """
+        print("INFO: [AccountingService] جاري حساب إحصائيات الداشبورد الموحدة...")
+        try:
+            # جلب الملخص المالي من الحسابات
+            summary = self.get_financial_summary()
+
+            # جلب KPIs من المشاريع والدفعات
+            kpis = self.repo.get_dashboard_kpis()
+
+            # توحيد البيانات
+            total_sales = summary.get('revenue', 0)  # إجمالي الإيرادات من الحسابات
+            cash_collected = kpis.get('total_collected', 0)  # النقدية المحصلة من الدفعات
+            receivables = kpis.get('total_outstanding', 0)  # المستحقات المتبقية
+            expenses = kpis.get('total_expenses', 0)  # المصروفات
+            net_profit = cash_collected - expenses  # صافي الربح النقدي
+
+            return {
+                "total_sales": total_sales,
+                "cash_collected": cash_collected,
+                "receivables": receivables,
+                "expenses": expenses,
+                "net_profit": net_profit
+            }
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل حساب إحصائيات الداشبورد: {e}")
+            return {
+                "total_sales": 0,
+                "cash_collected": 0,
+                "receivables": 0,
+                "expenses": 0,
+                "net_profit": 0
+            }
+
+    def get_recent_journal_entries(self, limit: int = 5) -> list[dict]:
+        """
+        جلب آخر القيود المحاسبية لعرضها في لوحة التحكم
+
+        Args:
+            limit: عدد القيود المطلوبة (افتراضي 5)
+
+        Returns:
+            قائمة بآخر القيود مع التاريخ والوصف والمبلغ
+        """
+        try:
+            entries = self.repo.get_all_journal_entries()
+            # ترتيب حسب التاريخ (الأحدث أولاً)
+            sorted_entries = sorted(
+                entries,
+                key=lambda x: x.date if x.date else datetime.min,
+                reverse=True
+            )[:limit]
+
+            results = []
+            for entry in sorted_entries:
+                # حساب إجمالي المبلغ من السطور
+                total = sum(line.debit for line in entry.lines if line.debit)
+                results.append({
+                    'date': entry.date.strftime('%Y-%m-%d') if entry.date else '',
+                    'description': entry.description or '',
+                    'amount': total
+                })
+
+            return results
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل جلب آخر القيود: {e}")
+            return []
+
     def create_account(self, account_data: dict) -> schemas.Account:
         """ إضافة حساب جديد مع التحقق من parent_code """
         print(f"INFO: [AccountingService] استلام طلب إضافة حساب: {account_data.get('name')}")
@@ -981,25 +1247,25 @@ class AccountingService:
                 parent_account = self.repo.get_account_by_code(account_data['parent_code'])
                 if not parent_account:
                     raise ValueError(f"الحساب الأب '{account_data['parent_code']}' غير موجود")
-            
+
             # إنشاء كائن الحساب
             new_account_schema = schemas.Account(**account_data)
             created_account = self.repo.create_account(new_account_schema)
-            
+
             # تحديث علامات is_group للحسابات
             if hasattr(self.repo, 'update_is_group_flags'):
                 self.repo.update_is_group_flags()
-            
+
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed('accounts')
-            
+
             print(f"SUCCESS: [AccountingService] تم إنشاء الحساب '{created_account.name}' بالكود '{created_account.code}'")
             return created_account
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل إضافة الحساب: {e}")
             raise
 
-    def update_account(self, account_id: str, new_data: dict) -> Optional[schemas.Account]:
+    def update_account(self, account_id: str, new_data: dict) -> schemas.Account | None:
         """ تعديل بيانات حساب مع التحقق من parent_code """
         print(f"INFO: [AccountingService] استلام طلب تعديل الحساب ID: {account_id}")
         try:
@@ -1008,43 +1274,72 @@ class AccountingService:
                 raise Exception("الحساب غير موجود للتعديل.")
 
             # التحقق من صحة parent_code الجديد إذا كان موجوداً
+            # وتحويله إلى parent_id للتوافق مع قاعدة البيانات
             if new_data.get('parent_code'):
                 parent_account = self.repo.get_account_by_code(new_data['parent_code'])
                 if not parent_account:
                     raise ValueError(f"الحساب الأب '{new_data['parent_code']}' غير موجود")
-                
+
                 # التأكد من عدم إنشاء حلقة مفرغة (الحساب لا يمكن أن يكون أباً لنفسه)
                 if new_data['parent_code'] == existing_account.code:
                     raise ValueError("لا يمكن للحساب أن يكون أباً لنفسه")
-            
+
+                # ✅ تحويل parent_code إلى parent_id للتوافق مع الـ repository
+                new_data['parent_id'] = new_data['parent_code']
+            else:
+                # إذا لم يكن هناك parent_code، نضع parent_id = None
+                new_data['parent_id'] = None
+                new_data['parent_code'] = None
+
             # ⚠️ حماية الرصيد: لا نسمح بتعديل الرصيد يدوياً عند التحديث
             # الرصيد يُحسب فقط من القيود المحاسبية
             if 'balance' in new_data:
-                print(f"WARNING: [AccountingService] Removing 'balance' from update data to preserve calculated balance")
+                print("WARNING: [AccountingService] Removing 'balance' from update data to preserve calculated balance")
                 new_data = {k: v for k, v in new_data.items() if k != 'balance'}
-            
+
             # حفظ الأرصدة الحالية قبل التحديث
             current_balance = existing_account.balance
             current_debit_total = existing_account.debit_total
             current_credit_total = existing_account.credit_total
 
             updated_account_schema = existing_account.model_copy(update=new_data)
-            
+
             # استعادة الأرصدة المحسوبة
             updated_account_schema.balance = current_balance
             updated_account_schema.debit_total = current_debit_total
             updated_account_schema.credit_total = current_credit_total
-            
+
             saved_account = self.repo.update_account(account_id, updated_account_schema)
-            
+
             # تحديث علامات is_group للحسابات
             if hasattr(self.repo, 'update_is_group_flags'):
                 self.repo.update_is_group_flags()
-            
-            print(f"SUCCESS: [AccountingService] تم تعديل الحساب {saved_account.name} بنجاح.")
+
+            if saved_account is not None:
+                print(f"SUCCESS: [AccountingService] تم تعديل الحساب {saved_account.name} بنجاح.")
             return saved_account
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل تعديل الحساب: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    def update_account_by_code(self, account_code: str, new_data: dict) -> schemas.Account | None:
+        """ تعديل بيانات حساب باستخدام الكود """
+        print(f"INFO: [AccountingService] تعديل الحساب بالكود: {account_code}")
+        try:
+            existing_account = self.repo.get_account_by_code(account_code)
+            if not existing_account:
+                raise Exception(f"الحساب بالكود '{account_code}' غير موجود للتعديل.")
+
+            # الحصول على الـ id من الحساب الموجود
+            account_id = existing_account._mongo_id or str(existing_account.id)
+            print(f"DEBUG: [AccountingService] Found account ID: {account_id}")
+
+            # استدعاء دالة التحديث العادية
+            return self.update_account(account_id, new_data)
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل تعديل الحساب بالكود: {e}")
             raise
 
     def delete_account(self, account_id: str) -> bool:
@@ -1055,7 +1350,7 @@ class AccountingService:
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل حذف الحساب: {e}")
             raise
-    
+
     def post_transaction(
         self,
         date: datetime,
@@ -1066,17 +1361,17 @@ class AccountingService:
         debit_account_code: str,
         credit_account_code: str,
         ref_type: str = "manual",
-        ref_id: str = None
+        ref_id: str | None = None
     ) -> bool:
         """
         Smart Transaction Engine - The Brain of the Financial System
-        
+
         Features:
         - Multi-currency support with automatic conversion to base currency (EGP)
         - Stores both original and converted amounts
         - Immediate balance updates (recursive for parent accounts)
         - Real-time GL posting
-        
+
         Args:
             date: Transaction date
             description: Transaction description
@@ -1087,29 +1382,29 @@ class AccountingService:
             credit_account_code: Credit account code
             ref_type: Reference type (expense, payment, invoice, manual)
             ref_id: Reference document ID
-        
+
         Returns:
             True if successful
         """
         print(f"INFO: [AccountingService] Smart Transaction: {description}")
         print(f"  Amount: {amount} {currency} @ {exchange_rate} = {amount * exchange_rate} EGP")
-        
+
         try:
             # 1. Convert to base currency (EGP)
             amount_egp = amount * exchange_rate
-            
+
             # 2. Verify accounts exist
             debit_account = self.repo.get_account_by_code(debit_account_code)
             credit_account = self.repo.get_account_by_code(credit_account_code)
-            
+
             if not debit_account:
                 print(f"ERROR: Debit account {debit_account_code} not found!")
                 return False
-            
+
             if not credit_account:
                 print(f"ERROR: Credit account {credit_account_code} not found!")
                 return False
-            
+
             # 3. Create journal entry with currency info
             journal_entry = schemas.JournalEntry(
                 date=date,
@@ -1134,42 +1429,42 @@ class AccountingService:
                 ],
                 related_document_id=ref_id or f"{ref_type}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
             )
-            
+
             # 4. Save to database
             self.repo.create_journal_entry(journal_entry)
-            
+
             # 5. Update balances immediately (with recursive parent update)
             self._update_account_balance_recursive(debit_account, amount_egp, is_debit=True)
             self._update_account_balance_recursive(credit_account, amount_egp, is_debit=False)
-            
-            print(f"SUCCESS: Smart transaction posted successfully!")
+
+            print("SUCCESS: Smart transaction posted successfully!")
             return True
-            
+
         except Exception as e:
             print(f"ERROR: Failed to post transaction: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def _update_account_balance_recursive(self, account, amount: float, is_debit: bool):
         """
         Update account balance and recursively update all parent accounts
-        
+
         This ensures the tree view shows correct aggregated balances in real-time
         """
         try:
             # Update current account
             self._update_account_balance(account, amount, is_debit)
-            
+
             # Recursively update parent accounts
             if account.parent_code:
                 parent_account = self.repo.get_account_by_code(account.parent_code)
                 if parent_account:
                     self._update_account_balance_recursive(parent_account, amount, is_debit)
-                    
+
         except Exception as e:
             print(f"WARNING: Failed to update balance recursively: {e}")
-    
+
     def post_journal_entry(
         self,
         date: datetime,
@@ -1182,12 +1477,12 @@ class AccountingService:
     ) -> bool:
         """
         إنشاء قيد يومية كامل مع تحديث الأرصدة
-        
+
         هذه الدالة الرئيسية لإنشاء القيود المحاسبية:
         1. إنشاء قيد اليومية (Journal Entry Header)
         2. إنشاء بنود القيد (Debit & Credit Lines)
         3. تحديث أرصدة الحسابات فوراً
-        
+
         Args:
             date: تاريخ القيد
             description: وصف القيد
@@ -1196,28 +1491,28 @@ class AccountingService:
             debit_account_code: كود الحساب المدين
             credit_account_code: كود الحساب الدائن
             amount: المبلغ
-        
+
         Returns:
             True إذا نجحت العملية
         """
         print(f"INFO: [AccountingService] post_journal_entry: {description} - {amount} جنيه")
         print(f"INFO: [AccountingService] مدين: {debit_account_code} | دائن: {credit_account_code}")
-        
+
         try:
             # 1. التحقق من وجود الحسابات
             debit_account = self.repo.get_account_by_code(debit_account_code)
             credit_account = self.repo.get_account_by_code(credit_account_code)
-            
+
             if not debit_account:
                 print(f"ERROR: [AccountingService] الحساب المدين {debit_account_code} غير موجود!")
                 return False
-            
+
             if not credit_account:
                 print(f"ERROR: [AccountingService] الحساب الدائن {credit_account_code} غير موجود!")
                 return False
-            
+
             print(f"INFO: [AccountingService] الحسابات موجودة: {debit_account.name} | {credit_account.name}")
-            
+
             # 2. إنشاء قيد اليومية
             journal_entry = schemas.JournalEntry(
                 date=date,
@@ -1242,24 +1537,28 @@ class AccountingService:
                 ],
                 related_document_id=ref_id
             )
-            
+
             # 3. حفظ القيد في قاعدة البيانات
-            created_entry = self.repo.create_journal_entry(journal_entry)
-            print(f"SUCCESS: [AccountingService] تم حفظ القيد في قاعدة البيانات")
-            
+            self.repo.create_journal_entry(journal_entry)
+            print("SUCCESS: [AccountingService] تم حفظ القيد في قاعدة البيانات")
+
             # 4. تحديث أرصدة الحسابات فوراً
             self._update_account_balance(debit_account, amount, is_debit=True)
             self._update_account_balance(credit_account, amount, is_debit=False)
-            
-            print(f"SUCCESS: [AccountingService] تم إنشاء القيد وتحديث الأرصدة بنجاح")
+
+            # 5. إبطال الـ cache لإعادة حساب الأرصدة
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+
+            print("SUCCESS: [AccountingService] تم إنشاء القيد وتحديث الأرصدة بنجاح")
             return True
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل إنشاء القيد: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
+
     def create_transaction(
         self,
         date: datetime,
@@ -1272,7 +1571,7 @@ class AccountingService:
     ) -> bool:
         """
         إنشاء معاملة محاسبية كاملة (قيد يومية + تحديث الأرصدة)
-        
+
         Args:
             date: تاريخ المعاملة
             description: وصف المعاملة
@@ -1281,23 +1580,23 @@ class AccountingService:
             debit_account_code: كود الحساب المدين
             credit_account_code: كود الحساب الدائن
             amount: المبلغ
-        
+
         Returns:
             True إذا نجحت العملية
         """
         print(f"INFO: [AccountingService] إنشاء معاملة: {description} - {amount} جنيه")
-        
+
         try:
             # 1. التحقق من وجود الحسابات
             debit_account = self.repo.get_account_by_code(debit_account_code)
             credit_account = self.repo.get_account_by_code(credit_account_code)
-            
+
             if not debit_account:
                 raise Exception(f"الحساب المدين {debit_account_code} غير موجود")
-            
+
             if not credit_account:
                 raise Exception(f"الحساب الدائن {credit_account_code} غير موجود")
-            
+
             # 2. إنشاء قيد اليومية
             journal_entry = schemas.JournalEntry(
                 date=date,
@@ -1318,58 +1617,58 @@ class AccountingService:
                 ],
                 related_document_id=ref_id
             )
-            
+
             # 3. حفظ القيد
             created_entry = self.repo.create_journal_entry(journal_entry)
-            
+
             # 4. تحديث أرصدة الحسابات
             self._update_account_balance(debit_account, amount, is_debit=True)
             self._update_account_balance(credit_account, amount, is_debit=False)
-            
+
             print(f"SUCCESS: [AccountingService] تم إنشاء المعاملة بنجاح - القيد #{created_entry.id if hasattr(created_entry, 'id') else 'N/A'}")
             return True
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل إنشاء المعاملة: {e}")
             import traceback
             traceback.print_exc()
             return False
-    
-    def get_account_ledger(self, account_id: str, start_date: datetime, end_date: datetime) -> List[dict]:
+
+    def get_account_ledger(self, account_id: str, start_date: datetime, end_date: datetime) -> list[dict]:
         """
         جلب كشف حساب (تاريخ المعاملات) لحساب معين
-        
+
         Args:
             account_id: معرف الحساب (ID أو Code)
             start_date: تاريخ البداية
             end_date: تاريخ النهاية
-        
+
         Returns:
             قائمة بالمعاملات مع الرصيد الجاري
         """
         print(f"INFO: [AccountingService] جلب كشف حساب {account_id} من {start_date} إلى {end_date}")
-        
+
         try:
             # جلب الحساب
             account = self.repo.get_account_by_id(account_id)
             if not account:
                 account = self.repo.get_account_by_code(account_id)
-            
+
             if not account:
                 print(f"ERROR: الحساب {account_id} غير موجود")
                 return []
-            
+
             # جلب جميع قيود اليومية في الفترة المحددة
             all_entries = self.repo.get_all_journal_entries()
-            
+
             ledger_transactions = []
-            
+
             for entry in all_entries:
                 # التحقق من التاريخ
                 entry_date = entry.date
                 if not (start_date <= entry_date <= end_date):
                     continue
-                
+
                 # البحث عن الأسطر المتعلقة بهذا الحساب
                 for line in entry.lines:
                     # مقارنة بالـ ID أو الكود
@@ -1379,7 +1678,7 @@ class AccountingService:
                         line_account_id == str(account.id) or
                         line_account_id == account.code
                     )
-                    
+
                     if account_match:
                         ledger_transactions.append({
                             'date': entry_date,
@@ -1388,19 +1687,19 @@ class AccountingService:
                             'debit': line.debit,
                             'credit': line.credit,
                         })
-            
+
             # ترتيب حسب التاريخ
-            ledger_transactions.sort(key=lambda x: x['date'])
-            
+            ledger_transactions.sort(key=lambda x: str(x.get('date', '')))
+
             print(f"INFO: تم جلب {len(ledger_transactions)} معاملة للحساب {account.name}")
             return ledger_transactions
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل جلب كشف الحساب: {e}")
             import traceback
             traceback.print_exc()
             return []
-    
+
     def seed_test_transactions(self) -> dict:
         """
         إنشاء معاملات اختبارية لتجربة كشف الحساب
@@ -1408,10 +1707,10 @@ class AccountingService:
         print("=" * 60)
         print("INFO: [AccountingService] بدء إنشاء معاملات اختبارية...")
         print("=" * 60)
-        
+
         created_count = 0
         errors = []
-        
+
         try:
             # التحقق من وجود الحسابات المطلوبة
             accounts_needed = {
@@ -1422,17 +1721,17 @@ class AccountingService:
                 '5110': 'الرواتب والأجور',
                 '1131': 'فودافون كاش'
             }
-            
+
             for code, name in accounts_needed.items():
                 account = self.repo.get_account_by_code(code)
                 if not account:
                     print(f"WARNING: الحساب {code} - {name} غير موجود")
-            
+
             # معاملة 1: إيداع نقدي في البنك (10000 جنيه)
             try:
                 bank_account = self.repo.get_account_by_code('1121')
                 cash_account = self.repo.get_account_by_code('1111')
-                
+
                 if bank_account and cash_account:
                     entry1 = schemas.JournalEntry(
                         date=datetime.now() - timedelta(days=30),
@@ -1460,12 +1759,12 @@ class AccountingService:
                 error_msg = f"فشل إنشاء معاملة الإيداع: {e}"
                 print(f"❌ {error_msg}")
                 errors.append(error_msg)
-            
+
             # معاملة 2: بيع خدمة (1500 جنيه)
             try:
                 receivable_account = self.repo.get_account_by_code('1140')
                 revenue_account = self.repo.get_account_by_code('4100')
-                
+
                 if receivable_account and revenue_account:
                     entry2 = schemas.JournalEntry(
                         date=datetime.now() - timedelta(days=20),
@@ -1493,12 +1792,12 @@ class AccountingService:
                 error_msg = f"فشل إنشاء معاملة بيع الخدمة: {e}"
                 print(f"❌ {error_msg}")
                 errors.append(error_msg)
-            
+
             # معاملة 3: دفع راتب (2000 جنيه)
             try:
                 salary_account = self.repo.get_account_by_code('5110')
                 vodafone_account = self.repo.get_account_by_code('1131')
-                
+
                 if salary_account and vodafone_account:
                     entry3 = schemas.JournalEntry(
                         date=datetime.now() - timedelta(days=10),
@@ -1526,12 +1825,12 @@ class AccountingService:
                 error_msg = f"فشل إنشاء معاملة دفع الراتب: {e}"
                 print(f"❌ {error_msg}")
                 errors.append(error_msg)
-            
+
             # معاملة 4: تحصيل من العميل (1500 جنيه)
             try:
                 receivable_account = self.repo.get_account_by_code('1140')
                 cash_account = self.repo.get_account_by_code('1111')
-                
+
                 if receivable_account and cash_account:
                     entry4 = schemas.JournalEntry(
                         date=datetime.now() - timedelta(days=5),
@@ -1559,20 +1858,20 @@ class AccountingService:
                 error_msg = f"فشل إنشاء معاملة التحصيل: {e}"
                 print(f"❌ {error_msg}")
                 errors.append(error_msg)
-            
+
             print("\n" + "=" * 60)
             print(f"✅ تم إنشاء {created_count} معاملة اختبارية")
             if errors:
                 print(f"❌ فشل إنشاء {len(errors)} معاملة")
             print("=" * 60)
-            
+
             return {
                 "success": True,
                 "created": created_count,
                 "errors": errors,
                 "message": f"تم إنشاء {created_count} معاملة اختبارية"
             }
-            
+
         except Exception as e:
             error_msg = f"فشل إنشاء المعاملات الاختبارية: {e}"
             print(f"ERROR: [AccountingService] {error_msg}")
@@ -1584,33 +1883,33 @@ class AccountingService:
                 "errors": errors + [error_msg],
                 "message": error_msg
             }
-    
+
     def reset_and_seed_agency_accounts(self) -> dict:
         """
         RESET & SEED: Wipe existing accounts and create fresh Digital Marketing Agency structure
-        
+
         WARNING: This will delete ALL existing accounts and journal entries!
         Use only for initial setup or complete reset.
         """
         print("=" * 60)
         print("⚠️  WARNING: RESETTING ALL ACCOUNTING DATA!")
         print("=" * 60)
-        
+
         try:
             # 1. Delete all existing accounts (if method exists)
             if hasattr(self.repo, 'delete_all_accounts'):
                 self.repo.delete_all_accounts()
                 print("✅ Deleted all existing accounts")
-            
+
             # 2. Seed new accounts
             result = self.seed_default_accounts()
-            
+
             print("=" * 60)
             print("✅ RESET COMPLETE - Fresh Agency Accounts Created!")
             print("=" * 60)
-            
+
             return result
-            
+
         except Exception as e:
             print(f"ERROR: Failed to reset accounts: {e}")
             import traceback
@@ -1621,72 +1920,142 @@ class AccountingService:
                 "errors": [str(e)],
                 "message": "Reset failed"
             }
-    
+
     def seed_default_accounts(self) -> dict:
         """
-        إنشاء شجرة حسابات مخصصة لوكالة التسويق الرقمي (Sky Wave)
+        🏢 إنشاء شجرة حسابات Enterprise Level لـ SkyWave
+
+        ✅ نظام 6 أرقام (Scalability) - يدعم 999 حساب فرعي تحت كل بند
+        ✅ فصل COGS (5xxxxx) عن OPEX (6xxxxx) لتحليل الربحية
+        ✅ دفعات مقدمة من العملاء (Unearned Revenue)
         """
         print("=" * 60)
-        print("INFO: [AccountingService] إنشاء حسابات وكالة التسويق الرقمي...")
+        print("INFO: [AccountingService] 🏢 إنشاء شجرة حسابات Enterprise Level...")
         print("=" * 60)
-        
-        # شجرة حسابات مخصصة لوكالة إعلانات ديجيتال
-        AD_AGENCY_ACCOUNTS = [
-            # --- 1. ASSETS (الأصول) ---
-            {"code": "1000", "name": "الأصول", "type": schemas.AccountType.ASSET, "parent": None, "is_group": True},
-            {"code": "1100", "name": "النقدية والبنوك", "type": schemas.AccountType.CASH, "parent": "1000", "is_group": True},
-            {"code": "1101", "name": "الخزنة الرئيسية", "type": schemas.AccountType.CASH, "parent": "1100", "is_group": False},
-            {"code": "1102", "name": "CIB Bank", "type": schemas.AccountType.CASH, "parent": "1100", "is_group": False},
-            {"code": "1103", "name": "Vodafone Cash", "type": schemas.AccountType.CASH, "parent": "1100", "is_group": False},
-            {"code": "1104", "name": "Instapay", "type": schemas.AccountType.CASH, "parent": "1100", "is_group": False},
-            {"code": "1200", "name": "العملاء (مدينون)", "type": schemas.AccountType.ASSET, "parent": "1000", "is_group": False},  # Control Account
-            
-            # --- 4. REVENUE (الإيرادات) ---
-            {"code": "4000", "name": "الإيرادات", "type": schemas.AccountType.REVENUE, "parent": None, "is_group": True},
-            {"code": "4100", "name": "إيرادات سوشيال ميديا", "type": schemas.AccountType.REVENUE, "parent": "4000", "is_group": False},
-            {"code": "4200", "name": "إيرادات تصميم ومواقع", "type": schemas.AccountType.REVENUE, "parent": "4000", "is_group": False},
-            {"code": "4300", "name": "إيرادات حملات إعلانية", "type": schemas.AccountType.REVENUE, "parent": "4000", "is_group": False},
-            
-            # --- 5. EXPENSES (المصروفات) ---
-            {"code": "5000", "name": "المصروفات", "type": schemas.AccountType.EXPENSE, "parent": None, "is_group": True},
-            
-            # Direct Costs (تكاليف التشغيل)
-            {"code": "5100", "name": "تكاليف الحملات (Media Buying)", "type": schemas.AccountType.EXPENSE, "parent": "5000", "is_group": True},
-            {"code": "5101", "name": "شحن فيسبوك (Meta Ads)", "type": schemas.AccountType.EXPENSE, "parent": "5100", "is_group": False},
-            {"code": "5102", "name": "شحن جوجل (Google Ads)", "type": schemas.AccountType.EXPENSE, "parent": "5100", "is_group": False},
-            {"code": "5103", "name": "سيرفرات ودومينات", "type": schemas.AccountType.EXPENSE, "parent": "5100", "is_group": False},
-            
-            # Operating Expenses (مصاريف إدارية)
-            {"code": "5200", "name": "مصاريف إدارية", "type": schemas.AccountType.EXPENSE, "parent": "5000", "is_group": True},
-            {"code": "5201", "name": "رواتب الموظفين", "type": schemas.AccountType.EXPENSE, "parent": "5200", "is_group": False},
-            {"code": "5202", "name": "فريلانسرز (Freelancers)", "type": schemas.AccountType.EXPENSE, "parent": "5200", "is_group": False},
-            {"code": "5203", "name": "إيجار ومرافق", "type": schemas.AccountType.EXPENSE, "parent": "5200", "is_group": False},
-            {"code": "5204", "name": "اشتراكات أدوات (Canva/Adobe)", "type": schemas.AccountType.EXPENSE, "parent": "5200", "is_group": False},
+
+        # ==================== شجرة الحسابات الاحترافية (6 أرقام) ====================
+        ENTERPRISE_ACCOUNTS: list[dict[str, Any]] = [
+            # ==================== 1. الأصول (100000) ====================
+            {"code": "100000", "name": "الأصول", "type": schemas.AccountType.ASSET, "parent": None, "is_group": True},
+
+            # الأصول المتداولة (110000)
+            {"code": "110000", "name": "الأصول المتداولة", "type": schemas.AccountType.ASSET, "parent": "100000", "is_group": True},
+
+            # النقدية وما في حكمها (111000)
+            {"code": "111000", "name": "النقدية وما في حكمها", "type": schemas.AccountType.CASH, "parent": "110000", "is_group": True},
+
+            # الخزائن النقدية (111100)
+            {"code": "111100", "name": "الخزائن النقدية", "type": schemas.AccountType.CASH, "parent": "111000", "is_group": True},
+            {"code": "111101", "name": "الخزنة الرئيسية (المقر)", "type": schemas.AccountType.CASH, "parent": "111100", "is_group": False},
+            {"code": "111102", "name": "عهد نقدية موظفين", "type": schemas.AccountType.CASH, "parent": "111100", "is_group": False},
+
+            # الحسابات البنكية (111200)
+            {"code": "111200", "name": "الحسابات البنكية", "type": schemas.AccountType.CASH, "parent": "111000", "is_group": True},
+            {"code": "111201", "name": "بنك مصر - جاري (..86626)", "type": schemas.AccountType.CASH, "parent": "111200", "is_group": False},
+
+            # المحافظ الإلكترونية (111300)
+            {"code": "111300", "name": "المحافظ الإلكترونية وبوابات الدفع", "type": schemas.AccountType.CASH, "parent": "111000", "is_group": True},
+            {"code": "111301", "name": "فودافون كاش (الرئيسي) ..321", "type": schemas.AccountType.CASH, "parent": "111300", "is_group": False},
+            {"code": "111302", "name": "فودافون كاش (الفرعي) ..200", "type": schemas.AccountType.CASH, "parent": "111300", "is_group": False},
+            {"code": "111303", "name": "مدفوعات تحت التسوية (InstaPay)", "type": schemas.AccountType.CASH, "parent": "111300", "is_group": False},
+
+            # العملاء وأوراق القبض (112000)
+            {"code": "112000", "name": "العملاء وأوراق القبض", "type": schemas.AccountType.ASSET, "parent": "110000", "is_group": True},
+            {"code": "112100", "name": "عملاء تجاريين (شركات)", "type": schemas.AccountType.ASSET, "parent": "112000", "is_group": False},
+            {"code": "112200", "name": "عملاء أفراد", "type": schemas.AccountType.ASSET, "parent": "112000", "is_group": False},
+
+            # أرصدة مدينة أخرى (113000)
+            {"code": "113000", "name": "أرصدة مدينة أخرى", "type": schemas.AccountType.ASSET, "parent": "110000", "is_group": True},
+            {"code": "113100", "name": "مصروفات مدفوعة مقدماً", "type": schemas.AccountType.ASSET, "parent": "113000", "is_group": False},
+            {"code": "113200", "name": "سلف العاملين", "type": schemas.AccountType.ASSET, "parent": "113000", "is_group": False},
+
+            # الأصول غير المتداولة (120000)
+            {"code": "120000", "name": "الأصول غير المتداولة", "type": schemas.AccountType.ASSET, "parent": "100000", "is_group": True},
+            {"code": "121000", "name": "الأصول الثابتة الملموسة", "type": schemas.AccountType.ASSET, "parent": "120000", "is_group": True},
+            {"code": "121100", "name": "أجهزة حاسب آلي وسيرفرات", "type": schemas.AccountType.ASSET, "parent": "121000", "is_group": False},
+            {"code": "121200", "name": "أثاث وتجهيزات مكتبية", "type": schemas.AccountType.ASSET, "parent": "121000", "is_group": False},
+
+            # ==================== 2. الخصوم (200000) ====================
+            {"code": "200000", "name": "الخصوم", "type": schemas.AccountType.LIABILITY, "parent": None, "is_group": True},
+
+            # الخصوم المتداولة (210000)
+            {"code": "210000", "name": "الخصوم المتداولة", "type": schemas.AccountType.LIABILITY, "parent": "200000", "is_group": True},
+
+            # الموردين (211000)
+            {"code": "211000", "name": "الموردين", "type": schemas.AccountType.LIABILITY, "parent": "210000", "is_group": True},
+            {"code": "211100", "name": "موردين تشغيل (خدمات تقنية)", "type": schemas.AccountType.LIABILITY, "parent": "211000", "is_group": False},
+            {"code": "211200", "name": "مستحقات مستقلين (Freelancers)", "type": schemas.AccountType.LIABILITY, "parent": "211000", "is_group": False},
+
+            # أرصدة دائنة أخرى (212000) - ⚡ مهم جداً
+            {"code": "212000", "name": "أرصدة دائنة أخرى", "type": schemas.AccountType.LIABILITY, "parent": "210000", "is_group": True},
+            {"code": "212100", "name": "دفعات مقدمة من العملاء (هام)", "type": schemas.AccountType.LIABILITY, "parent": "212000", "is_group": False},  # Unearned Revenue
+            {"code": "212200", "name": "ضريبة القيمة المضافة", "type": schemas.AccountType.LIABILITY, "parent": "212000", "is_group": False},
+
+            # ==================== 3. حقوق الملكية (300000) ====================
+            {"code": "300000", "name": "حقوق الملكية", "type": schemas.AccountType.EQUITY, "parent": None, "is_group": True},
+            {"code": "310000", "name": "رأس المال", "type": schemas.AccountType.EQUITY, "parent": "300000", "is_group": False},
+            {"code": "320000", "name": "جاري المالك (مسحوبات)", "type": schemas.AccountType.EQUITY, "parent": "300000", "is_group": False},
+            {"code": "330000", "name": "الأرباح المرحلة", "type": schemas.AccountType.EQUITY, "parent": "300000", "is_group": False},
+
+            # ==================== 4. الإيرادات (400000) ====================
+            {"code": "400000", "name": "الإيرادات", "type": schemas.AccountType.REVENUE, "parent": None, "is_group": True},
+            {"code": "410000", "name": "إيرادات التشغيل الرئيسية", "type": schemas.AccountType.REVENUE, "parent": "400000", "is_group": True},
+            {"code": "410100", "name": "إيرادات خدمات التسويق الرقمي", "type": schemas.AccountType.REVENUE, "parent": "410000", "is_group": False},
+            {"code": "410200", "name": "إيرادات تطوير المواقع والتطبيقات", "type": schemas.AccountType.REVENUE, "parent": "410000", "is_group": False},
+            {"code": "410300", "name": "إيرادات الباقات والعقود السنوية", "type": schemas.AccountType.REVENUE, "parent": "410000", "is_group": False},
+
+            # ==================== 5. تكاليف الإيرادات - COGS (500000) ====================
+            # ⚡ هذا القسم يخبرك كم كلفك المشروع تقنياً (Direct Costs)
+            {"code": "500000", "name": "تكاليف الإيرادات (المباشرة)", "type": schemas.AccountType.EXPENSE, "parent": None, "is_group": True},
+            {"code": "510000", "name": "تكاليف الحملات والتشغيل", "type": schemas.AccountType.EXPENSE, "parent": "500000", "is_group": True},
+            {"code": "510001", "name": "ميزانية إعلانات (Ads Spend)", "type": schemas.AccountType.EXPENSE, "parent": "510000", "is_group": False},
+            {"code": "510002", "name": "تكلفة استضافة وسيرفرات", "type": schemas.AccountType.EXPENSE, "parent": "510000", "is_group": False},
+            {"code": "510003", "name": "أجور مستقلين (Outsourcing)", "type": schemas.AccountType.EXPENSE, "parent": "510000", "is_group": False},
+
+            # ==================== 6. المصروفات التشغيلية - OPEX (600000) ====================
+            # ⚡ هذا القسم يخبرك كم كلفتك إدارة الشركة (Indirect Costs)
+            {"code": "600000", "name": "المصروفات التشغيلية والإدارية", "type": schemas.AccountType.EXPENSE, "parent": None, "is_group": True},
+
+            # المصروفات التسويقية (610000)
+            {"code": "610000", "name": "المصروفات التسويقية", "type": schemas.AccountType.EXPENSE, "parent": "600000", "is_group": True},
+            {"code": "610001", "name": "دعاية وإعلان للشركة", "type": schemas.AccountType.EXPENSE, "parent": "610000", "is_group": False},
+            {"code": "610002", "name": "عمولات البيع", "type": schemas.AccountType.EXPENSE, "parent": "610000", "is_group": False},
+
+            # المصروفات الإدارية والعمومية (620000)
+            {"code": "620000", "name": "المصروفات الإدارية والعمومية", "type": schemas.AccountType.EXPENSE, "parent": "600000", "is_group": True},
+            {"code": "620001", "name": "رواتب الموظفين", "type": schemas.AccountType.EXPENSE, "parent": "620000", "is_group": False},
+            {"code": "620002", "name": "إيجار ومرافق", "type": schemas.AccountType.EXPENSE, "parent": "620000", "is_group": False},
+            {"code": "620003", "name": "إنترنت واتصالات", "type": schemas.AccountType.EXPENSE, "parent": "620000", "is_group": False},
+            {"code": "620004", "name": "اشتراكات برمجيات (SaaS)", "type": schemas.AccountType.EXPENSE, "parent": "620000", "is_group": False},
+
+            # المصروفات المالية (630000)
+            {"code": "630000", "name": "المصروفات المالية", "type": schemas.AccountType.EXPENSE, "parent": "600000", "is_group": True},
+            {"code": "630001", "name": "رسوم بنكية وعمولات سحب", "type": schemas.AccountType.EXPENSE, "parent": "630000", "is_group": False},
         ]
-        
-        DEFAULT_ACCOUNTS = AD_AGENCY_ACCOUNTS
-        
+
+        DEFAULT_ACCOUNTS: list[dict[str, Any]] = ENTERPRISE_ACCOUNTS
+
         created_count = 0
         skipped_count = 0
         errors = []
-        
+
         try:
             # جلب الحسابات الموجودة للتحقق من التكرار
             existing_accounts = self.repo.get_all_accounts()
             existing_codes = {acc.code for acc in existing_accounts}
-            
+
             print(f"INFO: عدد الحسابات الموجودة حالياً: {len(existing_codes)}")
-            
+
             # إنشاء الحسابات بالترتيب (الآباء أولاً)
             for account_template in DEFAULT_ACCOUNTS:
                 code = account_template["code"]
-                
+
                 # التحقق من عدم التكرار
                 if code in existing_codes:
                     print(f"⏭️  تخطي: {code} - {account_template['name']} (موجود مسبقاً)")
                     skipped_count += 1
                     continue
-                
+
                 try:
                     # إنشاء بيانات الحساب
                     account_data = {
@@ -1699,32 +2068,32 @@ class AccountingService:
                         "currency": "EGP",
                         "status": schemas.AccountStatus.ACTIVE,
                     }
-                    
+
                     # إنشاء الحساب
                     new_account = schemas.Account(**account_data)
-                    created_account = self.repo.create_account(new_account)
-                    
+                    self.repo.create_account(new_account)
+
                     # إضافة إلى قائمة الأكواد الموجودة
                     existing_codes.add(code)
-                    
+
                     group_indicator = "📁" if account_template["is_group"] else "📄"
                     parent_info = f" (تحت {account_template['parent']})" if account_template['parent'] else ""
                     print(f"✅ {group_indicator} {code} - {account_template['name']}{parent_info}")
-                    
+
                     created_count += 1
-                    
+
                 except Exception as e:
                     error_msg = f"❌ فشل إنشاء {code} - {account_template['name']}: {e}"
                     print(error_msg)
                     errors.append(error_msg)
-            
+
             print("\n" + "=" * 60)
             print(f"✅ تم إنشاء {created_count} حساب جديد")
             print(f"⏭️  تم تخطي {skipped_count} حساب (موجود مسبقاً)")
             if errors:
                 print(f"❌ فشل إنشاء {len(errors)} حساب")
             print("=" * 60)
-            
+
             return {
                 "success": True,
                 "created": created_count,
@@ -1732,7 +2101,7 @@ class AccountingService:
                 "errors": errors,
                 "message": f"تم إنشاء {created_count} حساب، تخطي {skipped_count} حساب موجود"
             }
-            
+
         except Exception as e:
             error_msg = f"فشل إنشاء الحسابات الافتراضية: {e}"
             print(f"ERROR: [AccountingService] {error_msg}")
@@ -1750,10 +2119,10 @@ class AccountingService:
     def cleanup_client_sub_accounts(self) -> dict:
         """
         تنظيف الحسابات الفرعية تحت حساب العملاء (1140)
-        
+
         هذه الدالة تحذف أي حسابات فرعية تم إنشاؤها تحت حساب العملاء الرئيسي
         وتضمن أن حساب 1140 هو حساب معاملات (ليس مجموعة)
-        
+
         Control Account Pattern:
         - جميع معاملات العملاء تُسجل في حساب 1140 مباشرة
         - لا يتم إنشاء حسابات فرعية لكل عميل
@@ -1762,32 +2131,32 @@ class AccountingService:
         print("=" * 60)
         print("INFO: [AccountingService] بدء تنظيف الحسابات الفرعية للعملاء...")
         print("=" * 60)
-        
+
         deleted_count = 0
         errors = []
-        
+
         try:
             # جلب جميع الحسابات
             all_accounts = self.repo.get_all_accounts()
-            
+
             # البحث عن الحسابات الفرعية تحت 1140
             sub_accounts_to_delete = []
             main_account = None
-            
+
             for acc in all_accounts:
                 # حساب العملاء الرئيسي
                 if acc.code == self.ACC_RECEIVABLE_CODE:
                     main_account = acc
                     continue
-                
+
                 # الحسابات الفرعية (تبدأ بـ 1140 أو parent_code = 1140)
                 if acc.code and acc.code.startswith("1140") and acc.code != "1140":
                     sub_accounts_to_delete.append(acc)
                 elif acc.parent_code == self.ACC_RECEIVABLE_CODE:
                     sub_accounts_to_delete.append(acc)
-            
+
             print(f"INFO: تم العثور على {len(sub_accounts_to_delete)} حساب فرعي للحذف")
-            
+
             # حذف الحسابات الفرعية
             for acc in sub_accounts_to_delete:
                 try:
@@ -1803,7 +2172,7 @@ class AccountingService:
                     error_msg = f"فشل أرشفة {acc.code}: {e}"
                     print(f"❌ {error_msg}")
                     errors.append(error_msg)
-            
+
             # التأكد من أن حساب 1140 هو حساب معاملات (ليس مجموعة)
             if main_account:
                 if getattr(main_account, 'is_group', True):
@@ -1811,29 +2180,29 @@ class AccountingService:
                         account_id = main_account._mongo_id or str(main_account.id)
                         updated_data = {"is_group": False}
                         self.repo.update_account(account_id, main_account.model_copy(update=updated_data))
-                        print(f"✅ تم تحديث حساب العملاء (1140) ليكون حساب معاملات")
+                        print("✅ تم تحديث حساب العملاء (1140) ليكون حساب معاملات")
                     except Exception as e:
                         error_msg = f"فشل تحديث حساب 1140: {e}"
                         print(f"❌ {error_msg}")
                         errors.append(error_msg)
                 else:
-                    print(f"✅ حساب العملاء (1140) هو بالفعل حساب معاملات")
+                    print("✅ حساب العملاء (1140) هو بالفعل حساب معاملات")
             else:
-                print(f"⚠️ حساب العملاء (1140) غير موجود!")
-            
+                print("⚠️ حساب العملاء (1140) غير موجود!")
+
             print("\n" + "=" * 60)
             print(f"✅ تم أرشفة {deleted_count} حساب فرعي")
             if errors:
                 print(f"❌ فشل {len(errors)} عملية")
             print("=" * 60)
-            
+
             return {
                 "success": len(errors) == 0,
                 "deleted": deleted_count,
                 "errors": errors,
                 "message": f"تم أرشفة {deleted_count} حساب فرعي تحت العملاء"
             }
-            
+
         except Exception as e:
             error_msg = f"فشل تنظيف الحسابات الفرعية: {e}"
             print(f"ERROR: [AccountingService] {error_msg}")
@@ -1845,144 +2214,173 @@ class AccountingService:
                 "errors": errors + [error_msg],
                 "message": error_msg
             }
-    
+
     def get_client_balance(self, client_id: str) -> float:
         """
         حساب رصيد عميل معين من قيود اليومية
-        
+
         بما أننا نستخدم Control Account (1140) لجميع العملاء،
         نحتاج لحساب رصيد كل عميل من خلال تتبع القيود المرتبطة به
-        
+
         Args:
             client_id: معرف العميل
-        
+
         Returns:
             رصيد العميل (موجب = مستحق على العميل، سالب = مستحق للعميل)
         """
         try:
             # جلب جميع الفواتير للعميل
             invoices = self.repo.get_invoices_by_client(client_id) if hasattr(self.repo, 'get_invoices_by_client') else []
-            
+
             # جلب جميع الدفعات للعميل
             payments = self.repo.get_payments_by_client(client_id) if hasattr(self.repo, 'get_payments_by_client') else []
-            
+
             # حساب إجمالي الفواتير (مستحق على العميل)
             total_invoiced = sum(inv.total_amount for inv in invoices if hasattr(inv, 'total_amount'))
-            
+
             # حساب إجمالي المدفوعات (مدفوع من العميل)
             total_paid = sum(pay.amount for pay in payments if hasattr(pay, 'amount'))
-            
+
             # الرصيد = الفواتير - المدفوعات
             balance = total_invoiced - total_paid
-            
-            return balance
-            
+
+            return float(balance)
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل حساب رصيد العميل {client_id}: {e}")
             return 0.0
-    
-    def get_all_clients_balances(self) -> List[dict]:
+
+    def get_all_clients_balances(self) -> list[dict]:
         """
         جلب أرصدة جميع العملاء
-        
+
         Returns:
             قائمة بأرصدة العملاء [{client_id, client_name, balance}, ...]
         """
         try:
             # جلب جميع العملاء
             clients = self.repo.get_all_clients() if hasattr(self.repo, 'get_all_clients') else []
-            
+
             balances = []
             for client in clients:
                 client_id = client._mongo_id or str(client.id) if hasattr(client, '_mongo_id') else str(client.id)
                 balance = self.get_client_balance(client_id)
-                
+
                 balances.append({
                     'client_id': client_id,
                     'client_name': client.name,
                     'balance': balance,
                     'status': 'مستحق' if balance > 0 else ('مسدد' if balance == 0 else 'دائن')
                 })
-            
+
             return balances
-            
+
         except Exception as e:
             print(f"ERROR: [AccountingService] فشل جلب أرصدة العملاء: {e}")
             return []
 
     def fix_accounts_parent_codes(self) -> dict:
         """
-        إصلاح ربط الحسابات بالآباء الصحيحين
-        
+        إصلاح ربط الحسابات بالآباء الصحيحين (Enterprise 6-Digit System)
+
         هذه الدالة تقوم بتحديث parent_code لجميع الحسابات بناءً على
-        الهيكل المنطقي لشجرة الحسابات (Sky Wave)
-        
+        الهيكل المنطقي لشجرة الحسابات الاحترافية
+
         Returns:
             dict مع نتائج الإصلاح
         """
         print("=" * 60)
-        print("INFO: [AccountingService] إصلاح ربط الحسابات بالآباء...")
+        print("INFO: [AccountingService] إصلاح ربط الحسابات بالآباء (Enterprise)...")
         print("=" * 60)
-        
-        # خريطة الحسابات والآباء الصحيحين
+
+        # خريطة الحسابات والآباء الصحيحين (Enterprise 6-Digit System)
         CORRECT_PARENT_MAP = {
-            # الأصول
-            "1000": None,           # الأصول - جذر
-            "1100": "1000",         # النقدية والبنوك -> الأصول
-            "1101": "1100",         # الخزنة الرئيسية -> النقدية والبنوك
-            "1102": "1100",         # CIB Bank -> النقدية والبنوك
-            "1103": "1100",         # Vodafone Cash -> النقدية والبنوك
-            "1104": "1100",         # Instapay -> النقدية والبنوك
-            "1200": "1000",         # العملاء -> الأصول
-            
-            # الخصوم
-            "2000": None,           # الخصوم - جذر
-            "2100": "2000",         # ضريبة القيمة المضافة -> الخصوم
-            "2200": "2000",         # الموردون -> الخصوم
-            
-            # حقوق الملكية
-            "3000": None,           # حقوق الملكية - جذر
-            "3100": "3000",         # رأس المال -> حقوق الملكية
-            "3200": "3000",         # الأرباح المحتجزة -> حقوق الملكية
-            
-            # الإيرادات
-            "4000": None,           # الإيرادات - جذر
-            "4100": "4000",         # إيرادات سوشيال ميديا -> الإيرادات
-            "4200": "4000",         # إيرادات تصميم ومواقع -> الإيرادات
-            "4300": "4000",         # إيرادات حملات إعلانية -> الإيرادات
-            
-            # المصروفات
-            "5000": None,           # المصروفات - جذر
-            "5100": "5000",         # تكاليف الحملات -> المصروفات
-            "5101": "5100",         # شحن فيسبوك -> تكاليف الحملات
-            "5102": "5100",         # شحن جوجل -> تكاليف الحملات
-            "5103": "5100",         # سيرفرات ودومينات -> تكاليف الحملات
-            "5200": "5000",         # مصاريف إدارية -> المصروفات
-            "5201": "5200",         # رواتب الموظفين -> مصاريف إدارية
-            "5202": "5200",         # فريلانسرز -> مصاريف إدارية
-            "5203": "5200",         # إيجار ومرافق -> مصاريف إدارية
-            "5204": "5200",         # اشتراكات أدوات -> مصاريف إدارية
-            "5900": "5000",         # مصروفات متنوعة -> المصروفات
+            # ==================== الأصول (100000) ====================
+            "100000": None,             # الأصول - جذر
+            "110000": "100000",         # الأصول المتداولة
+            "111000": "110000",         # النقدية وما في حكمها
+            "111100": "111000",         # الخزائن النقدية
+            "111101": "111100",         # الخزنة الرئيسية
+            "111102": "111100",         # عهد نقدية موظفين
+            "111200": "111000",         # الحسابات البنكية
+            "111201": "111200",         # بنك مصر
+            "111300": "111000",         # المحافظ الإلكترونية
+            "111301": "111300",         # فودافون كاش الرئيسي
+            "111302": "111300",         # فودافون كاش الفرعي
+            "111303": "111300",         # InstaPay
+            "112000": "110000",         # العملاء وأوراق القبض
+            "112100": "112000",         # عملاء تجاريين
+            "112200": "112000",         # عملاء أفراد
+            "113000": "110000",         # أرصدة مدينة أخرى
+            "113100": "113000",         # مصروفات مدفوعة مقدماً
+            "113200": "113000",         # سلف العاملين
+            "120000": "100000",         # الأصول غير المتداولة
+            "121000": "120000",         # الأصول الثابتة
+            "121100": "121000",         # أجهزة حاسب
+            "121200": "121000",         # أثاث
+
+            # ==================== الخصوم (200000) ====================
+            "200000": None,             # الخصوم - جذر
+            "210000": "200000",         # الخصوم المتداولة
+            "211000": "210000",         # الموردين
+            "211100": "211000",         # موردين تشغيل
+            "211200": "211000",         # مستحقات مستقلين
+            "212000": "210000",         # أرصدة دائنة أخرى
+            "212100": "212000",         # دفعات مقدمة من العملاء
+            "212200": "212000",         # ضريبة القيمة المضافة
+
+            # ==================== حقوق الملكية (300000) ====================
+            "300000": None,             # حقوق الملكية - جذر
+            "310000": "300000",         # رأس المال
+            "320000": "300000",         # جاري المالك
+            "330000": "300000",         # الأرباح المرحلة
+
+            # ==================== الإيرادات (400000) ====================
+            "400000": None,             # الإيرادات - جذر
+            "410000": "400000",         # إيرادات التشغيل
+            "410100": "410000",         # إيرادات التسويق الرقمي
+            "410200": "410000",         # إيرادات تطوير المواقع
+            "410300": "410000",         # إيرادات الباقات
+
+            # ==================== تكاليف الإيرادات COGS (500000) ====================
+            "500000": None,             # تكاليف الإيرادات - جذر
+            "510000": "500000",         # تكاليف الحملات والتشغيل
+            "510001": "510000",         # ميزانية إعلانات
+            "510002": "510000",         # تكلفة استضافة
+            "510003": "510000",         # أجور مستقلين
+
+            # ==================== المصروفات التشغيلية OPEX (600000) ====================
+            "600000": None,             # المصروفات التشغيلية - جذر
+            "610000": "600000",         # المصروفات التسويقية
+            "610001": "610000",         # دعاية وإعلان
+            "610002": "610000",         # عمولات البيع
+            "620000": "600000",         # المصروفات الإدارية
+            "620001": "620000",         # رواتب الموظفين
+            "620002": "620000",         # إيجار ومرافق
+            "620003": "620000",         # إنترنت واتصالات
+            "620004": "620000",         # اشتراكات برمجيات
+            "630000": "600000",         # المصروفات المالية
+            "630001": "630000",         # رسوم بنكية
         }
-        
+
         updated_count = 0
         skipped_count = 0
         errors = []
-        
+
         try:
             # جلب جميع الحسابات
             all_accounts = self.repo.get_all_accounts()
             print(f"INFO: عدد الحسابات: {len(all_accounts)}")
-            
+
             for acc in all_accounts:
                 if not acc.code:
                     continue
-                
+
                 # الحصول على الأب الصحيح
                 correct_parent = CORRECT_PARENT_MAP.get(acc.code)
                 # قاعدة البيانات تستخدم parent_id
                 current_parent = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
-                
+
                 # إذا لم يكن الكود في الخريطة، نحاول استنتاج الأب
                 if acc.code not in CORRECT_PARENT_MAP:
                     # استنتاج الأب من الكود (مثال: 1105 -> 1100)
@@ -1994,39 +2392,39 @@ class AccountingService:
                             possible_parent = acc.code[:1] + "000"
                             if possible_parent in CORRECT_PARENT_MAP or any(a.code == possible_parent for a in all_accounts):
                                 correct_parent = possible_parent
-                
+
                 # التحقق مما إذا كان التحديث مطلوباً
                 current_str = str(current_parent).strip() if current_parent else None
                 correct_str = str(correct_parent).strip() if correct_parent else None
-                
+
                 if current_str != correct_str:
                     try:
                         account_id = acc._mongo_id or str(acc.id)
-                        
+
                         # تحديث الحساب - استخدام parent_id لأن قاعدة البيانات تستخدمه
                         updated_data = acc.model_copy(update={"parent_id": correct_parent, "parent_code": correct_parent})
                         self.repo.update_account(account_id, updated_data)
-                        
+
                         print(f"✅ تحديث {acc.code} ({acc.name}): {current_parent} -> {correct_parent}")
                         updated_count += 1
-                        
+
                     except Exception as e:
                         error_msg = f"فشل تحديث {acc.code}: {e}"
                         print(f"❌ {error_msg}")
                         errors.append(error_msg)
                 else:
                     skipped_count += 1
-            
+
             print("\n" + "=" * 60)
             print(f"✅ تم تحديث {updated_count} حساب")
             print(f"⏭️  تم تخطي {skipped_count} حساب (صحيح بالفعل)")
             if errors:
                 print(f"❌ فشل {len(errors)} عملية")
             print("=" * 60)
-            
+
             # إرسال إشارة التحديث
             app_signals.emit_data_changed('accounts')
-            
+
             return {
                 "success": len(errors) == 0,
                 "updated": updated_count,
@@ -2034,7 +2432,7 @@ class AccountingService:
                 "errors": errors,
                 "message": f"تم تحديث {updated_count} حساب"
             }
-            
+
         except Exception as e:
             error_msg = f"فشل إصلاح الحسابات: {e}"
             print(f"ERROR: [AccountingService] {error_msg}")
@@ -2051,53 +2449,53 @@ class AccountingService:
     def cleanup_all_data(self) -> dict:
         """
         تنظيف شامل للبيانات المكررة وإصلاح العلاقات
-        
+
         يقوم بـ:
         1. تنظيف العملاء المكررين
         2. تنظيف المشاريع المكررة
         3. تنظيف الدفعات المكررة
         4. إصلاح ربط الحسابات بالآباء
         5. تنظيف الحسابات الفرعية للعملاء
-        
+
         Returns:
             dict مع نتائج التنظيف الشامل
         """
         print("=" * 70)
         print("INFO: [AccountingService] ========== بدء التنظيف الشامل ==========")
         print("=" * 70)
-        
+
         results = {}
-        
+
         try:
             # 1. تنظيف التكرارات من Repository
             if hasattr(self.repo, 'cleanup_all_duplicates'):
                 print("\n📋 الخطوة 1: تنظيف التكرارات...")
                 results['duplicates'] = self.repo.cleanup_all_duplicates()
-            
+
             # 2. إصلاح ربط الحسابات
             print("\n📋 الخطوة 2: إصلاح ربط الحسابات...")
             results['accounts_fix'] = self.fix_accounts_parent_codes()
-            
+
             # 3. تنظيف الحسابات الفرعية للعملاء
             print("\n📋 الخطوة 3: تنظيف الحسابات الفرعية للعملاء...")
             results['client_accounts'] = self.cleanup_client_sub_accounts()
-            
+
             # إرسال إشارات التحديث
             app_signals.emit_data_changed('clients')
             app_signals.emit_data_changed('projects')
             app_signals.emit_data_changed('payments')
             app_signals.emit_data_changed('accounts')
-            
+
             print("\n" + "=" * 70)
             print("INFO: [AccountingService] ========== انتهى التنظيف الشامل ==========")
             print("=" * 70)
-            
+
             return {
                 "success": True,
                 "results": results,
                 "message": "تم التنظيف الشامل بنجاح"
             }
-            
+
         except Exception as e:
             error_msg = f"فشل التنظيف الشامل: {e}"
             print(f"ERROR: [AccountingService] {error_msg}")
@@ -2106,5 +2504,93 @@ class AccountingService:
             return {
                 "success": False,
                 "results": results,
+                "message": error_msg
+            }
+
+    def reset_to_enterprise_accounts(self) -> dict:
+        """
+        🔄 إعادة تعيين شجرة الحسابات إلى Enterprise Level (6 أرقام)
+
+        هذه الدالة تقوم بـ:
+        1. حذف جميع الحسابات القديمة (4 أرقام)
+        2. إنشاء شجرة الحسابات الجديدة (6 أرقام)
+
+        ⚠️ تحذير: هذه العملية ستحذف جميع الحسابات القديمة!
+        """
+        print("=" * 70)
+        print("🔄 [AccountingService] إعادة تعيين شجرة الحسابات إلى Enterprise Level...")
+        print("=" * 70)
+
+        deleted_count = 0
+        errors = []
+
+        try:
+            # 1. جلب جميع الحسابات الموجودة
+            all_accounts = self.repo.get_all_accounts()
+            print(f"INFO: عدد الحسابات الموجودة: {len(all_accounts)}")
+
+            # 2. تحديد الحسابات القديمة (4 أرقام أو أقل)
+            old_accounts = []
+            for acc in all_accounts:
+                if acc.code and len(acc.code) <= 4:
+                    old_accounts.append(acc)
+
+            print(f"INFO: عدد الحسابات القديمة (4 أرقام): {len(old_accounts)}")
+
+            # 3. حذف الحسابات القديمة (من الأوراق للجذور)
+            # ترتيب الحسابات بحيث نحذف الأبناء أولاً
+            old_accounts.sort(key=lambda x: len(x.code or ""), reverse=True)
+
+            for acc in old_accounts:
+                try:
+                    account_id = acc._mongo_id or str(acc.id) or acc.code
+                    success = self.repo.delete_account_permanently(account_id)
+                    if success:
+                        print(f"✅ تم حذف: {acc.code} - {acc.name}")
+                        deleted_count += 1
+                    else:
+                        print(f"⚠️ فشل حذف: {acc.code} - {acc.name}")
+                except Exception as e:
+                    error_msg = f"فشل حذف {acc.code}: {e}"
+                    print(f"❌ {error_msg}")
+                    errors.append(error_msg)
+
+            print(f"\n✅ تم حذف {deleted_count} حساب قديم")
+
+            # 4. إنشاء الحسابات الجديدة (Enterprise Level)
+            print("\n📊 جاري إنشاء شجرة الحسابات الجديدة (Enterprise Level)...")
+            seed_result = self.seed_default_accounts()
+
+            # 5. إبطال الـ cache
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+
+            # 6. إرسال إشارات التحديث
+            app_signals.emit_data_changed('accounts')
+
+            print("\n" + "=" * 70)
+            print("✅ [AccountingService] تم إعادة تعيين شجرة الحسابات بنجاح!")
+            print("=" * 70)
+
+            return {
+                "success": True,
+                "deleted": deleted_count,
+                "created": seed_result.get("created", 0),
+                "skipped": seed_result.get("skipped", 0),
+                "errors": errors + seed_result.get("errors", []),
+                "message": f"تم حذف {deleted_count} حساب قديم وإنشاء {seed_result.get('created', 0)} حساب جديد"
+            }
+
+        except Exception as e:
+            error_msg = f"فشل إعادة تعيين شجرة الحسابات: {e}"
+            print(f"ERROR: [AccountingService] {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "deleted": deleted_count,
+                "created": 0,
+                "skipped": 0,
+                "errors": errors + [error_msg],
                 "message": error_msg
             }

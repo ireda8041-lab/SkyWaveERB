@@ -5,8 +5,10 @@
 """
 
 from collections import defaultdict
-from typing import Callable, Any, Dict, List, Optional, Set
+from collections.abc import Callable
 from threading import Lock
+from typing import Any
+
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -15,10 +17,10 @@ logger = get_logger(__name__)
 class EventBus:
     """
     ناقل الأحداث (Event Bus)
-    
-    مسؤول عن توصيل الأحداث من الناشر (Publisher) 
+
+    مسؤول عن توصيل الأحداث من الناشر (Publisher)
     إلى المستمعين (Listeners/Subscribers).
-    
+
     الأحداث المدعومة:
     - CLIENT_CREATED: عند إنشاء عميل جديد
     - CLIENT_UPDATED: عند تحديث بيانات عميل
@@ -34,14 +36,14 @@ class EventBus:
     - SYNC_COMPLETED: عند اكتمال المزامنة
     - SYNC_FAILED: عند فشل المزامنة
     - NOTIFICATION_CREATED: عند إنشاء إشعار
-    
+
     Attributes:
         _handlers: قاموس المعالجات لكل حدث
         _lock: قفل للتزامن في البيئات متعددة الخيوط
     """
-    
+
     # قائمة الأحداث المعروفة (للتوثيق والتحقق)
-    KNOWN_EVENTS: Set[str] = {
+    KNOWN_EVENTS: set[str] = {
         "CLIENT_CREATED", "CLIENT_UPDATED", "CLIENT_DELETED",
         "PROJECT_CREATED", "PROJECT_UPDATED", "PROJECT_DELETED",
         "INVOICE_CREATED", "INVOICE_UPDATED", "INVOICE_VOIDED",
@@ -51,15 +53,15 @@ class EventBus:
         "SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED",
         "NOTIFICATION_CREATED",
     }
-    
+
     def __init__(self) -> None:
         """تهيئة نظام الأحداث"""
-        self._handlers: Dict[str, List[Callable[[Any], None]]] = defaultdict(list)
+        self._handlers: dict[str, list[Callable[[Any], None]]] = defaultdict(list)
         self._lock: Lock = Lock()
         logger.info("تم تهيئة EventBus")
 
     @property
-    def listeners(self) -> Dict[str, List[Callable]]:
+    def listeners(self) -> dict[str, list[Callable]]:
         """الوصول للمعالجات (للتوافق مع الكود القديم)"""
         return self._handlers
 
@@ -70,11 +72,11 @@ class EventBus:
     ) -> None:
         """
         الاشتراك في حدث
-        
+
         Args:
             event_name: اسم الحدث (مثل 'INVOICE_CREATED')
             listener_func: الدالة التي ستُستدعى عند حدوث الحدث
-        
+
         Example:
             >>> def on_invoice_created(data):
             ...     print(f"فاتورة جديدة: {data['invoice_number']}")
@@ -94,11 +96,11 @@ class EventBus:
     ) -> bool:
         """
         إلغاء الاشتراك من حدث
-        
+
         Args:
             event_name: اسم الحدث
             listener_func: الدالة المراد إلغاء اشتراكها
-        
+
         Returns:
             True إذا تم إلغاء الاشتراك بنجاح
         """
@@ -116,31 +118,31 @@ class EventBus:
     def publish(
         self,
         event_name: str,
-        data: Optional[Any] = None
+        data: Any | None = None
     ) -> int:
         """
         نشر حدث
-        
+
         Args:
             event_name: اسم الحدث
             data: البيانات المرفقة مع الحدث
-        
+
         Returns:
             عدد المستمعين الذين تم إخطارهم بنجاح
-        
+
         Example:
             >>> bus.publish('INVOICE_CREATED', {'invoice_number': 'INV-001'})
         """
         with self._lock:
             handlers = list(self._handlers.get(event_name, []))
-        
+
         if not handlers:
             logger.debug(f"لا يوجد مستمعين لحدث: {event_name}")
             return 0
-        
+
         logger.info(f"جاري نشر حدث: {event_name} ({len(handlers)} مستمع)")
         logger.debug(f"بيانات الحدث: {data}")
-        
+
         success_count = 0
         for listener_func in handlers:
             try:
@@ -152,16 +154,16 @@ class EventBus:
                     f"فشل المستمع {func_name} في معالجة حدث {event_name}: {e}",
                     exc_info=True
                 )
-        
+
         return success_count
 
     def has_subscribers(self, event_name: str) -> bool:
         """
         التحقق من وجود مشتركين لحدث
-        
+
         Args:
             event_name: اسم الحدث
-        
+
         Returns:
             True إذا كان هناك مشتركين
         """
@@ -171,10 +173,10 @@ class EventBus:
     def get_subscriber_count(self, event_name: str) -> int:
         """
         الحصول على عدد المشتركين لحدث
-        
+
         Args:
             event_name: اسم الحدث
-        
+
         Returns:
             عدد المشتركين
         """
@@ -184,7 +186,7 @@ class EventBus:
     def clear_event(self, event_name: str) -> None:
         """
         مسح جميع المشتركين لحدث معين
-        
+
         Args:
             event_name: اسم الحدث
         """
@@ -199,10 +201,10 @@ class EventBus:
             self._handlers.clear()
             logger.info("تم مسح جميع المشتركين")
 
-    def get_all_events(self) -> List[str]:
+    def get_all_events(self) -> list[str]:
         """
         الحصول على قائمة الأحداث التي لها مشتركين
-        
+
         Returns:
             قائمة أسماء الأحداث
         """
@@ -214,7 +216,7 @@ class EventBus:
 
 # (ده مجرد مثال عشان نتأكد إن الإذاعة شغالة)
 if __name__ == "__main__":
-    
+
     # 1. تعريف "مستمعين" (وظايف عادية)
     def accountant_listener(invoice_data):
         print(f"  >> المحاسب سمع: تم إنشاء فاتورة جديدة برقم {invoice_data['number']}")
@@ -225,7 +227,7 @@ if __name__ == "__main__":
 
     # 2. تشغيل الإذاعة
     bus = EventBus()
-    
+
     # 3. الأقسام بتشترك في الإذاعة
     bus.subscribe('INVOICE_CREATED', accountant_listener)
     bus.subscribe('INVOICE_CREATED', notification_listener)

@@ -3,8 +3,8 @@
 1. أرقام الفواتير الفارغة
 2. الخدمات المكررة
 """
-import sqlite3
 import os
+import sqlite3
 from datetime import datetime
 
 db_path = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'SkyWaveERP', 'skywave_local.db')
@@ -37,7 +37,7 @@ cursor.execute("SELECT COUNT(*) FROM services")
 before_count = cursor.fetchone()[0]
 
 cursor.execute('''
-    DELETE FROM services 
+    DELETE FROM services
     WHERE id NOT IN (
         SELECT MIN(id) FROM services GROUP BY name
     )
@@ -66,11 +66,11 @@ next_num = (max_num_row or 97161) + 1 if max_num_row and max_num_row > 97161 els
 for proj in projects:
     proj_id = proj['id']
     proj_name = proj['name']
-    
+
     # تحقق من وجود رقم فاتورة محفوظ
     cursor.execute("SELECT invoice_number FROM invoice_numbers WHERE project_name = ?", (proj_name,))
     existing = cursor.fetchone()
-    
+
     if existing:
         invoice_number = existing['invoice_number']
     else:
@@ -81,7 +81,7 @@ for proj in projects:
             (proj_name, invoice_number, datetime.now().isoformat())
         )
         next_num += 1
-    
+
     # تحديث المشروع برقم الفاتورة
     cursor.execute("UPDATE projects SET invoice_number = ? WHERE id = ?", (invoice_number, proj_id))
     print(f"   {proj_name}: {invoice_number}")

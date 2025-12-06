@@ -1,22 +1,29 @@
 # الملف: ui/client_manager.py
 
-from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLabel, QMessageBox, QGroupBox, QCheckBox,
-    QApplication, QDialog
-)
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
-from PyQt6.QtGui import QPixmap, QColor, QFont
-from services.client_service import ClientService
-from core import schemas
-from typing import List, Optional
-
-from ui.client_editor_dialog import ClientEditorDialog
-from ui.styles import BUTTON_STYLES, TABLE_STYLE
 import os
 
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QColor, QFont, QPixmap
+from PyQt6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-
+from core import schemas
+from services.client_service import ClientService
+from ui.client_editor_dialog import ClientEditorDialog
+from ui.styles import BUTTON_STYLES
 
 
 class ClientManagerTab(QWidget):
@@ -28,8 +35,8 @@ class ClientManagerTab(QWidget):
         super().__init__(parent)
 
         self.client_service = client_service
-        self.clients_list: List[schemas.Client] = []
-        self.selected_client: Optional[schemas.Client] = None
+        self.clients_list: list[schemas.Client] = []
+        self.selected_client: schemas.Client | None = None
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -37,7 +44,7 @@ class ClientManagerTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
         app_signals.clients_changed.connect(self._on_clients_changed)
@@ -89,10 +96,10 @@ class ClientManagerTab(QWidget):
         self.clients_table = QTableWidget()
         self.clients_table.setColumnCount(8)
         self.clients_table.setHorizontalHeaderLabels(["اللوجو", "الاسم", "الشركة", "الهاتف", "الإيميل", "💰 إجمالي المشاريع", "✅ إجمالي المدفوعات", "الحالة"])
-        
+
         # ⚡ تفعيل الترتيب بالضغط على رأس العمود
         self.clients_table.setSortingEnabled(True)
-        
+
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
         self.search_bar = UniversalSearchBar(
@@ -101,26 +108,30 @@ class ClientManagerTab(QWidget):
         )
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
-        
+
         self.clients_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.clients_table.setAlternatingRowColors(True)
-        self.clients_table.verticalHeader().setDefaultSectionSize(70)  # ⚡ ارتفاع الصفوف (تم تكبيره)
-        self.clients_table.verticalHeader().setVisible(False)
-        self.clients_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        self.clients_table.setColumnWidth(0, 70)
-        self.clients_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.clients_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.clients_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-        self.clients_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-        self.clients_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        self.clients_table.setColumnWidth(5, 150)
-        self.clients_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        self.clients_table.setColumnWidth(6, 150)
-        self.clients_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        v_header = self.clients_table.verticalHeader()
+        if v_header is not None:
+            v_header.setDefaultSectionSize(70)  # ⚡ ارتفاع الصفوف (تم تكبيره)
+            v_header.setVisible(False)
+        h_header = self.clients_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            self.clients_table.setColumnWidth(0, 70)
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+            self.clients_table.setColumnWidth(5, 150)
+            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+            self.clients_table.setColumnWidth(6, 150)
+            h_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
         self.clients_table.itemSelectionChanged.connect(self.on_client_selection_changed)
-        
+
         # إضافة دبل كليك للتعديل
         self.clients_table.itemDoubleClicked.connect(self.open_editor_for_selected)
 
@@ -130,7 +141,7 @@ class ClientManagerTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_clients_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
-    
+
     def export_clients(self):
         """تصدير العملاء إلى Excel"""
         try:
@@ -138,16 +149,16 @@ class ClientManagerTab(QWidget):
             main_window = self.parent()
             while main_window and not hasattr(main_window, 'export_service'):
                 main_window = main_window.parent()
-            
+
             export_service = getattr(main_window, 'export_service', None) if main_window else None
-            
+
             if not export_service:
                 QMessageBox.warning(self, "خدمة التصدير غير متوفرة", "يرجى تثبيت pandas: pip install pandas openpyxl")
                 return
-            
+
             # تصدير العملاء
             filepath = export_service.export_clients_to_excel(self.clients_list)
-            
+
             if filepath:
                 reply = QMessageBox.question(
                     self,
@@ -155,31 +166,31 @@ class ClientManagerTab(QWidget):
                     f"تم تصدير {len(self.clients_list)} عميل بنجاح إلى:\n{filepath}\n\nهل تريد فتح الملف؟",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
-                
+
                 if reply == QMessageBox.StandardButton.Yes:
                     export_service.open_file(filepath)
             else:
                 QMessageBox.warning(self, "خطأ", "فشل في تصدير البيانات")
-                
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في التصدير:\n{str(e)}")
-    
+
     def import_clients(self):
         """استيراد العملاء من ملف Excel"""
         try:
             from PyQt6.QtWidgets import QFileDialog
-            
+
             # الحصول على خدمة التصدير من النافذة الرئيسية
             main_window = self.parent()
             while main_window and not hasattr(main_window, 'export_service'):
                 main_window = main_window.parent()
-            
+
             export_service = getattr(main_window, 'export_service', None) if main_window else None
-            
+
             if not export_service:
                 QMessageBox.warning(self, "خدمة الاستيراد غير متوفرة", "يرجى تثبيت pandas: pip install pandas openpyxl")
                 return
-            
+
             # اختيار ملف Excel
             filepath, _ = QFileDialog.getOpenFileName(
                 self,
@@ -187,36 +198,36 @@ class ClientManagerTab(QWidget):
                 "",
                 "Excel Files (*.xlsx *.xls)"
             )
-            
+
             if not filepath:
                 return
-            
+
             # استيراد البيانات
             clients_data, errors = export_service.import_clients_from_excel(filepath)
-            
+
             if errors:
                 error_msg = "\n".join(errors[:10])  # عرض أول 10 أخطاء
                 if len(errors) > 10:
                     error_msg += f"\n... و {len(errors) - 10} خطأ آخر"
-                
+
                 reply = QMessageBox.question(
                     self,
                     "تحذير",
                     f"تم العثور على {len(errors)} خطأ:\n\n{error_msg}\n\nهل تريد المتابعة باستيراد البيانات الصحيحة ({len(clients_data)} عميل)؟",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                 )
-                
+
                 if reply == QMessageBox.StandardButton.No:
                     return
-            
+
             if not clients_data:
                 QMessageBox.warning(self, "لا توجد بيانات", "لم يتم العثور على بيانات صحيحة للاستيراد")
                 return
-            
+
             # استيراد العملاء
             success_count = 0
             failed_count = 0
-            
+
             for client_dict in clients_data:
                 try:
                     # إنشاء عميل جديد
@@ -226,17 +237,17 @@ class ClientManagerTab(QWidget):
                 except Exception as e:
                     print(f"ERROR: فشل استيراد عميل {client_dict.get('name')}: {e}")
                     failed_count += 1
-            
+
             # تحديث الجدول
             self.load_clients_data()
-            
+
             # عرض النتيجة
             result_msg = f"✅ تم استيراد {success_count} عميل بنجاح"
             if failed_count > 0:
                 result_msg += f"\n❌ فشل استيراد {failed_count} عميل"
-            
+
             QMessageBox.information(self, "نتيجة الاستيراد", result_msg)
-            
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في الاستيراد:\n{str(e)}")
 
@@ -257,17 +268,16 @@ class ClientManagerTab(QWidget):
     def load_clients_data(self):
         """⚡ تحميل بيانات العملاء في الخلفية لمنع التجميد"""
         print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
-        
+
         from core.data_loader import get_data_loader
-        from PyQt6.QtWidgets import QApplication
-        
+
         # تحضير الجدول
         self.clients_table.setSortingEnabled(False)
         self.clients_table.setUpdatesEnabled(False)
         self.clients_table.blockSignals(True)
         self.clients_table.setRowCount(0)
         QApplication.processEvents()
-        
+
         # دالة جلب البيانات (تعمل في الخلفية)
         def fetch_clients():
             try:
@@ -276,11 +286,11 @@ class ClientManagerTab(QWidget):
                     clients = self.client_service.get_archived_clients()
                 else:
                     clients = self.client_service.get_all_clients()
-                
+
                 # جلب الإجماليات
                 client_invoices_total = {}
                 client_payments_total = {}
-                
+
                 try:
                     self.client_service.repo.sqlite_cursor.execute("""
                         SELECT client_id, SUM(total_amount) as total_projects
@@ -288,20 +298,20 @@ class ClientManagerTab(QWidget):
                         WHERE status != 'مؤرشف' AND status != 'ملغي'
                         GROUP BY client_id
                     """)
-                    client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                    client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0
                                             for row in self.client_service.repo.sqlite_cursor.fetchall()}
-                    
+
                     self.client_service.repo.sqlite_cursor.execute("""
                         SELECT client_id, SUM(amount) as total_paid
                         FROM payments
                         WHERE client_id IS NOT NULL AND client_id != ''
                         GROUP BY client_id
                     """)
-                    client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0 
+                    client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0
                                             for row in self.client_service.repo.sqlite_cursor.fetchall()}
                 except Exception as e:
                     print(f"ERROR: فشل حساب الإجماليات: {e}")
-                
+
                 return {
                     'clients': clients,
                     'invoices_total': client_invoices_total,
@@ -310,16 +320,16 @@ class ClientManagerTab(QWidget):
             except Exception as e:
                 print(f"ERROR: [ClientManager] فشل جلب العملاء: {e}")
                 return {'clients': [], 'invoices_total': {}, 'payments_total': {}}
-        
+
         # دالة تحديث الواجهة
         def on_data_loaded(data):
             try:
                 self.clients_list = data['clients']
                 client_invoices_total = data['invoices_total']
                 client_payments_total = data['payments_total']
-                
+
                 self._populate_clients_table(client_invoices_total, client_payments_total)
-                
+
             except Exception as e:
                 print(f"ERROR: [ClientManager] فشل تحديث الجدول: {e}")
                 import traceback
@@ -328,13 +338,13 @@ class ClientManagerTab(QWidget):
                 self.clients_table.blockSignals(False)
                 self.clients_table.setUpdatesEnabled(True)
                 self.clients_table.setSortingEnabled(True)
-        
+
         def on_error(error_msg):
             print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
             self.clients_table.blockSignals(False)
             self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
-        
+
         # تحميل البيانات في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -344,11 +354,10 @@ class ClientManagerTab(QWidget):
             on_error=on_error,
             use_thread_pool=True
         )
-    
+
     def _populate_clients_table(self, client_invoices_total, client_payments_total):
         """ملء جدول العملاء بالبيانات"""
-        from PyQt6.QtWidgets import QApplication
-        
+
         # ⚡ تحميل البيانات على دفعات لمنع التجميد
         batch_size = 15
         for index, client in enumerate(self.clients_list):
@@ -356,9 +365,9 @@ class ClientManagerTab(QWidget):
 
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
+
             pixmap = None
-            
+
             # أولاً: محاولة تحميل الصورة من base64 (للمزامنة بين الأجهزة)
             if hasattr(client, 'logo_data') and client.logo_data:
                 try:
@@ -367,19 +376,19 @@ class ClientManagerTab(QWidget):
                     logo_data = client.logo_data
                     if ',' in logo_data:
                         logo_data = logo_data.split(',')[1]
-                    
+
                     img_bytes = base64.b64decode(logo_data)
                     pixmap = QPixmap()
                     pixmap.loadFromData(img_bytes)
-                except Exception as e:
+                except Exception:
                     # ⚡ تجاهل الخطأ بصمت لتجنب البطء
                     pixmap = None
-            
+
             # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
             if not pixmap or pixmap.isNull():
                 if client.logo_path and os.path.exists(client.logo_path):
                     pixmap = QPixmap(client.logo_path)
-            
+
             # عرض الصورة أو أيقونة افتراضية
             if pixmap and not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
@@ -393,10 +402,10 @@ class ClientManagerTab(QWidget):
                 logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
 
             self.clients_table.setCellWidget(index, 0, logo_label)
-            
+
             # ⚡ معالجة الأحداث كل batch_size صف
             if (index + 1) % batch_size == 0:
-                QApplication.processEvents()
+                QApplication.processEvents()  # noqa: F823
 
             self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
             self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
@@ -407,7 +416,7 @@ class ClientManagerTab(QWidget):
             client_name = client.name
             total_invoices = client_invoices_total.get(client_name, 0.0)
             total_payments = client_payments_total.get(client_name, 0.0)
-            
+
             # عرض إجمالي الفواتير
             total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
             total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
@@ -438,10 +447,10 @@ class ClientManagerTab(QWidget):
             self.clients_table.setItem(index, 7, status_item)
 
         print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
-        
-        from PyQt6.QtWidgets import QApplication
+
+        # QApplication مستورد في أعلى الملف
         QApplication.processEvents()
-        
+
         self.selected_client = None
         self.update_buttons_state(False)
 
@@ -450,7 +459,7 @@ class ClientManagerTab(QWidget):
         print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
         self.load_clients_data()
 
-    def open_editor(self, client_to_edit: Optional[schemas.Client]):
+    def open_editor(self, client_to_edit: schemas.Client | None):
         dialog = ClientEditorDialog(
             client_service=self.client_service,
             client_to_edit=client_to_edit,

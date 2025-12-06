@@ -6,14 +6,12 @@
 """
 
 from datetime import datetime, timedelta
-from typing import List, Optional
-from core.schemas import (
-    Notification, NotificationType, NotificationPriority
-)
-from core.repository import Repository
+
+from core.error_handler import ErrorHandler
 from core.event_bus import EventBus
 from core.logger import get_logger
-from core.error_handler import ErrorHandler
+from core.repository import Repository
+from core.schemas import Notification, NotificationPriority, NotificationType
 
 logger = get_logger(__name__)
 error_handler = ErrorHandler()
@@ -27,54 +25,54 @@ class NotificationService:
     - تحديد الإشعارات كمقروءة
     - حذف الإشعارات القديمة
     """
-    
+
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
         تهيئة خدمة الإشعارات
-        
+
         Args:
             repository: مخزن البيانات
             event_bus: ناقل الأحداث
         """
         self.repo = repository
         self.event_bus = event_bus
-        
+
         # الاشتراك في الأحداث المهمة
         self._subscribe_to_events()
-        
+
         logger.info("تم تهيئة NotificationService")
-    
+
     def _subscribe_to_events(self):
         """⚡ الاشتراك في جميع الأحداث المهمة لإنشاء إشعارات تلقائية"""
         # إشعارات الدفعات
         self.event_bus.subscribe("PAYMENT_RECORDED", self._on_payment_recorded)
-        
+
         # إشعارات المزامنة
         self.event_bus.subscribe("SYNC_FAILED", self._on_sync_failed)
-        
+
         # ⚡ إشعارات جديدة - آخر 10 أحداث
         self.event_bus.subscribe("CLIENT_CREATED", self._on_client_created)
         self.event_bus.subscribe("PROJECT_CREATED", self._on_project_created)
         self.event_bus.subscribe("INVOICE_CREATED", self._on_invoice_created)
         self.event_bus.subscribe("EXPENSE_CREATED", self._on_expense_created)
         self.event_bus.subscribe("QUOTATION_CREATED", self._on_quotation_created)
-        
+
         logger.debug("تم الاشتراك في أحداث الإشعارات")
-    
+
     def create_notification(
         self,
         title: str,
         message: str,
         type: NotificationType = NotificationType.INFO,
         priority: NotificationPriority = NotificationPriority.MEDIUM,
-        related_entity_type: Optional[str] = None,
-        related_entity_id: Optional[str] = None,
-        action_url: Optional[str] = None,
-        expires_at: Optional[datetime] = None
-    ) -> Optional[Notification]:
+        related_entity_type: str | None = None,
+        related_entity_id: str | None = None,
+        action_url: str | None = None,
+        expires_at: datetime | None = None
+    ) -> Notification | None:
         """
         إنشاء إشعار جديد
-        
+
         Args:
             title: عنوان الإشعار
             message: نص الإشعار
@@ -84,7 +82,7 @@ class NotificationService:
             related_entity_id: معرف الكيان المرتبط
             action_url: رابط الإجراء
             expires_at: تاريخ انتهاء الصلاحية
-            
+
         Returns:
             الإشعار المنشأ أو None في حالة الفشل
         """
@@ -99,10 +97,10 @@ class NotificationService:
                 action_url=action_url,
                 expires_at=expires_at
             )
-            
+
             # حفظ في قاعدة البيانات
             saved_notification = self._save_notification(notification)
-            
+
             if saved_notification:
                 # إرسال حدث إنشاء إشعار جديد
                 self.event_bus.publish("NOTIFICATION_CREATED", {
@@ -110,226 +108,246 @@ class NotificationService:
                     'type': type.value,
                     'priority': priority.value
                 })
-                
+
                 logger.info(f"تم إنشاء إشعار: {title}")
                 return saved_notification
-            
+
             return None
-        
+
         except Exception as e:
             error_handler.handle_exception(e, f"فشل إنشاء الإشعار: {title}")
             return None
-    
-    def _save_notification(self, notification: Notification) -> Optional[Notification]:
-        """حفظ الإشعار في قاعدة البيانات"""
+
+    def _save_notification(self, notification: Notification) -> Notification | None:
+        """حفظ الإشعار في قاعدة البيانات - يستخدم cursor منفصل"""
         try:
             now = datetime.now().isoformat()
-            
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                INSERT INTO notifications (
-                    sync_status, created_at, last_modified,
-                    title, message, type, priority, is_read,
-                    related_entity_type, related_entity_id,
-                    action_url, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                'new_offline', now, now,
-                notification.title,
-                notification.message,
-                notification.type.value,
-                notification.priority.value,
-                0,  # is_read = False
-                notification.related_entity_type,
-                notification.related_entity_id,
-                notification.action_url,
-                notification.expires_at.isoformat() if notification.expires_at else None
-            ))
-            
-            self.repo.sqlite_conn.commit()
-            notification.id = cursor.lastrowid
-            
-            # محاولة الحفظ في MongoDB
-            if self.repo.online:
-                try:
-                    notification_dict = notification.model_dump(exclude={'_mongo_id'})
-                    result = self.repo.mongo_db.notifications.insert_one(notification_dict)
-                    
-                    # تحديث _mongo_id
-                    mongo_id = str(result.inserted_id)
-                    cursor.execute(
-                        "UPDATE notifications SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
-                        (mongo_id, notification.id)
-                    )
-                    self.repo.sqlite_conn.commit()
-                except Exception as e:
-                    logger.warning(f"فشل حفظ الإشعار في MongoDB: {e}")
-            
+
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    INSERT INTO notifications (
+                        sync_status, created_at, last_modified,
+                        title, message, type, priority, is_read,
+                        related_entity_type, related_entity_id,
+                        action_url, expires_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    'new_offline', now, now,
+                    notification.title,
+                    notification.message,
+                    notification.type.value,
+                    notification.priority.value,
+                    0,  # is_read = False
+                    notification.related_entity_type,
+                    notification.related_entity_id,
+                    notification.action_url,
+                    notification.expires_at.isoformat() if notification.expires_at else None
+                ))
+
+                self.repo.sqlite_conn.commit()
+                notification.id = cursor.lastrowid
+
+                # محاولة الحفظ في MongoDB
+                if self.repo.online:
+                    try:
+                        notification_dict = notification.model_dump(exclude={'_mongo_id'})
+                        result = self.repo.mongo_db.notifications.insert_one(notification_dict)
+
+                        # تحديث _mongo_id
+                        mongo_id = str(result.inserted_id)
+                        cursor.execute(
+                            "UPDATE notifications SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                            (mongo_id, notification.id)
+                        )
+                        self.repo.sqlite_conn.commit()
+                    except Exception as e:
+                        logger.warning(f"فشل حفظ الإشعار في MongoDB: {e}")
+            finally:
+                cursor.close()
+
             return notification
-        
+
         except Exception as e:
             logger.error(f"فشل حفظ الإشعار: {e}")
             return None
-    
-    def get_unread_notifications(self, limit: int = 50) -> List[Notification]:
+
+    def get_unread_notifications(self, limit: int = 50) -> list[Notification]:
         """
         الحصول على الإشعارات غير المقروءة
-        
+        ⚡ يستخدم cursor منفصل لتجنب Recursive cursor
+
         Args:
             limit: الحد الأقصى لعدد الإشعارات
-            
+
         Returns:
             قائمة الإشعارات غير المقروءة
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                SELECT * FROM notifications 
-                WHERE is_read = 0 
-                AND (expires_at IS NULL OR expires_at > ?)
-                ORDER BY created_at DESC 
-                LIMIT ?
-            """, (datetime.now().isoformat(), limit))
-            
-            rows = cursor.fetchall()
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT * FROM notifications
+                    WHERE is_read = 0
+                    AND (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (datetime.now().isoformat(), limit))
+
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
             notifications = []
-            
             for row in rows:
                 notification = self._row_to_notification(row)
                 if notification:
                     notifications.append(notification)
-            
+
             return notifications
-        
+
         except Exception as e:
             logger.error(f"فشل الحصول على الإشعارات غير المقروءة: {e}")
             return []
-    
-    def get_all_notifications(self, limit: int = 100) -> List[Notification]:
+
+    def get_all_notifications(self, limit: int = 100) -> list[Notification]:
         """
-        الحصول على جميع الإشعارات
-        
+        الحصول على جميع الإشعارات - يستخدم cursor منفصل
+
         Args:
             limit: الحد الأقصى لعدد الإشعارات
-            
+
         Returns:
             قائمة جميع الإشعارات
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                SELECT * FROM notifications 
-                WHERE (expires_at IS NULL OR expires_at > ?)
-                ORDER BY created_at DESC 
-                LIMIT ?
-            """, (datetime.now().isoformat(), limit))
-            
-            rows = cursor.fetchall()
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT * FROM notifications
+                    WHERE (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (datetime.now().isoformat(), limit))
+
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
             notifications = []
-            
             for row in rows:
                 notification = self._row_to_notification(row)
                 if notification:
                     notifications.append(notification)
-            
+
             return notifications
-        
+
         except Exception as e:
             logger.error(f"فشل الحصول على الإشعارات: {e}")
             return []
-    
-    def get_recent_activities(self, limit: int = 10) -> List[Notification]:
+
+    def get_recent_activities(self, limit: int = 10) -> list[Notification]:
         """
-        ⚡ الحصول على آخر 10 أنشطة/أحداث في البرنامج
-        
+        ⚡ الحصول على آخر 10 أنشطة/أحداث في البرنامج - يستخدم cursor منفصل
+
         Args:
             limit: عدد الأنشطة (افتراضي 10)
-            
+
         Returns:
             قائمة آخر الأنشطة
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                SELECT * FROM notifications 
-                ORDER BY created_at DESC 
-                LIMIT ?
-            """, (limit,))
-            
-            rows = cursor.fetchall()
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT * FROM notifications
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (limit,))
+
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
             activities = []
-            
             for row in rows:
                 notification = self._row_to_notification(row)
                 if notification:
                     activities.append(notification)
-            
+
             logger.debug(f"تم جلب {len(activities)} نشاط حديث")
             return activities
-        
+
         except Exception as e:
             logger.error(f"فشل الحصول على الأنشطة الحديثة: {e}")
             return []
-    
+
     def mark_as_read(self, notification_id: int) -> bool:
         """
-        تحديد إشعار كمقروء
-        
+        تحديد إشعار كمقروء - يستخدم cursor منفصل
+
         Args:
             notification_id: معرف الإشعار
-            
+
         Returns:
             True إذا نجحت العملية
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                UPDATE notifications 
-                SET is_read = 1, last_modified = ?
-                WHERE id = ?
-            """, (datetime.now().isoformat(), notification_id))
-            
-            self.repo.sqlite_conn.commit()
-            
-            # محاولة التحديث في MongoDB
-            if self.repo.online:
-                try:
-                    cursor.execute("SELECT _mongo_id FROM notifications WHERE id = ?", (notification_id,))
-                    row = cursor.fetchone()
-                    
-                    if row and row['_mongo_id']:
-                        from bson import ObjectId
-                        self.repo.mongo_db.notifications.update_one(
-                            {'_id': ObjectId(row['_mongo_id'])},
-                            {'$set': {'is_read': True}}
-                        )
-                except Exception as e:
-                    logger.warning(f"فشل تحديث الإشعار في MongoDB: {e}")
-            
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    UPDATE notifications
+                    SET is_read = 1, last_modified = ?
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), notification_id))
+
+                self.repo.sqlite_conn.commit()
+
+                # محاولة التحديث في MongoDB
+                if self.repo.online:
+                    try:
+                        cursor.execute("SELECT _mongo_id FROM notifications WHERE id = ?", (notification_id,))
+                        row = cursor.fetchone()
+
+                        if row and row['_mongo_id']:
+                            from bson import ObjectId
+                            self.repo.mongo_db.notifications.update_one(
+                                {'_id': ObjectId(row['_mongo_id'])},
+                                {'$set': {'is_read': True}}
+                            )
+                    except Exception as e:
+                        logger.warning(f"فشل تحديث الإشعار في MongoDB: {e}")
+            finally:
+                cursor.close()
+
             logger.debug(f"تم تحديد الإشعار {notification_id} كمقروء")
             return True
-        
+
         except Exception as e:
             logger.error(f"فشل تحديد الإشعار كمقروء: {e}")
             return False
-    
+
     def mark_all_as_read(self) -> bool:
         """
-        تحديد جميع الإشعارات كمقروءة
-        
+        تحديد جميع الإشعارات كمقروءة - يستخدم cursor منفصل
+
         Returns:
             True إذا نجحت العملية
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                UPDATE notifications 
-                SET is_read = 1, last_modified = ?
-                WHERE is_read = 0
-            """, (datetime.now().isoformat(),))
-            
-            self.repo.sqlite_conn.commit()
-            
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    UPDATE notifications
+                    SET is_read = 1, last_modified = ?
+                    WHERE is_read = 0
+                """, (datetime.now().isoformat(),))
+
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
+
             # محاولة التحديث في MongoDB
             if self.repo.online:
                 try:
@@ -339,35 +357,37 @@ class NotificationService:
                     )
                 except Exception as e:
                     logger.warning(f"فشل تحديث الإشعارات في MongoDB: {e}")
-            
+
             logger.info("تم تحديد جميع الإشعارات كمقروءة")
             return True
-        
+
         except Exception as e:
             logger.error(f"فشل تحديد جميع الإشعارات كمقروءة: {e}")
             return False
-    
+
     def delete_notification(self, notification_id: int) -> bool:
         """
-        حذف إشعار
-        
+        حذف إشعار - يستخدم cursor منفصل
+
         Args:
             notification_id: معرف الإشعار
-            
+
         Returns:
             True إذا نجحت العملية
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            
-            # الحصول على _mongo_id قبل الحذف
-            cursor.execute("SELECT _mongo_id FROM notifications WHERE id = ?", (notification_id,))
-            row = cursor.fetchone()
-            
-            # حذف من SQLite
-            cursor.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
-            self.repo.sqlite_conn.commit()
-            
+            cursor = self.repo.get_cursor()
+            try:
+                # الحصول على _mongo_id قبل الحذف
+                cursor.execute("SELECT _mongo_id FROM notifications WHERE id = ?", (notification_id,))
+                row = cursor.fetchone()
+
+                # حذف من SQLite
+                cursor.execute("DELETE FROM notifications WHERE id = ?", (notification_id,))
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
+
             # محاولة الحذف من MongoDB
             if self.repo.online and row and row['_mongo_id']:
                 try:
@@ -377,36 +397,39 @@ class NotificationService:
                     )
                 except Exception as e:
                     logger.warning(f"فشل حذف الإشعار من MongoDB: {e}")
-            
+
             logger.debug(f"تم حذف الإشعار {notification_id}")
             return True
-        
+
         except Exception as e:
             logger.error(f"فشل حذف الإشعار: {e}")
             return False
-    
+
     def delete_old_notifications(self, days: int = 30) -> int:
         """
-        حذف الإشعارات القديمة
-        
+        حذف الإشعارات القديمة - يستخدم cursor منفصل
+
         Args:
             days: عدد الأيام (الإشعارات الأقدم من هذا سيتم حذفها)
-            
+
         Returns:
             عدد الإشعارات المحذوفة
         """
         try:
             cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-            
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                DELETE FROM notifications 
-                WHERE created_at < ? AND is_read = 1
-            """, (cutoff_date,))
-            
-            deleted_count = cursor.rowcount
-            self.repo.sqlite_conn.commit()
-            
+
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    DELETE FROM notifications
+                    WHERE created_at < ? AND is_read = 1
+                """, (cutoff_date,))
+
+                deleted_count = cursor.rowcount
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
+
             # محاولة الحذف من MongoDB
             if self.repo.online:
                 try:
@@ -416,37 +439,41 @@ class NotificationService:
                     })
                 except Exception as e:
                     logger.warning(f"فشل حذف الإشعارات القديمة من MongoDB: {e}")
-            
+
             logger.info(f"تم حذف {deleted_count} إشعار قديم")
-            return deleted_count
-        
+            return int(deleted_count)
+
         except Exception as e:
             logger.error(f"فشل حذف الإشعارات القديمة: {e}")
             return 0
-    
+
     def get_unread_count(self) -> int:
         """
         الحصول على عدد الإشعارات غير المقروءة
-        
+        ⚡ يستخدم cursor منفصل لتجنب Recursive cursor
+
         Returns:
             عدد الإشعارات غير المقروءة
         """
         try:
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                SELECT COUNT(*) FROM notifications 
-                WHERE is_read = 0 
-                AND (expires_at IS NULL OR expires_at > ?)
-            """, (datetime.now().isoformat(),))
-            
-            result = cursor.fetchone()
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            with self.repo._lock:
+                temp_cursor = self.repo.sqlite_conn.cursor()
+                temp_cursor.execute("""
+                    SELECT COUNT(*) FROM notifications
+                    WHERE is_read = 0
+                    AND (expires_at IS NULL OR expires_at > ?)
+                """, (datetime.now().isoformat(),))
+
+                result = temp_cursor.fetchone()
+                temp_cursor.close()
             return result[0] if result else 0
-        
+
         except Exception as e:
             logger.error(f"فشل الحصول على عدد الإشعارات غير المقروءة: {e}")
             return 0
-    
-    def _row_to_notification(self, row) -> Optional[Notification]:
+
+    def _row_to_notification(self, row) -> Notification | None:
         """تحويل صف من قاعدة البيانات إلى كائن Notification"""
         try:
             return Notification(
@@ -462,21 +489,21 @@ class NotificationService:
                 related_entity_id=row['related_entity_id'],
                 action_url=row['action_url'],
                 expires_at=datetime.fromisoformat(row['expires_at']) if row['expires_at'] else None,
-                mongo_id=row['_mongo_id'],
+                _mongo_id=row['_mongo_id'],
                 sync_status=row['sync_status']
             )
         except Exception as e:
             logger.error(f"فشل تحويل صف إلى Notification: {e}")
             return None
-    
+
     # --- معالجات الأحداث ---
-    
+
     def _on_payment_recorded(self, data: dict):
         """معالج حدث تسجيل دفعة جديدة"""
         try:
             amount = data.get('amount', 0)
             project_name = data.get('project_name', 'غير معروف')
-            
+
             self.create_notification(
                 title="تم تسجيل دفعة جديدة",
                 message=f"تم تسجيل دفعة بمبلغ {amount:.2f} جنيه للمشروع '{project_name}'",
@@ -487,12 +514,12 @@ class NotificationService:
             )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار الدفعة: {e}")
-    
+
     def _on_sync_failed(self, data: dict):
         """معالج حدث فشل المزامنة"""
         try:
             error_message = data.get('error', 'خطأ غير معروف')
-            
+
             self.create_notification(
                 title="فشلت عملية المزامنة",
                 message=f"فشلت المزامنة مع السحابة: {error_message}",
@@ -503,9 +530,9 @@ class NotificationService:
             )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار فشل المزامنة: {e}")
-    
+
     # ⚡ معالجات الأحداث الجديدة - آخر 10 أحداث
-    
+
     def _on_client_created(self, data: dict):
         """معالج حدث إنشاء عميل جديد"""
         try:
@@ -521,7 +548,7 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار العميل: {e}")
-    
+
     def _on_project_created(self, data: dict):
         """معالج حدث إنشاء مشروع جديد"""
         try:
@@ -537,7 +564,7 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار المشروع: {e}")
-    
+
     def _on_invoice_created(self, data: dict):
         """معالج حدث إنشاء فاتورة جديدة"""
         try:
@@ -553,7 +580,7 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار الفاتورة: {e}")
-    
+
     def _on_expense_created(self, data: dict):
         """معالج حدث إنشاء مصروف جديد"""
         try:
@@ -569,7 +596,7 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار المصروف: {e}")
-    
+
     def _on_quotation_created(self, data: dict):
         """معالج حدث إنشاء عرض سعر جديد"""
         try:
@@ -585,54 +612,66 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار عرض السعر: {e}")
-    
+
     def check_project_due_dates(self):
         """
-        فحص مواعيد استحقاق المشاريع وإنشاء إشعارات
+        فحص مواعيد استحقاق المشاريع وإنشاء إشعارات - يستخدم cursor منفصل
         يجب استدعاء هذه الدالة بشكل دوري (مثلاً يومياً)
         """
         try:
             # الحصول على المشاريع النشطة
-            cursor = self.repo.sqlite_cursor
-            cursor.execute("""
-                SELECT id, name, end_date 
-                FROM projects 
-                WHERE status = 'نشط' AND end_date IS NOT NULL
-            """)
-            
-            rows = cursor.fetchall()
-            now = datetime.now()
-            
-            for row in rows:
-                end_date = datetime.fromisoformat(row['end_date'])
-                days_until_due = (end_date - now).days
-                
-                # إشعار قبل 7 أيام من الموعد
-                if 0 <= days_until_due <= 7:
-                    # التحقق من عدم وجود إشعار مسبق
-                    cursor.execute("""
-                        SELECT COUNT(*) FROM notifications 
-                        WHERE related_entity_type = 'projects' 
-                        AND related_entity_id = ?
-                        AND type = ?
-                        AND created_at > ?
-                    """, (
-                        str(row['id']),
-                        NotificationType.PROJECT_DUE.value,
-                        (now - timedelta(days=1)).isoformat()
-                    ))
-                    
-                    if cursor.fetchone()[0] == 0:
-                        self.create_notification(
-                            title="موعد استحقاق مشروع قريب",
-                            message=f"المشروع '{row['name']}' سينتهي خلال {days_until_due} يوم",
-                            type=NotificationType.PROJECT_DUE,
-                            priority=NotificationPriority.HIGH,
-                            related_entity_type="projects",
-                            related_entity_id=str(row['id'])
-                        )
-            
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT id, name, end_date
+                    FROM projects
+                    WHERE status = 'نشط' AND end_date IS NOT NULL
+                """)
+
+                rows = cursor.fetchall()
+                now = datetime.now()
+
+                projects_to_notify = []
+                for row in rows:
+                    end_date = datetime.fromisoformat(row['end_date'])
+                    days_until_due = (end_date - now).days
+
+                    # إشعار قبل 7 أيام من الموعد
+                    if 0 <= days_until_due <= 7:
+                        # التحقق من عدم وجود إشعار مسبق
+                        cursor.execute("""
+                            SELECT COUNT(*) FROM notifications
+                            WHERE related_entity_type = 'projects'
+                            AND related_entity_id = ?
+                            AND type = ?
+                            AND created_at > ?
+                        """, (
+                            str(row['id']),
+                            NotificationType.PROJECT_DUE.value,
+                            (now - timedelta(days=1)).isoformat()
+                        ))
+
+                        if cursor.fetchone()[0] == 0:
+                            projects_to_notify.append({
+                                'id': row['id'],
+                                'name': row['name'],
+                                'days': days_until_due
+                            })
+            finally:
+                cursor.close()
+
+            # إنشاء الإشعارات خارج الـ cursor
+            for project in projects_to_notify:
+                self.create_notification(
+                    title="موعد استحقاق مشروع قريب",
+                    message=f"المشروع '{project['name']}' سينتهي خلال {project['days']} يوم",
+                    type=NotificationType.PROJECT_DUE,
+                    priority=NotificationPriority.HIGH,
+                    related_entity_type="projects",
+                    related_entity_id=str(project['id'])
+                )
+
             logger.debug("تم فحص مواعيد استحقاق المشاريع")
-        
+
         except Exception as e:
             logger.error(f"فشل فحص مواعيد استحقاق المشاريع: {e}")

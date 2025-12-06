@@ -3,78 +3,88 @@
 مدير قوالب الفواتير - واجهة إدارة القوالب
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QDialog, QLabel,
-    QTextEdit, QLineEdit, QFormLayout, QDialogButtonBox, QComboBox,
-    QSplitter, QFrame, QGroupBox
-)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from services.template_service import TemplateService
-from core import schemas
 
 
 class TemplateEditorDialog(QDialog):
     """نافذة تحرير القوالب"""
-    
+
     def __init__(self, template_service: TemplateService, template_data=None, parent=None):
         super().__init__(parent)
         self.template_service = template_service
         self.template_data = template_data
         self.setup_ui()
-        
+
         if template_data:
             self.load_template_data()
-    
+
     def setup_ui(self):
         """إعداد واجهة المستخدم"""
         self.setWindowTitle("تحرير قالب الفاتورة")
         self.setModal(True)
         self.resize(800, 600)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # معلومات القالب
         info_group = QGroupBox("معلومات القالب")
         info_layout = QFormLayout(info_group)
-        
+
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("اسم القالب")
         info_layout.addRow("الاسم:", self.name_input)
-        
+
         self.description_input = QLineEdit()
         self.description_input.setPlaceholderText("وصف القالب")
         info_layout.addRow("الوصف:", self.description_input)
-        
+
         layout.addWidget(info_group)
-        
+
         # محرر HTML
         editor_group = QGroupBox("محتوى القالب (HTML)")
         editor_layout = QVBoxLayout(editor_group)
-        
+
         self.html_editor = QTextEdit()
         self.html_editor.setFont(QFont("Consolas", 10))
         self.html_editor.setPlaceholderText("أدخل كود HTML للقالب...")
         editor_layout.addWidget(self.html_editor)
-        
+
         # أزرار المساعدة
         help_layout = QHBoxLayout()
-        
+
         variables_btn = QPushButton("📋 المتغيرات المتاحة")
         variables_btn.clicked.connect(self.show_available_variables)
         help_layout.addWidget(variables_btn)
-        
+
         sample_btn = QPushButton("📄 قالب نموذجي")
         sample_btn.clicked.connect(self.load_sample_template)
         help_layout.addWidget(sample_btn)
-        
+
         help_layout.addStretch()
         editor_layout.addLayout(help_layout)
-        
+
         layout.addWidget(editor_group)
-        
+
         # أزرار الحفظ والإلغاء
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
@@ -82,7 +92,7 @@ class TemplateEditorDialog(QDialog):
         buttons.accepted.connect(self.save_template)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        
+
         # تطبيق الأنماط
         self.setStyleSheet("""
             QGroupBox {
@@ -115,13 +125,13 @@ class TemplateEditorDialog(QDialog):
                 background-color: #005a9e;
             }
         """)
-    
+
     def load_template_data(self):
         """تحميل بيانات القالب للتحرير"""
         if self.template_data:
             self.name_input.setText(self.template_data.get('name', ''))
             self.description_input.setText(self.template_data.get('description', ''))
-            
+
             # تحميل محتوى الملف
             template_file = self.template_data.get('template_file', '')
             if template_file:
@@ -129,12 +139,12 @@ class TemplateEditorDialog(QDialog):
                     import os
                     template_path = os.path.join("templates", template_file)
                     if os.path.exists(template_path):
-                        with open(template_path, 'r', encoding='utf-8') as f:
+                        with open(template_path, encoding='utf-8') as f:
                             content = f.read()
                         self.html_editor.setPlainText(content)
                 except Exception as e:
                     QMessageBox.warning(self, "خطأ", f"فشل في تحميل محتوى القالب: {e}")
-    
+
     def show_available_variables(self):
         """عرض المتغيرات المتاحة"""
         variables_text = """
@@ -178,9 +188,9 @@ class TemplateEditorDialog(QDialog):
 </table>
 <p>الإجمالي: {{ grand_total }}</p>
         """
-        
+
         QMessageBox.information(self, "المتغيرات المتاحة", variables_text)
-    
+
     def load_sample_template(self):
         """تحميل قالب نموذجي"""
         sample_html = '''<!DOCTYPE html>
@@ -204,12 +214,12 @@ class TemplateEditorDialog(QDialog):
         <p>فاتورة رقم: {{ invoice_id }}</p>
         <p>التاريخ: {{ date }}</p>
     </div>
-    
+
     <div class="content">
         <h2>معلومات العميل</h2>
         <p><strong>الاسم:</strong> {{ client_name }}</p>
         <p><strong>الهاتف:</strong> {{ client_phone }}</p>
-        
+
         <h2>الخدمات</h2>
         <table>
             <thead>
@@ -231,30 +241,30 @@ class TemplateEditorDialog(QDialog):
                 {% endfor %}
             </tbody>
         </table>
-        
+
         <div class="total">
             <p>الإجمالي النهائي: {{ grand_total }} ج.م</p>
         </div>
     </div>
 </body>
 </html>'''
-        
+
         self.html_editor.setPlainText(sample_html)
-    
+
     def save_template(self):
         """حفظ القالب"""
         name = self.name_input.text().strip()
         description = self.description_input.text().strip()
         content = self.html_editor.toPlainText().strip()
-        
+
         if not name:
             QMessageBox.warning(self, "خطأ", "يرجى إدخال اسم القالب")
             return
-        
+
         if not content:
             QMessageBox.warning(self, "خطأ", "يرجى إدخال محتوى القالب")
             return
-        
+
         try:
             if self.template_data:
                 # تحديث قالب موجود
@@ -273,88 +283,89 @@ class TemplateEditorDialog(QDialog):
                     self.accept()
                 else:
                     QMessageBox.warning(self, "خطأ", "فشل في حفظ القالب")
-        
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حفظ القالب: {e}")
 
 
 class TemplateManager(QWidget):
     """مدير قوالب الفواتير"""
-    
+
     template_changed = pyqtSignal()
-    
+
     def __init__(self, template_service: TemplateService, parent=None):
         super().__init__(parent)
         self.template_service = template_service
         self.setup_ui()
         self.load_templates()
-    
+
     def setup_ui(self):
         """إعداد واجهة المستخدم"""
         layout = QVBoxLayout(self)
-        
+
         # عنوان القسم
         title_label = QLabel("إدارة قوالب الفواتير")
         title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
-        
+
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
-        
+
         self.add_btn = QPushButton("➕ إضافة قالب جديد")
         self.add_btn.clicked.connect(self.add_template)
         buttons_layout.addWidget(self.add_btn)
-        
+
         self.edit_btn = QPushButton("✏️ تعديل القالب")
         self.edit_btn.clicked.connect(self.edit_template)
         self.edit_btn.setEnabled(False)
         buttons_layout.addWidget(self.edit_btn)
-        
+
         self.preview_btn = QPushButton("👁️ معاينة")
         self.preview_btn.clicked.connect(self.preview_template)
         self.preview_btn.setEnabled(False)
         buttons_layout.addWidget(self.preview_btn)
-        
+
         self.set_default_btn = QPushButton("⭐ تعيين كافتراضي")
         self.set_default_btn.clicked.connect(self.set_default_template)
         self.set_default_btn.setEnabled(False)
         buttons_layout.addWidget(self.set_default_btn)
-        
+
         self.delete_btn = QPushButton("🗑️ حذف")
         self.delete_btn.clicked.connect(self.delete_template)
         self.delete_btn.setEnabled(False)
         buttons_layout.addWidget(self.delete_btn)
-        
+
         buttons_layout.addStretch()
-        
+
         self.refresh_btn = QPushButton("🔄 تحديث")
         self.refresh_btn.clicked.connect(self.load_templates)
         buttons_layout.addWidget(self.refresh_btn)
-        
+
         layout.addLayout(buttons_layout)
-        
+
         # جدول القوالب
         self.templates_table = QTableWidget()
         self.templates_table.setColumnCount(5)
         self.templates_table.setHorizontalHeaderLabels([
             "الاسم", "الوصف", "ملف القالب", "افتراضي", "تاريخ الإنشاء"
         ])
-        
+
         # تعديل عرض الأعمدة
         header = self.templates_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
         self.templates_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.templates_table.setAlternatingRowColors(True)
         self.templates_table.itemSelectionChanged.connect(self.on_selection_changed)
-        
+
         layout.addWidget(self.templates_table)
-        
+
         # تطبيق الأنماط
         self.setStyleSheet("""
             QPushButton {
@@ -388,52 +399,52 @@ class TemplateManager(QWidget):
                 color: white;
             }
         """)
-    
+
     def load_templates(self):
         """تحميل قائمة القوالب"""
         try:
             templates = self.template_service.get_all_templates()
-            
+
             self.templates_table.setRowCount(len(templates))
-            
+
             for row, template in enumerate(templates):
                 # الاسم
                 name_item = QTableWidgetItem(template['name'])
                 self.templates_table.setItem(row, 0, name_item)
-                
+
                 # الوصف
                 desc_item = QTableWidgetItem(template['description'] or '')
                 self.templates_table.setItem(row, 1, desc_item)
-                
+
                 # ملف القالب
                 file_item = QTableWidgetItem(template['template_file'])
                 self.templates_table.setItem(row, 2, file_item)
-                
+
                 # افتراضي
                 default_item = QTableWidgetItem("✓" if template['is_default'] else "")
                 default_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.templates_table.setItem(row, 3, default_item)
-                
+
                 # تاريخ الإنشاء
                 date_item = QTableWidgetItem(template['created_at'][:10] if template['created_at'] else '')
                 self.templates_table.setItem(row, 4, date_item)
-                
+
                 # حفظ ID في البيانات
                 name_item.setData(Qt.ItemDataRole.UserRole, template['id'])
-        
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في تحميل القوالب: {e}")
-    
+
     def on_selection_changed(self):
         """عند تغيير التحديد"""
         selected_rows = self.templates_table.selectionModel().selectedRows()
         has_selection = len(selected_rows) > 0
-        
+
         self.edit_btn.setEnabled(has_selection)
         self.preview_btn.setEnabled(has_selection)
         self.set_default_btn.setEnabled(has_selection)
         self.delete_btn.setEnabled(has_selection)
-    
+
     def get_selected_template_id(self):
         """جلب معرف القالب المحدد"""
         selected_rows = self.templates_table.selectionModel().selectedRows()
@@ -442,14 +453,14 @@ class TemplateManager(QWidget):
             name_item = self.templates_table.item(row, 0)
             return name_item.data(Qt.ItemDataRole.UserRole)
         return None
-    
+
     def add_template(self):
         """إضافة قالب جديد"""
         dialog = TemplateEditorDialog(self.template_service, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_templates()
             self.template_changed.emit()
-    
+
     def edit_template(self):
         """تعديل القالب المحدد"""
         template_id = self.get_selected_template_id()
@@ -460,15 +471,14 @@ class TemplateManager(QWidget):
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     self.load_templates()
                     self.template_changed.emit()
-    
+
     def preview_template(self):
         """معاينة القالب المحدد"""
         template_id = self.get_selected_template_id()
         if template_id:
             try:
                 # إنشاء بيانات تجريبية للمعاينة
-                from datetime import datetime
-                
+
                 # بيانات مشروع تجريبية
                 sample_project = type('Project', (), {
                     'id': 1,
@@ -491,7 +501,7 @@ class TemplateManager(QWidget):
                     'discount_rate': 5.0,
                     'tax_rate': 14.0
                 })()
-                
+
                 # بيانات عميل تجريبية
                 sample_client = {
                     'name': 'أحمد محمد علي',
@@ -499,28 +509,28 @@ class TemplateManager(QWidget):
                     'email': 'ahmed@example.com',
                     'address': 'القاهرة، مصر'
                 }
-                
+
                 # معاينة القالب
                 success = self.template_service.preview_template(
                     sample_project, sample_client, template_id
                 )
-                
+
                 if not success:
                     QMessageBox.warning(self, "خطأ", "فشل في معاينة القالب")
-            
+
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء المعاينة: {e}")
-    
+
     def set_default_template(self):
         """تعيين القالب كافتراضي"""
         template_id = self.get_selected_template_id()
         if template_id:
             reply = QMessageBox.question(
-                self, "تأكيد", 
+                self, "تأكيد",
                 "هل تريد تعيين هذا القالب كافتراضي؟",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 success = self.template_service.set_default_template(template_id)
                 if success:
@@ -529,17 +539,17 @@ class TemplateManager(QWidget):
                     QMessageBox.information(self, "نجح", "تم تعيين القالب كافتراضي")
                 else:
                     QMessageBox.warning(self, "خطأ", "فشل في تعيين القالب كافتراضي")
-    
+
     def delete_template(self):
         """حذف القالب المحدد"""
         template_id = self.get_selected_template_id()
         if template_id:
             reply = QMessageBox.question(
-                self, "تأكيد الحذف", 
+                self, "تأكيد الحذف",
                 "هل تريد حذف هذا القالب نهائياً؟\nلا يمكن التراجع عن هذا الإجراء.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 success = self.template_service.delete_template(template_id)
                 if success:

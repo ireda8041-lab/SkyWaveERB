@@ -1,23 +1,24 @@
 # الملف: ui/service_editor_dialog.py
 
+from typing import Any
+
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QDialog,
-    QVBoxLayout,
     QFormLayout,
-    QLineEdit,
-    QPushButton,
-    QLabel,
-    QMessageBox,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
     QTextEdit,
-    QCheckBox,
+    QVBoxLayout,
 )
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import Qt
-from services.service_service import ServiceService
+
 from core import schemas
-from typing import Optional, Dict, Any
+from services.service_service import ServiceService
+from ui.custom_spinbox import CustomSpinBox
 
 
 class ServiceEditorDialog(QDialog):
@@ -26,7 +27,7 @@ class ServiceEditorDialog(QDialog):
     def __init__(
         self,
         service_service: ServiceService,
-        service_to_edit: Optional[schemas.Service] = None,
+        service_to_edit: schemas.Service | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -35,30 +36,30 @@ class ServiceEditorDialog(QDialog):
         self.service_to_edit = service_to_edit
         self.is_editing = service_to_edit is not None
 
-        if self.is_editing:
+        if self.is_editing and service_to_edit is not None:
             self.setWindowTitle(f"تعديل الخدمة: {service_to_edit.name}")
         else:
             self.setWindowTitle("إضافة خدمة/باقة جديدة")
 
         self.setMinimumWidth(450)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         # إزالة الإطار البرتقالي نهائياً
         self.setStyleSheet("""
             * {
                 outline: none;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, 
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus {
                 border: none;
                 outline: none;
             }
         """)
-        
+
         self._init_ui()
 
     def _init_ui(self):
@@ -116,7 +117,7 @@ class ServiceEditorDialog(QDialog):
             self.service_to_edit.status == schemas.ServiceStatus.ACTIVE
         )
 
-    def _collect_form_data(self) -> Dict[str, Any]:
+    def _collect_form_data(self) -> dict[str, Any]:
         status = (
             schemas.ServiceStatus.ACTIVE
             if self.status_checkbox.isChecked()

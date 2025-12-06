@@ -2,26 +2,25 @@
 
 from datetime import datetime
 
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
-    QVBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
     QHeaderView,
-    QPushButton,
     QLabel,
     QMessageBox,
-    QGroupBox,
-    QFrame,
-    QHBoxLayout,
     QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor
 
-from services.project_service import ProjectService
 from core import schemas
-from typing import List
+from services.project_service import ProjectService
 
 
 class ProjectProfitDialog(QDialog):
@@ -36,7 +35,7 @@ class ProjectProfitDialog(QDialog):
         self.setWindowTitle(f"📊 تقرير ربحية مشروع: {project.name}")
         self.setMinimumWidth(800)
         self.setMinimumHeight(650)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
@@ -47,11 +46,11 @@ class ProjectProfitDialog(QDialog):
         # --- معلومات المشروع الأساسية ---
         info_group = QGroupBox("معلومات المشروع")
         info_layout = QHBoxLayout()
-        
+
         self.project_name_label = QLabel(f"<b>اسم المشروع:</b> {project.name}")
         self.client_label = QLabel(f"<b>العميل:</b> {project.client_id}")
         self.status_label = QLabel(f"<b>الحالة:</b> {project.status.value}")
-        
+
         info_layout.addWidget(self.project_name_label)
         info_layout.addWidget(self.client_label)
         info_layout.addWidget(self.status_label)
@@ -65,7 +64,7 @@ class ProjectProfitDialog(QDialog):
         self.due_card = self.create_kpi_card("⏳ المتبقي", "due", "#f59e0b")
         self.expenses_card = self.create_kpi_card("📉 المصروفات", "expenses", "#ef4444")
         self.profit_card = self.create_kpi_card("📈 صافي الربح", "profit", "#8b5cf6")
-        
+
         kpi_layout.addWidget(self.revenue_card)
         kpi_layout.addWidget(self.paid_card)
         kpi_layout.addWidget(self.due_card)
@@ -105,7 +104,9 @@ class ProjectProfitDialog(QDialog):
         self.payments_table = QTableWidget()
         self.payments_table.setColumnCount(4)
         self.payments_table.setHorizontalHeaderLabels(["التاريخ", "المبلغ", "الحساب", "ملاحظات"])
-        self.payments_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        h_header = self.payments_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.payments_table.setMaximumHeight(150)
         self.payments_table.setAlternatingRowColors(True)
         main_layout.addWidget(self.payments_table)
@@ -115,7 +116,9 @@ class ProjectProfitDialog(QDialog):
         self.expenses_table = QTableWidget()
         self.expenses_table.setColumnCount(4)
         self.expenses_table.setHorizontalHeaderLabels(["التاريخ", "الفئة", "الوصف", "المبلغ"])
-        self.expenses_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        h_header2 = self.expenses_table.horizontalHeader()
+        if h_header2 is not None:
+            h_header2.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.expenses_table.setMaximumHeight(150)
         self.expenses_table.setAlternatingRowColors(True)
         main_layout.addWidget(self.expenses_table)
@@ -145,16 +148,16 @@ class ProjectProfitDialog(QDialog):
         card.setMinimumWidth(140)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 10, 8)
-        
+
         title_label = QLabel(title)
         title_label.setStyleSheet("color: white; font-size: 11px;")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
         value_label = QLabel("0.00")
         value_label.setStyleSheet("color: white; font-weight: bold; font-size: 16px;")
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         value_label.setObjectName(f"val_{key}")
-        
+
         card_layout.addWidget(title_label)
         card_layout.addWidget(value_label)
         card.setProperty("card_key", key)
@@ -206,13 +209,13 @@ class ProjectProfitDialog(QDialog):
         try:
             # جلب بيانات الربحية
             profit_data = self.project_service.get_project_profitability(project_name)
-            
+
             total_revenue = profit_data.get("total_revenue", 0.0)
             total_paid = profit_data.get("total_paid", 0.0)
             balance_due = profit_data.get("balance_due", 0.0)
             total_expenses = profit_data.get("total_expenses", 0.0)
             net_profit = profit_data.get("net_profit", 0.0)
-            
+
             # تحديث الكروت
             self.update_card_value(self.revenue_card, "revenue", total_revenue)
             self.update_card_value(self.paid_card, "paid", total_paid)
@@ -236,11 +239,11 @@ class ProjectProfitDialog(QDialog):
                 self.payments_table.insertRow(i)
                 date_str = pay.date.strftime("%Y-%m-%d") if isinstance(pay.date, datetime) else str(pay.date)
                 self.payments_table.setItem(i, 0, QTableWidgetItem(date_str))
-                
+
                 amount_item = QTableWidgetItem(f"{pay.amount:,.2f}")
                 amount_item.setForeground(QColor("#0A6CF1"))
                 self.payments_table.setItem(i, 1, amount_item)
-                
+
                 # عرض اسم الحساب بدلاً من ID
                 account_name = "-"
                 if hasattr(pay, 'account_id') and pay.account_id:
@@ -261,7 +264,7 @@ class ProjectProfitDialog(QDialog):
                     except Exception as acc_err:
                         print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
                         account_name = str(pay.account_id)
-                
+
                 self.payments_table.setItem(i, 2, QTableWidgetItem(account_name))
                 self.payments_table.setItem(i, 3, QTableWidgetItem(getattr(pay, 'notes', '') or "-"))
 
@@ -274,7 +277,7 @@ class ProjectProfitDialog(QDialog):
                 self.expenses_table.setItem(i, 0, QTableWidgetItem(date_str))
                 self.expenses_table.setItem(i, 1, QTableWidgetItem(exp.category or "-"))
                 self.expenses_table.setItem(i, 2, QTableWidgetItem(exp.description or "-"))
-                
+
                 amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
                 amount_item.setForeground(QColor("#ef4444"))
                 self.expenses_table.setItem(i, 3, amount_item)

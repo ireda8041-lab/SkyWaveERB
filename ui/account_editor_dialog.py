@@ -1,22 +1,22 @@
+from typing import Any
+
 from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
-    QVBoxLayout,
     QFormLayout,
-    QLineEdit,
-    QPushButton,
-    QMessageBox,
     QGroupBox,
     QHBoxLayout,
-    QComboBox,
-    QCheckBox,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
     QTextEdit,
+    QVBoxLayout,
 )
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import Qt
 
-from services.accounting_service import AccountingService
 from core import schemas
-from typing import Optional, Dict, Any, List
+from services.accounting_service import AccountingService
+from ui.custom_spinbox import CustomSpinBox
 
 
 class AccountEditorDialog(QDialog):
@@ -28,8 +28,8 @@ class AccountEditorDialog(QDialog):
     def __init__(
         self,
         accounting_service: AccountingService,
-        all_accounts: List[schemas.Account],
-        account_to_edit: Optional[schemas.Account] = None,
+        all_accounts: list[schemas.Account],
+        account_to_edit: schemas.Account | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -39,38 +39,38 @@ class AccountEditorDialog(QDialog):
         self.account_to_edit = account_to_edit
         self.is_editing = account_to_edit is not None
 
-        if self.is_editing:
+        if self.is_editing and account_to_edit is not None:
             self.setWindowTitle(f"تعديل حساب: {account_to_edit.name}")
         else:
             self.setWindowTitle("إضافة حساب جديد")
 
         self.setMinimumWidth(450)
         self.setMinimumHeight(450)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         # إزالة الإطار البرتقالي نهائياً من جميع العناصر
         self.setStyleSheet("""
             * {
                 outline: none;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, 
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus, QCheckBox:focus, QRadioButton:focus {
                 border: none;
                 outline: none;
             }
         """)
-        
+
         self.init_ui()
 
     def init_ui(self):
         """إنشاء واجهة المستخدم - Standard Form Layout with Smart Features"""
         main_layout = QVBoxLayout()
         main_layout.setSpacing(10)
-        
+
         # GroupBox للبيانات الأساسية
         form_groupbox = QGroupBox("بيانات الحساب")
         form_layout = QFormLayout()
@@ -155,10 +155,10 @@ class AccountEditorDialog(QDialog):
 
         # أزرار الحفظ والإلغاء
         buttons_layout = QHBoxLayout()
-        
+
         self.cancel_button = QPushButton("إلغاء")
         self.cancel_button.clicked.connect(self.reject)
-        
+
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setDefault(True)
         self.save_button.clicked.connect(self.save_account)
@@ -178,11 +178,11 @@ class AccountEditorDialog(QDialog):
                 color: #9ca3af;
             }
         """)
-        
+
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
-        
+
         main_layout.addLayout(buttons_layout)
         self.setLayout(main_layout)
 
@@ -196,40 +196,40 @@ class AccountEditorDialog(QDialog):
         else:
             # Initial validation for new accounts
             self._validate_inputs()
-    
+
     def _validate_inputs(self):
         """Real-time validation - only enable/disable save button"""
         is_valid = True
         error_messages = []
-        
+
         # Validate code
         code = self.code_input.text().strip()
         if not code:
             is_valid = False
             error_messages.append("كود الحساب مطلوب")
-        
+
         # Validate name
         name = self.name_input.text().strip()
         if not name:
             is_valid = False
             error_messages.append("اسم الحساب مطلوب")
-        
+
         # Update validation message
         if error_messages:
             self.validation_label.setText("⚠️ " + " • ".join(error_messages))
             self.validation_label.setVisible(True)
         else:
             self.validation_label.setVisible(False)
-        
+
         # Enable/disable save button
         self.save_button.setEnabled(is_valid)
-        
+
         return is_valid
-    
+
     def _on_type_changed(self, index):
         """Smart suggestions based on account type"""
         account_type = self.type_combo.currentData()
-        
+
         # Auto-suggest parent based on type
         if account_type == schemas.AccountType.CASH:
             # Suggest under "النقدية والخزائن" (1110)
@@ -254,7 +254,7 @@ class AccountEditorDialog(QDialog):
         """ملء قائمة الحسابات الأب - مرتبة حسب الكود"""
         # ترتيب الحسابات حسب الكود لعرض الشجرة بشكل منطقي
         sorted_accounts = sorted(self.all_accounts, key=lambda x: str(x.code or ""))
-        
+
         for acc in sorted_accounts:
             if not acc.code:
                 continue
@@ -264,15 +264,15 @@ class AccountEditorDialog(QDialog):
             # لا يمكن للحساب أن يكون أباً لأحد أبنائه (منع الحلقات)
             if self.is_editing and self._is_descendant(acc.code, self.account_to_edit.code):
                 continue
-            
+
             # إضافة مسافة بادئة للحسابات الفرعية
             indent = ""
             if acc.parent_code:
                 indent = "  └─ "
-            
+
             display_text = f"{indent}{acc.code} - {acc.name}"
             self.parent_combo.addItem(display_text, userData=str(acc.code))
-    
+
     def _is_descendant(self, potential_child_code: str, parent_code: str) -> bool:
         """التحقق مما إذا كان الحساب من أحفاد حساب آخر"""
         if not potential_child_code or not parent_code:
@@ -290,28 +290,28 @@ class AccountEditorDialog(QDialog):
         """تحميل بيانات الحساب للتعديل - FIXED: يحدد الحساب الأب بشكل صحيح"""
         if not self.account_to_edit:
             return
-        
+
         print(f"INFO: [AccountDialog] Loading account: {self.account_to_edit.name}")
-        print(f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}")
-        
+        print(f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}, parent_id = {self.account_to_edit.parent_id}")
+
         # 1. Code
         self.code_input.setText(self.account_to_edit.code or "")
-        
+
         # 2. Name
         self.name_input.setText(self.account_to_edit.name or "")
-        
+
         # 3. Type
         for i in range(self.type_combo.count()):
             if self.type_combo.itemData(i) == self.account_to_edit.type:
                 self.type_combo.setCurrentIndex(i)
                 break
-        
-        # 4. Parent Account - CRITICAL FIX
-        parent_code = self.account_to_edit.parent_code
+
+        # 4. Parent Account - استخدام parent_code أو parent_id (أيهما موجود)
+        parent_code = self.account_to_edit.parent_code or self.account_to_edit.parent_id
         if parent_code:
             parent_code_str = str(parent_code).strip()
             print(f"DEBUG: [AccountDialog] Searching for parent: '{parent_code_str}'")
-            
+
             # البحث في جميع عناصر الـ combo
             found = False
             for i in range(self.parent_combo.count()):
@@ -321,7 +321,7 @@ class AccountEditorDialog(QDialog):
                     print(f"SUCCESS: [AccountDialog] Parent found at index {i}: {parent_code_str}")
                     found = True
                     break
-            
+
             if not found:
                 # إذا لم يتم العثور، نحاول إضافته يدوياً
                 print(f"WARNING: [AccountDialog] Parent {parent_code_str} not found in combo")
@@ -337,8 +337,8 @@ class AccountEditorDialog(QDialog):
         else:
             # No parent - set to "No Parent" (index 0)
             self.parent_combo.setCurrentIndex(0)
-            print(f"INFO: [AccountDialog] No parent_code, setting to 'No Parent'")
-        
+            print("INFO: [AccountDialog] No parent_code, setting to 'No Parent'")
+
         # 5. Currency
         if self.account_to_edit.currency:
             for i in range(self.currency_combo.count()):
@@ -346,28 +346,28 @@ class AccountEditorDialog(QDialog):
                 if currency_data == self.account_to_edit.currency:
                     self.currency_combo.setCurrentIndex(i)
                     break
-        
+
         # 6. Opening Balance
         self.balance_spinbox.setValue(self.account_to_edit.balance or 0.0)
-        
+
         # 7. Description
         if self.account_to_edit.description:
             self.description_input.setText(self.account_to_edit.description)
-        
+
         # 8. Active Status
         is_active = self.account_to_edit.status == schemas.AccountStatus.ACTIVE
         self.active_checkbox.setChecked(is_active)
 
-    def get_form_data(self) -> Dict[str, Any]:
+    def get_form_data(self) -> dict[str, Any]:
         """جمع البيانات من النموذج"""
         selected_parent_code = self.parent_combo.currentData()
-        
+
         # التأكد من أن parent_code هو None إذا كان "بدون أب"
         if selected_parent_code is None or selected_parent_code == "":
             parent_code = None
         else:
             parent_code = str(selected_parent_code)
-        
+
         data = {
             "code": self.code_input.text().strip(),
             "name": self.name_input.text().strip(),
@@ -378,41 +378,41 @@ class AccountEditorDialog(QDialog):
             "status": schemas.AccountStatus.ACTIVE if self.active_checkbox.isChecked() else schemas.AccountStatus.ARCHIVED,
             "is_group": False,
         }
-        
+
         # ⚠️ فقط أضف الرصيد الافتتاحي عند إنشاء حساب جديد
         # عند التعديل، لا نريد تغيير الرصيد المحسوب من القيود
         if not self.is_editing:
             data["balance"] = self.balance_spinbox.value()
-        
+
         return data
 
     def validate_form(self) -> tuple[bool, str]:
         """التحقق من صحة البيانات المدخلة"""
         account_data = self.get_form_data()
-        
+
         if not account_data["code"]:
             return False, "كود الحساب مطلوب"
-        
+
         if not account_data["name"]:
             return False, "اسم الحساب مطلوب"
-        
+
         if not account_data["type"]:
             return False, "نوع الحساب مطلوب"
-        
+
         # التحقق من تفرد الكود
         existing_codes = {acc.code for acc in self.all_accounts}
-        if self.is_editing:
+        if self.is_editing and self.account_to_edit is not None:
             existing_codes.discard(self.account_to_edit.code)
-        
+
         if account_data["code"] in existing_codes:
             return False, f"كود الحساب '{account_data['code']}' موجود مسبقاً"
-        
+
         # التحقق من صحة الحساب الأب
         if account_data["parent_code"]:
             parent_exists = any(acc.code == account_data["parent_code"] for acc in self.all_accounts)
             if not parent_exists:
                 return False, f"الحساب الأب '{account_data['parent_code']}' غير موجود"
-        
+
         return True, "البيانات صحيحة"
 
     def save_account(self):
@@ -421,13 +421,23 @@ class AccountEditorDialog(QDialog):
         if not is_valid:
             QMessageBox.warning(self, "خطأ في البيانات", error_message)
             return
-        
+
         account_data = self.get_form_data()
-        
+
         try:
             if self.is_editing:
-                account_id = self.account_to_edit._mongo_id or str(self.account_to_edit.id)
-                self.accounting_service.update_account(account_id, account_data)
+                # استخدام id أو _mongo_id أو code
+                account_id = None
+                if self.account_to_edit._mongo_id:
+                    account_id = self.account_to_edit._mongo_id
+                elif self.account_to_edit.id:
+                    account_id = str(self.account_to_edit.id)
+
+                # إذا لم يكن هناك id صالح، نستخدم الكود للتحديث
+                if not account_id or account_id == "None":
+                    self.accounting_service.update_account_by_code(self.account_to_edit.code, account_data)
+                else:
+                    self.accounting_service.update_account(account_id, account_data)
                 QMessageBox.information(
                     self,
                     "تم التعديل",
@@ -447,7 +457,7 @@ class AccountEditorDialog(QDialog):
             print(f"ERROR: [AccountEditorDialog] Failed to save account: {e}")
             import traceback
             traceback.print_exc()
-            
+
             QMessageBox.critical(
                 self,
                 "خطأ في الحفظ",

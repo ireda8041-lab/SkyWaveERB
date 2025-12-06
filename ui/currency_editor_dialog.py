@@ -3,17 +3,26 @@
 نافذة تعديل العملة مع جلب أسعار الصرف الحقيقية من الإنترنت
 """
 
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QMessageBox, QGroupBox,
-    QComboBox, QCheckBox, QProgressBar
-)
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
-from ui.styles import BUTTON_STYLES, COLORS
-import urllib.request
 import json
+import urllib.request
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+)
+
+from ui.custom_spinbox import CustomSpinBox
+from ui.styles import BUTTON_STYLES, COLORS
 
 
 class ExchangeRateFetcher(QThread):
@@ -29,20 +38,20 @@ class ExchangeRateFetcher(QThread):
         try:
             rate = None
             source = None
-            
+
             # محاولة 1: Open Exchange Rates (مجاني محدود)
             # https://openexchangerates.org/
             try:
                 # API مجاني يعطي أسعار مقابل USD
                 url = "https://open.er-api.com/v6/latest/USD"
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=15) as response:
+                with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
                     data = json.loads(response.read().decode())
                     if data.get('result') == 'success' and 'rates' in data:
                         rates = data['rates']
                         egp_rate = rates.get('EGP', 0)
                         currency_rate = rates.get(self.currency_code, 0)
-                        
+
                         if egp_rate > 0 and currency_rate > 0:
                             # حساب سعر العملة مقابل الجنيه
                             rate = egp_rate / currency_rate
@@ -55,7 +64,7 @@ class ExchangeRateFetcher(QThread):
                 try:
                     url = f"https://api.exchangerate-api.com/v4/latest/{self.currency_code}"
                     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as response:
+                    with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
                         data = json.loads(response.read().decode())
                         if 'rates' in data:
                             egp_rate = data['rates'].get('EGP', 0)
@@ -70,7 +79,7 @@ class ExchangeRateFetcher(QThread):
                 try:
                     url = f"https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/{self.currency_code.lower()}/egp.json"
                     req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as response:
+                    with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
                         data = json.loads(response.read().decode())
                         if 'egp' in data:
                             rate = data['egp']
@@ -109,7 +118,7 @@ class ExchangeRateFetcher(QThread):
                 'TRY': 1.45,    # ليرة تركية
                 'EGP': 1.00,    # جنيه مصري
             }
-            
+
             if self.currency_code in fallback_rates:
                 self.finished.emit({
                     'success': True,
@@ -129,21 +138,21 @@ class CurrencyEditorDialog(QDialog):
 
     def __init__(self, currency_data=None, parent=None):
         super().__init__(parent)
-        
+
         self.currency_data = currency_data or {}
         self.is_editing = bool(currency_data)
         self.fetcher = None
-        
+
         self.setWindowTitle("تعديل العملة" if self.is_editing else "إضافة عملة جديدة")
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         self.init_ui()
-        
+
         if self.is_editing:
             self.load_currency_data()
 
@@ -233,15 +242,15 @@ class CurrencyEditorDialog(QDialog):
 
         # أزرار الحفظ والإلغاء
         buttons_layout = QHBoxLayout()
-        
+
         self.save_btn = QPushButton("💾 حفظ")
         self.save_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.save_btn.clicked.connect(self.save_currency)
-        
+
         self.cancel_btn = QPushButton("إلغاء")
         self.cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.cancel_btn.clicked.connect(self.reject)
-        
+
         buttons_layout.addWidget(self.save_btn)
         buttons_layout.addWidget(self.cancel_btn)
         layout.addLayout(buttons_layout)
@@ -259,11 +268,11 @@ class CurrencyEditorDialog(QDialog):
     def fetch_exchange_rate(self):
         """جلب سعر الصرف من الإنترنت"""
         code = self.code_input.text().upper().strip()
-        
+
         if not code:
             QMessageBox.warning(self, "تنبيه", "يرجى إدخال رمز العملة أولاً")
             return
-        
+
         if code == "EGP":
             self.rate_input.setValue(1.0)
             self.source_label.setText("✅ الجنيه المصري هو العملة الأساسية")
@@ -288,16 +297,16 @@ class CurrencyEditorDialog(QDialog):
             rate = result['rate']
             source = result.get('source', 'غير معروف')
             is_fallback = result.get('is_fallback', False)
-            
+
             self.rate_input.setValue(rate)
-            
+
             if is_fallback:
                 self.source_label.setText(f"⚠️ سعر تقديري من: {source}")
                 self.source_label.setStyleSheet("color: #f59e0b; font-size: 11px;")
             else:
                 self.source_label.setText(f"✅ تم جلب السعر من: {source}")
                 self.source_label.setStyleSheet("color: #0A6CF1; font-size: 11px;")
-            
+
             QMessageBox.information(
                 self, "تم",
                 f"تم جلب سعر الصرف بنجاح!\n\n"
@@ -311,7 +320,7 @@ class CurrencyEditorDialog(QDialog):
         self.progress_bar.hide()
         self.source_label.setText(f"❌ فشل جلب السعر: {error_msg}")
         self.source_label.setStyleSheet("color: #ef4444; font-size: 11px;")
-        
+
         QMessageBox.warning(
             self, "تنبيه",
             f"تعذر جلب سعر الصرف من الإنترنت.\n\n"
@@ -323,11 +332,11 @@ class CurrencyEditorDialog(QDialog):
         """حفظ العملة"""
         code = self.code_input.text().upper().strip()
         name = self.name_input.text().strip()
-        
+
         if not code:
             QMessageBox.warning(self, "خطأ", "يرجى إدخال رمز العملة")
             return
-        
+
         if not name:
             QMessageBox.warning(self, "خطأ", "يرجى إدخال اسم العملة")
             return
@@ -339,7 +348,7 @@ class CurrencyEditorDialog(QDialog):
             'rate': self.rate_input.value(),
             'active': self.active_checkbox.isChecked()
         }
-        
+
         self.accept()
 
     def get_result(self):

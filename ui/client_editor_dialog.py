@@ -1,15 +1,28 @@
 # الملف: ui/client_editor_dialog.py
 
 import os
-from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QMessageBox, QGroupBox, QHBoxLayout,
-    QComboBox, QTextEdit, QCheckBox, QFileDialog, QWidget
-)
+from typing import Any
+
 from PyQt6.QtCore import Qt
-from services.client_service import ClientService
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
 from core import schemas
-from typing import Optional, Dict, Any
+from services.client_service import ClientService
 
 
 class ClientEditorDialog(QDialog):
@@ -17,37 +30,37 @@ class ClientEditorDialog(QDialog):
     (معدلة بالكامل لتطابق الصورة + طلباتك)
     """
 
-    def __init__(self, client_service: ClientService, client_to_edit: Optional[schemas.Client] = None, parent=None):
+    def __init__(self, client_service: ClientService, client_to_edit: schemas.Client | None = None, parent=None):
         super().__init__(parent)
 
         self.client_service = client_service
         self.client_to_edit = client_to_edit
         self.is_editing = client_to_edit is not None
 
-        if self.is_editing:
+        if self.is_editing and client_to_edit is not None:
             self.setWindowTitle(f"تعديل العميل: {client_to_edit.name}")
         else:
             self.setWindowTitle("إضافة عميل جديد")
 
         self.setMinimumWidth(500)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         # إزالة الإطار البرتقالي نهائياً
         self.setStyleSheet("""
             * {
                 outline: none;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, 
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus {
                 border: none;
                 outline: none;
             }
         """)
-        
+
         self.init_ui()
 
     def init_ui(self):
@@ -154,7 +167,7 @@ class ClientEditorDialog(QDialog):
         # ⚡ عرض حالة الصورة (من logo_data أو logo_path)
         has_logo_data = hasattr(self.client_to_edit, 'logo_data') and self.client_to_edit.logo_data
         logo_path = self.client_to_edit.logo_path or ""
-        
+
         if has_logo_data:
             # الصورة محفوظة في قاعدة البيانات كـ base64
             self.logo_path_label.setText("✅ صورة محفوظة في قاعدة البيانات")
@@ -173,32 +186,32 @@ class ClientEditorDialog(QDialog):
         """تحويل صورة إلى base64 للحفظ في قاعدة البيانات"""
         import base64
         import os
-        
+
         if not image_path or not os.path.exists(image_path):
             return ""
-        
+
         try:
             # قراءة الصورة وتحويلها
             with open(image_path, "rb") as img_file:
                 img_data = img_file.read()
-            
+
             # ضغط الصورة إذا كانت كبيرة (أكثر من 500KB)
             if len(img_data) > 500 * 1024:
-                from PyQt6.QtGui import QPixmap, QImage
                 from PyQt6.QtCore import QBuffer, QIODevice
-                
+                from PyQt6.QtGui import QPixmap
+
                 pixmap = QPixmap(image_path)
                 # تصغير الصورة إلى 300x300 كحد أقصى
                 scaled = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                
+
                 buffer = QBuffer()
                 buffer.open(QIODevice.OpenModeFlag.WriteOnly)
                 scaled.save(buffer, "PNG", 80)  # جودة 80%
                 img_data = buffer.data().data()
-            
+
             # تحويل إلى base64
             base64_str = base64.b64encode(img_data).decode('utf-8')
-            
+
             # إضافة prefix للتعرف على نوع الصورة
             ext = os.path.splitext(image_path)[1].lower()
             mime_type = {
@@ -207,26 +220,26 @@ class ClientEditorDialog(QDialog):
                 '.jpeg': 'image/jpeg',
                 '.gif': 'image/gif'
             }.get(ext, 'image/png')
-            
+
             return f"data:{mime_type};base64,{base64_str}"
-            
+
         except Exception as e:
             print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
             return ""
-    
-    def get_form_data(self) -> Dict[str, Any]:
+
+    def get_form_data(self) -> dict[str, Any]:
         """ يجمع البيانات من الحقول """
         status = schemas.ClientStatus.ACTIVE if self.status_checkbox.isChecked() else schemas.ClientStatus.ARCHIVED
         logo_text = self.logo_path_label.text()
-        
+
         # ⚡ تحديد مسار الصورة (تجاهل النص التوضيحي)
         logo_value = ""
         if logo_text and "لم يتم" not in logo_text and "محفوظة في قاعدة البيانات" not in logo_text:
             logo_value = logo_text
-        
+
         # ⚡ تحويل الصورة إلى base64 للحفظ في قاعدة البيانات
         logo_data = ""
-        
+
         # حالة 1: تم اختيار صورة جديدة (مسار ملف)
         if logo_value and os.path.exists(logo_value):
             logo_data = self._convert_image_to_base64(logo_value)

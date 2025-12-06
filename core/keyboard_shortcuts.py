@@ -5,9 +5,10 @@
 يوفر اختصارات سريعة لتحسين الإنتاجية
 """
 
-from PyQt6.QtGui import QKeySequence, QShortcut
+
 from PyQt6.QtCore import QObject, pyqtSignal
-from typing import Dict, Callable
+from PyQt6.QtGui import QKeySequence, QShortcut
+
 from core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,7 +21,7 @@ class KeyboardShortcutManager(QObject):
     - ربط الاختصارات بالإجراءات
     - إدارة الاختصارات المخصصة
     """
-    
+
     # إشارات للاختصارات
     new_project = pyqtSignal()
     new_client = pyqtSignal()
@@ -30,18 +31,18 @@ class KeyboardShortcutManager(QObject):
     save_data = pyqtSignal()
     close_dialog = pyqtSignal()
     show_help = pyqtSignal()
-    
+
     def __init__(self, main_window):
         """
         تهيئة مدير الاختصارات
-        
+
         Args:
             main_window: النافذة الرئيسية للتطبيق
         """
         super().__init__()
         self.main_window = main_window
-        self.shortcuts: Dict[str, QShortcut] = {}
-        
+        self.shortcuts: dict[str, QShortcut] = {}
+
         # تعريف الاختصارات
         self.shortcut_definitions = {
             # اختصارات الإنشاء
@@ -60,7 +61,7 @@ class KeyboardShortcutManager(QObject):
                 'description': 'مصروف جديد',
                 'signal': self.new_expense
             },
-            
+
             # اختصارات التنقل والبحث
             'search': {
                 'key': 'Ctrl+F',
@@ -72,7 +73,7 @@ class KeyboardShortcutManager(QObject):
                 'description': 'تحديث البيانات',
                 'signal': self.refresh_data
             },
-            
+
             # اختصارات الحفظ والإغلاق
             'save': {
                 'key': 'Ctrl+S',
@@ -84,14 +85,14 @@ class KeyboardShortcutManager(QObject):
                 'description': 'إغلاق النافذة',
                 'signal': self.close_dialog
             },
-            
+
             # اختصارات المساعدة
             'help': {
                 'key': 'F1',
                 'description': 'عرض المساعدة',
                 'signal': self.show_help
             },
-            
+
             # اختصارات التابات
             'tab_dashboard': {
                 'key': 'Ctrl+1',
@@ -134,20 +135,20 @@ class KeyboardShortcutManager(QObject):
                 'action': lambda: self._switch_tab(7)
             }
         }
-        
+
         logger.info("تم تهيئة KeyboardShortcutManager")
-    
+
     def setup_shortcuts(self):
         """إعداد جميع الاختصارات"""
         for name, definition in self.shortcut_definitions.items():
             self._create_shortcut(name, definition)
-        
+
         logger.info(f"تم إعداد {len(self.shortcuts)} اختصار")
-    
-    def _create_shortcut(self, name: str, definition: Dict):
+
+    def _create_shortcut(self, name: str, definition: dict):
         """
         ⚡ إنشاء اختصار واحد بشكل احترافي
-        
+
         Args:
             name: اسم الاختصار
             definition: تعريف الاختصار
@@ -157,27 +158,27 @@ class KeyboardShortcutManager(QObject):
                 QKeySequence(definition['key']),
                 self.main_window
             )
-            
+
             # ⚡ تفعيل الاختصار دائماً
             shortcut.setEnabled(True)
             shortcut.setAutoRepeat(False)  # منع التكرار التلقائي
-            
+
             # ربط الاختصار بالإجراء أو الإشارة
             if 'signal' in definition:
                 shortcut.activated.connect(definition['signal'].emit)
             elif 'action' in definition:
                 shortcut.activated.connect(definition['action'])
-            
+
             self.shortcuts[name] = shortcut
             logger.debug(f"تم إنشاء اختصار: {name} ({definition['key']})")
-        
+
         except Exception as e:
             logger.error(f"فشل إنشاء اختصار {name}: {e}")
-    
+
     def _switch_tab(self, index: int):
         """
         التبديل إلى تاب معين
-        
+
         Args:
             index: رقم التاب
         """
@@ -188,32 +189,32 @@ class KeyboardShortcutManager(QObject):
                     logger.debug(f"تم التبديل إلى التاب {index}")
         except Exception as e:
             logger.error(f"فشل التبديل إلى التاب {index}: {e}")
-    
-    def get_all_shortcuts(self) -> Dict[str, Dict]:
+
+    def get_all_shortcuts(self) -> dict[str, dict]:
         """
         الحصول على جميع الاختصارات
-        
+
         Returns:
             قاموس بجميع الاختصارات وتعريفاتها
         """
-        return self.shortcut_definitions
-    
-    def get_shortcut_by_name(self, name: str) -> QShortcut:
+        return dict(self.shortcut_definitions)
+
+    def get_shortcut_by_name(self, name: str) -> QShortcut | None:
         """
         الحصول على اختصار بالاسم
-        
+
         Args:
             name: اسم الاختصار
-            
+
         Returns:
             كائن QShortcut أو None
         """
         return self.shortcuts.get(name)
-    
+
     def enable_shortcut(self, name: str):
         """
         تفعيل اختصار
-        
+
         Args:
             name: اسم الاختصار
         """
@@ -221,11 +222,11 @@ class KeyboardShortcutManager(QObject):
         if shortcut:
             shortcut.setEnabled(True)
             logger.debug(f"تم تفعيل الاختصار: {name}")
-    
+
     def disable_shortcut(self, name: str):
         """
         تعطيل اختصار
-        
+
         Args:
             name: اسم الاختصار
         """
@@ -233,34 +234,34 @@ class KeyboardShortcutManager(QObject):
         if shortcut:
             shortcut.setEnabled(False)
             logger.debug(f"تم تعطيل الاختصار: {name}")
-    
+
     def enable_all(self):
         """تفعيل جميع الاختصارات"""
         for shortcut in self.shortcuts.values():
             shortcut.setEnabled(True)
         logger.info("تم تفعيل جميع الاختصارات")
-    
+
     def disable_all(self):
         """تعطيل جميع الاختصارات"""
         for shortcut in self.shortcuts.values():
             shortcut.setEnabled(False)
         logger.info("تم تعطيل جميع الاختصارات")
-    
-    def get_shortcuts_by_category(self) -> Dict[str, list]:
+
+    def get_shortcuts_by_category(self) -> dict[str, list]:
         """
         الحصول على الاختصارات مصنفة حسب الفئة
-        
+
         Returns:
             قاموس بالاختصارات مصنفة
         """
-        categories = {
+        categories: dict[str, list[dict[str, str]]] = {
             'إنشاء': [],
             'تنقل وبحث': [],
             'حفظ وإغلاق': [],
             'مساعدة': [],
             'التابات': []
         }
-        
+
         for name, definition in self.shortcut_definitions.items():
             if name.startswith('new_'):
                 categories['إنشاء'].append({
@@ -292,7 +293,7 @@ class KeyboardShortcutManager(QObject):
                     'key': definition['key'],
                     'description': definition['description']
                 })
-        
+
         return categories
 
 

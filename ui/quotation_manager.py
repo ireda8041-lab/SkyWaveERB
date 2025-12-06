@@ -1,26 +1,24 @@
-from typing import List, Optional
 
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QTableWidget,
-    QTableWidgetItem,
+    QHBoxLayout,
     QHeaderView,
-    QPushButton,
     QLabel,
     QMessageBox,
-    QHBoxLayout,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtGui import QColor
 
-from services.quotation_service import QuotationService
+from core import schemas
 from services.client_service import ClientService
+from services.quotation_service import QuotationService
 from services.service_service import ServiceService
 from services.settings_service import SettingsService
-from core import schemas
-
 from ui.quotation_editor import QuotationEditorWindow
-from ui.styles import BUTTON_STYLES, TABLE_STYLE
+from ui.styles import BUTTON_STYLES
 
 
 class QuotationManagerTab(QWidget):
@@ -41,11 +39,11 @@ class QuotationManagerTab(QWidget):
         self.service_service = service_service
         self.settings_service = settings_service
 
-        self.quotations_list: List[schemas.Quotation] = []
+        self.quotations_list: list[schemas.Quotation] = []
 
         layout = QVBoxLayout()
         self.setLayout(layout)
-        
+
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
         app_signals.quotations_changed.connect(self._on_quotations_changed)
@@ -89,7 +87,7 @@ class QuotationManagerTab(QWidget):
                 "الإجمالي",
             ]
         )
-        
+
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
         self.search_bar = UniversalSearchBar(
@@ -98,26 +96,29 @@ class QuotationManagerTab(QWidget):
         )
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
-        
+
         self.quotes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.quotes_table.setAlternatingRowColors(True)
-        self.quotes_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        h_header = self.quotes_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
 
         layout.addWidget(self.quotes_table)
 
     def load_quotations_data(self):
         """⚡ تحميل عروض الأسعار في الخلفية لمنع التجميد"""
         print("INFO: [QuoteManager] جاري تحميل عروض الأسعار...")
-        
-        from core.data_loader import get_data_loader
+
         from PyQt6.QtWidgets import QApplication
-        
+
+        from core.data_loader import get_data_loader
+
         # تحضير الجدول
         self.quotes_table.setUpdatesEnabled(False)
         self.quotes_table.blockSignals(True)
         self.quotes_table.setRowCount(0)
         QApplication.processEvents()
-        
+
         # دالة جلب البيانات
         def fetch_quotations():
             try:
@@ -125,41 +126,41 @@ class QuotationManagerTab(QWidget):
             except Exception as e:
                 print(f"ERROR: [QuoteManager] فشل جلب عروض الأسعار: {e}")
                 return []
-        
+
         # دالة تحديث الواجهة
         def on_data_loaded(quotations):
             try:
                 self.quotations_list = quotations
-                
+
                 colors_map = {
                     schemas.QuotationStatus.ACCEPTED: QColor("#0A6CF1"),
                     schemas.QuotationStatus.SENT: QColor("#3b82f6"),
                     schemas.QuotationStatus.DRAFT: QColor("#9ca3af"),
                     schemas.QuotationStatus.REJECTED: QColor("#ef4444"),
                 }
-                
+
                 batch_size = 15
                 for index, quote in enumerate(self.quotations_list):
                     self.quotes_table.insertRow(index)
-                    
+
                     status_item = QTableWidgetItem(quote.status.value)
                     status_color = colors_map.get(quote.status, colors_map[schemas.QuotationStatus.DRAFT])
                     status_item.setBackground(status_color)
                     if quote.status != schemas.QuotationStatus.DRAFT:
                         status_item.setForeground(QColor("white"))
-                    
+
                     self.quotes_table.setItem(index, 0, status_item)
                     self.quotes_table.setItem(index, 1, QTableWidgetItem(quote.quote_number))
                     self.quotes_table.setItem(index, 2, QTableWidgetItem(quote.client_id))
                     self.quotes_table.setItem(index, 3, QTableWidgetItem(quote.issue_date.strftime("%Y-%m-%d")))
                     self.quotes_table.setItem(index, 4, QTableWidgetItem(quote.expiry_date.strftime("%Y-%m-%d")))
                     self.quotes_table.setItem(index, 5, QTableWidgetItem(f"{quote.total_amount:,.2f} {quote.currency.value}"))
-                    
+
                     if (index + 1) % batch_size == 0:
                         QApplication.processEvents()
-                
+
                 print(f"INFO: [QuoteManager] ✅ تم تحميل {len(self.quotations_list)} عرض سعر.")
-                
+
             except Exception as e:
                 print(f"ERROR: [QuoteManager] فشل تحديث الجدول: {e}")
                 import traceback
@@ -168,12 +169,12 @@ class QuotationManagerTab(QWidget):
                 self.quotes_table.blockSignals(False)
                 self.quotes_table.setUpdatesEnabled(True)
                 QApplication.processEvents()
-        
+
         def on_error(error_msg):
             print(f"ERROR: [QuoteManager] فشل تحميل عروض الأسعار: {error_msg}")
             self.quotes_table.blockSignals(False)
             self.quotes_table.setUpdatesEnabled(True)
-        
+
         # تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(

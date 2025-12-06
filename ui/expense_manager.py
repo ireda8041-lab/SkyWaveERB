@@ -3,21 +3,28 @@
 تاب إدارة المصروفات - يستخدم dialog للإضافة والتعديل
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLabel, QMessageBox, QGroupBox, QDialog
-)
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
-from services.expense_service import ExpenseService
-from services.accounting_service import AccountingService
-from services.project_service import ProjectService
 from core import schemas
-from typing import List, Optional
-
-from ui.styles import BUTTON_STYLES
+from services.accounting_service import AccountingService
+from services.expense_service import ExpenseService
+from services.project_service import ProjectService
 from ui.expense_editor_dialog import ExpenseEditorDialog
+from ui.styles import BUTTON_STYLES
 
 
 class ExpenseManagerTab(QWidget):
@@ -36,14 +43,14 @@ class ExpenseManagerTab(QWidget):
         self.accounting_service = accounting_service
         self.project_service = project_service
 
-        self.expenses_list: List[schemas.Expense] = []
+        self.expenses_list: list[schemas.Expense] = []
 
         self.setup_ui()
-        
+
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
         app_signals.expenses_changed.connect(self._on_expenses_changed)
-        
+
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
 
@@ -54,7 +61,7 @@ class ExpenseManagerTab(QWidget):
 
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
-        
+
         self.add_button = QPushButton("➕ إضافة مصروف")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.clicked.connect(self.open_add_dialog)
@@ -84,7 +91,7 @@ class ExpenseManagerTab(QWidget):
         self.expenses_table.setHorizontalHeaderLabels([
             "#", "التاريخ", "الفئة", "الوصف", "المشروع", "المبلغ"
         ])
-        
+
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
         self.search_bar = UniversalSearchBar(
@@ -93,15 +100,19 @@ class ExpenseManagerTab(QWidget):
         )
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
-        
-        self.expenses_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.expenses_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+
+        h_header = self.expenses_table.horizontalHeader()
+        v_header = self.expenses_table.verticalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.expenses_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.expenses_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.expenses_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.expenses_table.setAlternatingRowColors(True)
-        self.expenses_table.verticalHeader().setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
-        self.expenses_table.verticalHeader().setVisible(False)
+        if v_header is not None:
+            v_header.setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
+            v_header.setVisible(False)
         self.expenses_table.itemDoubleClicked.connect(self.open_edit_dialog)
         from ui.styles import TABLE_STYLE_DARK
         self.expenses_table.setStyleSheet(TABLE_STYLE_DARK)
@@ -116,16 +127,17 @@ class ExpenseManagerTab(QWidget):
     def load_expenses_data(self):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
         print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
-        
-        from core.data_loader import get_data_loader
+
         from PyQt6.QtWidgets import QApplication
-        
+
+        from core.data_loader import get_data_loader
+
         # تحضير الجدول
         self.expenses_table.setUpdatesEnabled(False)
         self.expenses_table.blockSignals(True)
         self.expenses_table.setRowCount(0)
         QApplication.processEvents()
-        
+
         # دالة جلب البيانات
         def fetch_expenses():
             try:
@@ -133,51 +145,51 @@ class ExpenseManagerTab(QWidget):
             except Exception as e:
                 print(f"ERROR: [ExpenseManager] فشل جلب المصروفات: {e}")
                 return []
-        
+
         # دالة تحديث الواجهة
         def on_data_loaded(expenses):
             try:
                 self.expenses_list = expenses
                 total_sum = 0.0
                 batch_size = 15
-                
+
                 for i, exp in enumerate(self.expenses_list):
                     self.expenses_table.insertRow(i)
-                    
+
                     num_item = QTableWidgetItem(str(i + 1))
                     num_item.setData(Qt.ItemDataRole.UserRole, exp)
                     self.expenses_table.setItem(i, 0, num_item)
-                    
+
                     date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
                     self.expenses_table.setItem(i, 1, QTableWidgetItem(date_str))
                     self.expenses_table.setItem(i, 2, QTableWidgetItem(exp.category or ""))
                     self.expenses_table.setItem(i, 3, QTableWidgetItem(exp.description or ""))
                     self.expenses_table.setItem(i, 4, QTableWidgetItem(exp.project_id or "---"))
-                    
+
                     amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
                     amount_item.setForeground(QColor("#ef4444"))
                     self.expenses_table.setItem(i, 5, amount_item)
-                    
+
                     total_sum += exp.amount
-                    
+
                     if (i + 1) % batch_size == 0:
                         QApplication.processEvents()
-                
+
                 self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
                 print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
-                
+
             except Exception as e:
                 print(f"ERROR: [ExpenseManager] فشل تحديث الجدول: {e}")
             finally:
                 self.expenses_table.blockSignals(False)
                 self.expenses_table.setUpdatesEnabled(True)
                 QApplication.processEvents()
-        
+
         def on_error(error_msg):
             print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")
             self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
-        
+
         # تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -193,7 +205,7 @@ class ExpenseManagerTab(QWidget):
         print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
         self.load_expenses_data()
 
-    def get_selected_expense(self) -> Optional[schemas.Expense]:
+    def get_selected_expense(self) -> schemas.Expense | None:
         """الحصول على المصروف المحدد"""
         current_row = self.expenses_table.currentRow()
         if current_row < 0:
@@ -201,7 +213,10 @@ class ExpenseManagerTab(QWidget):
         num_item = self.expenses_table.item(current_row, 0)
         if not num_item:
             return None
-        return num_item.data(Qt.ItemDataRole.UserRole)
+        data = num_item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(data, schemas.Expense):
+            return data
+        return None
 
     def open_add_dialog(self):
         """فتح dialog إضافة مصروف جديد"""

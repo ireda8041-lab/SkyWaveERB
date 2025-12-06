@@ -12,10 +12,10 @@ class AppSignals(QObject):
     كلاس الإشارات العامة للتطبيق
     يستخدم لإرسال إشارات التحديث بين الخدمات والواجهة
     """
-    
+
     # إشارة عامة لتحديث البيانات
     data_changed = pyqtSignal(str)  # يرسل نوع البيانات المتغيرة (projects, expenses, accounts, etc.)
-    
+
     # إشارات محددة
     accounts_changed = pyqtSignal()
     projects_changed = pyqtSignal()
@@ -26,15 +26,15 @@ class AppSignals(QObject):
     quotations_changed = pyqtSignal()  # ⚡ إشارة تحديث عروض الأسعار
     tasks_changed = pyqtSignal()  # ⚡ إشارة تحديث المهام
     journal_entry_created = pyqtSignal(str)  # إشارة إنشاء قيد محاسبي
-    
+
     # ⚡ إشارات المزامنة
     sync_completed = pyqtSignal(dict)  # نتائج المزامنة
     sync_failed = pyqtSignal(str)  # رسالة الخطأ
-    
+
     def emit_data_changed(self, data_type: str):
         """إرسال إشارة تحديث البيانات"""
         self.data_changed.emit(data_type)
-        
+
         # إرسال الإشارة المحددة أيضاً
         if data_type == 'accounts':
             self.accounts_changed.emit()
@@ -52,7 +52,7 @@ class AppSignals(QObject):
             self.quotations_changed.emit()
         elif data_type == 'tasks':
             self.tasks_changed.emit()
-    
+
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""
         self.journal_entry_created.emit(entry_id)

@@ -1,23 +1,24 @@
+
+from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
-    QDialog,
-    QVBoxLayout,
-    QFormLayout,
     QComboBox,
     QDateEdit,
-    QTextEdit,
-    QPushButton,
-    QHBoxLayout,
-    QMessageBox,
-    QLabel,
+    QDialog,
+    QFormLayout,
     QFrame,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import QDate
-from PyQt6.QtGui import QFont
-from typing import List
 
 from core import schemas
+from ui.custom_spinbox import CustomSpinBox
+from ui.smart_scan_dropzone import SmartScanDropzone
 
 
 class PaymentDialog(QDialog):
@@ -26,7 +27,7 @@ class PaymentDialog(QDialog):
     def __init__(
         self,
         project: schemas.Project,
-        accounts: List[schemas.Account],
+        accounts: list[schemas.Account],
         project_service,
         parent=None,
     ):
@@ -50,17 +51,17 @@ class PaymentDialog(QDialog):
 
         self.setWindowTitle(f"تسجيل دفعة - {project.name}")
         self.setMinimumWidth(450)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         # إزالة الإطار البرتقالي نهائياً
         self.setStyleSheet("""
             * {
                 outline: none;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, 
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus {
                 border: none;
@@ -90,6 +91,17 @@ class PaymentDialog(QDialog):
         summary_group.setLayout(summary_layout)
         layout.addWidget(summary_group)
 
+        # --- قسم المسح الذكي ---
+        self.smart_scan = SmartScanDropzone(self)
+        self.smart_scan.scan_completed.connect(self._on_scan_completed)
+        self.smart_scan.scan_failed.connect(self._on_scan_failed)
+
+        # إخفاء الـ widget إذا الخدمة غير متاحة
+        if not self.smart_scan.is_available():
+            self.smart_scan.setVisible(False)
+        else:
+            layout.addWidget(self.smart_scan)
+
         # --- قسم بيانات الدفعة ---
         form = QFormLayout()
 
@@ -111,6 +123,10 @@ class PaymentDialog(QDialog):
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("yyyy-MM-dd")
 
+        # حقل الرقم المرجعي (للمسح الذكي)
+        self.reference_input = QLineEdit()
+        self.reference_input.setPlaceholderText("رقم العملية / المرجع (اختياري)")
+
         self.notes_input = QTextEdit()
         self.notes_input.setPlaceholderText("ملاحظات الدفع (اختياري)...")
         self.notes_input.setMaximumHeight(80)
@@ -118,7 +134,32 @@ class PaymentDialog(QDialog):
         form.addRow("الحساب المستلم:", self.account_combo)
         form.addRow("المبلغ:", self.amount_input)
         form.addRow("التاريخ:", self.date_input)
+        form.addRow("رقم المرجع:", self.reference_input)
         form.addRow("ملاحظات:", self.notes_input)
+
+        # === زر إرفاق صورة الدفعة ===
+        attachment_layout = QHBoxLayout()
+        self.upload_btn = QPushButton("📎 إرفاق صورة الدفعة")
+        self.upload_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #34495e; }
+        """)
+        self.upload_btn.clicked.connect(self.select_receipt_image)
+        attachment_layout.addWidget(self.upload_btn)
+
+        self.file_label = QLabel("")
+        self.file_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        attachment_layout.addWidget(self.file_label)
+        attachment_layout.addStretch()
+
+        self.selected_image_path = None
+        form.addRow("المرفقات:", attachment_layout)
+
         layout.addLayout(form)
 
         buttons_layout = QHBoxLayout()
@@ -148,11 +189,11 @@ class PaymentDialog(QDialog):
 
         layout.addLayout(buttons_layout)
         self.setLayout(layout)
-        
+
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
         apply_arrows_to_all_widgets(self)
-        
+
         # Initial validation
         self._validate_payment()
 
@@ -184,17 +225,17 @@ class PaymentDialog(QDialog):
         """Real-time payment validation"""
         amount = self.amount_input.value()
         selected_account = self.account_combo.currentData()
-        
+
         is_valid = True
-        
+
         if amount <= 0:
             is_valid = False
-        
+
         if not selected_account:
             is_valid = False
-        
+
         self.save_btn.setEnabled(is_valid)
-    
+
     def save_payment(self):
         selected_account = self.account_combo.currentData()
         amount = self.amount_input.value()
@@ -226,3 +267,137 @@ class PaymentDialog(QDialog):
             self.accept()
         except Exception as exc:
             QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {exc}")
+
+    def select_receipt_image(self):
+        """فتح نافذة اختيار ملف صورة الإيصال"""
+        from PyQt6.QtWidgets import QFileDialog
+        import os
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "اختر صورة الإيصال/الدفعة",
+            "",
+            "Images (*.png *.jpg *.jpeg);;PDF Files (*.pdf);;All Files (*)"
+        )
+
+        if file_path:
+            self.selected_image_path = file_path
+            file_name = os.path.basename(file_path)
+            self.file_label.setText(f"✅ {file_name}")
+            self.file_label.setStyleSheet("color: #2ecc71; font-size: 11px;")
+        else:
+            self.file_label.setText("")
+            self.selected_image_path = None
+
+    def _on_scan_completed(self, data: dict):
+        """Auto-fill form fields with extracted data from smart scan."""
+        # ملء حقل المبلغ
+        if data.get('amount'):
+            self.amount_input.setValue(data['amount'])
+
+        # ملء حقل التاريخ
+        if data.get('date'):
+            date = QDate.fromString(data['date'], 'yyyy-MM-dd')
+            if date.isValid():
+                self.date_input.setDate(date)
+
+        # ملء حقل الرقم المرجعي
+        if data.get('reference_number'):
+            self.reference_input.setText(data['reference_number'])
+
+        # ملاحظة: لا نختار الحساب تلقائياً - المستخدم يختار بنفسه
+        # لأن أسماء المنصات قد لا تتطابق مع أسماء الحسابات
+
+        # إضافة اسم المرسل للملاحظات
+        if data.get('sender_name'):
+            current_notes = self.notes_input.toPlainText()
+            sender_note = f"المرسل: {data['sender_name']}"
+            if current_notes:
+                self.notes_input.setText(f"{current_notes}\n{sender_note}")
+            else:
+                self.notes_input.setText(sender_note)
+
+        # تحديث التحقق
+        self._validate_payment()
+
+    def _on_scan_failed(self, error_message: str):
+        """Handle scan failure - just log, error is shown in dropzone."""
+        print(f"INFO: [PaymentDialog] فشل المسح الذكي: {error_message}")
+
+    def _select_account_by_platform(self, platform: str):
+        """Try to select the matching account based on platform name.
+
+        يختار الحساب تلقائياً لو موجود، ويسيبه فاضي لو مش موجود.
+        """
+        if not platform:
+            return
+
+        # لو مفيش حسابات، ما نعملش حاجة
+        if self.account_combo.count() == 0:
+            return
+
+        platform_lower = platform.lower()
+
+        # قائمة الكلمات المفتاحية لكل منصة
+        platform_keywords = {
+            'vodafone': ['vodafone', 'فودافون', 'vf', 'فودا'],
+            'instapay': ['instapay', 'انستا', 'insta'],
+            'orange': ['orange', 'اورنج'],
+            'etisalat': ['etisalat', 'اتصالات', 'we'],
+            'cib': ['cib', 'سي اي بي'],
+            'nbe': ['nbe', 'الأهلي', 'اهلي'],
+            'qnb': ['qnb', 'قطر'],
+            'bank': ['bank', 'بنك'],
+        }
+
+        best_match_index = -1
+        best_match_score = 0
+
+        # البحث عن أفضل حساب مطابق من الحسابات الحقيقية فقط
+        for i in range(self.account_combo.count()):
+            account = self.account_combo.itemData(i)
+
+            # تخطي العناصر بدون بيانات حساب حقيقية
+            if account is None:
+                continue
+
+            # التحقق من أن الحساب له اسم
+            if not hasattr(account, 'name') or not account.name:
+                continue
+
+            # التحقق من أن الحساب موجود في قائمة الحسابات الأصلية
+            account_exists = any(
+                acc.code == account.code for acc in self.accounts
+            ) if hasattr(account, 'code') else False
+
+            if not account_exists:
+                continue
+
+            account_name_lower = account.name.lower()
+            current_score = 0
+
+            # التحقق من كل منصة
+            for _platform_key, keywords in platform_keywords.items():
+                platform_matches = any(kw in platform_lower for kw in keywords)
+                account_matches = any(kw in account_name_lower for kw in keywords)
+
+                if platform_matches and account_matches:
+                    current_score = sum(1 for kw in keywords if kw in account_name_lower)
+                    break
+
+            # مطابقة مباشرة
+            if platform_lower in account_name_lower:
+                current_score += 10
+
+            if current_score > best_match_score:
+                best_match_score = current_score
+                best_match_index = i
+
+        # فقط غيّر الحساب لو لقينا مطابقة حقيقية مع حساب موجود
+        if best_match_index >= 0 and best_match_score > 0:
+            self.account_combo.setCurrentIndex(best_match_index)
+            print(f"INFO: [PaymentDialog] تم اختيار الحساب تلقائياً: {self.account_combo.currentText()}")
+        else:
+            # لو مفيش مطابقة، نسيب الـ ComboBox على الـ placeholder
+            self.account_combo.setCurrentIndex(-1)
+            print(f"INFO: [PaymentDialog] لم يتم العثور على حساب مطابق للمنصة: {platform}")

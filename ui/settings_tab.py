@@ -8,29 +8,42 @@
 - النسخ الاحتياطي
 """
 
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QMessageBox, QGroupBox,
-    QTextEdit, QFileDialog, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QComboBox, QCheckBox, QFrame, QProgressBar
-)
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import Qt, QDate
-from PyQt6.QtGui import QPixmap, QFont
-
-from services.settings_service import SettingsService
-from ui.styles import BUTTON_STYLES, TABLE_STYLE, COLORS
-from ui.currency_editor_dialog import CurrencyEditorDialog
-from core.repository import Repository
 import json
 import os
 from datetime import datetime
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.repository import Repository
+from services.settings_service import SettingsService
+from ui.currency_editor_dialog import CurrencyEditorDialog
+from ui.styles import BUTTON_STYLES
 
 
 class SettingsTab(QWidget):
     """تاب الإعدادات المتقدمة مع تابات فرعية."""
 
-    def __init__(self, settings_service: SettingsService, repository: Repository = None, parent=None):
+    def __init__(self, settings_service: SettingsService, repository: Repository | None = None, parent=None):
         super().__init__(parent)
         self.settings_service = settings_service
         self.repository = repository
@@ -71,12 +84,12 @@ class SettingsTab(QWidget):
         self.default_accounts_tab = QWidget()
         self.tabs.addTab(self.default_accounts_tab, "🔗 الحسابات الافتراضية")
         self.setup_default_accounts_tab()
-        
+
         # تاب قوالب الفواتير
         from ui.template_settings import TemplateSettings
         self.template_tab = TemplateSettings(self.settings_service)
         self.tabs.addTab(self.template_tab, "🎨 قوالب الفواتير")
-        
+
         # تاب التحديثات
         self.update_tab = QWidget()
         self.tabs.addTab(self.update_tab, "🔄 التحديثات")
@@ -220,7 +233,9 @@ class SettingsTab(QWidget):
         self.currencies_table.setHorizontalHeaderLabels([
             "#", "الرمز", "الاسم", "الرمز", "سعر الصرف", "الحالة"
         ])
-        self.currencies_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        h_header = self.currencies_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.currencies_table.setAlternatingRowColors(True)
         self.currencies_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.currencies_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -273,7 +288,9 @@ class SettingsTab(QWidget):
         self.users_table.setHorizontalHeaderLabels([
             "#", "اسم المستخدم", "الاسم الكامل", "البريد", "الدور", "الحالة", "تاريخ الإنشاء"
         ])
-        self.users_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        h_header = self.users_table.horizontalHeader()
+        if h_header is not None:
+            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.users_table.setAlternatingRowColors(True)
         self.users_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.users_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -420,7 +437,7 @@ class SettingsTab(QWidget):
             # ⚡ معالجة الأحداث لمنع التجميد
             from PyQt6.QtWidgets import QApplication
             QApplication.processEvents()
-            
+
             settings = self.settings_service.get_settings()
             self.company_name_input.setText(settings.get("company_name", ""))
             self.company_address_input.setText(settings.get("company_address", ""))
@@ -460,21 +477,21 @@ class SettingsTab(QWidget):
     def load_currencies(self):
         """تحميل العملات من قاعدة البيانات"""
         self.currencies_table.setRowCount(0)
-        
+
         currencies = []
         if self.repository:
             # جلب العملات من قاعدة البيانات
             currencies = self.repository.get_all_currencies()
-            
+
             # إذا لم توجد عملات، إنشاء العملات الافتراضية
             if not currencies:
                 self.repository.init_default_currencies()
                 currencies = self.repository.get_all_currencies()
-        
+
         # إذا لم يكن هناك repository أو فشل الجلب، استخدم القيم الافتراضية
         if not currencies:
             currencies = self._get_default_currencies()
-        
+
         for i, curr in enumerate(currencies):
             code = curr.get('code', '')
             name = curr.get('name', '')
@@ -482,23 +499,23 @@ class SettingsTab(QWidget):
             rate = curr.get('rate', 1.0)
             is_base = curr.get('is_base', False)
             active = curr.get('active', True)
-            
+
             self.currencies_table.insertRow(i)
             self.currencies_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
             self.currencies_table.setItem(i, 1, QTableWidgetItem(code))
-            
+
             name_display = name
             if is_base:
                 name_display += " ⭐"
             self.currencies_table.setItem(i, 2, QTableWidgetItem(name_display))
-            
+
             self.currencies_table.setItem(i, 3, QTableWidgetItem(symbol))
-            
+
             rate_display = f"{rate:.2f}"
             if is_base:
                 rate_display += " (أساسية)"
             self.currencies_table.setItem(i, 4, QTableWidgetItem(rate_display))
-            
+
             status = "✅ نشط" if active else "❌ غير نشط"
             self.currencies_table.setItem(i, 5, QTableWidgetItem(status))
 
@@ -535,22 +552,22 @@ class SettingsTab(QWidget):
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد عملة أولاً")
             return
-        
+
         # جلب بيانات العملة الحالية
         code = self.currencies_table.item(current_row, 1).text()
         name = self.currencies_table.item(current_row, 2).text()
         symbol = self.currencies_table.item(current_row, 3).text()
         rate_text = self.currencies_table.item(current_row, 4).text()
-        
+
         # تحويل السعر
         try:
             rate = float(rate_text.replace(" (أساسية)", "").replace(",", ""))
         except (ValueError, AttributeError):
             rate = 1.0
-        
+
         status_text = self.currencies_table.item(current_row, 5).text()
         active = "نشط" in status_text
-        
+
         currency_data = {
             'code': code,
             'name': name.replace(" ⭐", ""),
@@ -558,7 +575,7 @@ class SettingsTab(QWidget):
             'rate': rate,
             'active': active
         }
-        
+
         dialog = CurrencyEditorDialog(currency_data=currency_data, parent=self)
         if dialog.exec():
             result = dialog.get_result()
@@ -574,22 +591,22 @@ class SettingsTab(QWidget):
                 else:
                     # تحديث الجدول فقط (بدون حفظ)
                     self.currencies_table.setItem(current_row, 1, QTableWidgetItem(result['code']))
-                    
+
                     name_display = result['name']
                     if result['code'] == "EGP":
                         name_display += " ⭐"
                     self.currencies_table.setItem(current_row, 2, QTableWidgetItem(name_display))
-                    
+
                     self.currencies_table.setItem(current_row, 3, QTableWidgetItem(result['symbol']))
-                    
+
                     rate_display = f"{result['rate']:.2f}"
                     if result['code'] == "EGP":
                         rate_display += " (أساسية)"
                     self.currencies_table.setItem(current_row, 4, QTableWidgetItem(rate_display))
-                    
+
                     status = "✅ نشط" if result['active'] else "❌ غير نشط"
                     self.currencies_table.setItem(current_row, 5, QTableWidgetItem(status))
-                    
+
                     QMessageBox.information(self, "تم", f"تم تحديث العملة {result['name']} بنجاح!")
 
     def delete_currency(self):
@@ -598,19 +615,19 @@ class SettingsTab(QWidget):
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد عملة أولاً")
             return
-        
+
         code = self.currencies_table.item(current_row, 1).text()
-        
+
         if code == "EGP":
             QMessageBox.warning(self, "خطأ", "لا يمكن حذف العملة الأساسية (الجنيه المصري)")
             return
-        
+
         reply = QMessageBox.question(
             self, "تأكيد الحذف",
             f"هل أنت متأكد من حذف العملة {code}؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             # حذف من قاعدة البيانات
             if self.repository:
@@ -629,48 +646,48 @@ class SettingsTab(QWidget):
         if not self.repository:
             QMessageBox.warning(self, "تنبيه", "لا يمكن تحديث الأسعار - قاعدة البيانات غير متصلة")
             return
-        
+
         reply = QMessageBox.question(
             self, "🌐 تحديث أسعار الصرف",
             "سيتم جلب أسعار الصرف الحالية من الإنترنت.\n\nهل تريد المتابعة؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.No:
             return
-        
+
         # تعطيل الزرار أثناء التحديث
         self.update_rates_btn.setEnabled(False)
         self.update_rates_btn.setText("⏳ جاري التحديث...")
-        
+
         try:
             # تحديث الأسعار
             result = self.repository.update_all_exchange_rates()
-            
+
             # إعادة تحميل الجدول
             self.load_currencies()
-            
+
             # عرض النتيجة
             updated = result.get('updated', 0)
             failed = result.get('failed', 0)
             results = result.get('results', {})
-            
+
             msg = f"✅ تم تحديث {updated} عملة من الإنترنت\n\n"
-            
+
             for code, data in results.items():
                 if data['success']:
                     msg += f"• {code}: {data['rate']:.4f} ج.م ✓\n"
                 else:
                     msg += f"• {code}: فشل التحديث ✗\n"
-            
+
             if failed > 0:
                 msg += f"\n⚠️ فشل تحديث {failed} عملة"
-            
+
             QMessageBox.information(self, "نتيجة التحديث", msg)
-            
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل تحديث الأسعار:\n{e}")
-        
+
         finally:
             # إعادة تفعيل الزرار
             self.update_rates_btn.setEnabled(True)
@@ -681,7 +698,7 @@ class SettingsTab(QWidget):
         if not self.repository:
             QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة!")
             return
-        
+
         file_path, _ = QFileDialog.getSaveFileName(
             self, "حفظ النسخة الاحتياطية",
             f"skywave_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
@@ -708,87 +725,87 @@ class SettingsTab(QWidget):
                     "payments": [],
                     "settings": {}
                 }
-                
+
                 # جلب العملاء
                 try:
                     clients = self.repository.get_all_clients()
                     backup_data["clients"] = [self._serialize_object(c) for c in clients]
                 except Exception as e:
                     print(f"WARNING: فشل جلب العملاء: {e}")
-                
+
                 # جلب الخدمات
                 try:
                     services = self.repository.get_all_services()
                     backup_data["services"] = [self._serialize_object(s) for s in services]
                 except Exception as e:
                     print(f"WARNING: فشل جلب الخدمات: {e}")
-                
+
                 # جلب المشاريع
                 try:
                     projects = self.repository.get_all_projects()
                     backup_data["projects"] = [self._serialize_object(p) for p in projects]
                 except Exception as e:
                     print(f"WARNING: فشل جلب المشاريع: {e}")
-                
+
                 # جلب الفواتير
                 try:
                     invoices = self.repository.get_all_invoices()
                     backup_data["invoices"] = [self._serialize_object(i) for i in invoices]
                 except Exception as e:
                     print(f"WARNING: فشل جلب الفواتير: {e}")
-                
+
                 # جلب عروض الأسعار
                 try:
                     quotations = self.repository.get_all_quotations()
                     backup_data["quotations"] = [self._serialize_object(q) for q in quotations]
                 except Exception as e:
                     print(f"WARNING: فشل جلب عروض الأسعار: {e}")
-                
+
                 # جلب المصروفات
                 try:
                     expenses = self.repository.get_all_expenses()
                     backup_data["expenses"] = [self._serialize_object(e) for e in expenses]
                 except Exception as e:
                     print(f"WARNING: فشل جلب المصروفات: {e}")
-                
+
                 # جلب الحسابات
                 try:
                     accounts = self.repository.get_all_accounts()
                     backup_data["accounts"] = [self._serialize_object(a) for a in accounts]
                 except Exception as e:
                     print(f"WARNING: فشل جلب الحسابات: {e}")
-                
+
                 # جلب العملات
                 try:
                     currencies = self.repository.get_all_currencies()
                     backup_data["currencies"] = currencies if isinstance(currencies, list) else [currencies]
                 except Exception as e:
                     print(f"WARNING: فشل جلب العملات: {e}")
-                
+
                 # جلب قيود اليومية
                 try:
                     journal_entries = self.repository.get_all_journal_entries()
                     backup_data["journal_entries"] = [self._serialize_object(j) for j in journal_entries]
                 except Exception as e:
                     print(f"WARNING: فشل جلب قيود اليومية: {e}")
-                
+
                 # جلب الدفعات
                 try:
                     payments = self.repository.get_all_payments()
                     backup_data["payments"] = [self._serialize_object(p) for p in payments]
                 except Exception as e:
                     print(f"WARNING: فشل جلب الدفعات: {e}")
-                
+
                 # جلب الإعدادات
                 try:
                     backup_data["settings"] = self.settings_service.get_settings()
                 except Exception as e:
                     print(f"WARNING: فشل جلب الإعدادات: {e}")
-                
+
                 # حفظ الملف
                 with open(file_path, 'w', encoding='utf-8') as f:
                     json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
-                
+
                 # حساب الإحصائيات
                 total_records = sum([
                     len(backup_data["clients"]),
@@ -802,10 +819,10 @@ class SettingsTab(QWidget):
                     len(backup_data["journal_entries"]),
                     len(backup_data["payments"]),
                 ])
-                
+
                 QMessageBox.information(
-                    self, 
-                    "✅ نجاح", 
+                    self,
+                    "✅ نجاح",
                     f"تم إنشاء النسخة الاحتياطية بنجاح!\n\n"
                     f"📁 الملف: {file_path}\n"
                     f"📊 إجمالي السجلات: {total_records}\n\n"
@@ -817,10 +834,10 @@ class SettingsTab(QWidget):
                     f"• الحسابات: {len(backup_data['accounts'])}\n"
                     f"• قيود اليومية: {len(backup_data['journal_entries'])}"
                 )
-                
+
             except Exception as e:
                 QMessageBox.critical(self, "❌ خطأ", f"فشل إنشاء النسخة الاحتياطية:\n{e}")
-    
+
     def _serialize_object(self, obj):
         """تحويل كائن إلى قاموس قابل للتسلسل"""
         if hasattr(obj, 'model_dump'):
@@ -837,7 +854,7 @@ class SettingsTab(QWidget):
         if not self.repository:
             QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة!")
             return
-        
+
         reply = QMessageBox.warning(
             self, "⚠️ تأكيد",
             "هل أنت متأكد من استرجاع النسخة الاحتياطية؟\n\n"
@@ -853,17 +870,17 @@ class SettingsTab(QWidget):
             if file_path:
                 try:
                     # قراءة ملف النسخة الاحتياطية
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, encoding='utf-8') as f:
                         backup_data = json.load(f)
-                    
+
                     # التحقق من صحة الملف
                     if "backup_info" not in backup_data:
                         QMessageBox.critical(self, "خطأ", "ملف النسخة الاحتياطية غير صالح!")
                         return
-                    
+
                     backup_info = backup_data.get("backup_info", {})
                     created_at = backup_info.get("created_at", "غير معروف")
-                    
+
                     # تأكيد نهائي
                     final_confirm = QMessageBox.question(
                         self, "تأكيد نهائي",
@@ -875,17 +892,17 @@ class SettingsTab(QWidget):
                         f"هل تريد المتابعة؟",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
-                    
+
                     if final_confirm == QMessageBox.StandardButton.Yes:
                         # استرجاع البيانات من النسخة الاحتياطية
                         # يتطلب دوال إضافية في Repository
                         QMessageBox.information(
-                            self, 
-                            "✅ نجاح", 
+                            self,
+                            "✅ نجاح",
                             "تم قراءة ملف النسخة الاحتياطية بنجاح.\n\n"
                             "⚠️ ملاحظة: استرجاع البيانات يتطلب إعادة تشغيل التطبيق."
                         )
-                        
+
                 except json.JSONDecodeError:
                     QMessageBox.critical(self, "خطأ", "ملف النسخة الاحتياطية تالف أو غير صالح!")
                 except Exception as e:
@@ -903,27 +920,27 @@ class SettingsTab(QWidget):
                 accounts_count = len(self.repository.get_all_accounts())
                 currencies_count = len(self.repository.get_all_currencies())
                 journal_count = len(self.repository.get_all_journal_entries())
-                
+
                 # محاولة جلب المشاريع وعروض الأسعار
                 try:
                     projects_count = len(self.repository.get_all_projects())
                 except (AttributeError, TypeError) as e:
                     print(f"WARNING: فشل جلب عدد المشاريع: {e}")
                     projects_count = 0
-                
+
                 try:
                     quotations_count = len(self.repository.get_all_quotations())
                 except (AttributeError, TypeError) as e:
                     print(f"WARNING: فشل جلب عدد عروض الأسعار: {e}")
                     quotations_count = 0
-                
-                total = (clients_count + services_count + invoices_count + 
-                        expenses_count + accounts_count + currencies_count + 
+
+                total = (clients_count + services_count + invoices_count +
+                        expenses_count + accounts_count + currencies_count +
                         journal_count + projects_count + quotations_count)
-                
+
                 # حالة الاتصال
                 connection_status = "✅ متصل" if self.repository.online else "⚠️ غير متصل"
-                
+
                 stats_text = f"""
 📊 إحصائيات قاعدة البيانات:
 
@@ -948,9 +965,9 @@ class SettingsTab(QWidget):
 ⚠️ قاعدة البيانات غير متصلة
 يرجى التحقق من الاتصال
                 """
-            
+
             self.db_stats_label.setText(stats_text)
-            
+
         except Exception as e:
             self.db_stats_label.setText(f"❌ خطأ في جلب الإحصائيات: {e}")
 
@@ -981,15 +998,15 @@ class SettingsTab(QWidget):
         # الخزينة الافتراضية
         self.default_treasury_combo = QComboBox()
         self.default_treasury_combo.setPlaceholderText("اختر حساب الخزينة الافتراضي...")
-        
+
         # حساب الإيرادات الافتراضي
         self.default_revenue_combo = QComboBox()
         self.default_revenue_combo.setPlaceholderText("اختر حساب الإيرادات الافتراضي...")
-        
+
         # حساب الضرائب الافتراضي
         self.default_tax_combo = QComboBox()
         self.default_tax_combo.setPlaceholderText("اختر حساب الضرائب الافتراضي...")
-        
+
         # حساب العملاء الافتراضي
         self.default_client_combo = QComboBox()
         self.default_client_combo.setPlaceholderText("اختر حساب العملاء الافتراضي...")
@@ -1004,7 +1021,7 @@ class SettingsTab(QWidget):
 
         # زر التحديث
         buttons_layout = QHBoxLayout()
-        
+
         self.refresh_accounts_btn = QPushButton("🔄 تحديث القوائم")
         self.refresh_accounts_btn.setStyleSheet("""
             QPushButton {
@@ -1041,7 +1058,7 @@ class SettingsTab(QWidget):
         layout.addLayout(buttons_layout)
 
         layout.addStretch()
-        
+
         # تحميل الحسابات
         self.load_default_accounts()
 
@@ -1053,39 +1070,39 @@ class SettingsTab(QWidget):
 
         try:
             all_accounts = self.repository.get_all_accounts()
-            
+
             # فلترة الحسابات حسب النوع
             cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('11') and not getattr(acc, 'is_group', False)]
             revenue_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('4') and not getattr(acc, 'is_group', False)]
             tax_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('21') and not getattr(acc, 'is_group', False)]
             client_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('114')]
-            
+
             # ملء القوائم المنسدلة
             self._populate_account_combo(self.default_treasury_combo, cash_accounts, '1111')
             self._populate_account_combo(self.default_revenue_combo, revenue_accounts, '4100')
             self._populate_account_combo(self.default_tax_combo, tax_accounts, '2102')
             self._populate_account_combo(self.default_client_combo, client_accounts, '1140')
-            
+
             # تحميل القيم المحفوظة
             settings = self.settings_service.get_settings()
             self._select_account_by_code(self.default_treasury_combo, settings.get('default_treasury_account', '1111'))
             self._select_account_by_code(self.default_revenue_combo, settings.get('default_revenue_account', '4100'))
             self._select_account_by_code(self.default_tax_combo, settings.get('default_tax_account', '2102'))
             self._select_account_by_code(self.default_client_combo, settings.get('default_client_account', '1140'))
-            
+
         except Exception as e:
             print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
 
-    def _populate_account_combo(self, combo: QComboBox, accounts: list, default_code: str = None):
+    def _populate_account_combo(self, combo: QComboBox, accounts: list, default_code: str | None = None):
         """ملء ComboBox بالحسابات"""
         combo.clear()
         combo.addItem("-- اختر حساباً --", userData=None)
-        
+
         for acc in accounts:
             display_text = f"{acc.name} ({acc.code})"
             combo.addItem(display_text, userData=acc.code)
-            
+
             # تحديد الحساب الافتراضي
             if default_code and acc.code == default_code:
                 combo.setCurrentIndex(combo.count() - 1)
@@ -1106,27 +1123,27 @@ class SettingsTab(QWidget):
                 'default_tax_account': self.default_tax_combo.currentData(),
                 'default_client_account': self.default_client_combo.currentData(),
             }
-            
+
             # التحقق من أن جميع الحسابات محددة
             if None in default_accounts.values():
                 QMessageBox.warning(
-                    self, 
-                    "تحذير", 
+                    self,
+                    "تحذير",
                     "يرجى تحديد جميع الحسابات الافتراضية قبل الحفظ"
                 )
                 return
-            
+
             # حفظ الإعدادات
             current_settings = self.settings_service.get_settings()
             current_settings.update(default_accounts)
             self.settings_service.save_settings(current_settings)
-            
+
             QMessageBox.information(
-                self, 
-                "نجاح", 
+                self,
+                "نجاح",
                 "✅ تم حفظ إعدادات الحسابات الافتراضية بنجاح"
             )
-            
+
         except Exception as e:
             print(f"ERROR: فشل حفظ الحسابات الافتراضية: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
@@ -1134,58 +1151,58 @@ class SettingsTab(QWidget):
     def load_users(self):
         """تحميل المستخدمين من قاعدة البيانات"""
         self.users_table.setRowCount(0)
-        
+
         if not self.repository:
             return
-        
+
         try:
             # جلب المستخدمين من قاعدة البيانات
             users = self.repository.get_all_users()
-            
+
             for i, user in enumerate(users):
                 self.users_table.insertRow(i)
-                
+
                 # العمود 0: الرقم التسلسلي
                 num_item = QTableWidgetItem(str(i + 1))
                 self.users_table.setItem(i, 0, num_item)
-                
+
                 # العمود 1: اسم المستخدم (نخزن الـ ID هنا)
                 username_item = QTableWidgetItem(user.username)
                 # CRITICAL: تخزين الـ ID الحقيقي في UserRole
                 user_id = user.id if hasattr(user, 'id') and user.id else user._mongo_id
                 username_item.setData(Qt.ItemDataRole.UserRole, user_id)
                 self.users_table.setItem(i, 1, username_item)
-                
+
                 # العمود 2: الاسم الكامل
                 self.users_table.setItem(i, 2, QTableWidgetItem(user.full_name or ""))
-                
+
                 # العمود 3: البريد الإلكتروني
                 self.users_table.setItem(i, 3, QTableWidgetItem(user.email or ""))
-                
+
                 # العمود 4: الدور
                 role_display = user.role.value if hasattr(user.role, 'value') else str(user.role)
                 self.users_table.setItem(i, 4, QTableWidgetItem(role_display))
-                
+
                 # العمود 5: الحالة
                 status = "✅ نشط" if user.is_active else "❌ غير نشط"
                 self.users_table.setItem(i, 5, QTableWidgetItem(status))
-                
+
                 # العمود 6: تاريخ الإنشاء
                 created_date = user.created_at[:10] if user.created_at else ""
                 self.users_table.setItem(i, 6, QTableWidgetItem(created_date))
-                
+
         except Exception as e:
             print(f"ERROR: فشل تحميل المستخدمين: {e}")
             QMessageBox.warning(self, "خطأ", f"فشل تحميل المستخدمين: {e}")
 
     def add_user(self):
         """إضافة مستخدم جديد"""
-        from ui.user_editor_dialog import UserEditorDialog
         from core.auth_models import AuthService
-        
+        from ui.user_editor_dialog import UserEditorDialog
+
         # إنشاء خدمة المصادقة
         auth_service = AuthService(self.repository)
-        
+
         dialog = UserEditorDialog(auth_service, parent=self)
         if dialog.exec():
             self.load_users()
@@ -1197,27 +1214,27 @@ class SettingsTab(QWidget):
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
             return
-        
+
         # الحصول على اسم المستخدم من العمود 1 (حيث خزنا الـ ID)
         username_item = self.users_table.item(current_row, 1)
         if not username_item:
             QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
             return
-        
+
         username = username_item.text()
-        
-        from ui.user_editor_dialog import UserEditorDialog
+
         from core.auth_models import AuthService
-        
+        from ui.user_editor_dialog import UserEditorDialog
+
         # إنشاء خدمة المصادقة
         auth_service = AuthService(self.repository)
-        
+
         # جلب بيانات المستخدم
         user = auth_service.repo.get_user_by_username(username)
         if not user:
             QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
             return
-        
+
         dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
         if dialog.exec():
             self.load_users()
@@ -1229,24 +1246,24 @@ class SettingsTab(QWidget):
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
             return
-        
+
         # الحصول على اسم المستخدم من العمود 1
         username_item = self.users_table.item(current_row, 1)
         if not username_item:
             QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
             return
-        
+
         username = username_item.text()
-        
+
         from core.auth_models import AuthService
         auth_service = AuthService(self.repository)
-        
+
         # جلب بيانات المستخدم
         user = auth_service.repo.get_user_by_username(username)
         if not user:
             QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
             return
-        
+
         # فتح نافذة تحرير الصلاحيات
         from ui.user_permissions_dialog import UserPermissionsDialog
         dialog = UserPermissionsDialog(user, self.repository, self)
@@ -1260,31 +1277,31 @@ class SettingsTab(QWidget):
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
             return
-        
+
         # الحصول على اسم المستخدم من العمود 1
         username_item = self.users_table.item(current_row, 1)
         if not username_item:
             QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
             return
-        
+
         username = username_item.text()
-        
+
         # منع حذف المستخدم reda123
         if username == "reda123":
             QMessageBox.warning(self, "تحذير", "لا يمكن حذف مستخدم المدير الرئيسي.")
             return
-        
+
         reply = QMessageBox.question(
             self, "تأكيد الحذف",
             f"هل أنت متأكد من حذف المستخدم '{username}'؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 from core.auth_models import AuthService
                 auth_service = AuthService(self.repository)
-                
+
                 # تعطيل المستخدم بدلاً من حذفه
                 user = auth_service.repo.get_user_by_username(username)
                 if user:
@@ -1294,37 +1311,37 @@ class SettingsTab(QWidget):
                     QMessageBox.information(self, "تم", "تم تعطيل المستخدم بنجاح.")
                 else:
                     QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
-                    
+
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"فشل في تعطيل المستخدم: {str(e)}")
 
     def setup_update_tab(self):
         """إعداد تاب التحديثات"""
         layout = QVBoxLayout(self.update_tab)
-        
+
         # معلومات الإصدار الحالي
-        from version import CURRENT_VERSION, APP_NAME
-        
+        from version import APP_NAME, CURRENT_VERSION
+
         version_group = QGroupBox("📱 معلومات الإصدار")
         version_layout = QVBoxLayout()
-        
+
         app_name_label = QLabel(f"<h2>{APP_NAME}</h2>")
         app_name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         app_name_label.setStyleSheet("color: #4a90e2; font-weight: bold;")
         version_layout.addWidget(app_name_label)
-        
+
         current_version_label = QLabel(f"الإصدار الحالي: {CURRENT_VERSION}")
         current_version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         current_version_label.setStyleSheet("font-size: 16px; color: #0A6CF1; padding: 10px;")
         version_layout.addWidget(current_version_label)
-        
+
         version_group.setLayout(version_layout)
         layout.addWidget(version_group)
-        
+
         # معلومات التحديث
         update_info_group = QGroupBox("ℹ️ معلومات التحديث")
         update_info_layout = QVBoxLayout()
-        
+
         self.update_status_label = QLabel("اضغط على 'التحقق من التحديثات' للبحث عن إصدارات جديدة")
         self.update_status_label.setWordWrap(True)
         self.update_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1336,10 +1353,10 @@ class SettingsTab(QWidget):
             font-size: 13px;
         """)
         update_info_layout.addWidget(self.update_status_label)
-        
+
         update_info_group.setLayout(update_info_layout)
         layout.addWidget(update_info_group)
-        
+
         # شريط التقدم (مخفي في البداية)
         self.update_progress_bar = QProgressBar()
         self.update_progress_bar.setVisible(False)
@@ -1358,34 +1375,34 @@ class SettingsTab(QWidget):
             }
         """)
         layout.addWidget(self.update_progress_bar)
-        
+
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
-        
+
         self.check_update_btn = QPushButton("🔍 التحقق من التحديثات")
         self.check_update_btn.setStyleSheet(BUTTON_STYLES["primary"])
         self.check_update_btn.clicked.connect(self.check_for_updates)
-        
+
         self.download_update_btn = QPushButton("⬇️ تنزيل التحديث")
         self.download_update_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.download_update_btn.setVisible(False)
         self.download_update_btn.clicked.connect(self.download_update)
-        
+
         self.install_update_btn = QPushButton("🚀 تثبيت التحديث")
         self.install_update_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.install_update_btn.setVisible(False)
         self.install_update_btn.clicked.connect(self.install_update)
-        
+
         buttons_layout.addWidget(self.check_update_btn)
         buttons_layout.addWidget(self.download_update_btn)
         buttons_layout.addWidget(self.install_update_btn)
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
-        
+
         # ملاحظات التحديث
         notes_group = QGroupBox("📝 ملاحظات مهمة")
         notes_layout = QVBoxLayout()
-        
+
         notes_text = QLabel(
             "• سيتم تحديث البرنامج في نفس المكان الحالي\n"
             "• لن تفقد أي بيانات أثناء التحديث\n"
@@ -1395,12 +1412,12 @@ class SettingsTab(QWidget):
         notes_text.setWordWrap(True)
         notes_text.setStyleSheet("color: #9ca3af; padding: 10px;")
         notes_layout.addWidget(notes_text)
-        
+
         notes_group.setLayout(notes_layout)
         layout.addWidget(notes_group)
-        
+
         layout.addStretch()
-        
+
         # تهيئة متغيرات التحديث
         self.update_download_url = None
         self.update_version = None
@@ -1408,9 +1425,9 @@ class SettingsTab(QWidget):
 
     def check_for_updates(self):
         """التحقق من وجود تحديثات جديدة"""
-        from version import CURRENT_VERSION, UPDATE_CHECK_URL
         from services.update_service import UpdateService
-        
+        from version import CURRENT_VERSION, UPDATE_CHECK_URL
+
         # تعطيل الزرار أثناء الفحص
         self.check_update_btn.setEnabled(False)
         self.check_update_btn.setText("⏳ جاري التحقق...")
@@ -1422,18 +1439,18 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إنشاء خدمة التحديث
         self.update_service = UpdateService(CURRENT_VERSION, UPDATE_CHECK_URL)
-        
+
         # إنشاء Thread للتحقق
         self.update_checker = self.update_service.check_for_updates()
-        
+
         # ربط الإشارات
         self.update_checker.update_available.connect(self.on_update_available)
         self.update_checker.no_update.connect(self.on_no_update)
         self.update_checker.error_occurred.connect(self.on_update_error)
-        
+
         # بدء الفحص
         self.update_checker.start()
 
@@ -1441,7 +1458,7 @@ class SettingsTab(QWidget):
         """عند توفر تحديث جديد"""
         self.update_version = version
         self.update_download_url = url
-        
+
         self.update_status_label.setText(
             f"🎉 يتوفر إصدار جديد!\n\n"
             f"الإصدار الجديد: {version}\n"
@@ -1454,10 +1471,10 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إظهار زرار التنزيل
         self.download_update_btn.setVisible(True)
-        
+
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
         self.check_update_btn.setText("🔍 التحقق من التحديثات")
@@ -1465,7 +1482,7 @@ class SettingsTab(QWidget):
     def on_no_update(self):
         """عند عدم توفر تحديثات"""
         from version import CURRENT_VERSION
-        
+
         self.update_status_label.setText(
             f"✅ أنت تستخدم أحدث إصدار!\n\n"
             f"الإصدار الحالي: {CURRENT_VERSION}"
@@ -1477,7 +1494,7 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
         self.check_update_btn.setText("🔍 التحقق من التحديثات")
@@ -1487,8 +1504,8 @@ class SettingsTab(QWidget):
         # Handle 404 and connection errors gracefully
         if "404" in error_message or "فشل الاتصال" in error_message:
             self.update_status_label.setText(
-                f"⚠️ لا توجد تحديثات متاحة حالياً\n\n"
-                f"سيتم التحقق مرة أخرى لاحقاً"
+                "⚠️ لا توجد تحديثات متاحة حالياً\n\n"
+                "سيتم التحقق مرة أخرى لاحقاً"
             )
             self.update_status_label.setStyleSheet("""
                 background-color: #f59e0b;
@@ -1509,11 +1526,11 @@ class SettingsTab(QWidget):
                 border-radius: 8px;
                 font-size: 13px;
             """)
-        
+
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
         self.check_update_btn.setText("🔍 التحقق من التحديثات")
-        
+
         # Don't show popup for 404 errors - just the subtle warning above
         if not ("404" in error_message or "فشل الاتصال" in error_message):
             QMessageBox.warning(self, "خطأ", f"فشل التحقق من التحديثات:\n{error_message}")
@@ -1523,25 +1540,25 @@ class SettingsTab(QWidget):
         if not self.update_download_url:
             QMessageBox.warning(self, "خطأ", "لا يوجد رابط تحديث متاح")
             return
-        
+
         # تأكيد التنزيل
         reply = QMessageBox.question(
             self, "تأكيد التنزيل",
             f"سيتم تنزيل الإصدار {self.update_version}\n\nهل تريد المتابعة؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.No:
             return
-        
+
         # تعطيل الأزرار
         self.download_update_btn.setEnabled(False)
         self.check_update_btn.setEnabled(False)
-        
+
         # إظهار شريط التقدم
         self.update_progress_bar.setVisible(True)
         self.update_progress_bar.setValue(0)
-        
+
         self.update_status_label.setText("⬇️ جاري تنزيل التحديث...")
         self.update_status_label.setStyleSheet("""
             background-color: #3b82f6;
@@ -1550,15 +1567,15 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إنشاء Thread للتنزيل
         self.update_downloader = self.update_service.download_update(self.update_download_url)
-        
+
         # ربط الإشارات
         self.update_downloader.progress_updated.connect(self.on_download_progress)
         self.update_downloader.download_completed.connect(self.on_download_completed)
         self.update_downloader.error_occurred.connect(self.on_download_error)
-        
+
         # بدء التنزيل
         self.update_downloader.start()
 
@@ -1569,10 +1586,10 @@ class SettingsTab(QWidget):
     def on_download_completed(self, file_path):
         """عند اكتمال التنزيل"""
         self.update_progress_bar.setValue(100)
-        
+
         self.update_status_label.setText(
-            f"✅ تم تنزيل التحديث بنجاح!\n\n"
-            f"اضغط على 'تثبيت التحديث' لإكمال العملية"
+            "✅ تم تنزيل التحديث بنجاح!\n\n"
+            "اضغط على 'تثبيت التحديث' لإكمال العملية"
         )
         self.update_status_label.setStyleSheet("""
             background-color: #0A6CF1;
@@ -1581,18 +1598,18 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إخفاء زرار التنزيل وإظهار زرار التثبيت
         self.download_update_btn.setVisible(False)
         self.install_update_btn.setVisible(True)
-        
+
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
 
     def on_download_error(self, error_message):
         """عند حدوث خطأ في التنزيل"""
         self.update_progress_bar.setVisible(False)
-        
+
         self.update_status_label.setText(
             f"❌ فشل تنزيل التحديث:\n\n{error_message}"
         )
@@ -1603,17 +1620,17 @@ class SettingsTab(QWidget):
             border-radius: 8px;
             font-size: 13px;
         """)
-        
+
         # إعادة تفعيل الأزرار
         self.download_update_btn.setEnabled(True)
         self.check_update_btn.setEnabled(True)
-        
+
         # إذا كان الخطأ بسبب الصلاحيات، اعرض خيار فتح صفحة التنزيل
         if "Permission denied" in error_message or "الصلاحيات" in error_message:
             reply = QMessageBox.question(
                 self, "خطأ في الصلاحيات",
-                f"فشل تنزيل التحديث بسبب مشكلة في الصلاحيات.\n\n"
-                f"هل تريد فتح صفحة التنزيل في المتصفح لتنزيل التحديث يدوياً؟",
+                "فشل تنزيل التحديث بسبب مشكلة في الصلاحيات.\n\n"
+                "هل تريد فتح صفحة التنزيل في المتصفح لتنزيل التحديث يدوياً؟",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.Yes:
@@ -1633,16 +1650,16 @@ class SettingsTab(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.No:
             return
-        
+
         try:
             # تطبيق التحديث
             success = self.update_service.apply_update(
                 self.update_service.temp_update_path
             )
-            
+
             if success:
                 # إغلاق البرنامج
                 import sys
@@ -1653,6 +1670,6 @@ class SettingsTab(QWidget):
                     "فشل تشغيل المحدث.\n"
                     "تأكد من وجود ملف updater.exe أو updater.py في مجلد البرنامج."
                 )
-                
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل تثبيت التحديث:\n{e}")

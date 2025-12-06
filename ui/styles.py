@@ -7,6 +7,7 @@ SkyWave Brand Identity Colors
 import os
 import sys
 
+
 def _get_asset_path(filename):
     """الحصول على المسار الصحيح للـ assets"""
     try:
@@ -66,7 +67,7 @@ BUTTON_STYLES = {
             color: #9ca3af;
         }}
     """,
-    
+
     "success": f"""
         QPushButton {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['success']}, stop:1 #0A6CF1);
@@ -94,7 +95,7 @@ BUTTON_STYLES = {
             color: #9ca3af;
         }}
     """,
-    
+
     "warning": f"""
         QPushButton {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['warning']}, stop:1 #d97706);
@@ -122,7 +123,7 @@ BUTTON_STYLES = {
             color: #9ca3af;
         }}
     """,
-    
+
     "danger": f"""
         QPushButton {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['danger']}, stop:1 #dc2626);
@@ -150,7 +151,7 @@ BUTTON_STYLES = {
             color: #9ca3af;
         }}
     """,
-    
+
     "info": f"""
         QPushButton {{
             background-color: {COLORS['info']};
@@ -171,7 +172,7 @@ BUTTON_STYLES = {
             background-color: #4b5563;
         }}
     """,
-    
+
     "secondary": f"""
         QPushButton {{
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['secondary']}, stop:1 #4b5563);
@@ -681,7 +682,7 @@ QTableView::indicator, QTableWidget::indicator {{
 
 /* إزالة المسافة المحجوزة للأيقونة */
 QTableWidget::item {{
-    padding-left: 5px; 
+    padding-left: 5px;
     margin: 0px;
 }}
 
@@ -811,10 +812,11 @@ QCheckBox::indicator:checked {{
 def apply_styles(app):
     """تطبيق الأنماط على التطبيق بالكامل"""
     # تحميل الخط العربي من الملف
-    from PyQt6.QtGui import QFont, QFontDatabase
     import os
     import sys
-    
+
+    from PyQt6.QtGui import QFont, QFontDatabase
+
     # تحديد المسار الصحيح للخط
     if getattr(sys, 'frozen', False):
         # البرنامج مجمع (EXE)
@@ -822,9 +824,9 @@ def apply_styles(app):
     else:
         # البرنامج يعمل من Python
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    
+
     font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
-    
+
     # تحميل خط Cairo من الملف (متوافق مع PyQt6 و Python 3.14)
     if os.path.exists(font_path):
         font_id = QFontDatabase.addApplicationFont(font_path)
@@ -836,16 +838,16 @@ def apply_styles(app):
                 app.setFont(cairo_font)
                 print(f"✅ تم تحميل خط Cairo من: {font_path}")
             else:
-                print(f"⚠️ فشل تحميل خط Cairo، استخدام الخط الافتراضي")
+                print("⚠️ فشل تحميل خط Cairo، استخدام الخط الافتراضي")
                 app.setFont(QFont("Segoe UI", 14))
         else:
-            print(f"⚠️ فشل إضافة خط Cairo، استخدام الخط الافتراضي")
+            print("⚠️ فشل إضافة خط Cairo، استخدام الخط الافتراضي")
             app.setFont(QFont("Segoe UI", 14))
     else:
         print(f"⚠️ ملف الخط غير موجود: {font_path}")
         # محاولة استخدام خط عربي من النظام
         app.setFont(QFont("Tahoma", 14))
-    
+
     # تطبيق الأنماط
     app.setStyleSheet(COMPLETE_STYLESHEET)
 
@@ -853,15 +855,15 @@ def apply_center_alignment_to_all_tables(widget):
     """
     تطبيق التوسيط على كل الجداول في الـ widget وأطفاله
     """
-    from PyQt6.QtWidgets import QTableWidget, QTreeWidget, QTreeView
     from PyQt6.QtCore import Qt
-    
+    from PyQt6.QtWidgets import QTableWidget, QTreeView, QTreeWidget
+
     # البحث عن كل الجداول
     tables = widget.findChildren(QTableWidget)
     for table in tables:
         setup_table_with_center_alignment(table)
         center_align_table(table)
-    
+
     # البحث عن كل الأشجار
     trees = widget.findChildren(QTreeWidget) + widget.findChildren(QTreeView)
     for tree in trees:
@@ -898,16 +900,16 @@ def configure_table_no_edit(table):
     """
     دالة مساعدة لتطبيق إعدادات منع التحرير على أي جدول
     """
-    from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem
     from PyQt6.QtCore import Qt
-    
+    from PyQt6.QtWidgets import QTableWidget
+
     table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
     table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
     table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     table.setTabKeyNavigation(False)
     table.setStyleSheet(TABLE_STYLE_DARK)
-    
+
     # توسيط كل النص في الجدول
     center_align_table(table)
 
@@ -916,13 +918,12 @@ def center_align_table(table):
     توسيط كل النص في الجدول
     """
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import QTableWidgetItem
-    
+
     # توسيط العناوين
     header = table.horizontalHeader()
     if header:
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-    
+
     # توسيط كل الخلايا الموجودة
     for row in range(table.rowCount()):
         for col in range(table.columnCount()):
@@ -935,17 +936,17 @@ def setup_table_with_center_alignment(table):
     إعداد جدول مع توسيط النص
     """
     from PyQt6.QtCore import Qt
-    
+
     # توسيط العناوين
     header = table.horizontalHeader()
     if header:
         header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
-    
+
     # ربط إشارة لتوسيط أي عنصر جديد
     def on_item_changed(item):
         if item:
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-    
+
     table.itemChanged.connect(on_item_changed)
 def setup_custom_title_bar(window):
     """
@@ -953,33 +954,32 @@ def setup_custom_title_bar(window):
     """
     try:
         import platform
-        
+
         # للويندوز - تخصيص شريط العنوان
         if platform.system() == "Windows":
             try:
                 import ctypes
-                from ctypes import wintypes
-                
+
                 # الحصول على handle النافذة
                 hwnd = int(window.winId())
-                
+
                 # تعريف الألوان (BGR format)
                 title_bar_color = 0x291301  # #011329 في BGR
                 title_text_color = 0xffffff  # أبيض للنص
-                
+
                 # تطبيق لون شريط العنوان
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, 35, ctypes.byref(ctypes.c_int(title_bar_color)), 4
                 )
-                
+
                 # تطبيق لون نص شريط العنوان
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, 36, ctypes.byref(ctypes.c_int(title_text_color)), 4
                 )
-                
+
             except Exception as e:
                 print(f"تعذر تخصيص شريط العنوان للنافذة: {e}")
-        
+
     except Exception as e:
         print(f"خطأ في تخصيص شريط العنوان: {e}")
 

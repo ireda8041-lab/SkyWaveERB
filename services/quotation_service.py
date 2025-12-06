@@ -1,10 +1,9 @@
 from datetime import datetime, timedelta
-from typing import List, Optional, Dict
 
-from core.repository import Repository
-from core.event_bus import EventBus
 from core import schemas
+from core.event_bus import EventBus
 from core.logger import get_logger
+from core.repository import Repository
 from core.signals import app_signals
 
 # (جديد) هنحتاج قسم المشاريع
@@ -26,7 +25,7 @@ class QuotationService:
     ):
         """
         تهيئة خدمة عروض الأسعار
-        
+
         Args:
             repository: مخزن البيانات الرئيسي
             event_bus: نظام الأحداث للتواصل بين الخدمات
@@ -37,10 +36,10 @@ class QuotationService:
         self.project_service = project_service
         logger.info("قسم عروض الأسعار (QuotationService) جاهز")
 
-    def get_all_quotations(self) -> List[schemas.Quotation]:
+    def get_all_quotations(self) -> list[schemas.Quotation]:
         """
         جلب كل عروض الأسعار
-        
+
         Returns:
             قائمة بجميع عروض الأسعار
         """
@@ -53,13 +52,13 @@ class QuotationService:
     def create_new_quotation(self, new_data_dict: dict) -> schemas.Quotation:
         """
         إنشاء عرض سعر جديد
-        
+
         Args:
             new_data_dict: بيانات عرض السعر الجديد
-            
+
         Returns:
             عرض السعر المُنشأ
-            
+
         Raises:
             Exception: في حالة فشل إنشاء عرض السعر
         """
@@ -67,7 +66,7 @@ class QuotationService:
         try:
             items_list = new_data_dict.get("items", [])
             subtotal = 0.0
-            normalized_items: List[schemas.QuotationItem] = []
+            normalized_items: list[schemas.QuotationItem] = []
 
             for item in items_list:
                 if isinstance(item, dict):
@@ -143,7 +142,7 @@ class QuotationService:
         # 2. (الجديد) إرسال الأمر لـ "قسم المشاريع" مباشرة
         try:
             self.project_service.create_project(project_data_dict, payment_data={})
-            print(f"INFO: [QuotationService] تم إرسال طلب إنشاء المشروع.")
+            print("INFO: [QuotationService] تم إرسال طلب إنشاء المشروع.")
 
             # 3. تحديث حالة عرض السعر
             self.repo.update_quotation_status(quote.quote_number, schemas.QuotationStatus.ACCEPTED)
@@ -154,7 +153,7 @@ class QuotationService:
             print(f"ERROR: [QuotationService] فشل تحويل عرض السعر لمشروع: {e}")
             raise
 
-    def update_quotation(self, quote_number: str, new_data_dict: dict) -> Optional[schemas.Quotation]:
+    def update_quotation(self, quote_number: str, new_data_dict: dict) -> schemas.Quotation | None:
         print(f"INFO: [QuotationService] استلام طلب تعديل عرض سعر: {quote_number}")
 
         try:

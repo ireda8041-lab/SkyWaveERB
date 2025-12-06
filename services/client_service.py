@@ -14,19 +14,20 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional, Dict, Any
-from core.repository import Repository
+import time
+from typing import TYPE_CHECKING, Any
+
 from core import schemas
 from core.logger import get_logger
+from core.repository import Repository
 from core.signals import app_signals
-import time
 
 if TYPE_CHECKING:
     from core.repository import Repository
 
 # ⚡ استيراد محسّن السرعة
 try:
-    from core.speed_optimizer import LRUCache, cached
+    from core.speed_optimizer import LRUCache, cached  # noqa: F401
     CACHE_ENABLED = True
 except ImportError:
     CACHE_ENABLED = False
@@ -42,17 +43,17 @@ class ClientService:
     def __init__(self, repository: Repository):
         """
         تهيئة خدمة العملاء
-        
+
         Args:
             repository: مخزن البيانات الرئيسي
         """
         self.repo = repository
-        self._cache_time = 0
-        self._cached_clients = None
+        self._cache_time: float = 0
+        self._cached_clients: list[schemas.Client] | None = None
         self._cache_ttl = 30  # ⚡ 30 ثانية
         logger.info("⚡ قسم العملاء (ClientService) جاهز")
 
-    def get_all_clients(self) -> List[schemas.Client]:
+    def get_all_clients(self) -> list[schemas.Client]:
         """
         ⚡ جلب كل العملاء النشطين (مع cache)
         """
@@ -61,19 +62,19 @@ class ClientService:
             now = time.time()
             if self._cached_clients and (now - self._cache_time) < self._cache_ttl:
                 return self._cached_clients
-            
+
             # جلب من قاعدة البيانات
             clients = self.repo.get_all_clients()
-            
+
             # تحديث الـ cache
             self._cached_clients = clients
             self._cache_time = now
-            
+
             return clients
         except Exception as e:
             logger.error(f"[ClientService] فشل جلب العملاء: {e}", exc_info=True)
             return []
-    
+
     def invalidate_cache(self):
         """⚡ إبطال الـ cache"""
         self._cached_clients = None
@@ -95,17 +96,17 @@ class ClientService:
             logger.error(f"[ClientService] فشل إضافة العميل: {e}", exc_info=True)
             raise
 
-    def update_client(self, client_id: str, new_data: dict) -> Optional[schemas.Client]:
+    def update_client(self, client_id: str, new_data: dict) -> schemas.Client | None:
         """
         تعديل بيانات عميل موجود
-        
+
         Args:
             client_id: معرف العميل
             new_data: البيانات الجديدة للتحديث
-            
+
         Returns:
             العميل المُحدث أو None في حالة الفشل
-            
+
         Raises:
             Exception: في حالة عدم وجود العميل أو فشل التحديث
         """
@@ -129,13 +130,13 @@ class ClientService:
             logger.error(f"[ClientService] فشل تعديل العميل: {e}", exc_info=True)
             raise
 
-    def get_client_by_id(self, client_id: str) -> Optional[schemas.Client]:
+    def get_client_by_id(self, client_id: str) -> schemas.Client | None:
         """
         جلب عميل واحد بالمعرف
-        
+
         Args:
             client_id: معرف العميل
-            
+
         Returns:
             بيانات العميل أو None إذا لم يُعثر عليه
         """
@@ -145,13 +146,13 @@ class ClientService:
             logger.error(f"[ClientService] فشل جلب العميل {client_id}: {e}", exc_info=True)
             return None
 
-    def get_client_by_name(self, name: str) -> Optional[schemas.Client]:
+    def get_client_by_name(self, name: str) -> schemas.Client | None:
         """
         جلب عميل واحد بالاسم
-        
+
         Args:
             name: اسم العميل
-            
+
         Returns:
             بيانات العميل أو None إذا لم يُعثر عليه
         """
@@ -164,13 +165,13 @@ class ClientService:
     def delete_client(self, client_id: str) -> bool:
         """
         أرشفة عميل (Soft Delete)
-        
+
         Args:
             client_id: معرف العميل المراد أرشفته
-            
+
         Returns:
             True في حالة النجاح، False في حالة الفشل
-            
+
         Raises:
             Exception: في حالة فشل عملية الأرشفة
         """
@@ -187,10 +188,10 @@ class ClientService:
             logger.error(f"[ClientService] فشل أرشفة العميل: {e}", exc_info=True)
             raise
 
-    def get_archived_clients(self) -> List[schemas.Client]:
+    def get_archived_clients(self) -> list[schemas.Client]:
         """
         جلب العملاء المؤرشفين
-        
+
         Returns:
             قائمة بجميع العملاء المؤرشفين
         """
@@ -203,70 +204,70 @@ class ClientService:
     def search_clients(
         self,
         query: str,
-        fields: Optional[List[str]] = None,
+        fields: list[str] | None = None,
         limit: int = 20
-    ) -> List[schemas.Client]:
+    ) -> list[schemas.Client]:
         """
         البحث في العملاء
-        
+
         Args:
             query: نص البحث
             fields: الحقول للبحث فيها (افتراضي: name, company_name, phone)
             limit: الحد الأقصى للنتائج
-            
+
         Returns:
             قائمة العملاء المطابقين
         """
         if not query:
             return []
-        
+
         search_fields = fields or ["name", "company_name", "phone", "email"]
         query_lower = query.lower()
-        
+
         try:
             all_clients = self.repo.get_all_clients()
             results = []
-            
+
             for client in all_clients:
                 for field in search_fields:
                     value = getattr(client, field, None)
                     if value and query_lower in str(value).lower():
                         results.append(client)
                         break
-                
+
                 if len(results) >= limit:
                     break
-            
+
             logger.debug(f"[ClientService] تم العثور على {len(results)} عميل للبحث: {query}")
             return results
-            
+
         except Exception as e:
             logger.error(f"[ClientService] فشل البحث في العملاء: {e}", exc_info=True)
             return []
 
-    def get_client_statistics(self) -> Dict[str, Any]:
+    def get_client_statistics(self) -> dict[str, Any]:
         """
         جلب إحصائيات العملاء
-        
+
         Returns:
             Dict مع إحصائيات العملاء
         """
         try:
             active_clients = self.repo.get_all_clients()
             archived_clients = self.repo.get_archived_clients()
-            
+
             # تصنيف حسب النوع
-            client_types: Dict[str, int] = {}
+            client_types: dict[str, int] = {}
             for client in active_clients:
                 client_type = client.client_type or "غير محدد"
                 client_types[client_type] = client_types.get(client_type, 0) + 1
-            
+
             # تصنيف حسب الدولة
-            countries: Dict[str, int] = {}
+            countries: dict[str, int] = {}
             for client in active_clients:
                 country = client.country or "غير محدد"
                 countries[country] = countries.get(country, 0) + 1
-            
+
             stats = {
                 "total_active": len(active_clients),
                 "total_archived": len(archived_clients),
@@ -274,10 +275,10 @@ class ClientService:
                 "by_type": client_types,
                 "by_country": countries
             }
-            
+
             logger.info(f"[ClientService] إحصائيات العملاء: {stats['total_active']} نشط، {stats['total_archived']} مؤرشف")
             return stats
-            
+
         except Exception as e:
             logger.error(f"[ClientService] فشل جلب إحصائيات العملاء: {e}", exc_info=True)
             return {

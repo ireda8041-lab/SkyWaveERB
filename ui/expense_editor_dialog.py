@@ -3,18 +3,30 @@
 نافذة إضافة/تعديل المصروفات
 """
 
+import os
+
+from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QLineEdit,
-    QPushButton, QLabel, QMessageBox, QGroupBox, QHBoxLayout,
-    QComboBox, QDateEdit, QTextEdit
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-from ui.custom_spinbox import CustomSpinBox
-from PyQt6.QtCore import Qt, QDate
-from services.expense_service import ExpenseService
-from services.accounting_service import AccountingService
-from services.project_service import ProjectService
+
 from core import schemas
-from typing import Optional, Dict, Any, List
+from services.accounting_service import AccountingService
+from services.expense_service import ExpenseService
+from services.project_service import ProjectService
+from services.settings_service import SettingsService
+from ui.custom_spinbox import CustomSpinBox
+from ui.invoice_scan_widget import InvoiceScanWidget
 
 
 class ExpenseEditorDialog(QDialog):
@@ -25,7 +37,8 @@ class ExpenseEditorDialog(QDialog):
         expense_service: ExpenseService,
         accounting_service: AccountingService,
         project_service: ProjectService,
-        expense_to_edit: Optional[schemas.Expense] = None,
+        settings_service: SettingsService | None = None,
+        expense_to_edit: schemas.Expense | None = None,
         parent=None
     ):
         super().__init__(parent)
@@ -33,34 +46,35 @@ class ExpenseEditorDialog(QDialog):
         self.expense_service = expense_service
         self.accounting_service = accounting_service
         self.project_service = project_service
+        self.settings_service = settings_service
         self.expense_to_edit = expense_to_edit
         self.is_editing = expense_to_edit is not None
 
         if self.is_editing:
-            self.setWindowTitle(f"تعديل المصروف")
+            self.setWindowTitle("تعديل المصروف")
         else:
             self.setWindowTitle("مصروف جديد")
 
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
-        
+
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-        
+
         # إزالة الإطار البرتقالي نهائياً
         self.setStyleSheet("""
             * {
                 outline: none;
             }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, 
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus, QCheckBox:focus {
                 border: none;
                 outline: none;
             }
         """)
-        
+
         # جلب البيانات
         self.load_data()
         self.init_ui()
@@ -69,18 +83,29 @@ class ExpenseEditorDialog(QDialog):
         """جلب الحسابات والمشاريع من قاعدة البيانات"""
         # جلب جميع الحسابات
         all_accounts = self.accounting_service.repo.get_all_accounts()
-        
+
         # حسابات النقدية والبنوك فقط (11xx) للدفع منها
         self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('11')]
-        
+
         # حسابات المصروفات فقط (5xxx) للفئة
         self.expense_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('5')]
-        
+
         # المشاريع
         self.projects_list = self.project_service.get_all_projects()
 
     def init_ui(self):
         layout = QVBoxLayout()
+
+        # === Widget المسح الذكي للفواتير ===
+        gemini_api_key = None
+        if self.settings_service:
+            gemini_api_key = self.settings_service.get_setting("gemini_api_key")
+        gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        
+        self.scan_widget = InvoiceScanWidget(api_key=gemini_api_key)
+        self.scan_widget.scan_completed.connect(self._on_invoice_scanned)
+        self.scan_widget.scan_failed.connect(self._on_scan_failed)
+        layout.addWidget(self.scan_widget)
 
         form_groupbox = QGroupBox("بيانات المصروف")
         form_layout = QFormLayout()
@@ -143,7 +168,7 @@ class ExpenseEditorDialog(QDialog):
 
         # أزرار الحفظ والإلغاء
         buttons_layout = QHBoxLayout()
-        
+
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setStyleSheet("""
             QPushButton {
@@ -163,7 +188,7 @@ class ExpenseEditorDialog(QDialog):
             }
         """)
         self.save_button.clicked.connect(self.save_expense)
-        
+
         # Initial validation
         self._validate_amount()
 
@@ -204,15 +229,15 @@ class ExpenseEditorDialog(QDialog):
             self.save_button.setEnabled(False)
         else:
             self.save_button.setEnabled(True)
-    
+
     def _show_validation_error(self, message: str):
         """Show validation error as a toast-like message"""
         QMessageBox.warning(self, "⚠️ تحقق من البيانات", message)
-    
+
     def load_expense_data(self):
         """تحميل بيانات المصروف للتعديل"""
         exp = self.expense_to_edit
-        
+
         # المشروع
         if exp.project_id:
             for i in range(self.project_combo.count()):
@@ -220,7 +245,7 @@ class ExpenseEditorDialog(QDialog):
                 if project and hasattr(project, 'name') and project.name == exp.project_id:
                     self.project_combo.setCurrentIndex(i)
                     break
-        
+
         # الفئة - البحث بالكود أو النص
         if hasattr(exp, 'account_id') and exp.account_id:
             # البحث بالكود
@@ -235,7 +260,7 @@ class ExpenseEditorDialog(QDialog):
                 if exp.category in self.category_combo.itemText(i):
                     self.category_combo.setCurrentIndex(i)
                     break
-        
+
         # حساب الدفع
         if hasattr(exp, 'payment_account_id') and exp.payment_account_id:
             for i in range(self.account_combo.count()):
@@ -243,14 +268,14 @@ class ExpenseEditorDialog(QDialog):
                 if acc_code == exp.payment_account_id:
                     self.account_combo.setCurrentIndex(i)
                     break
-        
+
         # المبلغ
         self.amount_input.setValue(exp.amount)
-        
+
         # التاريخ
         if exp.date:
             self.date_input.setDate(QDate(exp.date.year, exp.date.month, exp.date.day))
-        
+
         # الوصف
         self.description_input.setText(exp.description or "")
 
@@ -265,11 +290,11 @@ class ExpenseEditorDialog(QDialog):
         if not selected_category_code:
             self._show_validation_error("⚠️ الرجاء اختيار فئة المصروف من الحسابات المحاسبية")
             return
-            
+
         if not selected_payment_code:
             self._show_validation_error("⚠️ الرجاء اختيار حساب الدفع من الحسابات النقدية")
             return
-            
+
         if self.amount_input.value() <= 0:
             self._show_validation_error("⚠️ الرجاء إدخال مبلغ صحيح (أكبر من صفر)")
             return
@@ -305,3 +330,57 @@ class ExpenseEditorDialog(QDialog):
         except Exception as e:
             print(f"ERROR: [ExpenseEditorDialog] فشل حفظ المصروف: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
+
+    # === معالجة نتائج المسح الذكي ===
+
+    def _on_invoice_scanned(self, data: dict):
+        """تعبئة الحقول تلقائياً من نتيجة المسح الذكي"""
+        try:
+            # تعبئة التاريخ
+            invoice_date = data.get('invoice_date', '')
+            if invoice_date:
+                date = QDate.fromString(invoice_date, 'yyyy-MM-dd')
+                if date.isValid():
+                    self.date_input.setDate(date)
+
+            # تعبئة المبلغ الإجمالي
+            total_amount = data.get('total_amount', 0)
+            if total_amount > 0:
+                self.amount_input.setValue(total_amount)
+
+            # تعبئة الوصف
+            merchant_name = data.get('merchant_name', '')
+            items = data.get('items', [])
+            
+            description_parts = []
+            if merchant_name:
+                description_parts.append(f"فاتورة من: {merchant_name}")
+            
+            for item in items:
+                item_name = item.get('name', '')
+                qty = item.get('qty', 1)
+                price = item.get('price', 0)
+                if item_name:
+                    description_parts.append(f"• {item_name} (×{qty}) = {price}")
+            
+            if description_parts:
+                self.description_input.setText("\n".join(description_parts))
+
+            # رسالة نجاح
+            QMessageBox.information(
+                self,
+                "✅ تم المسح بنجاح",
+                f"تم استخراج البيانات من الفاتورة.\nالمبلغ: {total_amount}\nيرجى مراجعة البيانات قبل الحفظ."
+            )
+
+        except Exception as e:
+            print(f"ERROR: [ExpenseEditorDialog] خطأ في معالجة نتيجة المسح: {e}")
+            QMessageBox.warning(self, "تحذير", f"تم المسح لكن حدث خطأ في التعبئة:\n{e}")
+
+    def _on_scan_failed(self, error_msg: str):
+        """معالجة فشل المسح"""
+        QMessageBox.warning(
+            self,
+            "❌ فشل المسح",
+            f"لم نتمكن من قراءة الفاتورة:\n{error_msg}\n\nيمكنك إدخال البيانات يدوياً."
+        )
