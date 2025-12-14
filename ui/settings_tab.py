@@ -37,16 +37,17 @@ from PyQt6.QtWidgets import (
 from core.repository import Repository
 from services.settings_service import SettingsService
 from ui.currency_editor_dialog import CurrencyEditorDialog
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
 
 
 class SettingsTab(QWidget):
     """تاب الإعدادات المتقدمة مع تابات فرعية."""
 
-    def __init__(self, settings_service: SettingsService, repository: Repository | None = None, parent=None):
+    def __init__(self, settings_service: SettingsService, repository: Repository | None = None, current_user=None, parent=None):
         super().__init__(parent)
         self.settings_service = settings_service
         self.repository = repository
+        self.current_user = current_user
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -95,14 +96,29 @@ class SettingsTab(QWidget):
         self.tabs.addTab(self.update_tab, "🔄 التحديثات")
         self.setup_update_tab()
 
+        # 🏢 تاب الموارد البشرية الشامل (دمج الموظفين + HR)
+        from ui.unified_hr_manager import UnifiedHRManager
+        self.hr_tab = UnifiedHRManager()
+        self.tabs.addTab(self.hr_tab, "🏢 الموارد البشرية")
 
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
         apply_arrows_to_all_widgets(self)
 
+        # ربط تغيير التاب الفرعي لتحميل البيانات
+        self.tabs.currentChanged.connect(self._on_sub_tab_changed)
+
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_settings_data() - يتم استدعاؤها من MainWindow
         # self.load_users() - يتم استدعاؤها من MainWindow
+
+    def _on_sub_tab_changed(self, index):
+        """معالج تغيير التاب الفرعي"""
+        tab_text = self.tabs.tabText(index)
+        print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
+
+        if "المستخدمين" in tab_text:
+            self.load_users()
 
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة"""
@@ -235,7 +251,12 @@ class SettingsTab(QWidget):
         ])
         h_header = self.currencies_table.horizontalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # #
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # الرمز
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الاسم - يتمدد
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الرمز
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # سعر الصرف
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
         self.currencies_table.setAlternatingRowColors(True)
         self.currencies_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.currencies_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -243,6 +264,9 @@ class SettingsTab(QWidget):
         self.currencies_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.currencies_table.setTabKeyNavigation(False)
         self.currencies_table.setStyleSheet(self._get_table_style())
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.currencies_table)
         layout.addWidget(self.currencies_table)
 
         self.load_currencies()
@@ -251,24 +275,39 @@ class SettingsTab(QWidget):
         """إعداد تاب إدارة المستخدمين"""
         layout = QVBoxLayout(self.users_tab)
 
+        # التحقق من صلاحية إدارة المستخدمين
+        from core.auth_models import PermissionManager
+        can_manage_users = True
+        if self.current_user:
+            can_manage_users = PermissionManager.has_feature(self.current_user, 'user_management')
+
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
 
         self.add_user_btn = QPushButton("➕ إضافة مستخدم")
         self.add_user_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.add_user_btn.clicked.connect(self.add_user)
+        self.add_user_btn.setEnabled(can_manage_users)
 
         self.edit_user_btn = QPushButton("✏️ تعديل")
         self.edit_user_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_user_btn.clicked.connect(self.edit_user)
+        self.edit_user_btn.setEnabled(can_manage_users)
 
-        self.permissions_btn = QPushButton("� تححرير الصلاحيات")
+        self.permissions_btn = QPushButton("🔐 تحرير الصلاحيات")
         self.permissions_btn.setStyleSheet(BUTTON_STYLES["info"])
         self.permissions_btn.clicked.connect(self.edit_user_permissions)
+        self.permissions_btn.setEnabled(can_manage_users)
 
-        self.delete_user_btn = QPushButton("🗑️ حذف")
+        self.delete_user_btn = QPushButton("🗑️ تعطيل")
         self.delete_user_btn.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_user_btn.clicked.connect(self.delete_user)
+        self.delete_user_btn.setEnabled(can_manage_users)
+
+        self.activate_user_btn = QPushButton("✅ تفعيل")
+        self.activate_user_btn.setStyleSheet(BUTTON_STYLES["success"])
+        self.activate_user_btn.clicked.connect(self.activate_user)
+        self.activate_user_btn.setEnabled(can_manage_users)
 
         self.refresh_users_btn = QPushButton("🔄 تحديث")
         self.refresh_users_btn.setStyleSheet(BUTTON_STYLES["secondary"])
@@ -278,9 +317,16 @@ class SettingsTab(QWidget):
         buttons_layout.addWidget(self.edit_user_btn)
         buttons_layout.addWidget(self.permissions_btn)
         buttons_layout.addWidget(self.delete_user_btn)
+        buttons_layout.addWidget(self.activate_user_btn)
         buttons_layout.addWidget(self.refresh_users_btn)
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
+
+        # رسالة تنبيه إذا لم يكن لديه صلاحية
+        if not can_manage_users:
+            warning_label = QLabel("⚠️ ليس لديك صلاحية إدارة المستخدمين. يمكنك فقط عرض القائمة.")
+            warning_label.setStyleSheet("color: #f59e0b; background-color: #422006; padding: 10px; border-radius: 5px; margin-bottom: 10px;")
+            layout.addWidget(warning_label)
 
         # جدول المستخدمين
         self.users_table = QTableWidget()
@@ -290,7 +336,13 @@ class SettingsTab(QWidget):
         ])
         h_header = self.users_table.horizontalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # #
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # اسم المستخدم - يتمدد
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الاسم الكامل - يتمدد
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # البريد - يتمدد
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # الدور
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
+            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # تاريخ الإنشاء
         self.users_table.setAlternatingRowColors(True)
         self.users_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.users_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -298,6 +350,11 @@ class SettingsTab(QWidget):
         self.users_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.users_table.setTabKeyNavigation(False)
         self.users_table.setStyleSheet(self._get_table_style())
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.users_table)
+        # دعم النقر المزدوج للتعديل
+        self.users_table.doubleClicked.connect(self.edit_user)
         layout.addWidget(self.users_table)
 
     def setup_backup_tab(self):
@@ -387,38 +444,7 @@ class SettingsTab(QWidget):
         """
 
     def _get_table_style(self):
-        return """
-            QTableWidget {
-                background-color: #001a3a;
-                alternate-background-color: #002040;
-                color: #ffffff;
-                border: 1px solid #003366;
-                border-radius: 8px;
-                gridline-color: #004080;
-            }
-            QTableWidget::item {
-                padding: 8px;
-                border: none;
-            }
-            QTableWidget::item:selected {
-                background-color: #3b82f6;
-                color: white;
-            }
-            QTableWidget::item:focus {
-                border: none;
-                outline: none;
-            }
-            QTableWidget QLineEdit {
-                display: none;
-            }
-            QHeaderView::section {
-                background-color: #4a90e2;
-                color: #ffffff;
-                padding: 10px;
-                border: none;
-                font-weight: bold;
-            }
-        """
+        return TABLE_STYLE_DARK
 
     def select_logo_file(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -501,23 +527,23 @@ class SettingsTab(QWidget):
             active = curr.get('active', True)
 
             self.currencies_table.insertRow(i)
-            self.currencies_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.currencies_table.setItem(i, 1, QTableWidgetItem(code))
+            self.currencies_table.setItem(i, 0, create_centered_item(str(i + 1)))
+            self.currencies_table.setItem(i, 1, create_centered_item(code))
 
             name_display = name
             if is_base:
                 name_display += " ⭐"
-            self.currencies_table.setItem(i, 2, QTableWidgetItem(name_display))
+            self.currencies_table.setItem(i, 2, create_centered_item(name_display))
 
-            self.currencies_table.setItem(i, 3, QTableWidgetItem(symbol))
+            self.currencies_table.setItem(i, 3, create_centered_item(symbol))
 
             rate_display = f"{rate:.2f}"
             if is_base:
                 rate_display += " (أساسية)"
-            self.currencies_table.setItem(i, 4, QTableWidgetItem(rate_display))
+            self.currencies_table.setItem(i, 4, create_centered_item(rate_display))
 
             status = "✅ نشط" if active else "❌ غير نشط"
-            self.currencies_table.setItem(i, 5, QTableWidgetItem(status))
+            self.currencies_table.setItem(i, 5, create_centered_item(status))
 
     def add_currency(self):
         """إضافة عملة جديدة"""
@@ -537,13 +563,13 @@ class SettingsTab(QWidget):
                     # إضافة العملة للجدول فقط (بدون حفظ)
                     row = self.currencies_table.rowCount()
                     self.currencies_table.insertRow(row)
-                    self.currencies_table.setItem(row, 0, QTableWidgetItem(str(row + 1)))
-                    self.currencies_table.setItem(row, 1, QTableWidgetItem(result['code']))
-                    self.currencies_table.setItem(row, 2, QTableWidgetItem(result['name']))
-                    self.currencies_table.setItem(row, 3, QTableWidgetItem(result['symbol']))
-                    self.currencies_table.setItem(row, 4, QTableWidgetItem(f"{result['rate']:.2f}"))
+                    self.currencies_table.setItem(row, 0, create_centered_item(str(row + 1)))
+                    self.currencies_table.setItem(row, 1, create_centered_item(result['code']))
+                    self.currencies_table.setItem(row, 2, create_centered_item(result['name']))
+                    self.currencies_table.setItem(row, 3, create_centered_item(result['symbol']))
+                    self.currencies_table.setItem(row, 4, create_centered_item(f"{result['rate']:.2f}"))
                     status = "✅ نشط" if result['active'] else "❌ غير نشط"
-                    self.currencies_table.setItem(row, 5, QTableWidgetItem(status))
+                    self.currencies_table.setItem(row, 5, create_centered_item(status))
                     QMessageBox.information(self, "تم", f"تم إضافة العملة {result['name']} بنجاح!")
 
     def edit_currency(self):
@@ -590,22 +616,22 @@ class SettingsTab(QWidget):
                         QMessageBox.critical(self, "خطأ", "فشل حفظ التعديلات في قاعدة البيانات")
                 else:
                     # تحديث الجدول فقط (بدون حفظ)
-                    self.currencies_table.setItem(current_row, 1, QTableWidgetItem(result['code']))
+                    self.currencies_table.setItem(current_row, 1, create_centered_item(result['code']))
 
                     name_display = result['name']
                     if result['code'] == "EGP":
                         name_display += " ⭐"
-                    self.currencies_table.setItem(current_row, 2, QTableWidgetItem(name_display))
+                    self.currencies_table.setItem(current_row, 2, create_centered_item(name_display))
 
-                    self.currencies_table.setItem(current_row, 3, QTableWidgetItem(result['symbol']))
+                    self.currencies_table.setItem(current_row, 3, create_centered_item(result['symbol']))
 
                     rate_display = f"{result['rate']:.2f}"
                     if result['code'] == "EGP":
                         rate_display += " (أساسية)"
-                    self.currencies_table.setItem(current_row, 4, QTableWidgetItem(rate_display))
+                    self.currencies_table.setItem(current_row, 4, create_centered_item(rate_display))
 
                     status = "✅ نشط" if result['active'] else "❌ غير نشط"
-                    self.currencies_table.setItem(current_row, 5, QTableWidgetItem(status))
+                    self.currencies_table.setItem(current_row, 5, create_centered_item(status))
 
                     QMessageBox.information(self, "تم", f"تم تحديث العملة {result['name']} بنجاح!")
 
@@ -1117,31 +1143,37 @@ class SettingsTab(QWidget):
     def save_default_accounts(self):
         """حفظ إعدادات الحسابات الافتراضية"""
         try:
-            default_accounts = {
+            # جمع الحسابات المحددة فقط (بدون إلزام تحديد الكل)
+            all_accounts = {
                 'default_treasury_account': self.default_treasury_combo.currentData(),
                 'default_revenue_account': self.default_revenue_combo.currentData(),
                 'default_tax_account': self.default_tax_combo.currentData(),
                 'default_client_account': self.default_client_combo.currentData(),
             }
 
-            # التحقق من أن جميع الحسابات محددة
-            if None in default_accounts.values():
+            # حفظ الحسابات المحددة فقط (السماح بحفظ حساب واحد أو أكثر)
+            default_accounts = {k: v for k, v in all_accounts.items() if v is not None}
+
+            # التحقق من أن هناك حساب واحد على الأقل محدد
+            if not default_accounts:
                 QMessageBox.warning(
                     self,
                     "تحذير",
-                    "يرجى تحديد جميع الحسابات الافتراضية قبل الحفظ"
+                    "يرجى تحديد حساب واحد على الأقل قبل الحفظ"
                 )
                 return
 
             # حفظ الإعدادات
             current_settings = self.settings_service.get_settings()
-            current_settings.update(default_accounts)
+            current_settings.update(all_accounts)  # حفظ الكل (بما فيها None للحسابات غير المحددة)
             self.settings_service.save_settings(current_settings)
 
+            # عرض رسالة نجاح مع عدد الحسابات المحفوظة
+            saved_count = len(default_accounts)
             QMessageBox.information(
                 self,
                 "نجاح",
-                "✅ تم حفظ إعدادات الحسابات الافتراضية بنجاح"
+                f"✅ تم حفظ {saved_count} حساب/حسابات افتراضية بنجاح"
             )
 
         except Exception as e:
@@ -1150,54 +1182,82 @@ class SettingsTab(QWidget):
 
     def load_users(self):
         """تحميل المستخدمين من قاعدة البيانات"""
+        print("=" * 50)
+        print("INFO: [SettingsTab] ========== جاري تحميل المستخدمين ==========")
+        print(f"INFO: [SettingsTab] repository موجود: {self.repository is not None}")
         self.users_table.setRowCount(0)
 
         if not self.repository:
+            print("WARNING: [SettingsTab] لا يوجد repository!")
             return
 
         try:
             # جلب المستخدمين من قاعدة البيانات
+            print("INFO: [SettingsTab] جاري استدعاء get_all_users...")
             users = self.repository.get_all_users()
+            print(f"INFO: [SettingsTab] ✅ تم جلب {len(users)} مستخدم")
 
             for i, user in enumerate(users):
                 self.users_table.insertRow(i)
 
                 # العمود 0: الرقم التسلسلي
-                num_item = QTableWidgetItem(str(i + 1))
-                self.users_table.setItem(i, 0, num_item)
+                self.users_table.setItem(i, 0, create_centered_item(str(i + 1)))
 
                 # العمود 1: اسم المستخدم (نخزن الـ ID هنا)
-                username_item = QTableWidgetItem(user.username)
-                # CRITICAL: تخزين الـ ID الحقيقي في UserRole
-                user_id = user.id if hasattr(user, 'id') and user.id else user._mongo_id
+                username_item = create_centered_item(user.username)
+                # CRITICAL: تخزين الـ ID الحقيقي
+                user_id = user.id if user.id else (user.mongo_id if hasattr(user, 'mongo_id') else None)
                 username_item.setData(Qt.ItemDataRole.UserRole, user_id)
                 self.users_table.setItem(i, 1, username_item)
 
                 # العمود 2: الاسم الكامل
-                self.users_table.setItem(i, 2, QTableWidgetItem(user.full_name or ""))
+                self.users_table.setItem(i, 2, create_centered_item(user.full_name or ""))
 
                 # العمود 3: البريد الإلكتروني
-                self.users_table.setItem(i, 3, QTableWidgetItem(user.email or ""))
+                self.users_table.setItem(i, 3, create_centered_item(user.email or ""))
 
                 # العمود 4: الدور
-                role_display = user.role.value if hasattr(user.role, 'value') else str(user.role)
-                self.users_table.setItem(i, 4, QTableWidgetItem(role_display))
+                # التعامل مع الدور سواء كان enum أو string
+                if hasattr(user.role, 'value'):
+                    role_value = user.role.value
+                else:
+                    role_value = str(user.role)
+                role_display_map = {
+                    'admin': '🔑 مدير النظام',
+                    'accountant': '📊 محاسب',
+                    'sales': '💼 مندوب مبيعات'
+                }
+                role_display = role_display_map.get(role_value.lower(), role_value)
+                self.users_table.setItem(i, 4, create_centered_item(role_display))
+                print(f"INFO: [SettingsTab] تم إضافة مستخدم: {user.username} - {role_display}")
 
                 # العمود 5: الحالة
                 status = "✅ نشط" if user.is_active else "❌ غير نشط"
-                self.users_table.setItem(i, 5, QTableWidgetItem(status))
+                self.users_table.setItem(i, 5, create_centered_item(status))
 
                 # العمود 6: تاريخ الإنشاء
                 created_date = user.created_at[:10] if user.created_at else ""
-                self.users_table.setItem(i, 6, QTableWidgetItem(created_date))
+                self.users_table.setItem(i, 6, create_centered_item(created_date))
+
+            # تحديث الجدول
+            self.users_table.viewport().update()
+            print(f"INFO: [SettingsTab] ✅ تم تحميل {self.users_table.rowCount()} صف في الجدول")
+            print("=" * 50)
 
         except Exception as e:
             print(f"ERROR: فشل تحميل المستخدمين: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.warning(self, "خطأ", f"فشل تحميل المستخدمين: {e}")
 
     def add_user(self):
         """إضافة مستخدم جديد"""
-        from core.auth_models import AuthService
+        # التحقق من الصلاحية
+        from core.auth_models import AuthService, PermissionManager
+        if self.current_user and not PermissionManager.has_feature(self.current_user, 'user_management'):
+            QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية إضافة مستخدمين.")
+            return
+
         from ui.user_editor_dialog import UserEditorDialog
 
         # إنشاء خدمة المصادقة
@@ -1210,38 +1270,12 @@ class SettingsTab(QWidget):
 
     def edit_user(self):
         """تعديل مستخدم"""
-        current_row = self.users_table.currentRow()
-        if current_row < 0:
-            QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
+        # التحقق من الصلاحية
+        from core.auth_models import AuthService, PermissionManager
+        if self.current_user and not PermissionManager.has_feature(self.current_user, 'user_management'):
+            QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية تعديل المستخدمين.")
             return
 
-        # الحصول على اسم المستخدم من العمود 1 (حيث خزنا الـ ID)
-        username_item = self.users_table.item(current_row, 1)
-        if not username_item:
-            QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
-            return
-
-        username = username_item.text()
-
-        from core.auth_models import AuthService
-        from ui.user_editor_dialog import UserEditorDialog
-
-        # إنشاء خدمة المصادقة
-        auth_service = AuthService(self.repository)
-
-        # جلب بيانات المستخدم
-        user = auth_service.repo.get_user_by_username(username)
-        if not user:
-            QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
-            return
-
-        dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
-        if dialog.exec():
-            self.load_users()
-            QMessageBox.information(self, "تم", "تم تعديل المستخدم بنجاح.")
-
-    def edit_user_permissions(self):
-        """تحرير صلاحيات المستخدم"""
         current_row = self.users_table.currentRow()
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
@@ -1254,15 +1288,57 @@ class SettingsTab(QWidget):
             return
 
         username = username_item.text()
+        print(f"INFO: [SettingsTab] جاري تعديل المستخدم: {username}")
 
-        from core.auth_models import AuthService
+        from ui.user_editor_dialog import UserEditorDialog
+
+        # إنشاء خدمة المصادقة
         auth_service = AuthService(self.repository)
 
-        # جلب بيانات المستخدم
+        # جلب بيانات المستخدم الحديثة من قاعدة البيانات
         user = auth_service.repo.get_user_by_username(username)
         if not user:
-            QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
+            QMessageBox.warning(self, "خطأ", f"لم يتم العثور على المستخدم: {username}")
             return
+
+        print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم: {user.username}, {user.full_name}, {user.email}")
+
+        # فتح نافذة التعديل مع بيانات المستخدم
+        dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
+        if dialog.exec():
+            self.load_users()  # إعادة تحميل الجدول بعد التعديل
+
+    def edit_user_permissions(self):
+        """تحرير صلاحيات المستخدم"""
+        # التحقق من الصلاحية
+        from core.auth_models import AuthService, PermissionManager
+        if self.current_user and not PermissionManager.has_feature(self.current_user, 'user_management'):
+            QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية تحرير صلاحيات المستخدمين.")
+            return
+
+        current_row = self.users_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
+            return
+
+        # الحصول على اسم المستخدم من العمود 1
+        username_item = self.users_table.item(current_row, 1)
+        if not username_item:
+            QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
+            return
+
+        username = username_item.text()
+        print(f"INFO: [SettingsTab] جاري تحرير صلاحيات المستخدم: {username}")
+
+        auth_service = AuthService(self.repository)
+
+        # جلب بيانات المستخدم الحديثة من قاعدة البيانات
+        user = auth_service.repo.get_user_by_username(username)
+        if not user:
+            QMessageBox.warning(self, "خطأ", f"لم يتم العثور على المستخدم: {username}")
+            return
+
+        print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم للصلاحيات: {user.username}")
 
         # فتح نافذة تحرير الصلاحيات
         from ui.user_permissions_dialog import UserPermissionsDialog
@@ -1273,6 +1349,12 @@ class SettingsTab(QWidget):
 
     def delete_user(self):
         """حذف مستخدم"""
+        # التحقق من الصلاحية
+        from core.auth_models import AuthService, PermissionManager
+        if self.current_user and not PermissionManager.has_feature(self.current_user, 'user_management'):
+            QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية حذف المستخدمين.")
+            return
+
         current_row = self.users_table.currentRow()
         if current_row < 0:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
@@ -1291,29 +1373,79 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "تحذير", "لا يمكن حذف مستخدم المدير الرئيسي.")
             return
 
+        # منع حذف المستخدم الحالي
+        if self.current_user and username == self.current_user.username:
+            QMessageBox.warning(self, "تحذير", "لا يمكنك حذف حسابك الخاص.")
+            return
+
         reply = QMessageBox.question(
             self, "تأكيد الحذف",
-            f"هل أنت متأكد من حذف المستخدم '{username}'؟",
+            f"هل أنت متأكد من تعطيل المستخدم '{username}'؟\n(سيتم تعطيل الحساب وليس حذفه نهائياً)",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                from core.auth_models import AuthService
-                auth_service = AuthService(self.repository)
+                # تعطيل المستخدم باستخدام username مباشرة
+                print(f"INFO: [SettingsTab] جاري تعطيل المستخدم: {username}")
+                success = self.repository.update_user_by_username(username, {"is_active": False})
 
-                # تعطيل المستخدم بدلاً من حذفه
-                user = auth_service.repo.get_user_by_username(username)
-                if user:
-                    user_id = user.id if hasattr(user, 'id') and user.id else user._mongo_id
-                    auth_service.repo.update_user(user_id, {"is_active": False})
+                if success:
                     self.load_users()
                     QMessageBox.information(self, "تم", "تم تعطيل المستخدم بنجاح.")
                 else:
-                    QMessageBox.warning(self, "خطأ", "لم يتم العثور على المستخدم.")
+                    QMessageBox.warning(self, "خطأ", "فشل في تعطيل المستخدم.")
 
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"فشل في تعطيل المستخدم: {str(e)}")
+
+    def activate_user(self):
+        """تفعيل مستخدم معطل"""
+        # التحقق من الصلاحية
+        from core.auth_models import AuthService, PermissionManager
+        if self.current_user and not PermissionManager.has_feature(self.current_user, 'user_management'):
+            QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية تفعيل المستخدمين.")
+            return
+
+        current_row = self.users_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "تنبيه", "يرجى تحديد مستخدم أولاً.")
+            return
+
+        # الحصول على اسم المستخدم من العمود 1
+        username_item = self.users_table.item(current_row, 1)
+        if not username_item:
+            QMessageBox.warning(self, "خطأ", "لم يتم العثور على بيانات المستخدم.")
+            return
+
+        username = username_item.text()
+
+        # التحقق من أن المستخدم معطل
+        status_item = self.users_table.item(current_row, 5)
+        if status_item and "نشط" in status_item.text() and "غير" not in status_item.text():
+            QMessageBox.information(self, "تنبيه", "هذا المستخدم نشط بالفعل.")
+            return
+
+        reply = QMessageBox.question(
+            self, "تأكيد التفعيل",
+            f"هل تريد تفعيل المستخدم '{username}'؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # تفعيل المستخدم باستخدام username مباشرة
+                print(f"INFO: [SettingsTab] جاري تفعيل المستخدم: {username}")
+                success = self.repository.update_user_by_username(username, {"is_active": True})
+
+                if success:
+                    self.load_users()
+                    QMessageBox.information(self, "تم", "تم تفعيل المستخدم بنجاح.")
+                else:
+                    QMessageBox.warning(self, "خطأ", "فشل في تفعيل المستخدم.")
+
+            except Exception as e:
+                QMessageBox.critical(self, "خطأ", f"فشل في تفعيل المستخدم: {str(e)}")
 
     def setup_update_tab(self):
         """إعداد تاب التحديثات"""

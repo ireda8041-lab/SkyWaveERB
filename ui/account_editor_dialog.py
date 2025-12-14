@@ -10,8 +10,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import schemas
@@ -44,8 +47,10 @@ class AccountEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة حساب جديد")
 
+        # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(450)
         self.setMinimumHeight(450)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -68,11 +73,49 @@ class AccountEditorDialog(QDialog):
 
     def init_ui(self):
         """إنشاء واجهة المستخدم - Standard Form Layout with Smart Features"""
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(10)
+        from PyQt6.QtWidgets import QLabel as QLabelWidget
+
+        from ui.styles import (
+            BUTTON_STYLES,
+            COLORS,
+            RESPONSIVE_GROUPBOX_STYLE,
+            get_cairo_font,
+        )
+
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+        """)
+
+        # محتوى التمرير
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(15, 15, 15, 15)
 
         # GroupBox للبيانات الأساسية
         form_groupbox = QGroupBox("بيانات الحساب")
+        form_groupbox.setStyleSheet(RESPONSIVE_GROUPBOX_STYLE)
         form_layout = QFormLayout()
         form_layout.setSpacing(12)
         form_layout.setContentsMargins(15, 20, 15, 15)
@@ -80,19 +123,20 @@ class AccountEditorDialog(QDialog):
         # 1. Code
         self.code_input = QLineEdit()
         self.code_input.setPlaceholderText("مثال: 1111")
-        self.code_input.setStyleSheet("QLineEdit { border: 1px solid #444; outline: none; } QLineEdit:focus { border: 1px solid #666; outline: none; }")
+        self.code_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.code_input.textChanged.connect(self._validate_inputs)
         form_layout.addRow("كود الحساب: *", self.code_input)
 
         # 2. Name
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("مثال: الخزنة الرئيسية")
-        self.name_input.setStyleSheet("QLineEdit { border: 1px solid #444; outline: none; } QLineEdit:focus { border: 1px solid #666; outline: none; }")
+        self.name_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.name_input.textChanged.connect(self._validate_inputs)
         form_layout.addRow("اسم الحساب: *", self.name_input)
 
         # 3. Type - with smart defaults
         self.type_combo = QComboBox()
+        self.type_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         account_types = [
             (schemas.AccountType.ASSET, "أصول"),
             (schemas.AccountType.CASH, "أصول نقدية"),
@@ -108,6 +152,7 @@ class AccountEditorDialog(QDialog):
 
         # 4. Parent Account (Critical) - with smart filtering
         self.parent_combo = QComboBox()
+        self.parent_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.parent_combo.addItem("-- بدون أب (حساب رئيسي) --", userData=None)
         self.parent_combo.setEditable(True)  # Enable auto-complete
         self._populate_parent_accounts()
@@ -115,6 +160,7 @@ class AccountEditorDialog(QDialog):
 
         # 5. Currency - Smart Default (EGP)
         self.currency_combo = QComboBox()
+        self.currency_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         currencies = [
             (schemas.CurrencyCode.EGP, "جنيه مصري (EGP)"),
             (schemas.CurrencyCode.USD, "دولار أمريكي (USD)"),
@@ -130,65 +176,62 @@ class AccountEditorDialog(QDialog):
         self.balance_spinbox = CustomSpinBox(decimals=2, minimum=-999999999.99, maximum=999999999.99)
         self.balance_spinbox.setValue(0.0)
         self.balance_spinbox.setSuffix(" ج.م")
+        self.balance_spinbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         form_layout.addRow("الرصيد الافتتاحي:", self.balance_spinbox)
 
         # 7. Description
         self.description_input = QTextEdit()
         self.description_input.setPlaceholderText("وصف الحساب (اختياري)...")
         self.description_input.setMaximumHeight(60)
+        self.description_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         form_layout.addRow("الوصف:", self.description_input)
 
         # 8. Active Checkbox - Default checked
         self.active_checkbox = QCheckBox("حساب نشط")
         self.active_checkbox.setChecked(True)
+        self.active_checkbox.setFont(get_cairo_font(13, bold=True))
         form_layout.addRow("الحالة:", self.active_checkbox)
 
         form_groupbox.setLayout(form_layout)
-        main_layout.addWidget(form_groupbox)
+        content_layout.addWidget(form_groupbox)
 
-        # Validation message label (without orange border)
-        from PyQt6.QtWidgets import QLabel as QLabelWidget
+        # Validation message label
         self.validation_label = QLabelWidget("")
         self.validation_label.setStyleSheet("color: #ff3d00; font-weight: bold; padding: 5px; border: none; outline: none;")
         self.validation_label.setVisible(False)
-        main_layout.addWidget(self.validation_label)
+        content_layout.addWidget(self.validation_label)
 
-        # أزرار الحفظ والإلغاء
-        buttons_layout = QHBoxLayout()
+        content_layout.addStretch()
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
+
+        # منطقة الأزرار (ثابتة في الأسفل)
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(15, 12, 15, 12)
+        buttons_layout.setSpacing(10)
+
+        buttons_layout.addStretch()
 
         self.cancel_button = QPushButton("إلغاء")
+        self.cancel_button.setStyleSheet(BUTTON_STYLES["secondary"])
         self.cancel_button.clicked.connect(self.reject)
 
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setDefault(True)
+        self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_button.clicked.connect(self.save_account)
-        self.save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #0A6CF1;
-                color: white;
-                padding: 10px 20px;
-                font-weight: bold;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #0A6CF1;
-            }
-            QPushButton:disabled {
-                background-color: #6b7280;
-                color: #9ca3af;
-            }
-        """)
 
-        buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
 
-        main_layout.addLayout(buttons_layout)
-        self.setLayout(main_layout)
-
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
-        apply_arrows_to_all_widgets(self)
+        main_layout.addWidget(buttons_container)
 
         # تحميل البيانات إذا كان في وضع التعديل
         if self.is_editing:

@@ -144,6 +144,8 @@ class CurrencyEditorDialog(QDialog):
         self.fetcher = None
 
         self.setWindowTitle("تعديل العملة" if self.is_editing else "إضافة عملة جديدة")
+        
+        # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
 
@@ -157,16 +159,52 @@ class CurrencyEditorDialog(QDialog):
             self.load_currency_data()
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        from PyQt6.QtWidgets import QScrollArea, QSizePolicy, QWidget
+
+        from ui.styles import RESPONSIVE_GROUPBOX_STYLE, get_cairo_font
+
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+        """)
+
+        # محتوى التمرير
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(15, 15, 15, 15)
 
         # معلومات العملة
         info_group = QGroupBox("معلومات العملة")
+        info_group.setStyleSheet(RESPONSIVE_GROUPBOX_STYLE)
         form_layout = QFormLayout()
+        form_layout.setSpacing(12)
 
         # رمز العملة
         self.code_input = QLineEdit()
         self.code_input.setPlaceholderText("مثال: USD, EUR, SAR")
         self.code_input.setMaxLength(3)
+        self.code_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if self.is_editing:
             self.code_input.setEnabled(False)
         form_layout.addRow(QLabel("🔤 رمز العملة:"), self.code_input)
@@ -174,26 +212,31 @@ class CurrencyEditorDialog(QDialog):
         # اسم العملة
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("مثال: دولار أمريكي")
+        self.name_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         form_layout.addRow(QLabel("📝 اسم العملة:"), self.name_input)
 
         # رمز العملة المختصر
         self.symbol_input = QLineEdit()
         self.symbol_input.setPlaceholderText("مثال: $, €, ر.س")
         self.symbol_input.setMaxLength(5)
+        self.symbol_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         form_layout.addRow(QLabel("💲 الرمز:"), self.symbol_input)
 
         info_group.setLayout(form_layout)
-        layout.addWidget(info_group)
+        content_layout.addWidget(info_group)
 
         # سعر الصرف
         rate_group = QGroupBox("💱 سعر الصرف (مقابل الجنيه المصري)")
+        rate_group.setStyleSheet(RESPONSIVE_GROUPBOX_STYLE)
         rate_layout = QVBoxLayout()
+        rate_layout.setSpacing(12)
 
         # سعر الصرف الحالي
         rate_form = QFormLayout()
         self.rate_input = CustomSpinBox(decimals=4, minimum=0.0001, maximum=999999)
         self.rate_input.setValue(1.0)
         self.rate_input.setSuffix(" ج.م")
+        self.rate_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         rate_form.addRow(QLabel("💰 سعر الصرف:"), self.rate_input)
         rate_layout.addLayout(rate_form)
 
@@ -230,32 +273,44 @@ class CurrencyEditorDialog(QDialog):
         rate_layout.addWidget(self.source_label)
 
         rate_group.setLayout(rate_layout)
-        layout.addWidget(rate_group)
+        content_layout.addWidget(rate_group)
 
         # الحالة
-        status_layout = QHBoxLayout()
         self.active_checkbox = QCheckBox("العملة نشطة")
         self.active_checkbox.setChecked(True)
-        status_layout.addWidget(self.active_checkbox)
-        status_layout.addStretch()
-        layout.addLayout(status_layout)
+        self.active_checkbox.setFont(get_cairo_font(13, bold=True))
+        content_layout.addWidget(self.active_checkbox)
 
-        # أزرار الحفظ والإلغاء
-        buttons_layout = QHBoxLayout()
+        content_layout.addStretch()
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
 
-        self.save_btn = QPushButton("💾 حفظ")
-        self.save_btn.setStyleSheet(BUTTON_STYLES["success"])
-        self.save_btn.clicked.connect(self.save_currency)
+        # منطقة الأزرار (ثابتة في الأسفل)
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(15, 12, 15, 12)
+        buttons_layout.setSpacing(10)
+
+        buttons_layout.addStretch()
 
         self.cancel_btn = QPushButton("إلغاء")
         self.cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.cancel_btn.clicked.connect(self.reject)
 
-        buttons_layout.addWidget(self.save_btn)
-        buttons_layout.addWidget(self.cancel_btn)
-        layout.addLayout(buttons_layout)
+        self.save_btn = QPushButton("💾 حفظ")
+        self.save_btn.setStyleSheet(BUTTON_STYLES["primary"])
+        self.save_btn.clicked.connect(self.save_currency)
 
-        self.setLayout(layout)
+        buttons_layout.addWidget(self.cancel_btn)
+        buttons_layout.addWidget(self.save_btn)
+
+        main_layout.addWidget(buttons_container)
 
     def load_currency_data(self):
         """تحميل بيانات العملة للتعديل"""

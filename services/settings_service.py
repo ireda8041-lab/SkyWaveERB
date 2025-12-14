@@ -6,6 +6,9 @@ from typing import Any
 _APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
 os.makedirs(_APP_DATA_DIR, exist_ok=True)
 
+# ملف الإعدادات المحلي في مجلد المشروع
+_LOCAL_SETTINGS_FILE = "skywave_settings.json"
+
 
 class SettingsService:
     """قسم الإعدادات المسؤول عن حفظ وقراءة إعدادات التطبيق."""
@@ -28,7 +31,28 @@ class SettingsService:
 
     def __init__(self):
         self.settings = self.load_settings()
+        # دمج الإعدادات من الملف المحلي (مثل smart_scan)
+        self._merge_local_settings()
         print("INFO: قسم الإعدادات (SettingsService) جاهز.")
+    
+    def _merge_local_settings(self):
+        """دمج الإعدادات من ملف المشروع المحلي (مثل smart_scan)"""
+        try:
+            if os.path.exists(_LOCAL_SETTINGS_FILE):
+                with open(_LOCAL_SETTINGS_FILE, encoding="utf-8") as f:
+                    local_settings = json.load(f)
+                
+                # دمج smart_scan إذا لم يكن موجوداً في الإعدادات الرئيسية
+                if "smart_scan" in local_settings and "smart_scan" not in self.settings:
+                    self.settings["smart_scan"] = local_settings["smart_scan"]
+                    print("INFO: [SettingsService] تم دمج إعدادات smart_scan من الملف المحلي")
+                
+                # دمج أي إعدادات أخرى غير موجودة
+                for key, value in local_settings.items():
+                    if key not in self.settings:
+                        self.settings[key] = value
+        except Exception as e:
+            print(f"WARNING: [SettingsService] فشل قراءة الملف المحلي: {e}")
 
     def load_settings(self) -> dict[str, Any]:
         if os.path.exists(self.SETTINGS_FILE):

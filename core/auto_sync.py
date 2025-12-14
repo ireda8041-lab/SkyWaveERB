@@ -119,22 +119,44 @@ class AutoSync:
             self.is_syncing = False
 
     def _quick_pull_clients(self) -> int:
-        """⚡ جلب العملاء بسرعة"""
+        """⚡ جلب العملاء بسرعة - بدون تكرار"""
         try:
             clients = list(self.repository.mongo_db.clients.find())
             count = 0
             for c in clients:
                 try:
                     mongo_id = str(c.get('_id'))
-                    self.repository.sqlite_cursor.execute("""
-                        INSERT OR REPLACE INTO clients (_mongo_id, name, company_name, status, phone, email,
-                        address, country, vat_number, client_type, work_field, logo_path, logo_data, client_notes,
-                        created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
-                    """, (mongo_id, c.get('name'), c.get('company_name'), c.get('status', 'نشط'),
-                          c.get('phone'), c.get('email'), c.get('address'), c.get('country'),
-                          c.get('vat_number'), c.get('client_type'), c.get('work_field'),
-                          c.get('logo_path'), c.get('logo_data'), c.get('client_notes')))
+                    
+                    # ✅ تحقق من وجود العميل أولاً
+                    self.repository.sqlite_cursor.execute(
+                        "SELECT id FROM clients WHERE _mongo_id = ?", (mongo_id,)
+                    )
+                    existing = self.repository.sqlite_cursor.fetchone()
+                    
+                    if existing:
+                        # تحديث العميل الموجود
+                        self.repository.sqlite_cursor.execute("""
+                            UPDATE clients SET 
+                            name = ?, company_name = ?, status = ?, phone = ?, email = ?,
+                            address = ?, country = ?, vat_number = ?, client_type = ?, work_field = ?,
+                            logo_path = ?, logo_data = ?, client_notes = ?, last_modified = datetime('now'),
+                            sync_status = 'synced'
+                            WHERE _mongo_id = ?
+                        """, (c.get('name'), c.get('company_name'), c.get('status', 'نشط'),
+                              c.get('phone'), c.get('email'), c.get('address'), c.get('country'),
+                              c.get('vat_number'), c.get('client_type'), c.get('work_field'),
+                              c.get('logo_path'), c.get('logo_data'), c.get('client_notes'), mongo_id))
+                    else:
+                        # إضافة عميل جديد
+                        self.repository.sqlite_cursor.execute("""
+                            INSERT INTO clients (_mongo_id, name, company_name, status, phone, email,
+                            address, country, vat_number, client_type, work_field, logo_path, logo_data, client_notes,
+                            created_at, last_modified, sync_status)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'), 'synced')
+                        """, (mongo_id, c.get('name'), c.get('company_name'), c.get('status', 'نشط'),
+                              c.get('phone'), c.get('email'), c.get('address'), c.get('country'),
+                              c.get('vat_number'), c.get('client_type'), c.get('work_field'),
+                              c.get('logo_path'), c.get('logo_data'), c.get('client_notes')))
                     count += 1
                 except Exception as ex:
                     print(f"    ⚠️ فشل جلب عميل: {ex}")
@@ -378,42 +400,10 @@ class AutoSync:
         total_pulled = 0
 
         try:
-            # جلب الحسابات
-            accounts = list(self.repository.mongo_db.accounts.find())
-            for acc in accounts:
-                try:
-                    acc_dict = dict(acc)
-                    mongo_id = str(acc_dict.pop('_id'))
-
-                    # تحويل datetime
-                    for key in ['created_at', 'last_modified']:
-                        if key in acc_dict and hasattr(acc_dict[key], 'isoformat'):
-                            acc_dict[key] = acc_dict[key].isoformat()
-
-                    # تحديث أو إدراج
-                    self.repository.sqlite_cursor.execute("""
-                        INSERT OR REPLACE INTO accounts
-                        (_mongo_id, name, code, type, parent_id, balance, currency,
-                         description, created_at, last_modified, sync_status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
-                    """, (
-                        mongo_id,
-                        acc_dict.get('name'),
-                        acc_dict.get('code'),
-                        acc_dict.get('type'),
-                        acc_dict.get('parent_id'),
-                        acc_dict.get('balance', 0.0),
-                        acc_dict.get('currency', 'EGP'),
-                        acc_dict.get('description'),
-                        acc_dict.get('created_at'),
-                        acc_dict.get('last_modified'),
-                    ))
-                    total_pulled += 1
-                except Exception as e:
-                    print(f"  ⚠️ فشل جلب حساب: {e}")
-
-            self.repository.sqlite_conn.commit()
-            print(f"  ✅ تم جلب {total_pulled} حساب")
+            # جلب الحسابات - معطل مؤقتاً (سيتم إضافتها يدوياً)
+            # accounts = list(self.repository.mongo_db.accounts.find())
+            # ... تم تعطيل sync الحسابات
+            print("  ⏭️ تم تخطي sync الحسابات (معطل مؤقتاً)")
 
             # جلب العملاء (مع إصلاح مشكلة cursor)
             try:

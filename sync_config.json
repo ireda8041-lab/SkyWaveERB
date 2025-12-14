@@ -1,0 +1,26 @@
+{
+  "sync_settings": {
+    "conflict_resolution": "local_wins",
+    "auto_backup": true,
+    "backup_interval_hours": 24,
+    "max_backups": 5,
+    "protected_tables": [
+      "users",
+      "settings",
+      "user_preferences"
+    ],
+    "sync_interval_minutes": 5,
+    "connection_check_interval_seconds": 30
+  },
+  "database_settings": {
+    "enable_wal_mode": true,
+    "cache_size": 10000,
+    "synchronous_mode": "NORMAL",
+    "auto_vacuum": true
+  },
+  "logging": {
+    "level": "INFO",
+    "max_log_files": 10,
+    "log_rotation_mb": 10
+  }
+}

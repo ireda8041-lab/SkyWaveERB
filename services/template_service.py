@@ -88,8 +88,12 @@ class TemplateService(BaseService):
         """
 
         try:
-            self.repo.sqlite_cursor.execute(create_table_sql)
-            self.repo.sqlite_conn.commit()
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute(create_table_sql)
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
             # إضافة القالب الافتراضي إذا لم يكن موجوداً
             self._add_default_template()
@@ -109,11 +113,13 @@ class TemplateService(BaseService):
 
     def _add_default_template(self):
         """إضافة القالب الافتراضي"""
+        cursor = None
         try:
+            cursor = self.repo.get_cursor()
             # التحقق من وجود أي قالب افتراضي
             check_sql = "SELECT COUNT(*) FROM invoice_templates WHERE is_default = 1"
-            self.repo.sqlite_cursor.execute(check_sql)
-            count = self.repo.sqlite_cursor.fetchone()[0]
+            cursor.execute(check_sql)
+            count = cursor.fetchone()[0]
 
             if count == 0:
                 # التحقق من وجود القالب في المجلد
@@ -132,7 +138,7 @@ class TemplateService(BaseService):
                 INSERT INTO invoice_templates (name, description, template_file, is_default)
                 VALUES (?, ?, ?, ?)
                 """
-                self.repo.sqlite_cursor.execute(insert_sql, (
+                cursor.execute(insert_sql, (
                     "Sky Wave Professional",
                     "القالب الاحترافي لفواتير Sky Wave",
                     template_file,
@@ -143,18 +149,23 @@ class TemplateService(BaseService):
 
         except Exception as e:
             print(f"ERROR: خطأ في إضافة القالب الافتراضي: {e}")
+        finally:
+            if cursor:
+                cursor.close()
 
     def get_all_templates(self) -> list[dict[str, Any]]:
         """جلب جميع القوالب"""
+        cursor = None
         try:
+            cursor = self.repo.get_cursor()
             select_sql = """
             SELECT id, name, description, template_file, is_default, created_at
             FROM invoice_templates
             ORDER BY is_default DESC, name ASC
             """
 
-            self.repo.sqlite_cursor.execute(select_sql)
-            rows = self.repo.sqlite_cursor.fetchall()
+            cursor.execute(select_sql)
+            rows = cursor.fetchall()
 
             templates = []
             for row in rows:
@@ -172,18 +183,23 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في جلب القوالب: {e}")
             return []
+        finally:
+            if cursor:
+                cursor.close()
 
     def get_template_by_id(self, template_id: int) -> dict[str, Any] | None:
         """جلب قالب بالمعرف"""
+        cursor = None
         try:
+            cursor = self.repo.get_cursor()
             select_sql = """
             SELECT id, name, description, template_file, is_default, created_at
             FROM invoice_templates
             WHERE id = ?
             """
 
-            self.repo.sqlite_cursor.execute(select_sql, (template_id,))
-            row = self.repo.sqlite_cursor.fetchone()
+            cursor.execute(select_sql, (template_id,))
+            row = cursor.fetchone()
 
             if row:
                 return {
@@ -200,10 +216,15 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في جلب القالب: {e}")
             return None
+        finally:
+            if cursor:
+                cursor.close()
 
     def get_default_template(self) -> dict[str, Any] | None:
         """جلب القالب الافتراضي"""
+        cursor = None
         try:
+            cursor = self.repo.get_cursor()
             select_sql = """
             SELECT id, name, description, template_file, is_default, created_at
             FROM invoice_templates
@@ -211,8 +232,8 @@ class TemplateService(BaseService):
             LIMIT 1
             """
 
-            self.repo.sqlite_cursor.execute(select_sql)
-            row = self.repo.sqlite_cursor.fetchone()
+            cursor.execute(select_sql)
+            row = cursor.fetchone()
 
             if row:
                 template_file = row[3]
@@ -228,7 +249,7 @@ class TemplateService(BaseService):
                             template_file = alt_template
                             # تحديث قاعدة البيانات
                             update_sql = "UPDATE invoice_templates SET template_file = ? WHERE id = ?"
-                            self.repo.sqlite_cursor.execute(update_sql, (template_file, row[0]))
+                            cursor.execute(update_sql, (template_file, row[0]))
                             self.repo.sqlite_conn.commit()
                             break
 
@@ -248,6 +269,9 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في جلب القالب الافتراضي: {e}")
             return None
+        finally:
+            if cursor:
+                cursor.close()
 
     def generate_invoice_html(
         self,
@@ -445,12 +469,16 @@ class TemplateService(BaseService):
                         # حاول حفظ رقم الفاتورة في قاعدة البيانات
                         try:
                             if self.repo:
-                                self.repo.sqlite_cursor.execute(
-                                    "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                                    (invoice_id, local_id)
-                                )
-                                self.repo.sqlite_conn.commit()
-                                print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
+                                cursor = self.repo.get_cursor()
+                                try:
+                                    cursor.execute(
+                                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                                        (invoice_id, local_id)
+                                    )
+                                    self.repo.sqlite_conn.commit()
+                                    print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
+                                finally:
+                                    cursor.close()
                         except Exception as save_error:
                             print(f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}")
                     else:
@@ -864,6 +892,7 @@ class TemplateService(BaseService):
 
     def add_template(self, name: str, description: str, template_content: str) -> bool:
         """إضافة قالب جديد"""
+        cursor = None
         try:
             # حفظ ملف القالب
             template_filename = f"{name.replace(' ', '_').lower()}.html"
@@ -873,12 +902,13 @@ class TemplateService(BaseService):
                 f.write(template_content)
 
             # إضافة إلى قاعدة البيانات
+            cursor = self.repo.get_cursor()
             insert_sql = """
             INSERT INTO invoice_templates (name, description, template_file)
             VALUES (?, ?, ?)
             """
 
-            self.repo.sqlite_cursor.execute(insert_sql, (name, description, template_filename))
+            cursor.execute(insert_sql, (name, description, template_filename))
             self.repo.sqlite_conn.commit()
 
             print(f"INFO: تم إضافة قالب جديد: {name}")
@@ -887,9 +917,13 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في إضافة القالب: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
 
     def update_template(self, template_id: int, name: str, description: str, template_content: str) -> bool:
         """تحديث قالب موجود"""
+        cursor = None
         try:
             # جلب معلومات القالب الحالي
             template = self.get_template_by_id(template_id)
@@ -913,13 +947,14 @@ class TemplateService(BaseService):
                     os.remove(old_path)
 
             # تحديث قاعدة البيانات
+            cursor = self.repo.get_cursor()
             update_sql = """
             UPDATE invoice_templates
             SET name = ?, description = ?, template_file = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
             """
 
-            self.repo.sqlite_cursor.execute(update_sql, (name, description, new_filename, template_id))
+            cursor.execute(update_sql, (name, description, new_filename, template_id))
             self.repo.sqlite_conn.commit()
 
             print(f"INFO: تم تحديث القالب: {name}")
@@ -928,17 +963,22 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في تحديث القالب: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
 
     def set_default_template(self, template_id: int) -> bool:
         """تعيين قالب كافتراضي"""
+        cursor = None
         try:
+            cursor = self.repo.get_cursor()
             # إزالة الافتراضي من جميع القوالب
             update_sql = "UPDATE invoice_templates SET is_default = 0"
-            self.repo.sqlite_cursor.execute(update_sql)
+            cursor.execute(update_sql)
 
             # تعيين القالب الجديد كافتراضي
             update_sql = "UPDATE invoice_templates SET is_default = 1 WHERE id = ?"
-            self.repo.sqlite_cursor.execute(update_sql, (template_id,))
+            cursor.execute(update_sql, (template_id,))
 
             self.repo.sqlite_conn.commit()
 
@@ -948,9 +988,13 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في تعيين القالب الافتراضي: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()
 
     def delete_template(self, template_id: int) -> bool:
         """حذف قالب"""
+        cursor = None
         try:
             # جلب معلومات القالب
             template_info = self.get_template_by_id(template_id)
@@ -969,8 +1013,9 @@ class TemplateService(BaseService):
                 os.remove(template_path)
 
             # حذف من قاعدة البيانات
+            cursor = self.repo.get_cursor()
             delete_sql = "DELETE FROM invoice_templates WHERE id = ?"
-            self.repo.sqlite_cursor.execute(delete_sql, (template_id,))
+            cursor.execute(delete_sql, (template_id,))
             self.repo.sqlite_conn.commit()
 
             # إذا كان القالب المحذوف افتراضياً، تعيين آخر كافتراضي
@@ -985,3 +1030,6 @@ class TemplateService(BaseService):
         except Exception as e:
             print(f"ERROR: خطأ في حذف القالب: {e}")
             return False
+        finally:
+            if cursor:
+                cursor.close()

@@ -26,11 +26,19 @@ class KeyboardShortcutManager(QObject):
     new_project = pyqtSignal()
     new_client = pyqtSignal()
     new_expense = pyqtSignal()
+    new_quotation = pyqtSignal()
+    new_payment = pyqtSignal()
     search_activated = pyqtSignal()
     refresh_data = pyqtSignal()
     save_data = pyqtSignal()
     close_dialog = pyqtSignal()
     show_help = pyqtSignal()
+    full_sync = pyqtSignal()
+    delete_selected = pyqtSignal()
+    select_all = pyqtSignal()
+    copy_selected = pyqtSignal()
+    export_excel = pyqtSignal()
+    print_current = pyqtSignal()
 
     def __init__(self, main_window):
         """
@@ -133,6 +141,48 @@ class KeyboardShortcutManager(QObject):
                 'key': 'Ctrl+8',
                 'description': 'الانتقال إلى الإعدادات',
                 'action': lambda: self._switch_tab(7)
+            },
+            
+            # اختصارات إضافية
+            'new_quotation': {
+                'key': 'Ctrl+Q',
+                'description': 'عرض سعر جديد',
+                'signal': self.new_quotation
+            },
+            'new_payment': {
+                'key': 'Ctrl+P',
+                'description': 'دفعة جديدة',
+                'signal': self.new_payment
+            },
+            'full_sync': {
+                'key': 'Ctrl+Shift+S',
+                'description': 'مزامنة كاملة',
+                'signal': self.full_sync
+            },
+            'delete_selected': {
+                'key': 'Delete',
+                'description': 'حذف العنصر المحدد',
+                'signal': self.delete_selected
+            },
+            'select_all': {
+                'key': 'Ctrl+A',
+                'description': 'تحديد الكل',
+                'signal': self.select_all
+            },
+            'copy_selected': {
+                'key': 'Ctrl+C',
+                'description': 'نسخ المحدد',
+                'signal': self.copy_selected
+            },
+            'export_excel': {
+                'key': 'Ctrl+Shift+E',
+                'description': 'تصدير Excel',
+                'signal': self.export_excel
+            },
+            'print_current': {
+                'key': 'Ctrl+Shift+P',
+                'description': 'طباعة',
+                'signal': self.print_current
             }
         }
 
@@ -257,6 +307,7 @@ class KeyboardShortcutManager(QObject):
         categories: dict[str, list[dict[str, str]]] = {
             'إنشاء': [],
             'تنقل وبحث': [],
+            'تحرير': [],
             'حفظ وإغلاق': [],
             'مساعدة': [],
             'التابات': []
@@ -269,8 +320,14 @@ class KeyboardShortcutManager(QObject):
                     'key': definition['key'],
                     'description': definition['description']
                 })
-            elif name in ['search', 'refresh']:
+            elif name in ['search', 'refresh', 'full_sync']:
                 categories['تنقل وبحث'].append({
+                    'name': name,
+                    'key': definition['key'],
+                    'description': definition['description']
+                })
+            elif name in ['delete_selected', 'select_all', 'copy_selected', 'export_excel', 'print_current']:
+                categories['تحرير'].append({
                     'name': name,
                     'key': definition['key'],
                     'description': definition['description']

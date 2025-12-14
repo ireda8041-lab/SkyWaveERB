@@ -112,7 +112,17 @@ class AutoUpdateService(QObject):
 
     def stop(self):
         """إيقاف خدمة التحديث التلقائي"""
-        self._timer.stop()
+        try:
+            # التحقق من أن QTimer لم يتم حذفه بواسطة Qt
+            if self._timer is not None:
+                try:
+                    self._timer.stop()
+                except RuntimeError:
+                    # QTimer تم حذفه بالفعل
+                    pass
+        except Exception as e:
+            logger.debug(f"تحذير عند إيقاف المؤقت: {e}")
+        
         if self._checker_thread and self._checker_thread.isRunning():
             self._checker_thread.quit()
             self._checker_thread.wait()

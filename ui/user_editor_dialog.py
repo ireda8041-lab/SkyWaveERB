@@ -3,7 +3,6 @@
 نافذة إضافة/تعديل المستخدمين
 """
 
-
 from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,7 +14,10 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from core.auth_models import AuthService, User, UserRole
@@ -28,16 +30,30 @@ class UserEditorDialog(QDialog):
         super().__init__(parent)
 
         self.auth_service = auth_service
-        self.user_to_edit = user_to_edit
         self.is_editing = user_to_edit is not None
 
-        if self.is_editing and user_to_edit is not None:
+        # إنشاء نسخة مستقلة من بيانات المستخدم لتجنب الخلط
+        if user_to_edit is not None:
+            # حفظ البيانات الأصلية كقاموس مستقل
+            self._original_user_data = {
+                'id': user_to_edit.id,
+                'mongo_id': user_to_edit.mongo_id,
+                'username': user_to_edit.username,
+                'full_name': user_to_edit.full_name,
+                'email': user_to_edit.email,
+                'role': user_to_edit.role,
+                'is_active': user_to_edit.is_active,
+                'password_hash': user_to_edit.password_hash,
+            }
             self.setWindowTitle(f"تعديل مستخدم: {user_to_edit.username}")
         else:
+            self._original_user_data = None
             self.setWindowTitle("إضافة مستخدم جديد")
 
+        # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(400)
         self.setMinimumHeight(350)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -61,17 +77,54 @@ class UserEditorDialog(QDialog):
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
-        main_layout = QVBoxLayout()
-        main_layout.setSpacing(15)
+        from ui.styles import (
+            BUTTON_STYLES,
+            COLORS,
+            RESPONSIVE_GROUPBOX_STYLE,
+            get_cairo_font,
+        )
+
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+        """)
+
+        # محتوى التمرير
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(15, 15, 15, 15)
 
         # مجموعة البيانات الأساسية
         basic_group = QGroupBox("البيانات الأساسية")
+        basic_group.setStyleSheet(RESPONSIVE_GROUPBOX_STYLE)
         basic_layout = QFormLayout()
         basic_layout.setSpacing(12)
 
         # اسم المستخدم
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("اسم المستخدم (بالإنجليزية)")
+        self.username_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if self.is_editing:
             self.username_input.setEnabled(False)  # لا يمكن تغيير اسم المستخدم
         basic_layout.addRow(QLabel("اسم المستخدم: *"), self.username_input)
@@ -79,15 +132,18 @@ class UserEditorDialog(QDialog):
         # الاسم الكامل
         self.full_name_input = QLineEdit()
         self.full_name_input.setPlaceholderText("الاسم الكامل")
+        self.full_name_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         basic_layout.addRow(QLabel("الاسم الكامل:"), self.full_name_input)
 
         # البريد الإلكتروني
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("example@company.com")
+        self.email_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         basic_layout.addRow(QLabel("البريد الإلكتروني:"), self.email_input)
 
         # الدور
         self.role_combo = QComboBox()
+        self.role_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.role_combo.addItem("مدير النظام", UserRole.ADMIN)
         self.role_combo.addItem("محاسب", UserRole.ACCOUNTANT)
         self.role_combo.addItem("مندوب مبيعات", UserRole.SALES)
@@ -96,19 +152,22 @@ class UserEditorDialog(QDialog):
         # الحالة
         self.active_checkbox = QCheckBox("المستخدم نشط")
         self.active_checkbox.setChecked(True)
+        self.active_checkbox.setFont(get_cairo_font(13, bold=True))
         basic_layout.addRow(QLabel("الحالة:"), self.active_checkbox)
 
         basic_group.setLayout(basic_layout)
-        main_layout.addWidget(basic_group)
+        content_layout.addWidget(basic_group)
 
         # مجموعة كلمة المرور
         password_group = QGroupBox("كلمة المرور")
+        password_group.setStyleSheet(RESPONSIVE_GROUPBOX_STYLE)
         password_layout = QFormLayout()
         password_layout.setSpacing(12)
 
         # كلمة المرور
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if self.is_editing:
             self.password_input.setPlaceholderText("اتركه فارغاً لعدم التغيير")
         else:
@@ -118,6 +177,7 @@ class UserEditorDialog(QDialog):
         # تأكيد كلمة المرور
         self.confirm_password_input = QLineEdit()
         self.confirm_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_password_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         if self.is_editing:
             self.confirm_password_input.setPlaceholderText("تأكيد كلمة المرور الجديدة")
         else:
@@ -125,64 +185,54 @@ class UserEditorDialog(QDialog):
         password_layout.addRow(QLabel("تأكيد كلمة المرور:" + ("" if self.is_editing else " *")), self.confirm_password_input)
 
         password_group.setLayout(password_layout)
-        main_layout.addWidget(password_group)
+        content_layout.addWidget(password_group)
 
-        # الأزرار
-        buttons_layout = QHBoxLayout()
+        content_layout.addStretch()
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
+
+        # منطقة الأزرار (ثابتة في الأسفل)
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(15, 12, 15, 12)
+        buttons_layout.setSpacing(10)
+
+        buttons_layout.addStretch()
+
+        # زر الإلغاء
+        self.cancel_button = QPushButton("إلغاء")
+        self.cancel_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.cancel_button.clicked.connect(self.reject)
 
         # زر الحفظ
         self.save_button = QPushButton("💾 حفظ")
         self.save_button.setDefault(True)
+        self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_button.clicked.connect(self.save_user)
-        self.save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #0A6CF1;
-                color: white;
-                padding: 10px 20px;
-                font-weight: bold;
-                border-radius: 6px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #0A6CF1;
-            }
-        """)
 
-        # زر الإلغاء
-        cancel_button = QPushButton("إلغاء")
-        cancel_button.clicked.connect(self.reject)
-        cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #6b7280;
-                color: white;
-                padding: 10px 20px;
-                font-weight: bold;
-                border-radius: 6px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #4b5563;
-            }
-        """)
-
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(cancel_button)
+        buttons_layout.addWidget(self.cancel_button)
         buttons_layout.addWidget(self.save_button)
 
-        main_layout.addLayout(buttons_layout)
-        self.setLayout(main_layout)
+        main_layout.addWidget(buttons_container)
 
     def populate_fields(self):
         """تحميل بيانات المستخدم للتعديل"""
-        if not self.user_to_edit:
+        if not self._original_user_data:
             return
 
-        self.username_input.setText(self.user_to_edit.username)
-        self.full_name_input.setText(self.user_to_edit.full_name or "")
-        self.email_input.setText(self.user_to_edit.email or "")
+        # استخدام البيانات المحفوظة بدلاً من الكائن الأصلي
+        self.username_input.setText(self._original_user_data['username'])
+        self.full_name_input.setText(self._original_user_data['full_name'] or "")
+        self.email_input.setText(self._original_user_data['email'] or "")
 
         # تحديد الدور
-        role_value = self.user_to_edit.role
+        role_value = self._original_user_data['role']
         if isinstance(role_value, str):
             try:
                 role_value = UserRole(role_value)
@@ -194,7 +244,7 @@ class UserEditorDialog(QDialog):
                 self.role_combo.setCurrentIndex(i)
                 break
 
-        self.active_checkbox.setChecked(self.user_to_edit.is_active)
+        self.active_checkbox.setChecked(self._original_user_data['is_active'])
 
     def validate_form(self) -> tuple[bool, str]:
         """التحقق من صحة البيانات"""
@@ -255,8 +305,10 @@ class UserEditorDialog(QDialog):
             is_active = self.active_checkbox.isChecked()
             password = self.password_input.text()
 
-            if self.is_editing:
-                # تعديل مستخدم موجود
+            if self.is_editing and self._original_user_data:
+                # تعديل مستخدم موجود - استخدام البيانات المحفوظة
+                original_username = self._original_user_data['username']
+
                 update_data = {
                     "full_name": full_name,
                     "email": email,
@@ -268,8 +320,12 @@ class UserEditorDialog(QDialog):
                 if password:
                     update_data["password_hash"] = self.auth_service.hash_password(password)
 
-                success = self.auth_service.repo.update_user(
-                    self.user_to_edit.id or self.user_to_edit._mongo_id,
+                # استخدام username للتحديث (أكثر أماناً)
+                print(f"INFO: [UserEditorDialog] جاري تحديث المستخدم: {original_username}")
+                print(f"INFO: [UserEditorDialog] البيانات: {update_data}")
+
+                success = self.auth_service.repo.update_user_by_username(
+                    original_username,
                     update_data
                 )
 
@@ -290,12 +346,10 @@ class UserEditorDialog(QDialog):
                 if success:
                     # تحديث البريد الإلكتروني إذا تم إدخاله
                     if email:
-                        user = self.auth_service.repo.get_user_by_username(username)
-                        if user:
-                            self.auth_service.repo.update_user(
-                                user.id or user._mongo_id,
-                                {"email": email}
-                            )
+                        self.auth_service.repo.update_user_by_username(
+                            username,
+                            {"email": email}
+                        )
 
                     QMessageBox.information(self, "تم", "تم إضافة المستخدم بنجاح.")
                     self.accept()

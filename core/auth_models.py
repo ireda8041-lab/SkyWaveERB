@@ -21,7 +21,7 @@ class UserRole(Enum):
 class User(BaseModel):
     """نموذج المستخدم"""
     id: str | None = None
-    _mongo_id: str | None = None
+    mongo_id: str | None = None  # تغيير من _mongo_id لتجنب مشاكل Pydantic
     username: str
     password_hash: str
     role: UserRole
@@ -34,6 +34,15 @@ class User(BaseModel):
 
     class Config:
         use_enum_values = True
+
+    # للتوافق مع الكود القديم
+    @property
+    def _mongo_id(self):
+        return self.mongo_id
+
+    @_mongo_id.setter
+    def _mongo_id(self, value):
+        self.mongo_id = value
 
 
 class UserPermissions(BaseModel):
@@ -53,13 +62,25 @@ class AuthService:
         self._ensure_default_admin()
 
     def _ensure_default_admin(self):
-        """التحقق من وجود مستخدمين - تم تعطيل إنشاء المستخدمين الافتراضيين"""
+        """التحقق من وجود مستخدمين وإنشاء مدير افتراضي إذا لزم الأمر"""
         try:
-            # تم تعطيل إنشاء المستخدمين الافتراضيين
-            # يجب إنشاء المستخدمين يدوياً أو عبر سكريبت منفصل
-            users_count = len(self.repo.get_all_users())
+            users = self.repo.get_all_users()
+            users_count = len(users)
+
             if users_count == 0:
-                print("WARNING: [AuthService] لا يوجد مستخدمين في النظام. يرجى إنشاء مستخدم مدير.")
+                # إنشاء مستخدم مدير افتراضي
+                print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
+                success = self.create_user(
+                    username="admin",
+                    password="admin123",
+                    role=UserRole.ADMIN,
+                    full_name="مدير النظام"
+                )
+                if success:
+                    print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي (admin / admin123)")
+                    print("WARNING: [AuthService] ⚠️ يرجى تغيير كلمة المرور الافتراضية فوراً!")
+                else:
+                    print("ERROR: [AuthService] فشل إنشاء المستخدم الافتراضي")
             else:
                 print(f"INFO: [AuthService] يوجد {users_count} مستخدم في النظام")
 
@@ -136,26 +157,26 @@ class PermissionManager:
     # تعريف الصلاحيات الافتراضية لكل دور
     ROLE_PERMISSIONS = {
         UserRole.ADMIN: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'settings'],
+            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo', 'settings'],
             'actions': ['create', 'read', 'update', 'delete', 'export', 'print'],
-            'features': ['user_management', 'system_settings', 'financial_reports', 'data_export']
+            'features': ['user_management', 'system_settings', 'financial_reports', 'data_export', 'task_management']
         },
         UserRole.ACCOUNTANT: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting'],
+            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo'],
             'actions': ['create', 'read', 'update', 'delete', 'export', 'print'],
-            'features': ['financial_reports', 'data_export']
+            'features': ['financial_reports', 'data_export', 'task_management']
         },
         UserRole.SALES: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'clients', 'services'],
+            'tabs': ['dashboard', 'projects', 'quotes', 'clients', 'services', 'todo'],
             'actions': ['create', 'read', 'update', 'print'],
-            'features': ['client_reports']
+            'features': ['client_reports', 'task_management']
         }
     }
 
     # جميع الصلاحيات المتاحة
-    ALL_TABS = ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'settings']
+    ALL_TABS = ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo', 'settings']
     ALL_ACTIONS = ['create', 'read', 'update', 'delete', 'export', 'print']
-    ALL_FEATURES = ['user_management', 'system_settings', 'financial_reports', 'data_export', 'client_reports']
+    ALL_FEATURES = ['user_management', 'system_settings', 'financial_reports', 'data_export', 'client_reports', 'task_management']
 
     @classmethod
     def can_access_tab(cls, user, tab_name: str) -> bool:

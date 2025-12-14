@@ -6,7 +6,7 @@
 from datetime import datetime
 
 from PyQt6.QtCore import QDate, Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDateEdit,
     QDialog,
@@ -22,12 +22,13 @@ from PyQt6.QtWidgets import (
 )
 
 from core import schemas
-from ui.styles import BUTTON_STYLES, COLORS
+from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
 
 
 class LedgerWindow(QDialog):
     """
     نافذة كشف الحساب - تعرض جميع الحركات المحاسبية لحساب معين
+    متجاوبة مع حجم الشاشة
     """
 
     def __init__(self, account: schemas.Account, accounting_service, parent=None):
@@ -37,8 +38,24 @@ class LedgerWindow(QDialog):
         self.accounting_service = accounting_service
 
         self.setWindowTitle(f"كشف حساب: {account.name} ({account.code})")
-        self.setMinimumWidth(1000)
-        self.setMinimumHeight(600)
+        
+        # 📱 تجاوب: حجم متجاوب مع الشاشة
+        from PyQt6.QtWidgets import QApplication, QSizePolicy
+        self.setMinimumWidth(800)
+        self.setMinimumHeight(500)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # حجم متجاوب مع الشاشة
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_size = screen.availableGeometry()
+            width = int(screen_size.width() * 0.75)
+            height = int(screen_size.height() * 0.75)
+            self.resize(min(width, 1200), min(height, 800))
+            # توسيط النافذة
+            x = (screen_size.width() - self.width()) // 2
+            y = (screen_size.height() - self.height()) // 2
+            self.move(x, y)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -191,29 +208,10 @@ class LedgerWindow(QDialog):
         ])
 
         # ستايل الجدول
-        self.movements_table.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_primary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                gridline-color: {COLORS['border']};
-                selection-background-color: {COLORS['primary']};
-                selection-color: white;
-            }}
-            QTableWidget::item {{
-                padding: 8px;
-                border-bottom: 1px solid {COLORS['border']};
-            }}
-            QHeaderView::section {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_primary']};
-                padding: 10px;
-                border: none;
-                border-right: 1px solid {COLORS['border']};
-                font-weight: bold;
-            }}
-        """)
+        self.movements_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.movements_table)
 
         # إعدادات الجدول
         self.movements_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -352,38 +350,32 @@ class LedgerWindow(QDialog):
 
                 # التاريخ
                 date_str = movement['date'].strftime("%Y-%m-%d") if hasattr(movement['date'], 'strftime') else str(movement['date'])[:10]
-                date_item = QTableWidgetItem(date_str)
-                date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                self.movements_table.setItem(i, 0, date_item)
+                self.movements_table.setItem(i, 0, create_centered_item(date_str))
 
                 # الوصف
-                desc_item = QTableWidgetItem(movement['description'])
-                desc_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                self.movements_table.setItem(i, 1, desc_item)
+                self.movements_table.setItem(i, 1, create_centered_item(movement['description']))
 
                 # المرجع
-                ref_item = QTableWidgetItem(movement['reference'][:20] if len(movement['reference']) > 20 else movement['reference'])
-                ref_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-                self.movements_table.setItem(i, 2, ref_item)
+                ref_text = movement['reference'][:20] if len(movement['reference']) > 20 else movement['reference']
+                self.movements_table.setItem(i, 2, create_centered_item(ref_text))
 
                 # مدين
-                debit_item = QTableWidgetItem(f"{movement['debit']:,.2f}" if movement['debit'] > 0 else "-")
-                debit_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                debit_text = f"{movement['debit']:,.2f}" if movement['debit'] > 0 else "-"
+                debit_item = create_centered_item(debit_text)
                 if movement['debit'] > 0:
                     debit_item.setForeground(QColor(COLORS['success']))
                 self.movements_table.setItem(i, 3, debit_item)
 
                 # دائن
-                credit_item = QTableWidgetItem(f"{movement['credit']:,.2f}" if movement['credit'] > 0 else "-")
-                credit_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                credit_text = f"{movement['credit']:,.2f}" if movement['credit'] > 0 else "-"
+                credit_item = create_centered_item(credit_text)
                 if movement['credit'] > 0:
                     credit_item.setForeground(QColor(COLORS['danger']))
                 self.movements_table.setItem(i, 4, credit_item)
 
                 # الرصيد
-                balance_item = QTableWidgetItem(f"{movement['balance']:,.2f}")
-                balance_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                balance_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                balance_item = create_centered_item(f"{movement['balance']:,.2f}")
+                balance_item.setFont(get_cairo_font(10, bold=True))
                 if movement['balance'] > 0:
                     balance_item.setForeground(QColor(COLORS['success']))
                 elif movement['balance'] < 0:
@@ -511,9 +503,9 @@ class LedgerWindow(QDialog):
 
             try:
                 # إعدادات الخطوط
-                title_font = QFont("Arial", 16, QFont.Weight.Bold)
-                header_font = QFont("Arial", 12, QFont.Weight.Bold)
-                normal_font = QFont("Arial", 10)
+                title_font = get_cairo_font(16, bold=True)
+                header_font = get_cairo_font(12, bold=True)
+                normal_font = get_cairo_font(10)
 
                 # الهوامش
                 margin = 50

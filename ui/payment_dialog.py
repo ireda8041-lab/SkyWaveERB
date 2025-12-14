@@ -1,28 +1,45 @@
+"""
+نافذة تسجيل دفعة لمشروع - مع عرض المبلغ المتبقي
+⚡ محسّن: دقة مالية، تحقق من البيانات، تكامل محاسبي
+📱 تصميم متجاوب (Responsive)
+"""
 
-from PyQt6.QtCore import QDate
+from decimal import Decimal, ROUND_HALF_UP
+
+from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import schemas
 from ui.custom_spinbox import CustomSpinBox
-from ui.smart_scan_dropzone import SmartScanDropzone
+
+
+def to_decimal(value) -> Decimal:
+    """تحويل آمن للقيم المالية إلى Decimal"""
+    if value is None:
+        return Decimal('0.00')
+    try:
+        return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except Exception:
+        return Decimal('0.00')
 
 
 class PaymentDialog(QDialog):
-    """نافذة تسجيل دفعة لمشروع - مع عرض المبلغ المتبقي."""
+    """نافذة تسجيل دفعة لمشروع - تصميم متجاوب."""
 
     def __init__(
         self,
@@ -36,209 +53,296 @@ class PaymentDialog(QDialog):
         self.accounts = accounts
         self.project_service = project_service
 
-        # حساب المبلغ المتبقي
-        self.total_amount = project.total_amount or 0
-        self.total_paid = 0
+        # ⚡ استخدام Decimal للدقة المالية
+        self.total_amount = to_decimal(project.total_amount or 0)
+        self.total_paid = Decimal('0.00')
         self.remaining_amount = self.total_amount
 
         if project_service:
             try:
                 profit_data = project_service.get_project_profitability(project.name)
-                self.total_paid = profit_data.get("total_paid", 0)
-                self.remaining_amount = profit_data.get("balance_due", self.total_amount)
+                self.total_paid = to_decimal(profit_data.get("total_paid", 0))
+                self.remaining_amount = to_decimal(profit_data.get("balance_due", float(self.total_amount)))
             except Exception as e:
                 print(f"WARNING: [PaymentDialog] فشل جلب بيانات الربحية: {e}")
 
         self.setWindowTitle(f"تسجيل دفعة - {project.name}")
         self.setMinimumWidth(450)
+        self.setMinimumHeight(480)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
 
-        # إزالة الإطار البرتقالي نهائياً
-        self.setStyleSheet("""
-            * {
-                outline: none;
-            }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
-            QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
-            QPushButton:focus {
+        self._init_ui()
+
+    def _init_ui(self):
+        from ui.styles import BUTTON_STYLES, COLORS
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
                 border: none;
-                outline: none;
-            }
+                background-color: {COLORS['bg_dark']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
         """)
 
-        layout = QVBoxLayout()
+        content_widget = QWidget()
+        content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(10)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        # --- قسم ملخص المشروع المالي ---
-        summary_group = QGroupBox("ملخص المشروع المالي")
-        summary_layout = QHBoxLayout()
+        # ستايل الحقول
+        field_style = f"""
+            QComboBox, QDateEdit, QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QComboBox:hover, QDateEdit:hover, QLineEdit:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QComboBox:focus, QDateEdit:focus, QLineEdit:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QTextEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 6px;
+                font-size: 11px;
+            }}
+        """
 
-        # كارت إجمالي العقد
-        total_card = self._create_info_card("إجمالي العقد", f"{self.total_amount:,.2f}", "#3b82f6")
-        summary_layout.addWidget(total_card)
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
 
-        # كارت المدفوع
-        paid_card = self._create_info_card("المدفوع", f"{self.total_paid:,.2f}", "#0A6CF1")
-        summary_layout.addWidget(paid_card)
+        # === ملخص المشروع المالي ===
+        summary_label = QLabel("ملخص المشروع المالي")
+        summary_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;")
+        layout.addWidget(summary_label)
 
-        # كارت المتبقي (بلون أحمر لو في متبقي)
-        remaining_color = "#ef4444" if self.remaining_amount > 0 else "#0A6CF1"
-        remaining_card = self._create_info_card("المتبقي", f"{self.remaining_amount:,.2f}", remaining_color)
-        summary_layout.addWidget(remaining_card)
+        # كروت الملخص
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(8)
 
-        summary_group.setLayout(summary_layout)
-        layout.addWidget(summary_group)
+        total_card = self._create_info_card("إجمالي العقد", f"{float(self.total_amount):,.2f}", "#3b82f6", "📋")
+        paid_card = self._create_info_card("المدفوع", f"{float(self.total_paid):,.2f}", "#10b981", "✅")
+        remaining_color = "#ef4444" if self.remaining_amount > 0 else "#10b981"
+        remaining_card = self._create_info_card("المتبقي", f"{float(self.remaining_amount):,.2f}", remaining_color, "⏳")
 
-        # --- قسم المسح الذكي ---
-        self.smart_scan = SmartScanDropzone(self)
-        self.smart_scan.scan_completed.connect(self._on_scan_completed)
-        self.smart_scan.scan_failed.connect(self._on_scan_failed)
+        cards_layout.addWidget(total_card)
+        cards_layout.addWidget(paid_card)
+        cards_layout.addWidget(remaining_card)
+        layout.addLayout(cards_layout)
 
-        # إخفاء الـ widget إذا الخدمة غير متاحة
-        if not self.smart_scan.is_available():
-            self.smart_scan.setVisible(False)
-        else:
-            layout.addWidget(self.smart_scan)
-
-        # --- قسم بيانات الدفعة ---
-        form = QFormLayout()
+        # === الحساب المستلم ===
+        acc_label = QLabel("💳 الحساب المستلم")
+        acc_label.setStyleSheet(label_style)
+        layout.addWidget(acc_label)
 
         self.account_combo = QComboBox()
+        self.account_combo.setStyleSheet(field_style)
         self.account_combo.setPlaceholderText("اختر حساب البنك/الخزينة...")
-        for acc in accounts:
-            # عرض الاسم والكود بشكل واضح
+        for acc in self.accounts:
             display_text = f"💰 {acc.name} ({acc.code})"
             self.account_combo.addItem(display_text, userData=acc)
+        layout.addWidget(self.account_combo)
 
-        self.amount_input = CustomSpinBox(decimals=2, minimum=0, maximum=100_000_000)
-        # Smart Default: القيمة الافتراضية هي المبلغ المتبقي
-        self.amount_input.setValue(self.remaining_amount if self.remaining_amount > 0 else 0)
-        self.amount_input.setStyleSheet("font-size: 14px; font-weight: bold;")
+        # === صف المبلغ والتاريخ ===
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+
+        # المبلغ
+        amount_cont = QVBoxLayout()
+        amount_cont.setSpacing(2)
+        amount_label = QLabel("💰 المبلغ")
+        amount_label.setStyleSheet(label_style)
+        amount_cont.addWidget(amount_label)
+        self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
+        default_amount = float(self.remaining_amount) if self.remaining_amount > 0 else 0.01
+        self.amount_input.setValue(default_amount)
         self.amount_input.valueChanged.connect(self._validate_payment)
+        amount_cont.addWidget(self.amount_input)
+        row1.addLayout(amount_cont, 1)
 
-        # Smart Default: Today's date
+        # التاريخ
+        date_cont = QVBoxLayout()
+        date_cont.setSpacing(2)
+        date_label = QLabel("📅 التاريخ")
+        date_label.setStyleSheet(label_style)
+        date_cont.addWidget(date_label)
         self.date_input = QDateEdit(QDate.currentDate())
+        self.date_input.setStyleSheet(field_style)
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("yyyy-MM-dd")
+        date_cont.addWidget(self.date_input)
+        row1.addLayout(date_cont, 1)
 
-        # حقل الرقم المرجعي (للمسح الذكي)
+        layout.addLayout(row1)
+
+        # === رقم المرجع ===
+        ref_label = QLabel("🔢 رقم المرجع")
+        ref_label.setStyleSheet(label_style)
+        layout.addWidget(ref_label)
+
         self.reference_input = QLineEdit()
+        self.reference_input.setStyleSheet(field_style)
         self.reference_input.setPlaceholderText("رقم العملية / المرجع (اختياري)")
+        layout.addWidget(self.reference_input)
+
+        # === الملاحظات ===
+        notes_label = QLabel("📝 ملاحظات")
+        notes_label.setStyleSheet(label_style)
+        layout.addWidget(notes_label)
 
         self.notes_input = QTextEdit()
+        self.notes_input.setStyleSheet(field_style)
         self.notes_input.setPlaceholderText("ملاحظات الدفع (اختياري)...")
-        self.notes_input.setMaximumHeight(80)
+        self.notes_input.setFixedHeight(55)
+        layout.addWidget(self.notes_input)
 
-        form.addRow("الحساب المستلم:", self.account_combo)
-        form.addRow("المبلغ:", self.amount_input)
-        form.addRow("التاريخ:", self.date_input)
-        form.addRow("رقم المرجع:", self.reference_input)
-        form.addRow("ملاحظات:", self.notes_input)
+        # === المرفقات ===
+        attach_label = QLabel("📎 المرفقات")
+        attach_label.setStyleSheet(label_style)
+        layout.addWidget(attach_label)
 
-        # === زر إرفاق صورة الدفعة ===
-        attachment_layout = QHBoxLayout()
+        attach_layout = QHBoxLayout()
+        attach_layout.setSpacing(8)
+
         self.upload_btn = QPushButton("📎 إرفاق صورة الدفعة")
-        self.upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2c3e50;
-                color: white;
-                padding: 8px;
+        self.upload_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
                 border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #34495e; }
+                padding: 6px 12px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLORS['primary']};
+            }}
         """)
         self.upload_btn.clicked.connect(self.select_receipt_image)
-        attachment_layout.addWidget(self.upload_btn)
+        attach_layout.addWidget(self.upload_btn)
 
         self.file_label = QLabel("")
-        self.file_label.setStyleSheet("color: #aaa; font-size: 11px;")
-        attachment_layout.addWidget(self.file_label)
-        attachment_layout.addStretch()
+        self.file_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px;")
+        attach_layout.addWidget(self.file_label, 1)
 
         self.selected_image_path = None
-        form.addRow("المرفقات:", attachment_layout)
+        layout.addLayout(attach_layout)
 
-        layout.addLayout(form)
+        layout.addStretch()
 
-        buttons_layout = QHBoxLayout()
-        self.save_btn = QPushButton("💾 تسجيل الدفعة")
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #0A6CF1;
-                color: white;
-                padding: 10px;
-                font-weight: bold;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #0A6CF1;
-            }
-            QPushButton:disabled {
-                background-color: #6b7280;
-                color: #9ca3af;
-            }
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
+
+        # منطقة الأزرار
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-top: 1px solid {COLORS['border']};
+            }}
         """)
-        self.save_btn.clicked.connect(self.save_payment)
-        self.cancel_btn = QPushButton("إلغاء")
-        self.cancel_btn.clicked.connect(self.reject)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(14, 10, 14, 10)
+        buttons_layout.setSpacing(8)
+
         buttons_layout.addStretch()
+
+        self.save_btn = QPushButton("💾 تسجيل الدفعة")
+        self.save_btn.setStyleSheet(BUTTON_STYLES["primary"])
+        self.save_btn.setFixedHeight(28)
+        self.save_btn.clicked.connect(self.save_payment)
         buttons_layout.addWidget(self.save_btn)
+
+        self.cancel_btn = QPushButton("إلغاء")
+        self.cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.cancel_btn.setFixedHeight(28)
+        self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)
 
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
+        main_layout.addWidget(buttons_container)
 
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
-        apply_arrows_to_all_widgets(self)
-
-        # Initial validation
         self._validate_payment()
 
-    def _create_info_card(self, title: str, value: str, color: str) -> QFrame:
-        """إنشاء كارت معلومات صغير"""
+    def _create_info_card(self, title: str, value: str, color: str, icon: str) -> QFrame:
+        """إنشاء كارت معلومات مالية"""
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: {color};
                 border-radius: 8px;
-                padding: 10px;
             }}
         """)
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 10, 8)
+        card_layout.setSpacing(3)
 
-        title_label = QLabel(title)
-        title_label.setStyleSheet("color: white; font-size: 11px;")
+        # صف العنوان
+        header = QHBoxLayout()
+        header.setSpacing(4)
 
-        value_label = QLabel(value)
-        value_label.setStyleSheet("color: white; font-weight: bold; font-size: 14px;")
+        icon_lbl = QLabel(icon)
+        icon_lbl.setStyleSheet("font-size: 12px; background: transparent;")
+        header.addWidget(icon_lbl)
 
-        card_layout.addWidget(title_label)
-        card_layout.addWidget(value_label)
+        title_lbl = QLabel(title)
+        title_lbl.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 10px; background: transparent;")
+        header.addWidget(title_lbl)
+        header.addStretch()
+
+        card_layout.addLayout(header)
+
+        value_lbl = QLabel(value)
+        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 13px; background: transparent;")
+        card_layout.addWidget(value_lbl)
 
         return card
 
     def _validate_payment(self):
-        """Real-time payment validation"""
+        """التحقق من صحة البيانات"""
         amount = self.amount_input.value()
         selected_account = self.account_combo.currentData()
-
-        is_valid = True
-
-        if amount <= 0:
-            is_valid = False
-
-        if not selected_account:
-            is_valid = False
-
+        is_valid = amount > 0 and selected_account is not None
         self.save_btn.setEnabled(is_valid)
 
     def save_payment(self):
         selected_account = self.account_combo.currentData()
-        amount = self.amount_input.value()
+        amount = to_decimal(self.amount_input.value())
 
         if not selected_account or amount <= 0:
             QMessageBox.warning(self, "⚠️ تحقق من البيانات", "يرجى اختيار الحساب وإدخال مبلغ صحيح.")
@@ -249,7 +353,7 @@ class PaymentDialog(QDialog):
             reply = QMessageBox.question(
                 self,
                 "تأكيد",
-                f"المبلغ المدخل ({amount:,.2f}) أكبر من المتبقي ({self.remaining_amount:,.2f}).\n\nهل تريد المتابعة؟",
+                f"المبلغ المدخل ({float(amount):,.2f}) أكبر من المتبقي ({float(self.remaining_amount):,.2f}).\n\nهل تريد المتابعة؟",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
@@ -257,16 +361,25 @@ class PaymentDialog(QDialog):
                 return
 
         try:
-            self.project_service.create_payment_for_project(
+            payment = self.project_service.create_payment_for_project(
                 project=self.project,
-                amount=amount,
+                amount=float(amount),
                 date=self.date_input.dateTime().toPyDateTime(),
                 account_id=selected_account.code,
             )
-            QMessageBox.information(self, "تم", "تم تسجيل الدفعة بنجاح.")
-            self.accept()
+
+            if payment:
+                QMessageBox.information(self, "✅ تم", "تم تسجيل الدفعة بنجاح وإنشاء القيد المحاسبي.")
+                self.accept()
+            else:
+                QMessageBox.warning(self, "خطأ", "فشل تسجيل الدفعة.")
+
         except Exception as exc:
-            QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {exc}")
+            error_msg = str(exc)
+            if "مكررة" in error_msg or "duplicate" in error_msg.lower():
+                QMessageBox.warning(self, "⚠️ دفعة مكررة", f"يوجد دفعة بنفس البيانات:\n{error_msg}")
+            else:
+                QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {exc}")
 
     def select_receipt_image(self):
         """فتح نافذة اختيار ملف صورة الإيصال"""
@@ -284,120 +397,7 @@ class PaymentDialog(QDialog):
             self.selected_image_path = file_path
             file_name = os.path.basename(file_path)
             self.file_label.setText(f"✅ {file_name}")
-            self.file_label.setStyleSheet("color: #2ecc71; font-size: 11px;")
+            self.file_label.setStyleSheet("color: #10b981; font-size: 10px;")
         else:
             self.file_label.setText("")
             self.selected_image_path = None
-
-    def _on_scan_completed(self, data: dict):
-        """Auto-fill form fields with extracted data from smart scan."""
-        # ملء حقل المبلغ
-        if data.get('amount'):
-            self.amount_input.setValue(data['amount'])
-
-        # ملء حقل التاريخ
-        if data.get('date'):
-            date = QDate.fromString(data['date'], 'yyyy-MM-dd')
-            if date.isValid():
-                self.date_input.setDate(date)
-
-        # ملء حقل الرقم المرجعي
-        if data.get('reference_number'):
-            self.reference_input.setText(data['reference_number'])
-
-        # ملاحظة: لا نختار الحساب تلقائياً - المستخدم يختار بنفسه
-        # لأن أسماء المنصات قد لا تتطابق مع أسماء الحسابات
-
-        # إضافة اسم المرسل للملاحظات
-        if data.get('sender_name'):
-            current_notes = self.notes_input.toPlainText()
-            sender_note = f"المرسل: {data['sender_name']}"
-            if current_notes:
-                self.notes_input.setText(f"{current_notes}\n{sender_note}")
-            else:
-                self.notes_input.setText(sender_note)
-
-        # تحديث التحقق
-        self._validate_payment()
-
-    def _on_scan_failed(self, error_message: str):
-        """Handle scan failure - just log, error is shown in dropzone."""
-        print(f"INFO: [PaymentDialog] فشل المسح الذكي: {error_message}")
-
-    def _select_account_by_platform(self, platform: str):
-        """Try to select the matching account based on platform name.
-
-        يختار الحساب تلقائياً لو موجود، ويسيبه فاضي لو مش موجود.
-        """
-        if not platform:
-            return
-
-        # لو مفيش حسابات، ما نعملش حاجة
-        if self.account_combo.count() == 0:
-            return
-
-        platform_lower = platform.lower()
-
-        # قائمة الكلمات المفتاحية لكل منصة
-        platform_keywords = {
-            'vodafone': ['vodafone', 'فودافون', 'vf', 'فودا'],
-            'instapay': ['instapay', 'انستا', 'insta'],
-            'orange': ['orange', 'اورنج'],
-            'etisalat': ['etisalat', 'اتصالات', 'we'],
-            'cib': ['cib', 'سي اي بي'],
-            'nbe': ['nbe', 'الأهلي', 'اهلي'],
-            'qnb': ['qnb', 'قطر'],
-            'bank': ['bank', 'بنك'],
-        }
-
-        best_match_index = -1
-        best_match_score = 0
-
-        # البحث عن أفضل حساب مطابق من الحسابات الحقيقية فقط
-        for i in range(self.account_combo.count()):
-            account = self.account_combo.itemData(i)
-
-            # تخطي العناصر بدون بيانات حساب حقيقية
-            if account is None:
-                continue
-
-            # التحقق من أن الحساب له اسم
-            if not hasattr(account, 'name') or not account.name:
-                continue
-
-            # التحقق من أن الحساب موجود في قائمة الحسابات الأصلية
-            account_exists = any(
-                acc.code == account.code for acc in self.accounts
-            ) if hasattr(account, 'code') else False
-
-            if not account_exists:
-                continue
-
-            account_name_lower = account.name.lower()
-            current_score = 0
-
-            # التحقق من كل منصة
-            for _platform_key, keywords in platform_keywords.items():
-                platform_matches = any(kw in platform_lower for kw in keywords)
-                account_matches = any(kw in account_name_lower for kw in keywords)
-
-                if platform_matches and account_matches:
-                    current_score = sum(1 for kw in keywords if kw in account_name_lower)
-                    break
-
-            # مطابقة مباشرة
-            if platform_lower in account_name_lower:
-                current_score += 10
-
-            if current_score > best_match_score:
-                best_match_score = current_score
-                best_match_index = i
-
-        # فقط غيّر الحساب لو لقينا مطابقة حقيقية مع حساب موجود
-        if best_match_index >= 0 and best_match_score > 0:
-            self.account_combo.setCurrentIndex(best_match_index)
-            print(f"INFO: [PaymentDialog] تم اختيار الحساب تلقائياً: {self.account_combo.currentText()}")
-        else:
-            # لو مفيش مطابقة، نسيب الـ ComboBox على الـ placeholder
-            self.account_combo.setCurrentIndex(-1)
-            print(f"INFO: [PaymentDialog] لم يتم العثور على حساب مطابق للمنصة: {platform}")

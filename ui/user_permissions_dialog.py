@@ -3,7 +3,6 @@
 نافذة تحرير صلاحيات المستخدم المخصصة
 """
 
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -19,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.auth_models import PermissionManager, UserRole
-from ui.styles import BUTTON_STYLES, COLORS
+from ui.styles import BUTTON_STYLES, COLORS, get_cairo_font
 
 
 class UserPermissionsDialog(QDialog):
@@ -33,7 +32,10 @@ class UserPermissionsDialog(QDialog):
 
         self.setWindowTitle(f"صلاحيات المستخدم: {user.username}")
         self.setModal(True)
-        self.resize(600, 700)
+        
+        # تصميم متجاوب - حد أدنى فقط
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(500)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -44,30 +46,55 @@ class UserPermissionsDialog(QDialog):
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
-        layout = QVBoxLayout()
-        self.setLayout(layout)
+        from ui.styles import RESPONSIVE_GROUPBOX_STYLE
+
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+        """)
+
+        # محتوى التمرير
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(15)
+        scroll_layout.setContentsMargins(15, 15, 15, 15)
 
         # معلومات المستخدم
         user_info = QLabel(f"👤 المستخدم: {self.user.full_name or self.user.username}")
-        user_info.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        user_info.setFont(get_cairo_font(12, bold=True))
         user_info.setStyleSheet(f"color: {COLORS['primary']}; padding: 10px;")
-        layout.addWidget(user_info)
+        scroll_layout.addWidget(user_info)
 
         role_display = self.user.role.value if hasattr(self.user.role, 'value') else str(self.user.role)
         role_info = QLabel(f"🎭 الدور: {role_display}")
         role_info.setStyleSheet(f"color: {COLORS['text_secondary']}; padding: 5px 10px;")
-        layout.addWidget(role_info)
+        scroll_layout.addWidget(role_info)
 
         # فاصل
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setStyleSheet(f"color: {COLORS['border']};")
-        layout.addWidget(separator)
-
-        # منطقة التمرير
-        scroll = QScrollArea()
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.addWidget(separator)
 
         # مجموعة التابات
         self.setup_tabs_group(scroll_layout)
@@ -78,12 +105,21 @@ class UserPermissionsDialog(QDialog):
         # مجموعة الميزات
         self.setup_features_group(scroll_layout)
 
+        scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
-        scroll.setWidgetResizable(True)
-        layout.addWidget(scroll)
+        main_layout.addWidget(scroll, 1)
 
-        # أزرار التحكم
-        buttons_layout = QHBoxLayout()
+        # منطقة الأزرار (ثابتة في الأسفل)
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(15, 12, 15, 12)
+        buttons_layout.setSpacing(10)
 
         # زر إعادة تعيين للافتراضي
         self.reset_btn = QPushButton("🔄 إعادة للافتراضي")
@@ -101,11 +137,11 @@ class UserPermissionsDialog(QDialog):
 
         # زر الحفظ
         self.save_btn = QPushButton("💾 حفظ الصلاحيات")
-        self.save_btn.setStyleSheet(BUTTON_STYLES["success"])
+        self.save_btn.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_btn.clicked.connect(self.save_permissions)
         buttons_layout.addWidget(self.save_btn)
 
-        layout.addLayout(buttons_layout)
+        main_layout.addWidget(buttons_container)
 
     def setup_tabs_group(self, layout):
         """إعداد مجموعة التابات"""
@@ -122,6 +158,7 @@ class UserPermissionsDialog(QDialog):
             'clients': '👤 العملاء',
             'services': '🛠️ الخدمات والباقات',
             'accounting': '📊 المحاسبة',
+            'todo': '📋 المهام',
             'settings': '🔧 الإعدادات'
         }
 
@@ -169,7 +206,8 @@ class UserPermissionsDialog(QDialog):
             'system_settings': '⚙️ إعدادات النظام',
             'financial_reports': '📊 التقارير المالية',
             'data_export': '💾 تصدير البيانات',
-            'client_reports': '👤 تقارير العملاء'
+            'client_reports': '👤 تقارير العملاء',
+            'task_management': '📋 إدارة المهام'
         }
 
         for feature_key, feature_display in feature_names.items():
@@ -262,9 +300,9 @@ class UserPermissionsDialog(QDialog):
                 'features': selected_features
             }
 
-            # حفظ في قاعدة البيانات
-            user_id = self.user.id if hasattr(self.user, 'id') and self.user.id else self.user._mongo_id
-            success = self.repository.update_user(user_id, {
+            # حفظ في قاعدة البيانات باستخدام username (أكثر أماناً)
+            print(f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}")
+            success = self.repository.update_user_by_username(self.user.username, {
                 'custom_permissions': custom_permissions
             })
 

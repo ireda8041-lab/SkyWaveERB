@@ -10,7 +10,6 @@ from PyQt6.QtGui import (
     QBitmap,
     QColor,
     QConicalGradient,
-    QFont,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -21,6 +20,7 @@ from PyQt6.QtGui import (
 from PyQt6.QtWidgets import QSplashScreen
 
 from core.resource_utils import get_resource_path
+from ui.styles import get_cairo_font
 
 
 class ModernSplash(QSplashScreen):
@@ -74,7 +74,7 @@ class ModernSplash(QSplashScreen):
         mask_painter.end()
         self.setMask(QRegion(mask))
 
-        self.title_font = QFont("Cairo", 16, QFont.Weight.Bold)
+        self.title_font = get_cairo_font(16, bold=True)
         self.start_time = time.time()
 
         # تحميل اللوجو

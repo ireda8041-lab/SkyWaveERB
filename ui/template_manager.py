@@ -4,7 +4,6 @@
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -24,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from services.template_service import TemplateService
+from ui.styles import get_cairo_font, TABLE_STYLE_DARK, create_centered_item
 
 
 class TemplateEditorDialog(QDialog):
@@ -43,6 +43,15 @@ class TemplateEditorDialog(QDialog):
         self.setWindowTitle("تحرير قالب الفاتورة")
         self.setModal(True)
         self.resize(800, 600)
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(500)
+        
+        # تطبيق شريط العنوان المخصص
+        try:
+            from ui.styles import setup_custom_title_bar
+            setup_custom_title_bar(self)
+        except (ImportError, AttributeError):
+            pass
 
         layout = QVBoxLayout(self)
 
@@ -65,7 +74,7 @@ class TemplateEditorDialog(QDialog):
         editor_layout = QVBoxLayout(editor_group)
 
         self.html_editor = QTextEdit()
-        self.html_editor.setFont(QFont("Consolas", 10))
+        self.html_editor.setFont(get_cairo_font(10))
         self.html_editor.setPlaceholderText("أدخل كود HTML للقالب...")
         editor_layout.addWidget(self.html_editor)
 
@@ -111,7 +120,7 @@ class TemplateEditorDialog(QDialog):
                 border: 1px solid #cccccc;
                 border-radius: 4px;
                 padding: 5px;
-                font-family: 'Consolas', monospace;
+                font-family: 'Cairo';
             }
             QPushButton {
                 padding: 8px 16px;
@@ -199,7 +208,7 @@ class TemplateEditorDialog(QDialog):
     <meta charset="UTF-8">
     <title>فاتورة - {{ invoice_id }}</title>
     <style>
-        body { font-family: Arial, sans-serif; direction: rtl; }
+        body { font-family: 'Cairo', sans-serif; direction: rtl; }
         .header { background: #007acc; color: white; padding: 20px; }
         .content { padding: 20px; }
         table { width: 100%; border-collapse: collapse; }
@@ -296,16 +305,22 @@ class TemplateManager(QWidget):
     def __init__(self, template_service: TemplateService, parent=None):
         super().__init__(parent)
         self.template_service = template_service
+        
+        # 📱 تصميم متجاوب
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         self.setup_ui()
         self.load_templates()
 
     def setup_ui(self):
         """إعداد واجهة المستخدم"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         # عنوان القسم
         title_label = QLabel("إدارة قوالب الفواتير")
-        title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title_label.setFont(get_cairo_font(14, bold=True))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
@@ -367,38 +382,10 @@ class TemplateManager(QWidget):
         layout.addWidget(self.templates_table)
 
         # تطبيق الأنماط
-        self.setStyleSheet("""
-            QPushButton {
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                min-width: 100px;
-            }
-            QPushButton:enabled {
-                background-color: #007acc;
-                color: white;
-            }
-            QPushButton:enabled:hover {
-                background-color: #005a9e;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-            QTableWidget {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                gridline-color: #e0e0e0;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-            QTableWidget::item:selected {
-                background-color: #007acc;
-                color: white;
-            }
-        """)
+        self.templates_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.templates_table)
 
     def load_templates(self):
         """تحميل قائمة القوالب"""
@@ -409,28 +396,21 @@ class TemplateManager(QWidget):
 
             for row, template in enumerate(templates):
                 # الاسم
-                name_item = QTableWidgetItem(template['name'])
+                name_item = create_centered_item(template['name'])
+                name_item.setData(Qt.ItemDataRole.UserRole, template['id'])
                 self.templates_table.setItem(row, 0, name_item)
 
                 # الوصف
-                desc_item = QTableWidgetItem(template['description'] or '')
-                self.templates_table.setItem(row, 1, desc_item)
+                self.templates_table.setItem(row, 1, create_centered_item(template['description'] or ''))
 
                 # ملف القالب
-                file_item = QTableWidgetItem(template['template_file'])
-                self.templates_table.setItem(row, 2, file_item)
+                self.templates_table.setItem(row, 2, create_centered_item(template['template_file']))
 
                 # افتراضي
-                default_item = QTableWidgetItem("✓" if template['is_default'] else "")
-                default_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.templates_table.setItem(row, 3, default_item)
+                self.templates_table.setItem(row, 3, create_centered_item("✓" if template['is_default'] else ""))
 
                 # تاريخ الإنشاء
-                date_item = QTableWidgetItem(template['created_at'][:10] if template['created_at'] else '')
-                self.templates_table.setItem(row, 4, date_item)
-
-                # حفظ ID في البيانات
-                name_item.setData(Qt.ItemDataRole.UserRole, template['id'])
+                self.templates_table.setItem(row, 4, create_centered_item(template['created_at'][:10] if template['created_at'] else ''))
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في تحميل القوالب: {e}")

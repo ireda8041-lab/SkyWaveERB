@@ -2,16 +2,22 @@
 # ruff: noqa: E402
 """
 ⚡ Sky Wave ERP - الملف الرئيسي
-محسّن للسرعة القصوى
+محسّن للسرعة القصوى - الإصدار المحسّن
 """
 
 import os
 import sys
+import gc
 
 # ⚡ تحسين الأداء على Windows
 if os.name == 'nt':
     os.environ['QT_QPA_PLATFORM'] = 'windows:darkmode=2'
-    os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '1'
+    # 🔧 إصلاح مشكلة دقة الشاشة (High DPI Scaling) - الحل الأول
+    os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
+    os.environ["QT_SCALE_FACTOR"] = "1"
+    os.environ["QT_SCREEN_SCALE_FACTORS"] = "1"
+    os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'  # تعطيل التكبير التلقائي
+    os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # تجنب إنشاء ملفات .pyc
 
 # ⚡ تفعيل WebEngine قبل إنشاء QApplication
 from PyQt6.QtCore import Qt
@@ -40,13 +46,17 @@ logger.info(f"⚡ {APP_NAME} v{CURRENT_VERSION}")
 
 # --- 1. استيراد "القلب" ---
 # Advanced Sync
-from core.advanced_sync_manager import AdvancedSyncManager
+from core.advanced_sync_manager import AdvancedSyncManagerV3
+from core.unified_sync import UnifiedSyncManagerV3
+
+# 🔥 نظام المزامنة الجديد - الإصدار الثالث
+from core.sync_manager_v3 import SyncManagerV3
 
 # Authentication
 from core.auth_models import AuthService
 from core.event_bus import EventBus
 from core.repository import Repository
-from core.sync_manager import SyncManager
+from core.sync_manager_v3 import SyncManagerV3
 
 # --- 2. استيراد "الأقسام" (العقل) ---
 from services.accounting_service import AccountingService
@@ -79,25 +89,56 @@ class SkyWaveERPApp:
 
         # --- 1. تجهيز "القلب" ---
         self.repository = Repository()
+        
+        # ✅ صيانة قاعدة البيانات التلقائية (في الخلفية لتسريع البدء)
+        def run_maintenance_background():
+            try:
+                from core.db_maintenance import run_maintenance
+                run_maintenance()
+            except Exception as e:
+                logger.warning(f"[MainApp] تحذير: فشلت الصيانة التلقائية: {e}")
+        
+        import threading
+        maintenance_thread = threading.Thread(target=run_maintenance_background, daemon=True)
+        maintenance_thread.start()
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
 
         # ⚡ تهيئة مدير المزامنة في Background
-        self.sync_manager = SyncManager(self.repository)
+        self.sync_manager = SyncManagerV3(self.repository)
+
+        # 🔄 نظام المزامنة الموحد - MongoDB First
+        self.unified_sync = UnifiedSyncManagerV3(self.repository)
+
+        # 🔥 نظام المزامنة الجديد - الإصدار الثالث
+        self.sync_manager = SyncManagerV3(self.repository)
 
         def load_sync_items():
-            self.sync_manager.load_pending_items()
+            # تحميل العناصر المعلقة للمزامنة (إذا كانت متاحة)
+            if hasattr(self.sync_manager, 'load_pending_items'):
+                self.sync_manager.load_pending_items()
+            else:
+                # استخدام النظام الجديد
+                status = self.sync_manager.get_sync_status()
+                logger.info(f"حالة المزامنة: {status.get('offline_queue_count', 0)} عنصر معلق")
+            # تنظيف التكرارات عند البدء
+            if self.repository.online:
+                logger.info("🧹 جاري تنظيف التكرارات...")
+                self.unified_sync.remove_duplicates()
         import threading
         sync_thread = threading.Thread(target=load_sync_items, daemon=True)
         sync_thread.start()
 
-        # ⚡ المزامنة التلقائية (Auto Sync) - معطلة عند البدء لتجنب التجميد
+        # ⚡ المزامنة التلقائية (Auto Sync)
         from core.auto_sync import AutoSync
         self.auto_sync = AutoSync(self.repository)
-        # سيتم تشغيلها يدوياً بعد فتح النافذة الرئيسية
+        
+        # 🚀 نظام المزامنة عند بدء التشغيل (الجديد)
+        from core.startup_sync import StartupSync, get_startup_sync
+        self.startup_sync = StartupSync(self.repository)
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
-        logger.info("⚡ المزامنة التلقائية ستبدأ بعد فتح النافذة الرئيسية")
+        logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
 
         # تعيين Repository لـ TaskService
         from ui.todo_manager import TaskService
@@ -160,10 +201,16 @@ class SkyWaveERPApp:
         self.auth_service = AuthService(repository=self.repository)
 
         # Advanced Sync Manager
-        self.advanced_sync_manager = AdvancedSyncManager(repository=self.repository)
+        self.advanced_sync_manager = AdvancedSyncManagerV3(repository=self.repository)
 
         # 🧠 Smart Scan Service (AI Invoice Scanner)
-        smart_scan_api_key = self.settings_service.get_setting("gemini_api_key")
+        # محاولة قراءة المفتاح من smart_scan أولاً
+        smart_scan_settings = self.settings_service.get_setting("smart_scan")
+        if smart_scan_settings and isinstance(smart_scan_settings, dict):
+            smart_scan_api_key = smart_scan_settings.get("gemini_api_key")
+        else:
+            smart_scan_api_key = self.settings_service.get_setting("gemini_api_key")
+        
         if not smart_scan_api_key:
             # محاولة قراءة من ملف الإعدادات المحلي
             try:
@@ -207,6 +254,23 @@ class SkyWaveERPApp:
             os.environ['QT_QPA_PLATFORM'] = 'windows:darkmode=2'
 
         app = QApplication(sys.argv)
+        
+        # === معالجة أخطاء Qt ===
+        def qt_message_handler(mode, context, message):
+            """معالج رسائل Qt لتجنب الأخطاء المزعجة"""
+            # تجاهل بعض التحذيرات غير المهمة
+            if "Unknown property" in message or "backdrop-filter" in message:
+                return
+            if "box-shadow" in message or "transform" in message:
+                return
+            # طباعة الرسائل المهمة فقط
+            if mode == 3:  # QtCriticalMsg
+                logger.error(f"Qt Critical: {message}")
+            elif mode == 2:  # QtWarningMsg
+                logger.warning(f"Qt Warning: {message}")
+        
+        from PyQt6.QtCore import qInstallMessageHandler
+        qInstallMessageHandler(qt_message_handler)
 
         # === تعيين أيقونة التطبيق ===
         from PyQt6.QtGui import QIcon
@@ -383,12 +447,12 @@ class SkyWaveERPApp:
             invoice_service=self.invoice_service,
             quotation_service=self.quotation_service,
             project_service=self.project_service,
-            sync_manager=self.sync_manager,
             notification_service=self.notification_service,
             printing_service=self.printing_service,
             export_service=self.export_service,
             advanced_sync_manager=self.advanced_sync_manager,
-            smart_scan_service=self.smart_scan_service
+            smart_scan_service=self.smart_scan_service,
+            sync_manager=self.sync_manager  # 🔥 نظام المزامنة الجديد
         )
 
         # === عرض النافذة الرئيسية ===
@@ -420,16 +484,34 @@ class SkyWaveERPApp:
                 logger.warning(f"فشل تطبيق التوسيط: {e}")
         QTimer.singleShot(2000, apply_styles_later)
 
-        # ⚡ تفعيل المزامنة التلقائية لجلب البيانات من السيرفر (بعد 3 ثواني فقط)
-        QTimer.singleShot(3000, lambda: self.auto_sync.start_auto_sync(delay_seconds=0))
-        logger.info("[MainApp] ⚡ المزامنة التلقائية ستبدأ بعد 3 ثواني (في الخلفية)")
+        # 🚀 تفعيل المزامنة عند بدء التشغيل (بعد 2 ثانية)
+        def start_sync_and_refresh():
+            """بدء المزامنة وتحديث الواجهة بعد الاكتمال"""
+            try:
+                logger.info("[MainApp] 🚀 بدء المزامنة التلقائية...")
+                
+                # إضافة callback لتحديث الواجهة
+                self.startup_sync.add_completion_callback(
+                    lambda: QTimer.singleShot(100, main_window.on_sync_completed)
+                )
+                
+                # بدء المزامنة في الخلفية
+                self.startup_sync.start_background_sync(delay_seconds=0)
+                
+            except Exception as e:
+                logger.error(f"[MainApp] ❌ خطأ في المزامنة التلقائية: {e}")
+        
+        QTimer.singleShot(2000, start_sync_and_refresh)
+        logger.info("[MainApp] 🚀 المزامنة ستبدأ بعد 2 ثانية")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
+        
+        # ⚡ صيانة دورية كل ساعة
+        self._setup_periodic_maintenance()
 
         # ✅ ربط إشارة الإغلاق لتنظيف الموارد
         app.aboutToQuit.connect(self._cleanup_on_exit)
-        main_window.destroyed.connect(self._cleanup_on_exit)
 
         # ✅ تفعيل الإغلاق عند إغلاق آخر نافذة
         app.setQuitOnLastWindowClosed(True)
@@ -464,9 +546,38 @@ class SkyWaveERPApp:
 
         except Exception as e:
             logger.warning(f"[MainApp] فشل تفعيل التحديث التلقائي: {e}")
+    
+    def _setup_periodic_maintenance(self):
+        """تفعيل الصيانة الدورية"""
+        try:
+            from core.db_maintenance import run_maintenance
+            
+            def maintenance_worker():
+                """صيانة دورية كل ساعة"""
+                import time
+                while True:
+                    time.sleep(3600)  # ساعة واحدة
+                    try:
+                        logger.info("[MainApp] بدء الصيانة الدورية...")
+                        run_maintenance()
+                    except Exception as e:
+                        logger.warning(f"[MainApp] فشلت الصيانة الدورية: {e}")
+            
+            import threading
+            maintenance_thread = threading.Thread(target=maintenance_worker, daemon=True)
+            maintenance_thread.start()
+            logger.info("[MainApp] تم تفعيل الصيانة الدورية (كل ساعة)")
+            
+        except Exception as e:
+            logger.warning(f"[MainApp] فشل تفعيل الصيانة الدورية: {e}")
 
     def _cleanup_on_exit(self):
         """✅ تنظيف جميع الموارد عند إغلاق البرنامج"""
+        # منع الاستدعاء المتكرر
+        if hasattr(self, '_cleanup_done') and self._cleanup_done:
+            return
+        self._cleanup_done = True
+        
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
         try:
@@ -483,6 +594,12 @@ class SkyWaveERPApp:
                 try:
                     self.auto_update_service.stop()
                     logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
+                except RuntimeError as e:
+                    # تجاهل أخطاء الكائنات المحذوفة بواسطة Qt
+                    if "deleted" in str(e).lower() or "c/c++ object" in str(e).lower():
+                        logger.debug(f"[MainApp] QTimer تم حذفه بالفعل: {e}")
+                    else:
+                        logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
                 except Exception as e:
                     logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
 
@@ -554,13 +671,26 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
+    # تجاهل أخطاء Qt المتعلقة بالكائنات المحذوفة
+    error_msg = str(exc_value).lower()
+    if "deleted" in error_msg or "c/c++ object" in error_msg or "wrapped c/c++" in error_msg:
+        logger.debug(f"تجاهل خطأ Qt: {exc_value}")
+        return
+
     logger.critical("خطأ غير متوقع!", exc_info=(exc_type, exc_value, exc_traceback))
-    ErrorHandler.handle_exception(
-        exception=exc_value,
-        context="uncaught_exception",
-        user_message="حدث خطأ غير متوقع. سيتم إغلاق البرنامج.",
-        show_dialog=True
-    )
+    
+    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ وإظهار رسالة
+    try:
+        ErrorHandler.handle_exception(
+            exception=exc_value,
+            context="uncaught_exception",
+            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل أو إعادة تشغيل البرنامج.",
+            show_dialog=True
+        )
+    except Exception:
+        # في حالة فشل معالج الأخطاء نفسه
+        print(f"CRITICAL ERROR: {exc_type.__name__}: {exc_value}")
+        traceback.print_exception(exc_type, exc_value, exc_traceback)
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception

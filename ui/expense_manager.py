@@ -5,7 +5,7 @@
 
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -24,11 +24,11 @@ from services.accounting_service import AccountingService
 from services.expense_service import ExpenseService
 from services.project_service import ProjectService
 from ui.expense_editor_dialog import ExpenseEditorDialog
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, get_cairo_font, create_centered_item
 
 
 class ExpenseManagerTab(QWidget):
-    """تاب إدارة المصروفات مع جدول و dialog"""
+    """تاب إدارة المصروفات مع جدول و dialog - متجاوب"""
 
     def __init__(
         self,
@@ -45,6 +45,10 @@ class ExpenseManagerTab(QWidget):
 
         self.expenses_list: list[schemas.Expense] = []
 
+        # 📱 تجاوب: سياسة التمدد الكامل
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.setup_ui()
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
@@ -55,8 +59,10 @@ class ExpenseManagerTab(QWidget):
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
 
     def setup_ui(self):
-        """إعداد الواجهة"""
+        """إعداد الواجهة - متجاوب"""
         layout = QVBoxLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(layout)
 
         # أزرار التحكم
@@ -64,18 +70,22 @@ class ExpenseManagerTab(QWidget):
 
         self.add_button = QPushButton("➕ إضافة مصروف")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
+        self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(self.open_add_dialog)
 
         self.edit_button = QPushButton("✏️ تعديل")
         self.edit_button.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_button.setFixedHeight(28)
         self.edit_button.clicked.connect(self.open_edit_dialog)
 
         self.delete_button = QPushButton("🗑️ حذف")
         self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
+        self.delete_button.setFixedHeight(28)
         self.delete_button.clicked.connect(self.delete_selected_expense)
 
         self.refresh_button = QPushButton("🔄 تحديث")
         self.refresh_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_expenses_data)
 
         buttons_layout.addWidget(self.add_button)
@@ -104,8 +114,12 @@ class ExpenseManagerTab(QWidget):
         h_header = self.expenses_table.horizontalHeader()
         v_header = self.expenses_table.verticalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # #
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # التاريخ
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # الفئة
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # الوصف - يتمدد
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # المشروع - يتمدد
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ
         self.expenses_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.expenses_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.expenses_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -114,15 +128,32 @@ class ExpenseManagerTab(QWidget):
             v_header.setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
             v_header.setVisible(False)
         self.expenses_table.itemDoubleClicked.connect(self.open_edit_dialog)
-        from ui.styles import TABLE_STYLE_DARK
+        from ui.styles import TABLE_STYLE_DARK, fix_table_rtl
         self.expenses_table.setStyleSheet(TABLE_STYLE_DARK)
+        fix_table_rtl(self.expenses_table)
+        
+        # إضافة قائمة السياق (كليك يمين)
+        self._setup_context_menu()
+        
         layout.addWidget(self.expenses_table)
 
         # إجمالي المصروفات
         self.total_label = QLabel("إجمالي المصروفات: 0.00 ج.م")
-        self.total_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.total_label.setFont(get_cairo_font(14, bold=True))
         self.total_label.setStyleSheet("color: #ef4444; padding: 10px;")
         layout.addWidget(self.total_label, 0, Qt.AlignmentFlag.AlignRight)
+
+    def _setup_context_menu(self):
+        """إعداد قائمة السياق (كليك يمين) للجدول"""
+        from core.context_menu import ContextMenuManager
+        
+        ContextMenuManager.setup_table_context_menu(
+            table=self.expenses_table,
+            on_view=self.open_edit_dialog,
+            on_edit=self.open_edit_dialog,
+            on_delete=self.delete_selected_expense,
+            on_refresh=self.load_expenses_data
+        )
 
     def load_expenses_data(self):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
@@ -156,17 +187,17 @@ class ExpenseManagerTab(QWidget):
                 for i, exp in enumerate(self.expenses_list):
                     self.expenses_table.insertRow(i)
 
-                    num_item = QTableWidgetItem(str(i + 1))
+                    num_item = create_centered_item(str(i + 1))
                     num_item.setData(Qt.ItemDataRole.UserRole, exp)
                     self.expenses_table.setItem(i, 0, num_item)
 
                     date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
-                    self.expenses_table.setItem(i, 1, QTableWidgetItem(date_str))
-                    self.expenses_table.setItem(i, 2, QTableWidgetItem(exp.category or ""))
-                    self.expenses_table.setItem(i, 3, QTableWidgetItem(exp.description or ""))
-                    self.expenses_table.setItem(i, 4, QTableWidgetItem(exp.project_id or "---"))
+                    self.expenses_table.setItem(i, 1, create_centered_item(date_str))
+                    self.expenses_table.setItem(i, 2, create_centered_item(exp.category or ""))
+                    self.expenses_table.setItem(i, 3, create_centered_item(exp.description or ""))
+                    self.expenses_table.setItem(i, 4, create_centered_item(exp.project_id or "---"))
 
-                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
+                    amount_item = create_centered_item(f"{exp.amount:,.2f}")
                     amount_item.setForeground(QColor("#ef4444"))
                     self.expenses_table.setItem(i, 5, amount_item)
 

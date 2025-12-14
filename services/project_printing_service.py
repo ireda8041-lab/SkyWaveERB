@@ -459,15 +459,26 @@ class ProjectPrinter:
         self.output_path = output_path
         self.width, self.height = A4
 
-        # تسجيل خط يدعم العربية
-        font_path = "C:/Windows/Fonts/arial.ttf"
+        # تسجيل خط Cairo العربي
+        import sys
+        import os
+        
+        # تحديد مسار خط Cairo
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
+        
         try:
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont
-            pdfmetrics.registerFont(TTFont('ArabicFont', font_path))
-            self.font_name = 'ArabicFont'
-        except (FileNotFoundError, OSError, RuntimeError):
-            print("⚠️ لم يتم العثور على خط Arial، يرجى التأكد من المسار")
+            pdfmetrics.registerFont(TTFont('CairoFont', font_path))
+            self.font_name = 'CairoFont'
+            print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {font_path}")
+        except (FileNotFoundError, OSError, RuntimeError) as e:
+            print(f"⚠️ لم يتم العثور على خط Cairo: {e}")
             self.font_name = 'Helvetica'
 
     def fix_text(self, text):

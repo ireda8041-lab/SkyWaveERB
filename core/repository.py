@@ -1,4 +1,4 @@
-﻿# الملف: core/repository.py
+# الملف: core/repository.py
 """
 ⚡ المخزن الذكي - Sky Wave ERP
 محسّن للسرعة القصوى مع نظام Cache ذكي
@@ -24,14 +24,25 @@ except ImportError:
     CACHE_ENABLED = False
     print("WARNING: speed_optimizer غير متوفر - الـ cache معطل")
 
+# ⚡ استيراد محسّن الأداء الجديد
+try:
+    from .performance_optimizer import (
+        SmartQueryCache,
+        optimize_sqlite_connection,
+        get_query_cache,
+    )
+    PERFORMANCE_OPTIMIZER_ENABLED = True
+except ImportError:
+    PERFORMANCE_OPTIMIZER_ENABLED = False
+    print("WARNING: performance_optimizer غير متوفر")
+
 # --- إعدادات الاتصال ---
-MONGO_URI = "mongodb://skywaveads:Newjoer2k24$@147.79.66.116:27017/skywave_erp_db?authSource=admin"
+MONGO_URI = "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db"
 DB_NAME = "skywave_erp_db"
 
-# استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
-_APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
-os.makedirs(_APP_DATA_DIR, exist_ok=True)
-LOCAL_DB_FILE = os.path.join(_APP_DATA_DIR, "skywave_local.db")
+# ✅ استخدام مجلد المشروع الحالي لقاعدة البيانات المحلية
+_PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+LOCAL_DB_FILE = os.path.join(_PROJECT_DIR, "skywave_local.db")
 
 # ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
 def _copy_initial_db():
@@ -106,6 +117,10 @@ class Repository:
         )
         self.sqlite_conn.row_factory = sqlite3.Row
         self.sqlite_cursor = self.sqlite_conn.cursor()
+        
+        # ⚡ تطبيق تحسينات SQLite للأداء
+        self._apply_sqlite_optimizations()
+        
         print(f"INFO: ✅ متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
 
         # 2. بناء الجداول الأوفلاين لو مش موجودة
@@ -122,6 +137,25 @@ class Repository:
         with self._lock:
             cursor = self.sqlite_conn.cursor()
             return cursor
+    
+    def _apply_sqlite_optimizations(self):
+        """⚡ تطبيق تحسينات SQLite للأداء الأقصى"""
+        try:
+            # WAL mode للقراءة والكتابة المتزامنة
+            self.sqlite_cursor.execute("PRAGMA journal_mode=WAL")
+            # تقليل الـ sync للسرعة (آمن مع WAL)
+            self.sqlite_cursor.execute("PRAGMA synchronous=NORMAL")
+            # زيادة حجم الـ cache (10000 صفحة = ~40MB)
+            self.sqlite_cursor.execute("PRAGMA cache_size=10000")
+            # تخزين الجداول المؤقتة في الذاكرة
+            self.sqlite_cursor.execute("PRAGMA temp_store=MEMORY")
+            # تفعيل memory-mapped I/O (256MB)
+            self.sqlite_cursor.execute("PRAGMA mmap_size=268435456")
+            # تفعيل الـ foreign keys
+            self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
+            print("INFO: ⚡ تم تطبيق تحسينات SQLite للأداء")
+        except Exception as e:
+            print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
 
     def _start_mongo_connection(self):
         """⚡ الاتصال بـ MongoDB في Background Thread"""
@@ -567,6 +601,152 @@ class Repository:
         except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
 
+        # جدول الموظفين (employees) - نظام الموارد البشرية
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            employee_id TEXT UNIQUE,
+            name TEXT NOT NULL,
+            email TEXT,
+            phone TEXT,
+            department TEXT,
+            position TEXT,
+            hire_date TEXT,
+            salary REAL DEFAULT 0.0,
+            status TEXT NOT NULL DEFAULT 'نشط',
+            address TEXT,
+            national_id TEXT,
+            bank_account TEXT,
+            notes TEXT
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول الموظفين جاهز")
+
+        # جدول سلف الموظفين (employee_loans)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employee_loans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            loan_type TEXT NOT NULL DEFAULT 'سلفة',
+            amount REAL NOT NULL DEFAULT 0.0,
+            remaining_amount REAL NOT NULL DEFAULT 0.0,
+            monthly_deduction REAL NOT NULL DEFAULT 0.0,
+            start_date TEXT,
+            end_date TEXT,
+            status TEXT NOT NULL DEFAULT 'نشط',
+            reason TEXT,
+            approved_by TEXT,
+            notes TEXT,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول سلف الموظفين جاهز")
+
+        # جدول مرتبات الموظفين (employee_salaries)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employee_salaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            month TEXT NOT NULL,
+            basic_salary REAL NOT NULL DEFAULT 0.0,
+            allowances REAL DEFAULT 0.0,
+            bonuses REAL DEFAULT 0.0,
+            overtime_hours REAL DEFAULT 0.0,
+            overtime_rate REAL DEFAULT 0.0,
+            overtime_amount REAL DEFAULT 0.0,
+            loan_deductions REAL DEFAULT 0.0,
+            insurance_deduction REAL DEFAULT 0.0,
+            tax_deduction REAL DEFAULT 0.0,
+            other_deductions REAL DEFAULT 0.0,
+            gross_salary REAL DEFAULT 0.0,
+            net_salary REAL DEFAULT 0.0,
+            payment_status TEXT NOT NULL DEFAULT 'معلق',
+            payment_date TEXT,
+            payment_method TEXT,
+            notes TEXT,
+            FOREIGN KEY (employee_id) REFERENCES employees(id),
+            UNIQUE(employee_id, month)
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول مرتبات الموظفين جاهز")
+
+        # جدول حضور الموظفين (employee_attendance)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employee_attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            check_in_time TEXT,
+            check_out_time TEXT,
+            work_hours REAL DEFAULT 0.0,
+            overtime_hours REAL DEFAULT 0.0,
+            status TEXT NOT NULL DEFAULT 'حاضر',
+            notes TEXT,
+            FOREIGN KEY (employee_id) REFERENCES employees(id),
+            UNIQUE(employee_id, date)
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول حضور الموظفين جاهز")
+
+        # جدول إجازات الموظفين (employee_leaves)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS employee_leaves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            employee_id INTEGER NOT NULL,
+            leave_type TEXT NOT NULL DEFAULT 'سنوية',
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            days_count INTEGER NOT NULL DEFAULT 1,
+            reason TEXT,
+            status TEXT NOT NULL DEFAULT 'معلق',
+            approved_by TEXT,
+            approval_date TEXT,
+            notes TEXT,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول إجازات الموظفين جاهز")
+
+        # جدول أقساط السلف (loan_payments)
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS loan_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            loan_id INTEGER NOT NULL,
+            employee_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            payment_date TEXT NOT NULL,
+            payment_method TEXT DEFAULT 'خصم من الراتب',
+            notes TEXT,
+            FOREIGN KEY (loan_id) REFERENCES employee_loans(id),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )""")
+        self.sqlite_conn.commit()
+        print("INFO: [Repository] ✅ جدول أقساط السلف جاهز")
+
         # جدول المهام (tasks) - نظام TODO
         self.sqlite_cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -589,9 +769,16 @@ class Repository:
             reminder INTEGER DEFAULT 0,
             reminder_minutes INTEGER DEFAULT 30,
             assigned_to TEXT,
+            is_archived INTEGER DEFAULT 0,
             FOREIGN KEY (related_project_id) REFERENCES projects(name),
             FOREIGN KEY (related_client_id) REFERENCES clients(id)
         )""")
+
+        # إضافة حقل is_archived إذا لم يكن موجوداً (للتوافق مع قواعد البيانات القديمة)
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE tasks ADD COLUMN is_archived INTEGER DEFAULT 0")
+        except Exception:
+            pass  # الحقل موجود بالفعل
 
         # جدول قائمة انتظار المزامنة (sync_queue)
         self.sqlite_cursor.execute("""
@@ -1614,121 +1801,385 @@ class Repository:
             print(f"ERROR: [Repository] فشل جلب المستخدم: {e}")
             return None
 
-    def update_user(self, user_id: str, update_data: dict) -> bool:
-        """تحديث بيانات مستخدم"""
+    def update_user_by_username(self, username: str, update_data: dict) -> bool:
+        """تحديث بيانات مستخدم باستخدام اسم المستخدم (أكثر أماناً)"""
         try:
             import json
             from datetime import datetime
             now_dt = datetime.now()
             now_iso = now_dt.isoformat()
 
+            print(f"INFO: [Repository] جاري تحديث المستخدم: {username}")
+            print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
+
             # تحديث في SQLite
-            update_data['last_modified'] = now_iso
-            update_data['sync_status'] = 'modified_offline'
+            update_data_copy = update_data.copy()
+            update_data_copy['last_modified'] = now_iso
+            update_data_copy['sync_status'] = 'modified_offline'
 
             # تحويل القواميس إلى JSON strings للـ SQLite
-            sqlite_data = update_data.copy()
+            sqlite_data = update_data_copy.copy()
             for key, value in sqlite_data.items():
                 if isinstance(value, dict):
                     sqlite_data[key] = json.dumps(value, ensure_ascii=False)
 
             # التحقق من صحة أسماء الأعمدة للحماية من SQL Injection
             import re
-            valid_columns = {k for k in sqlite_data.keys()
-                           if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', k)}
+            valid_columns = {k for k in sqlite_data.keys() if re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', k)}
             filtered_data = {k: v for k, v in sqlite_data.items() if k in valid_columns}
 
             set_clause = ", ".join([f"{key} = ?" for key in filtered_data.keys()])
             values = list(filtered_data.values())
-            values.append(user_id)  # للـ WHERE clause
+            values.append(username)  # للـ WHERE clause
 
-            sql = f"UPDATE users SET {set_clause} WHERE id = ? OR _mongo_id = ?"
-            values.append(user_id)  # للـ WHERE clause الثاني
+            sql = f"UPDATE users SET {set_clause} WHERE username = ?"
+
+            print(f"INFO: [Repository] SQL: {sql}")
+            print(f"INFO: [Repository] Values: {values}")
 
             self.sqlite_cursor.execute(sql, values)
             self.sqlite_conn.commit()
 
+            rows_affected = self.sqlite_cursor.rowcount
+            print(f"INFO: [Repository] تم تحديث {rows_affected} صف في SQLite")
+
             # تحديث في MongoDB
-            if self.online:
+            if self.online and self.mongo_db is not None:
                 try:
                     mongo_update = update_data.copy()
                     mongo_update['last_modified'] = now_dt
 
-                    self.mongo_db.users.update_one(
-                        {"$or": [{"_id": self._to_objectid(user_id)}, {"_mongo_id": user_id}]},
+                    result = self.mongo_db.users.update_one(
+                        {"username": username},
                         {"$set": mongo_update}
                     )
+                    print(f"INFO: [Repository] تم تحديث {result.modified_count} مستخدم في MongoDB")
 
                     # تحديث حالة المزامنة
                     self.sqlite_cursor.execute(
-                        "UPDATE users SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
-                        (user_id, user_id)
+                        "UPDATE users SET sync_status = 'synced' WHERE username = ?",
+                        (username,)
                     )
                     self.sqlite_conn.commit()
 
                 except Exception as e:
                     print(f"WARNING: [Repository] فشل تحديث المستخدم في MongoDB: {e}")
 
-            return True
+            return rows_affected > 0
+        except Exception as e:
+            print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def update_user(self, user_id: str, update_data: dict) -> bool:
+        """تحديث بيانات مستخدم باستخدام ID - يستخدم update_user_by_username داخلياً"""
+        try:
+            print(f"INFO: [Repository] جاري تحديث المستخدم بـ ID: {user_id}")
+            print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
+
+            # أولاً: التحقق من وجود المستخدم وجلب username
+            username = None
+            self.sqlite_cursor.execute(
+                "SELECT username FROM users WHERE id = ? OR _mongo_id = ?",
+                (user_id, user_id)
+            )
+            row = self.sqlite_cursor.fetchone()
+            if row:
+                username = row[0]
+                print(f"INFO: [Repository] تم العثور على المستخدم في SQLite: {username}")
+            else:
+                # محاولة البحث في MongoDB
+                if self.online and self.mongo_db is not None:
+                    try:
+                        mongo_user = self.mongo_db.users.find_one({"_id": self._to_objectid(user_id)})
+                        if mongo_user:
+                            username = mongo_user.get('username')
+                            print(f"INFO: [Repository] تم العثور على المستخدم في MongoDB: {username}")
+                    except Exception as e:
+                        print(f"WARNING: [Repository] فشل البحث في MongoDB: {e}")
+
+            if not username:
+                print(f"ERROR: [Repository] المستخدم غير موجود بـ ID: {user_id}")
+                return False
+
+            # استخدام الدالة الجديدة للتحديث باستخدام username
+            return self.update_user_by_username(username, update_data)
+
         except Exception as e:
             print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
             return False
 
     def get_all_users(self):
-        """جلب جميع المستخدمين"""
+        """جلب جميع المستخدمين من MongoDB أو SQLite"""
+        print("INFO: [Repository] جاري جلب المستخدمين...")
         try:
             from core.auth_models import User, UserRole
             users = []
 
+            # انتظار اكتمال الاتصال بـ MongoDB إذا كان جاري
+            import time
+            wait_count = 0
+            while self._mongo_connecting and wait_count < 10:
+                print(f"INFO: [Repository] انتظار اتصال MongoDB... ({wait_count + 1}/10)")
+                time.sleep(0.5)
+                wait_count += 1
+
+            print(f"INFO: [Repository] حالة الاتصال: online={self.online}, mongo_db={self.mongo_db is not None}")
+
             # جلب من MongoDB أولاً
-            if self.online:
+            if self.online and self.mongo_db is not None:
                 try:
                     users_data = list(self.mongo_db.users.find())
+                    print(f"INFO: [Repository] وجدت {len(users_data)} مستخدم في MongoDB")
                     for user_data in users_data:
-                        # تحويل _id إلى string
-                        user_data['id'] = str(user_data.get('_id', ''))
-                        user_data['_mongo_id'] = str(user_data.pop('_id'))
+                        try:
+                            # استخراج _id من MongoDB
+                            mongo_id = str(user_data.pop('_id', ''))
 
-                        # تحويل datetime إلى string
-                        if 'created_at' in user_data and hasattr(user_data['created_at'], 'isoformat'):
-                            user_data['created_at'] = user_data['created_at'].isoformat()
-                        if 'last_modified' in user_data and hasattr(user_data['last_modified'], 'isoformat'):
-                            user_data['last_modified'] = user_data['last_modified'].isoformat()
-                        if 'last_login' in user_data and hasattr(user_data['last_login'], 'isoformat'):
-                            user_data['last_login'] = user_data['last_login'].isoformat()
+                            # تحويل datetime إلى string
+                            created_at = user_data.get('created_at')
+                            if created_at and hasattr(created_at, 'isoformat'):
+                                created_at = created_at.isoformat()
+                            else:
+                                created_at = str(created_at) if created_at else None
 
-                        # تحويل role إلى enum
-                        user_data['role'] = UserRole(user_data['role'])
-                        users.append(User(**user_data))
+                            last_modified = user_data.get('last_modified')
+                            if last_modified and hasattr(last_modified, 'isoformat'):
+                                last_modified = last_modified.isoformat()
+
+                            last_login = user_data.get('last_login')
+                            if last_login and hasattr(last_login, 'isoformat'):
+                                last_login = last_login.isoformat()
+
+                            # تحويل role إلى enum
+                            role_value = user_data.get('role', 'sales')
+                            if isinstance(role_value, str):
+                                role_enum = UserRole(role_value)
+                            else:
+                                role_enum = role_value
+
+                            # إنشاء كائن User
+                            user = User(
+                                id=mongo_id,
+                                mongo_id=mongo_id,
+                                username=user_data.get('username', ''),
+                                password_hash=user_data.get('password_hash', ''),
+                                role=role_enum,
+                                is_active=bool(user_data.get('is_active', True)),
+                                full_name=user_data.get('full_name'),
+                                email=user_data.get('email'),
+                                created_at=created_at,
+                                last_login=last_login,
+                                custom_permissions=user_data.get('custom_permissions')
+                            )
+                            users.append(user)
+                            print(f"INFO: [Repository] تم تحويل مستخدم من MongoDB: {user.username}")
+                        except Exception as e:
+                            print(f"WARNING: [Repository] فشل تحويل مستخدم من MongoDB: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
 
                     if users:
+                        print(f"INFO: [Repository] تم جلب {len(users)} مستخدم من MongoDB")
                         return users
                 except Exception as e:
                     print(f"WARNING: [Repository] فشل جلب المستخدمين من MongoDB: {e}")
+                    import traceback
+                    traceback.print_exc()
 
             # جلب من SQLite
+            print("INFO: [Repository] جاري جلب المستخدمين من SQLite...")
             self.sqlite_cursor.execute("SELECT * FROM users")
             rows = self.sqlite_cursor.fetchall()
+            print(f"INFO: [Repository] وجدت {len(rows)} مستخدم في SQLite")
+
             for row in rows:
-                user_data = dict(row)
-                user_data['id'] = str(user_data.get('id', ''))
-                user_data['role'] = UserRole(user_data['role'])
-                user_data['is_active'] = bool(user_data['is_active'])
+                try:
+                    row_dict = dict(row)
 
-                # تحويل custom_permissions من JSON string إلى dict
-                if user_data.get('custom_permissions'):
-                    try:
-                        import json
-                        user_data['custom_permissions'] = json.loads(user_data['custom_permissions'])
-                    except (json.JSONDecodeError, TypeError):
-                        user_data['custom_permissions'] = None
+                    # تحويل role إلى enum
+                    role_value = row_dict.get('role', 'sales')
+                    if isinstance(role_value, str):
+                        role_enum = UserRole(role_value)
+                    else:
+                        role_enum = role_value
 
-                users.append(User(**user_data))
+                    # تحويل custom_permissions من JSON string إلى dict
+                    custom_perms = None
+                    if row_dict.get('custom_permissions'):
+                        try:
+                            import json
+                            custom_perms = json.loads(row_dict['custom_permissions'])
+                        except (json.JSONDecodeError, TypeError):
+                            custom_perms = None
 
+                    # إنشاء كائن User مع الحقول المطلوبة فقط
+                    user = User(
+                        id=str(row_dict.get('id', '')),
+                        mongo_id=row_dict.get('_mongo_id'),
+                        username=row_dict.get('username', ''),
+                        password_hash=row_dict.get('password_hash', ''),
+                        role=role_enum,
+                        is_active=bool(row_dict.get('is_active', 1)),
+                        full_name=row_dict.get('full_name'),
+                        email=row_dict.get('email'),
+                        created_at=row_dict.get('created_at'),
+                        last_login=row_dict.get('last_login'),
+                        custom_permissions=custom_perms
+                    )
+
+                    users.append(user)
+                    print(f"INFO: [Repository] تم تحويل مستخدم: {user.username}")
+                except Exception as e:
+                    print(f"WARNING: [Repository] فشل تحويل مستخدم من SQLite: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+
+            print(f"INFO: [Repository] تم جلب {len(users)} مستخدم إجمالاً")
             return users
         except Exception as e:
             print(f"ERROR: [Repository] فشل جلب المستخدمين: {e}")
+            import traceback
+            traceback.print_exc()
             return []
+
+    def sync_users_bidirectional(self) -> dict:
+        """مزامنة المستخدمين ثنائية الاتجاه (من وإلى السحابة)"""
+        result = {'uploaded': 0, 'downloaded': 0, 'errors': []}
+
+        if not self.online or self.mongo_db is None:
+            result['errors'].append("غير متصل بـ MongoDB")
+            return result
+
+        try:
+            from datetime import datetime
+
+            # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
+            print("INFO: [Repository] 📤 جاري رفع المستخدمين المحليين إلى السحابة...")
+            self.sqlite_cursor.execute("""
+                SELECT * FROM users 
+                WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
+                   OR _mongo_id IS NULL
+            """)
+            local_pending = self.sqlite_cursor.fetchall()
+
+            for row in local_pending:
+                try:
+                    user_data = dict(row)
+                    username = user_data.get('username')
+                    local_id = user_data.get('id')
+
+                    existing_cloud = self.mongo_db.users.find_one({'username': username})
+
+                    if existing_cloud:
+                        mongo_id = str(existing_cloud['_id'])
+                        update_data = {
+                            'full_name': user_data.get('full_name'),
+                            'email': user_data.get('email'),
+                            'role': user_data.get('role'),
+                            'is_active': bool(user_data.get('is_active', 1)),
+                            'last_modified': datetime.now()
+                        }
+                        if user_data.get('password_hash'):
+                            update_data['password_hash'] = user_data['password_hash']
+
+                        self.mongo_db.users.update_one(
+                            {'_id': existing_cloud['_id']},
+                            {'$set': update_data}
+                        )
+                        self.sqlite_cursor.execute(
+                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            (mongo_id, local_id)
+                        )
+                        result['uploaded'] += 1
+                        print(f"INFO: [Repository]   ✅ تم تحديث المستخدم في السحابة: {username}")
+                    else:
+                        new_user = {
+                            'username': username,
+                            'password_hash': user_data.get('password_hash'),
+                            'full_name': user_data.get('full_name'),
+                            'email': user_data.get('email'),
+                            'role': user_data.get('role', 'sales'),
+                            'is_active': bool(user_data.get('is_active', 1)),
+                            'created_at': datetime.now(),
+                            'last_modified': datetime.now()
+                        }
+                        insert_result = self.mongo_db.users.insert_one(new_user)
+                        mongo_id = str(insert_result.inserted_id)
+                        self.sqlite_cursor.execute(
+                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            (mongo_id, local_id)
+                        )
+                        result['uploaded'] += 1
+                        print(f"INFO: [Repository]   ✅ تم رفع مستخدم جديد للسحابة: {username}")
+                except Exception as e:
+                    result['errors'].append(f"خطأ في رفع {username}: {e}")
+
+            if result['uploaded'] > 0:
+                self.sqlite_conn.commit()
+
+            # === 2. تنزيل المستخدمين من السحابة ===
+            print("INFO: [Repository] 📥 جاري تنزيل المستخدمين من السحابة...")
+            cloud_users = list(self.mongo_db.users.find())
+
+            for u in cloud_users:
+                try:
+                    mongo_id = str(u['_id'])
+                    username = u.get('username')
+
+                    for field in ['created_at', 'last_modified', 'last_login']:
+                        if field in u and hasattr(u[field], 'isoformat'):
+                            u[field] = u[field].isoformat()
+
+                    self.sqlite_cursor.execute(
+                        "SELECT id, sync_status FROM users WHERE _mongo_id = ? OR username = ?",
+                        (mongo_id, username)
+                    )
+                    exists = self.sqlite_cursor.fetchone()
+
+                    if exists:
+                        if exists[1] not in ('modified_offline', 'new_offline'):
+                            self.sqlite_cursor.execute("""
+                                UPDATE users SET
+                                    full_name=?, email=?, role=?, is_active=?,
+                                    password_hash=?, _mongo_id=?, sync_status='synced',
+                                    last_modified=?
+                                WHERE id=?
+                            """, (
+                                u.get('full_name'), u.get('email'), u.get('role'),
+                                u.get('is_active', 1), u.get('password_hash'),
+                                mongo_id, u.get('last_modified', datetime.now().isoformat()),
+                                exists[0]
+                            ))
+                            result['downloaded'] += 1
+                    else:
+                        self.sqlite_cursor.execute("""
+                            INSERT INTO users (
+                                _mongo_id, username, full_name, email, role,
+                                password_hash, is_active, sync_status, created_at, last_modified
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?, ?)
+                        """, (
+                            mongo_id, username, u.get('full_name'), u.get('email'),
+                            u.get('role'), u.get('password_hash'), u.get('is_active', 1),
+                            u.get('created_at', datetime.now().isoformat()),
+                            u.get('last_modified', datetime.now().isoformat())
+                        ))
+                        result['downloaded'] += 1
+                        print(f"INFO: [Repository]   ✅ تم تنزيل مستخدم جديد: {username}")
+                except Exception as e:
+                    result['errors'].append(f"خطأ في تنزيل {username}: {e}")
+
+            self.sqlite_conn.commit()
+            print(f"INFO: [Repository] ✅ تم مزامنة المستخدمين (رفع: {result['uploaded']}, تنزيل: {result['downloaded']})")
+
+        except Exception as e:
+            result['errors'].append(str(e))
+            print(f"ERROR: [Repository] فشل مزامنة المستخدمين: {e}")
+
+        return result
 
     def update_account(self, account_id: str, account_data: schemas.Account) -> schemas.Account | None:
         """ ⚡ تحديث بيانات حساب - محلي أولاً ثم مزامنة في الخلفية """
@@ -2022,7 +2473,23 @@ class Repository:
                         row_dict["lines"] = json.loads(lines_value)
                     except json.JSONDecodeError:
                         row_dict["lines"] = []
-                entries_list.append(schemas.JournalEntry(**row_dict))
+                
+                # ⚡ إصلاح البيانات القديمة: إضافة account_id إذا كان مفقوداً
+                fixed_lines = []
+                for line in row_dict.get("lines", []):
+                    if isinstance(line, dict):
+                        # إذا كان account_id مفقوداً، استخدم account_code أو قيمة افتراضية
+                        if "account_id" not in line or not line.get("account_id"):
+                            line["account_id"] = line.get("account_code", "") or line.get("account_name", "") or "unknown"
+                        fixed_lines.append(line)
+                row_dict["lines"] = fixed_lines
+                
+                try:
+                    entries_list.append(schemas.JournalEntry(**row_dict))
+                except Exception as entry_error:
+                    print(f"WARNING: تخطي قيد فاسد: {entry_error}")
+                    continue
+                    
             print(f"INFO: تم جلب {len(entries_list)} قيد من المحلي.")
             return entries_list
         except Exception as e:
@@ -2067,6 +2534,16 @@ class Repository:
             if row:
                 row_dict = dict(row)
                 row_dict['lines'] = json.loads(row_dict['lines'])
+                
+                # ⚡ إصلاح البيانات القديمة: إضافة account_id إذا كان مفقوداً
+                fixed_lines = []
+                for line in row_dict.get("lines", []):
+                    if isinstance(line, dict):
+                        if "account_id" not in line or not line.get("account_id"):
+                            line["account_id"] = line.get("account_code", "") or line.get("account_name", "") or "unknown"
+                        fixed_lines.append(line)
+                row_dict["lines"] = fixed_lines
+                
                 return schemas.JournalEntry(**row_dict)
         except Exception as e:
             print(f"ERROR: [Repo] فشل جلب القيد (SQLite): {e}")
@@ -3175,6 +3652,8 @@ class Repository:
                 project_dict['start_date'] = project_data.start_date
                 project_dict['end_date'] = project_data.end_date
                 project_dict['currency'] = project_data.currency.value
+                # ✅ تأكد من حفظ رقم الفاتورة
+                project_dict['invoice_number'] = invoice_number
 
                 result = self.mongo_db.projects.insert_one(project_dict)
                 mongo_id = str(result.inserted_id)
@@ -3802,32 +4281,6 @@ class Repository:
         print(f"INFO: [Repo] تم تحديث {updated} عملة، فشل {failed}")
         return {'updated': updated, 'failed': failed, 'results': results}
 
-
-# --- كود للاختبار (اختياري) ---
-if __name__ == "__main__":
-    print("--- بدء اختبار الـ Repository ---")
-    repo = Repository()
-
-    print(f"\nحالة الاتصال: {'أونلاين' if repo.is_online() else 'أوفلاين'}")
-
-    # اختبار إضافة عميل جديد
-    print("\n--- اختبار إضافة عميل ---")
-    new_client = schemas.Client(
-        name="Test Client " + str(datetime.now().second),
-        company_name="Test Co.",
-        email="test@example.com",
-        phone="123456789"
-    )
-    repo.create_client(new_client)
-
-    # اختبار جلب كل العملاء
-    print("\n--- اختبار جلب العملاء ---")
-    all_clients = repo.get_all_clients()
-    for client in all_clients:
-        print(f"- {client.name} (Status: {client.sync_status}, MongoID: {client._mongo_id})")
-
-    print("\n--- انتهاء الاختبار ---")
-
     # ============================================
     # دوال تنظيف التكرارات وإصلاح البيانات
     # ============================================
@@ -4170,29 +4623,36 @@ if __name__ == "__main__":
                 title, description, priority, status, category,
                 due_date, due_time, completed_at,
                 related_project_id, related_client_id, tags,
-                reminder, reminder_minutes, assigned_to
+                reminder, reminder_minutes
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
 
         tags_json = json.dumps(task_data.get('tags', []), ensure_ascii=False)
+        
+        # تحويل القيم الفارغة إلى None لتجنب مشاكل FOREIGN KEY
+        related_project = task_data.get('related_project_id')
+        related_client = task_data.get('related_client_id')
+        if related_project == '':
+            related_project = None
+        if related_client == '':
+            related_client = None
 
         self.sqlite_cursor.execute(sql, (
             'new_offline', now_iso, now_iso,
             task_data.get('title', ''),
-            task_data.get('description', ''),
+            task_data.get('description') or None,
             task_data.get('priority', 'MEDIUM'),
             task_data.get('status', 'TODO'),
             task_data.get('category', 'GENERAL'),
             task_data.get('due_date'),
             task_data.get('due_time'),
             task_data.get('completed_at'),
-            task_data.get('related_project_id'),
-            task_data.get('related_client_id'),
+            related_project,
+            related_client,
             tags_json,
             1 if task_data.get('reminder', False) else 0,
-            task_data.get('reminder_minutes', 30),
-            task_data.get('assigned_to')
+            task_data.get('reminder_minutes', 30)
         ))
         self.sqlite_conn.commit()
 
@@ -4236,32 +4696,40 @@ if __name__ == "__main__":
         now_iso = datetime.now().isoformat()
 
         tags_json = json.dumps(task_data.get('tags', []), ensure_ascii=False)
+        
+        # تحويل القيم الفارغة إلى None لتجنب مشاكل FOREIGN KEY
+        related_project = task_data.get('related_project_id')
+        related_client = task_data.get('related_client_id')
+        if related_project == '':
+            related_project = None
+        if related_client == '':
+            related_client = None
 
         sql = """
             UPDATE tasks SET
                 title = ?, description = ?, priority = ?, status = ?, category = ?,
                 due_date = ?, due_time = ?, completed_at = ?,
                 related_project_id = ?, related_client_id = ?, tags = ?,
-                reminder = ?, reminder_minutes = ?, assigned_to = ?,
+                reminder = ?, reminder_minutes = ?, is_archived = ?,
                 last_modified = ?, sync_status = 'modified_offline'
             WHERE id = ? OR _mongo_id = ?
         """
 
         self.sqlite_cursor.execute(sql, (
             task_data.get('title', ''),
-            task_data.get('description', ''),
+            task_data.get('description') or None,
             task_data.get('priority', 'MEDIUM'),
             task_data.get('status', 'TODO'),
             task_data.get('category', 'GENERAL'),
             task_data.get('due_date'),
             task_data.get('due_time'),
             task_data.get('completed_at'),
-            task_data.get('related_project_id'),
-            task_data.get('related_client_id'),
+            related_project,
+            related_client,
             tags_json,
             1 if task_data.get('reminder', False) else 0,
             task_data.get('reminder_minutes', 30),
-            task_data.get('assigned_to'),
+            1 if task_data.get('is_archived', False) else 0,
             now_iso,
             task_id, task_id
         ))
@@ -4459,7 +4927,8 @@ if __name__ == "__main__":
             'tags': json.loads(row['tags']) if row['tags'] else [],
             'reminder': bool(row['reminder']),
             'reminder_minutes': row['reminder_minutes'] or 30,
-            'assigned_to': row['assigned_to']
+            'assigned_to': row['assigned_to'],
+            'is_archived': bool(row['is_archived']) if 'is_archived' in row.keys() else False
         }
         return task
 
@@ -4573,3 +5042,12 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"ERROR: [Repo] فشل استعادة أرقام الفواتير: {e}")
             return False
+
+
+
+# --- كود للاختبار (اختياري) ---
+if __name__ == "__main__":
+    print("--- بدء اختبار الـ Repository ---")
+    repo = Repository()
+    print(f"حالة الاتصال: {'أونلاين' if repo.is_online() else 'أوفلاين'}")
+    print("--- انتهاء الاختبار ---")

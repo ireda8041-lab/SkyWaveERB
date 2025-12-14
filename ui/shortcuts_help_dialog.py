@@ -6,7 +6,7 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ui.styles import get_cairo_font, create_centered_item
 
 
 class ShortcutsHelpDialog(QDialog):
@@ -36,8 +38,13 @@ class ShortcutsHelpDialog(QDialog):
 
     def init_ui(self):
         """تهيئة الواجهة"""
+        from PyQt6.QtWidgets import QSizePolicy
+
         self.setWindowTitle("اختصارات لوحة المفاتيح")
-        self.setMinimumSize(750, 650)
+        
+        # تصميم متجاوب - حد أدنى فقط
+        self.setMinimumSize(750, 550)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setModal(True)
 
         # تطبيق شريط العنوان المخصص
@@ -208,11 +215,9 @@ class ShortcutsHelpDialog(QDialog):
             # عمود الاختصار مع تصميم محسّن
             key_text = shortcut['key']
             key_item = QTableWidgetItem(f"  {key_text}  ")
-            key_font = QFont("Consolas", 12)
-            key_font.setBold(True)
+            key_font = get_cairo_font(14, bold=True)
             key_item.setFont(key_font)
             key_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            from PyQt6.QtGui import QColor
             # تلوين متناوب للصفوف
             if row % 2 == 0:
                 key_item.setBackground(QColor("#0A6CF1"))  # Primary Blue
@@ -223,7 +228,7 @@ class ShortcutsHelpDialog(QDialog):
 
             # عمود الوصف
             desc_item = QTableWidgetItem(f"  {shortcut['description']}")
-            desc_font = QFont("Segoe UI", 11)
+            desc_font = get_cairo_font(14)
             desc_item.setFont(desc_font)
             if row % 2 == 0:
                 desc_item.setBackground(QColor("#0A2A55"))  # bg_medium

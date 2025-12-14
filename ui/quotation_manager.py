@@ -18,11 +18,11 @@ from services.quotation_service import QuotationService
 from services.service_service import ServiceService
 from services.settings_service import SettingsService
 from ui.quotation_editor import QuotationEditorWindow
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
 
 
 class QuotationManagerTab(QWidget):
-    """التاب الخاص بإدارة عروض الأسعار."""
+    """التاب الخاص بإدارة عروض الأسعار - متجاوب."""
 
     def __init__(
         self,
@@ -41,7 +41,13 @@ class QuotationManagerTab(QWidget):
 
         self.quotations_list: list[schemas.Quotation] = []
 
+        # 📱 تجاوب: سياسة التمدد الكامل
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         layout = QVBoxLayout()
+        layout.setSpacing(10)
+        layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(layout)
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
@@ -49,28 +55,33 @@ class QuotationManagerTab(QWidget):
         app_signals.quotations_changed.connect(self._on_quotations_changed)
 
         buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(6)
 
-        self.add_quote_button = QPushButton("➕ إضافة عرض سعر جديد")
+        self.add_quote_button = QPushButton("➕ إضافة عرض سعر")
         self.add_quote_button.setStyleSheet(BUTTON_STYLES["primary"])
+        self.add_quote_button.setFixedHeight(28)
         self.add_quote_button.clicked.connect(self.open_quote_editor)
-
-        self.convert_button = QPushButton("🔄 تحويل إلى فاتورة")
-        self.convert_button.setStyleSheet(BUTTON_STYLES["success"])
-        self.convert_button.clicked.connect(self.convert_to_invoice)
 
         self.edit_quote_button = QPushButton("✏️ تعديل")
         self.edit_quote_button.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_quote_button.setFixedHeight(28)
         self.edit_quote_button.clicked.connect(self.open_quote_for_edit)
 
-        # زرار التحديث
+        self.convert_button = QPushButton("📄 تحويل لفاتورة")
+        self.convert_button.setStyleSheet(BUTTON_STYLES["success"])
+        self.convert_button.setFixedHeight(28)
+        self.convert_button.clicked.connect(self.convert_to_invoice)
+
         self.refresh_button = QPushButton("🔄 تحديث")
         self.refresh_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_quotations_data)
 
         buttons_layout.addWidget(self.add_quote_button)
         buttons_layout.addWidget(self.edit_quote_button)
         buttons_layout.addWidget(self.convert_button)
         buttons_layout.addWidget(self.refresh_button)
+        buttons_layout.addStretch()
 
         layout.addLayout(buttons_layout)
 
@@ -97,11 +108,25 @@ class QuotationManagerTab(QWidget):
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
 
+        self.quotes_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.quotes_table)
         self.quotes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.quotes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.quotes_table.setAlternatingRowColors(True)
         h_header = self.quotes_table.horizontalHeader()
+        v_header = self.quotes_table.verticalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # رقم العرض
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # اسم العميل - يتمدد
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # التاريخ
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # تاريخ الانتهاء
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # الإجمالي
+        if v_header is not None:
+            v_header.setDefaultSectionSize(32)
+            v_header.setVisible(False)
 
         layout.addWidget(self.quotes_table)
 
@@ -143,18 +168,26 @@ class QuotationManagerTab(QWidget):
                 for index, quote in enumerate(self.quotations_list):
                     self.quotes_table.insertRow(index)
 
-                    status_item = QTableWidgetItem(quote.status.value)
+                    # الحالة مع لون الخلفية
                     status_color = colors_map.get(quote.status, colors_map[schemas.QuotationStatus.DRAFT])
-                    status_item.setBackground(status_color)
+                    status_item = create_centered_item(quote.status.value, status_color)
                     if quote.status != schemas.QuotationStatus.DRAFT:
                         status_item.setForeground(QColor("white"))
 
                     self.quotes_table.setItem(index, 0, status_item)
-                    self.quotes_table.setItem(index, 1, QTableWidgetItem(quote.quote_number))
-                    self.quotes_table.setItem(index, 2, QTableWidgetItem(quote.client_id))
-                    self.quotes_table.setItem(index, 3, QTableWidgetItem(quote.issue_date.strftime("%Y-%m-%d")))
-                    self.quotes_table.setItem(index, 4, QTableWidgetItem(quote.expiry_date.strftime("%Y-%m-%d")))
-                    self.quotes_table.setItem(index, 5, QTableWidgetItem(f"{quote.total_amount:,.2f} {quote.currency.value}"))
+                    self.quotes_table.setItem(index, 1, create_centered_item(quote.quote_number))
+                    self.quotes_table.setItem(index, 2, create_centered_item(quote.client_id))
+                    self.quotes_table.setItem(index, 3, create_centered_item(quote.issue_date.strftime("%Y-%m-%d")))
+                    self.quotes_table.setItem(index, 4, create_centered_item(quote.expiry_date.strftime("%Y-%m-%d")))
+                    # عرض الإجمالي مع رمز العملة
+                    currency_symbol = "ج.م"
+                    if quote.currency == schemas.CurrencyCode.USD:
+                        currency_symbol = "$"
+                    elif quote.currency == schemas.CurrencyCode.SAR:
+                        currency_symbol = "ر.س"
+                    elif quote.currency == schemas.CurrencyCode.AED:
+                        currency_symbol = "د.إ"
+                    self.quotes_table.setItem(index, 5, create_centered_item(f"{quote.total_amount:,.2f} {currency_symbol}"))
 
                     if (index + 1) % batch_size == 0:
                         QApplication.processEvents()

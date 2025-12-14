@@ -6,7 +6,7 @@ Supports drag & drop and file selection for payment receipt scanning.
 import os
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 
 from core.scan_result import ScanResult
 from services.smart_scan_service import SmartScanService
-from ui.styles import COLORS
+from ui.styles import COLORS, get_cairo_font
 
 
 class ScanWorker(QThread):
@@ -89,20 +89,20 @@ class SmartScanDropzone(QFrame):
         self._icon_label = QLabel()
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_label.setText("📷")
-        self._icon_label.setFont(QFont("Segoe UI Emoji", 32))
+        self._icon_label.setFont(get_cairo_font(32))
         layout.addWidget(self._icon_label)
 
         # Main text label
         self._text_label = QLabel("ارفع سكرين شوت التحويل لملء البيانات تلقائياً")
         self._text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._text_label.setWordWrap(True)
-        self._text_label.setFont(QFont("Cairo", 12, QFont.Weight.Bold))
+        self._text_label.setFont(get_cairo_font(12, bold=True))
         layout.addWidget(self._text_label)
 
         # Sub text label (for loading/error states)
         self._sub_label = QLabel("أو اضغط لاختيار ملف")
         self._sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._sub_label.setFont(QFont("Cairo", 10))
+        self._sub_label.setFont(get_cairo_font(10))
         self._sub_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
         layout.addWidget(self._sub_label)
 

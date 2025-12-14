@@ -1,19 +1,24 @@
 # الملف: ui/service_editor_dialog.py
+"""
+نافذة تحرير الخدمات - تصميم محسن ومتجاوب
+"""
 
 from typing import Any
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import schemas
@@ -22,7 +27,7 @@ from ui.custom_spinbox import CustomSpinBox
 
 
 class ServiceEditorDialog(QDialog):
-    """نافذة منبثقة لإضافة أو تعديل خدمة."""
+    """نافذة منبثقة لإضافة أو تعديل خدمة - تصميم متجاوب."""
 
     def __init__(
         self,
@@ -41,72 +46,192 @@ class ServiceEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة خدمة/باقة جديدة")
 
-        self.setMinimumWidth(450)
+        # 📱 Responsive
+        self.setMinimumWidth(420)
+        self.setMinimumHeight(400)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
-
-        # إزالة الإطار البرتقالي نهائياً
-        self.setStyleSheet("""
-            * {
-                outline: none;
-            }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
-            QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
-            QPushButton:focus {
-                border: none;
-                outline: none;
-            }
-        """)
 
         self._init_ui()
 
     def _init_ui(self):
-        layout = QVBoxLayout()
+        """إعداد واجهة المستخدم"""
+        from ui.styles import BUTTON_STYLES, COLORS
 
-        form_groupbox = QGroupBox("بيانات الخدمة")
-        form_layout = QFormLayout()
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: {COLORS['bg_dark']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+        """)
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        # ستايل الحقول
+        field_style = f"""
+            QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QLineEdit:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QTextEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 6px;
+                font-size: 11px;
+            }}
+            QTextEdit:hover {{
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
+
+        # === اسم الخدمة ===
+        name_label = QLabel("📦 اسم الخدمة *")
+        name_label.setStyleSheet(label_style)
+        layout.addWidget(name_label)
 
         self.name_input = QLineEdit()
-        self.description_input = QTextEdit()
-        self.description_input.setMaximumHeight(80)
+        self.name_input.setStyleSheet(field_style)
+        self.name_input.setPlaceholderText("أدخل اسم الخدمة...")
+        layout.addWidget(self.name_input)
+
+        # === صف السعر والفئة ===
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+
+        # السعر
+        price_cont = QVBoxLayout()
+        price_cont.setSpacing(2)
+        price_label = QLabel("💰 السعر الافتراضي *")
+        price_label.setStyleSheet(label_style)
+        price_cont.addWidget(price_label)
         self.price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999_999)
         self.price_input.setDecimals(2)
-        self.category_input = QLineEdit()
-        self.category_input.setPlaceholderText("مثال: SEO, Web, Packages")
+        price_cont.addWidget(self.price_input)
+        row1.addLayout(price_cont, 1)
 
+        # الفئة
+        cat_cont = QVBoxLayout()
+        cat_cont.setSpacing(2)
+        cat_label = QLabel("📂 الفئة")
+        cat_label.setStyleSheet(label_style)
+        cat_cont.addWidget(cat_label)
+        self.category_input = QLineEdit()
+        self.category_input.setStyleSheet(field_style)
+        self.category_input.setPlaceholderText("SEO, Web...")
+        cat_cont.addWidget(self.category_input)
+        row1.addLayout(cat_cont, 1)
+
+        layout.addLayout(row1)
+
+        # === الوصف ===
+        desc_label = QLabel("📝 الوصف")
+        desc_label.setStyleSheet(label_style)
+        layout.addWidget(desc_label)
+
+        self.description_input = QTextEdit()
+        self.description_input.setStyleSheet(field_style)
+        self.description_input.setPlaceholderText("وصف الخدمة...")
+        self.description_input.setFixedHeight(60)
+        layout.addWidget(self.description_input)
+
+        # === الحالة ===
         self.status_checkbox = QCheckBox("الخدمة نشطة")
         self.status_checkbox.setChecked(True)
-        self.status_checkbox.setStyleSheet("font-weight: bold;")
+        self.status_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: {COLORS['text_primary']};
+                font-size: 11px;
+                spacing: 6px;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border-radius: 4px;
+                border: 1px solid {COLORS['border']};
+                background-color: {COLORS['bg_medium']};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """)
+        layout.addWidget(self.status_checkbox)
 
-        form_layout.addRow(QLabel("اسم الخدمة:"), self.name_input)
-        form_layout.addRow(QLabel("الوصف:"), self.description_input)
-        form_layout.addRow(QLabel("السعر الافتراضي:"), self.price_input)
-        form_layout.addRow(QLabel("الفئة:"), self.category_input)
-        form_layout.addRow(QLabel("الحالة:"), self.status_checkbox)
+        layout.addStretch()
 
-        form_groupbox.setLayout(form_layout)
-        layout.addWidget(form_groupbox)
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
 
-        buttons_layout = QHBoxLayout()
+        # منطقة الأزرار
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(14, 10, 14, 10)
+        buttons_layout.setSpacing(8)
+
+        buttons_layout.addStretch()
+
         self.save_button = QPushButton("💾 حفظ")
-        self.save_button.setStyleSheet(
-            "background-color: #0A6CF1; color: white; padding: 10px; font-weight: bold;"
-        )
+        self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
+        self.save_button.setFixedHeight(28)
         self.save_button.clicked.connect(self.save_service)
         buttons_layout.addWidget(self.save_button)
-        layout.addLayout(buttons_layout)
 
-        self.setLayout(layout)
+        self.cancel_button = QPushButton("إلغاء")
+        self.cancel_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.cancel_button.setFixedHeight(28)
+        self.cancel_button.clicked.connect(self.reject)
+        buttons_layout.addWidget(self.cancel_button)
 
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
-        apply_arrows_to_all_widgets(self)
+        main_layout.addWidget(buttons_container)
 
         if self.is_editing:
             self.load_service_data()
-            self.save_button.setText("💾 حفظ التعديلات")
+            self.save_button.setText("💾 حفظ")
 
     def load_service_data(self):
         self.name_input.setText(self.service_to_edit.name)

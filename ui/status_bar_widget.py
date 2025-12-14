@@ -4,7 +4,6 @@
 """
 
 from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -15,9 +14,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ui.styles import get_cairo_font
+
 
 class SyncIndicator(QWidget):
-    """مؤشر حالة المزامنة"""
+    """مؤشر حالة الاتصال - تصميم بسيط ونظيف"""
 
     sync_requested = pyqtSignal()
 
@@ -30,142 +31,59 @@ class SyncIndicator(QWidget):
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
-        layout = QHBoxLayout()
-        layout.setContentsMargins(5, 2, 5, 2)
-        layout.setSpacing(8)
-
-        # زرار المزامنة اللحظية
         from ui.styles import COLORS
-        self.sync_btn = QPushButton("🔄")
-        self.sync_btn.setFont(QFont("Segoe UI Emoji", 11))
-        self.sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sync_btn.setToolTip("مزامنة لحظية")
-        self.sync_btn.setFixedSize(28, 28)
-        self.sync_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['primary']};
-                color: white;
-                border: none;
-                border-radius: 14px;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['primary_hover']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['primary_dark']};
-            }}
-            QPushButton:disabled {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_secondary']};
-            }}
-        """)
-        self.sync_btn.clicked.connect(self._on_sync_clicked)
-        layout.addWidget(self.sync_btn)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
 
-        # أيقونة الحالة
-        self.status_icon = QLabel("🔴")
-        self.status_icon.setFont(QFont("Segoe UI Emoji", 12))
-        self.status_icon.setStyleSheet("background-color: transparent; border: none;")
-        layout.addWidget(self.status_icon)
+        # نقطة الحالة فقط (دائرة صغيرة)
+        self.status_dot = QLabel("●")
+        self.status_dot.setFont(get_cairo_font(10))
+        self.status_dot.setStyleSheet("color: #6B7280; background: transparent; border: none;")
+        layout.addWidget(self.status_dot)
 
         # نص الحالة
         self.status_text = QLabel("غير متصل")
-        self.status_text.setFont(QFont("Segoe UI", 9))
-        self.status_text.setStyleSheet("background-color: transparent; border: none;")
+        self.status_text.setFont(get_cairo_font(10))
+        self.status_text.setStyleSheet(f"color: {COLORS['text_secondary']}; background: transparent; border: none;")
         layout.addWidget(self.status_text)
-
-        # عداد العمليات المعلقة
-        self.pending_label = QLabel("")
-        self.pending_label.setFont(QFont("Segoe UI", 8))
-        self.pending_label.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold; background-color: transparent; border: none;")
-        layout.addWidget(self.pending_label)
-
-        # شريط التقدم (مخفي افتراضياً)
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumHeight(4)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: none;
-                background-color: {COLORS['bg_medium']};
-                border-radius: 2px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {COLORS['primary']};
-                border-radius: 2px;
-            }}
-        """)
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-
-        self.setLayout(layout)
-        self.setMaximumHeight(30)
-        self.setStyleSheet("background-color: transparent;")
-
-    def _on_sync_clicked(self):
-        """معالج الضغط على زرار المزامنة"""
-        if not self._is_syncing:
-            self.sync_requested.emit()
+        
+        self.setStyleSheet("background: transparent; border: none;")
+        self.setMaximumHeight(26)
 
     def update_status(self, status: str, pending_count: int = 0):
-        """تحديث حالة المزامنة"""
-        from ui.styles import COLORS
+        """تحديث حالة الاتصال"""
         self.sync_status = status
         self.pending_count = pending_count
 
-        # تحديث الأيقونة والنص
         if status == "synced":
-            self.status_icon.setText("🟢")
-            self.status_text.setText("متزامن")
-            self.status_text.setStyleSheet(f"color: {COLORS['success']}; background-color: transparent; border: none;")
+            self.status_dot.setStyleSheet("color: #10B981; background: transparent; border: none;")
+            self.status_text.setText("متصل")
+            self.status_text.setStyleSheet("color: #10B981; background: transparent; border: none;")
             self._is_syncing = False
-            self.sync_btn.setEnabled(True)
-            self.sync_btn.setText("🔄")
-            self.sync_btn.setToolTip("مزامنة لحظية")
 
         elif status == "syncing":
-            self.status_icon.setText("🟡")
-            self.status_text.setText("جاري المزامنة...")
-            self.status_text.setStyleSheet(f"color: {COLORS['warning']}; background-color: transparent; border: none;")
+            self.status_dot.setStyleSheet("color: #F59E0B; background: transparent; border: none;")
+            self.status_text.setText("مزامنة...")
+            self.status_text.setStyleSheet("color: #F59E0B; background: transparent; border: none;")
             self._is_syncing = True
-            self.sync_btn.setEnabled(False)
-            self.sync_btn.setText("⏳")
-            self.sync_btn.setToolTip("جاري المزامنة...")
 
         elif status == "offline":
-            self.status_icon.setText("🔴")
+            self.status_dot.setStyleSheet("color: #6B7280; background: transparent; border: none;")
             self.status_text.setText("غير متصل")
-            self.status_text.setStyleSheet(f"color: {COLORS['danger']}; background-color: transparent; border: none;")
+            self.status_text.setStyleSheet("color: #9CA3AF; background: transparent; border: none;")
             self._is_syncing = False
-            self.sync_btn.setEnabled(True)
-            self.sync_btn.setText("🔄")
-            self.sync_btn.setToolTip("مزامنة لحظية (غير متصل)")
 
         elif status == "error":
-            self.status_icon.setText("❌")
-            self.status_text.setText("خطأ في المزامنة")
-            self.status_text.setStyleSheet(f"color: {COLORS['danger']}; background-color: transparent; border: none;")
+            self.status_dot.setStyleSheet("color: #ef4444; background: transparent; border: none;")
+            self.status_text.setText("خطأ")
+            self.status_text.setStyleSheet("color: #ef4444; background: transparent; border: none;")
             self._is_syncing = False
-            self.sync_btn.setEnabled(True)
-            self.sync_btn.setText("🔄")
-            self.sync_btn.setToolTip("إعادة المزامنة")
-
-        # تحديث عداد العمليات المعلقة
-        if pending_count > 0:
-            self.pending_label.setText(f"({pending_count} معلق)")
-            self.pending_label.setVisible(True)
-        else:
-            self.pending_label.setVisible(False)
 
     def update_progress(self, current: int, total: int):
-        """تحديث شريط التقدم"""
-        if total > 0:
-            self.progress_bar.setMaximum(total)
-            self.progress_bar.setValue(current)
-            self.progress_bar.setVisible(True)
-        else:
-            self.progress_bar.setVisible(False)
+        """تحديث التقدم - لا شيء حالياً"""
+        pass
 
 
 class ToastNotification(QWidget):
@@ -199,13 +117,13 @@ class ToastNotification(QWidget):
 
         # العنوان
         title_label = QLabel(title)
-        title_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        title_label.setFont(get_cairo_font(10, bold=True))
         title_label.setStyleSheet(f"color: {COLORS['text_primary']}; background-color: transparent;")
         layout.addWidget(title_label)
 
         # الرسالة
         message_label = QLabel(message)
-        message_label.setFont(QFont("Segoe UI", 9))
+        message_label.setFont(get_cairo_font(9))
         message_label.setStyleSheet(f"color: {COLORS['text_secondary']}; background-color: transparent;")
         message_label.setWordWrap(True)
         layout.addWidget(message_label)
@@ -264,6 +182,8 @@ class StatusBarWidget(QWidget):
 
     # إشارة تسجيل الخروج
     logout_requested = pyqtSignal()
+    # إشارة المزامنة الكاملة
+    full_sync_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,45 +192,78 @@ class StatusBarWidget(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        """إنشاء واجهة المستخدم"""
+        """إنشاء واجهة المستخدم - تصميم احترافي"""
         layout = QHBoxLayout()
-        layout.setContentsMargins(10, 2, 10, 2)
-        layout.setSpacing(15)
+        layout.setContentsMargins(20, 4, 20, 4)
+        layout.setSpacing(12)
 
         # التأكد من أن الويدجت مرئي دائمًا
         self.setVisible(True)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
 
-        # 1. LEFT SIDE - مؤشر المزامنة
+        from ui.styles import COLORS
+
+        # 1. LEFT SIDE - مؤشر المزامنة (احترافي)
         self.sync_indicator = SyncIndicator()
         layout.addWidget(self.sync_indicator)
+        
+        # زر المزامنة الكاملة
+        self.full_sync_btn = QPushButton("🔄 مزامنة")
+        self.full_sync_btn.setFixedSize(80, 26)
+        self.full_sync_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.full_sync_btn.setToolTip("مزامنة كاملة مع السيرفر")
+        self.full_sync_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['primary']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 2px 8px;
+                min-height: 26px;
+                max-height: 26px;
+            }}
+            QPushButton:hover {{ background-color: #2563eb; }}
+            QPushButton:pressed {{ background-color: #1d4ed8; }}
+        """)
+        self.full_sync_btn.clicked.connect(self.full_sync_requested.emit)
+        layout.addWidget(self.full_sync_btn)
 
-        # فاصل
-        from ui.styles import COLORS
-        separator1 = QFrame()
-        separator1.setFrameShape(QFrame.Shape.VLine)
-        separator1.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
-        layout.addWidget(separator1)
-
-        # 2. SPACER - دفع العناصر التالية للوسط
+        # 2. SPACER
         layout.addStretch()
 
-        # 3. CENTER - اسم المستخدم والساعة
-        self.user_label = QLabel("👤 مستخدم")
-        self.user_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.user_label.setStyleSheet("color: #00d4ff; background-color: transparent; border: none;")
-        layout.addWidget(self.user_label)
-
-        # فاصل بين المستخدم والساعة
-        separator_center = QLabel(" | ")
-        separator_center.setFont(QFont("Segoe UI", 10))
-        separator_center.setStyleSheet(f"color: {COLORS['text_secondary']}; background-color: transparent; border: none;")
-        layout.addWidget(separator_center)
+        # 3. CENTER - معلومات المستخدم (تصميم نظيف)
+        user_container = QWidget()
+        user_layout = QHBoxLayout(user_container)
+        user_layout.setContentsMargins(8, 2, 8, 2)
+        user_layout.setSpacing(7)
+        
+        # اسم المستخدم بدون أيقونة
+        self.user_label = QLabel("مستخدم")
+        self.user_label.setFont(get_cairo_font(12, bold=True))
+        self.user_label.setStyleSheet(f"""
+            color: {COLORS['primary']};
+            background-color: transparent;
+            padding: 2px 6px;
+        """)
+        user_layout.addWidget(self.user_label)
+        
+        user_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        layout.addWidget(user_container)
 
         # الوقت الحالي
         self.time_label = QLabel()
-        self.time_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.time_label.setStyleSheet("color: #ffffff; background-color: transparent; border: none;")
+        self.time_label.setFont(get_cairo_font(12, bold=True))
+        self.time_label.setStyleSheet(f"""
+            color: {COLORS['text_primary']};
+            background-color: transparent;
+        """)
         layout.addWidget(self.time_label)
 
         # تحديث الوقت كل ثانية
@@ -319,55 +272,43 @@ class StatusBarWidget(QWidget):
         self.time_timer.start(1000)
         self.update_time()
 
-        # 4. SPACER - دفع العناصر للوسط
+        # 4. SPACER
         layout.addStretch()
 
-        # فاصل
-        separator2 = QFrame()
-        separator2.setFrameShape(QFrame.Shape.VLine)
-        separator2.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
-        layout.addWidget(separator2)
-
-        # 5. RIGHT SIDE - زر تسجيل الخروج
-        self.logout_btn = QPushButton("🚪 تسجيل خروج")
-        self.logout_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.logout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.logout_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['danger']};
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 5px 12px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: #D430B0;
-            }}
-        """)
-        layout.addWidget(self.logout_btn)
-
-        # فاصل
-        separator3 = QFrame()
-        separator3.setFrameShape(QFrame.Shape.VLine)
-        separator3.setStyleSheet(f"color: {COLORS['border']}; background-color: transparent;")
-        layout.addWidget(separator3)
-
-        # 6. معلومات النظام (رقم الإصدار الديناميكي)
+        # 6. معلومات النظام
         from version import CURRENT_VERSION
         self.system_info = QLabel(f"Sky Wave ERP v{CURRENT_VERSION}")
-        self.system_info.setFont(QFont("Segoe UI", 9))
-        self.system_info.setStyleSheet("background-color: transparent; border: none;")
+        self.system_info.setFont(get_cairo_font(9))
+        self.system_info.setStyleSheet(f"""
+            color: {COLORS['text_secondary']};
+            background-color: transparent;
+        """)
         layout.addWidget(self.system_info)
 
         self.setLayout(layout)
+    
+    def _create_separator(self):
+        """إنشاء فاصل احترافي"""
+        from ui.styles import COLORS
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFixedHeight(18)
+        separator.setStyleSheet(f"""
+            QFrame {{
+                color: {COLORS['border']};
+                background-color: rgba(255, 255, 255, 0.1);
+                max-width: 1px;
+            }}
+        """)
+        return separator
 
-        # ربط زر تسجيل الخروج
-        self.logout_btn.clicked.connect(self.logout_requested.emit)
+        # ربط زر تسجيل الخروج - معطل لأن الزرار مخفي
+        # self.logout_btn.clicked.connect(self.logout_requested.emit)
 
         # ✅ إعدادات الحجم الثابت
-        self.setMinimumHeight(35)
-        self.setMaximumHeight(35)
+        self.setMinimumHeight(32)
+        self.setMaximumHeight(32)
+        self.setMinimumWidth(0)  # لا حد أدنى للعرض
 
         # ✅ سياسة الحجم - ثابت عمودياً، متمدد أفقياً
         from PyQt6.QtWidgets import QSizePolicy
@@ -378,20 +319,25 @@ class StatusBarWidget(QWidget):
 
         # ✅ منع الإخفاء والحذف
         self.setVisible(True)
+        
+        # ✅ إزالة الحواف لجعل البار يملأ العرض كاملاً
+        self.setContentsMargins(0, 0, 0, 0)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
 
-        # استخدام الألوان من ملف styles.py
+        # استخدام الألوان من ملف styles.py - تصميم نظيف بدون borders
         from ui.styles import COLORS
         self.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS['bg_dark']};
-            }}
             StatusBarWidget {{
                 background-color: {COLORS['bg_dark']};
-                border-top: 3px solid {COLORS['primary']};
-                min-height: 40px;
-                max-height: 40px;
+                border: none;
+                min-height: 32px;
+                max-height: 32px;
+                min-width: 100%;
+            }}
+            QWidget {{
+                background-color: transparent;
+                border: none;
             }}
             QLabel {{
                 background-color: transparent;
@@ -402,6 +348,7 @@ class StatusBarWidget(QWidget):
             }}
             QFrame {{
                 background-color: transparent;
+                border: none;
             }}
         """)
 
@@ -438,7 +385,7 @@ class StatusBarWidget(QWidget):
         self.current_user = user
         if user:
             username = user.full_name or user.username
-            self.user_label.setText(f"👤 {username}")
+            self.user_label.setText(username)
 
     def update_sync_status(self, status: str, pending_count: int = 0):
         """تحديث حالة المزامنة"""

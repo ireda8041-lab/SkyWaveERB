@@ -1,4 +1,7 @@
 # الملف: ui/client_editor_dialog.py
+"""
+نافذة إضافة/تعديل العملاء - تصميم متجاوب (Responsive)
+"""
 
 import os
 from typing import Any
@@ -16,6 +19,8 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -26,9 +31,7 @@ from services.client_service import ClientService
 
 
 class ClientEditorDialog(QDialog):
-    """
-    (معدلة بالكامل لتطابق الصورة + طلباتك)
-    """
+    """نافذة إضافة/تعديل عميل - تصميم متجاوب"""
 
     def __init__(self, client_service: ClientService, client_to_edit: schemas.Client | None = None, parent=None):
         super().__init__(parent)
@@ -42,108 +45,290 @@ class ClientEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة عميل جديد")
 
-        self.setMinimumWidth(500)
+        # 📱 Responsive: الحد الأدنى فقط
+        self.setMinimumWidth(420)
+        self.setMinimumHeight(450)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
 
-        # إزالة الإطار البرتقالي نهائياً
-        self.setStyleSheet("""
-            * {
-                outline: none;
-            }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
-            QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
-            QPushButton:focus {
-                border: none;
-                outline: none;
-            }
-        """)
-
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout()
+        from ui.styles import BUTTON_STYLES, COLORS
 
-        form_groupbox = QGroupBox("بيانات العميل")
-        client_form = QFormLayout()
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: {COLORS['bg_dark']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 3px;
+                min-height: 20px;
+            }}
+        """)
+
+        content_widget = QWidget()
+        content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 14)
+
+        # ستايل الحقول
+        field_style = f"""
+            QLineEdit, QComboBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QLineEdit:hover, QComboBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QTextEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 6px;
+                font-size: 11px;
+            }}
+        """
+        
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
+
+        # === البيانات الأساسية ===
+        # الاسم
+        name_label = QLabel("الاسم بالكامل *")
+        name_label.setStyleSheet(label_style)
+        layout.addWidget(name_label)
         self.name_input = QLineEdit()
+        self.name_input.setStyleSheet(field_style)
+        self.name_input.setPlaceholderText("اسم العميل...")
+        layout.addWidget(self.name_input)
+
+        # صف الشركة والنوع
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        
+        company_cont = QVBoxLayout()
+        company_cont.setSpacing(2)
+        company_label = QLabel("الشركة")
+        company_label.setStyleSheet(label_style)
+        company_cont.addWidget(company_label)
         self.company_input = QLineEdit()
-        self.company_input.setPlaceholderText("(اختياري)")
-        self.phone_input = QLineEdit()
-        self.email_input = QLineEdit()
-        self.address_input = QLineEdit()
-        self.country_input = QLineEdit()
-        self.country_input.setPlaceholderText("مثال: EGY / KSA / UAE")
-
+        self.company_input.setStyleSheet(field_style)
+        self.company_input.setPlaceholderText("اختياري")
+        company_cont.addWidget(self.company_input)
+        row1.addLayout(company_cont, 2)
+        
+        type_cont = QVBoxLayout()
+        type_cont.setSpacing(2)
+        type_label = QLabel("النوع")
+        type_label.setStyleSheet(label_style)
+        type_cont.addWidget(type_label)
         self.client_type_combo = QComboBox()
+        self.client_type_combo.setStyleSheet(field_style)
         self.client_type_combo.addItems(["فرد", "شركة"])
+        type_cont.addWidget(self.client_type_combo)
+        row1.addLayout(type_cont, 1)
+        
+        layout.addLayout(row1)
 
+        # صف الهاتف والبريد
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        
+        phone_cont = QVBoxLayout()
+        phone_cont.setSpacing(2)
+        phone_label = QLabel("📱 الهاتف")
+        phone_label.setStyleSheet(label_style)
+        phone_cont.addWidget(phone_label)
+        self.phone_input = QLineEdit()
+        self.phone_input.setStyleSheet(field_style)
+        phone_cont.addWidget(self.phone_input)
+        row2.addLayout(phone_cont, 1)
+        
+        email_cont = QVBoxLayout()
+        email_cont.setSpacing(2)
+        email_label = QLabel("📧 البريد")
+        email_label.setStyleSheet(label_style)
+        email_cont.addWidget(email_label)
+        self.email_input = QLineEdit()
+        self.email_input.setStyleSheet(field_style)
+        email_cont.addWidget(self.email_input)
+        row2.addLayout(email_cont, 1)
+        
+        layout.addLayout(row2)
+
+        # صف العنوان والدولة
+        row3 = QHBoxLayout()
+        row3.setSpacing(8)
+        
+        address_cont = QVBoxLayout()
+        address_cont.setSpacing(2)
+        address_label = QLabel("📍 العنوان")
+        address_label.setStyleSheet(label_style)
+        address_cont.addWidget(address_label)
+        self.address_input = QLineEdit()
+        self.address_input.setStyleSheet(field_style)
+        address_cont.addWidget(self.address_input)
+        row3.addLayout(address_cont, 2)
+        
+        country_cont = QVBoxLayout()
+        country_cont.setSpacing(2)
+        country_label = QLabel("🌍 الدولة")
+        country_label.setStyleSheet(label_style)
+        country_cont.addWidget(country_label)
+        self.country_input = QLineEdit()
+        self.country_input.setStyleSheet(field_style)
+        self.country_input.setPlaceholderText("EGY")
+        country_cont.addWidget(self.country_input)
+        row3.addLayout(country_cont, 1)
+        
+        layout.addLayout(row3)
+
+        # صف مجال العمل والرقم الضريبي
+        row4 = QHBoxLayout()
+        row4.setSpacing(8)
+        
+        work_cont = QVBoxLayout()
+        work_cont.setSpacing(2)
+        work_label = QLabel("مجال العمل")
+        work_label.setStyleSheet(label_style)
+        work_cont.addWidget(work_label)
         self.work_field_input = QLineEdit()
-        self.work_field_input.setPlaceholderText("مثال: أثاث، تجارة إلكترونية...")
-
+        self.work_field_input.setStyleSheet(field_style)
+        self.work_field_input.setPlaceholderText("تجارة، خدمات...")
+        work_cont.addWidget(self.work_field_input)
+        row4.addLayout(work_cont, 1)
+        
+        vat_cont = QVBoxLayout()
+        vat_cont.setSpacing(2)
+        vat_label = QLabel("الرقم الضريبي")
+        vat_label.setStyleSheet(label_style)
+        vat_cont.addWidget(vat_label)
         self.vat_input = QLineEdit()
-        self.vat_input.setPlaceholderText("(اختياري)")
+        self.vat_input.setStyleSheet(field_style)
+        self.vat_input.setPlaceholderText("اختياري")
+        vat_cont.addWidget(self.vat_input)
+        row4.addLayout(vat_cont, 1)
+        
+        layout.addLayout(row4)
 
+        # اللوجو
+        logo_label = QLabel("🖼️ صورة/لوجو")
+        logo_label.setStyleSheet(label_style)
+        layout.addWidget(logo_label)
+        
         logo_layout = QHBoxLayout()
+        logo_layout.setSpacing(8)
         self.logo_path_label = QLabel("لم يتم اختيار صورة")
-        self.logo_path_label.setStyleSheet("font-style: italic; color: #888;")
-        select_logo_btn = QPushButton("... اختيار صورة")
+        self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px;")
+        self.logo_path_label.setWordWrap(True)
+        select_logo_btn = QPushButton("اختيار...")
+        select_logo_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                border-color: {COLORS['primary']};
+            }}
+        """)
         select_logo_btn.clicked.connect(self.select_logo_file)
         logo_layout.addWidget(self.logo_path_label, 1)
         logo_layout.addWidget(select_logo_btn)
-        logo_widget = QWidget()
-        logo_widget.setLayout(logo_layout)
+        layout.addLayout(logo_layout)
 
+        # الملاحظات
+        notes_label = QLabel("📝 ملاحظات")
+        notes_label.setStyleSheet(label_style)
+        layout.addWidget(notes_label)
+        
         self.notes_input = QTextEdit()
-        self.notes_input.setPlaceholderText("أي ملاحظات إضافية عن العميل...")
-        self.notes_input.setMinimumHeight(80)
+        self.notes_input.setStyleSheet(field_style)
+        self.notes_input.setPlaceholderText("ملاحظات إضافية...")
+        self.notes_input.setFixedHeight(50)
+        layout.addWidget(self.notes_input)
 
+        # الحالة
         self.status_checkbox = QCheckBox("العميل نشط")
         self.status_checkbox.setChecked(True)
-        self.status_checkbox.setStyleSheet("font-weight: bold;")
+        self.status_checkbox.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        layout.addWidget(self.status_checkbox)
 
-        client_form.addRow(QLabel("الاسم بالكامل:"), self.name_input)
-        client_form.addRow(QLabel("الشركة:"), self.company_input)
-        client_form.addRow(QLabel("رقم الهاتف:"), self.phone_input)
-        client_form.addRow(QLabel("البريد الإلكتروني:"), self.email_input)
-        client_form.addRow(QLabel("العنوان:"), self.address_input)
-        client_form.addRow(QLabel("الدولة:"), self.country_input)
-        client_form.addRow(QLabel("نوع العميل:"), self.client_type_combo)
-        client_form.addRow(QLabel("مجال العمل:"), self.work_field_input)
-        client_form.addRow(QLabel("الرقم الضريبي:"), self.vat_input)
-        client_form.addRow(QLabel("صورة/لوجو:"), logo_widget)
-        client_form.addRow(QLabel("ملاحظات:"), self.notes_input)
-        client_form.addRow(QLabel("الحالة:"), self.status_checkbox)
+        layout.addStretch()
 
-        form_groupbox.setLayout(client_form)
-        layout.addWidget(form_groupbox)
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
 
-        buttons_layout = QHBoxLayout()
+        # منطقة الأزرار
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(14, 10, 14, 10)
+        buttons_layout.setSpacing(8)
+
+        buttons_layout.addStretch()
+
         self.save_button = QPushButton("💾 حفظ")
-        self.cancel_button = QPushButton("✕ إلغاء")
-
-        self.save_button.setStyleSheet("background-color: #0A6CF1; color: white; padding: 10px; font-weight: bold;")
-        self.cancel_button.setStyleSheet("background-color: #ef4444; color: white; padding: 10px; font-weight: bold;")
-
+        self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
+        self.save_button.setFixedSize(90, 30)
         self.save_button.clicked.connect(self.save_client)
-        self.cancel_button.clicked.connect(self.reject)
-
         buttons_layout.addWidget(self.save_button)
+
+        self.cancel_button = QPushButton("إلغاء")
+        self.cancel_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.cancel_button.setFixedSize(70, 30)
+        self.cancel_button.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_button)
-        layout.addLayout(buttons_layout)
 
-        self.setLayout(layout)
-
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
-        apply_arrows_to_all_widgets(self)
+        main_layout.addWidget(buttons_container)
 
         if self.is_editing:
             self.load_client_data()
-            self.save_button.setText("💾 حفظ التعديلات")
+            self.save_button.setText("💾 حفظ")
 
     def select_logo_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "اختر صورة", "", "Image Files (*.png *.jpg *.jpeg)")
@@ -153,7 +338,7 @@ class ClientEditorDialog(QDialog):
             self.logo_path_label.setStyleSheet("font-style: normal; color: #111827;")
 
     def load_client_data(self):
-        """ يملأ الحقول ببيانات العميل القديمة """
+        """يملأ الحقول ببيانات العميل القديمة"""
         self.name_input.setText(self.client_to_edit.name)
         self.company_input.setText(self.client_to_edit.company_name or "")
         self.email_input.setText(self.client_to_edit.email or "")
@@ -164,12 +349,10 @@ class ClientEditorDialog(QDialog):
         self.client_type_combo.setCurrentText(self.client_to_edit.client_type or "فرد")
         self.work_field_input.setText(self.client_to_edit.work_field or "")
 
-        # ⚡ عرض حالة الصورة (من logo_data أو logo_path)
         has_logo_data = hasattr(self.client_to_edit, 'logo_data') and self.client_to_edit.logo_data
         logo_path = self.client_to_edit.logo_path or ""
 
         if has_logo_data:
-            # الصورة محفوظة في قاعدة البيانات كـ base64
             self.logo_path_label.setText("✅ صورة محفوظة في قاعدة البيانات")
             self.logo_path_label.setStyleSheet("font-style: normal; color: #10B981; font-weight: bold;")
         elif logo_path:
@@ -185,34 +368,28 @@ class ClientEditorDialog(QDialog):
     def _convert_image_to_base64(self, image_path: str) -> str:
         """تحويل صورة إلى base64 للحفظ في قاعدة البيانات"""
         import base64
-        import os
 
         if not image_path or not os.path.exists(image_path):
             return ""
 
         try:
-            # قراءة الصورة وتحويلها
             with open(image_path, "rb") as img_file:
                 img_data = img_file.read()
 
-            # ضغط الصورة إذا كانت كبيرة (أكثر من 500KB)
             if len(img_data) > 500 * 1024:
                 from PyQt6.QtCore import QBuffer, QIODevice
                 from PyQt6.QtGui import QPixmap
 
                 pixmap = QPixmap(image_path)
-                # تصغير الصورة إلى 300x300 كحد أقصى
                 scaled = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
                 buffer = QBuffer()
                 buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-                scaled.save(buffer, "PNG", 80)  # جودة 80%
+                scaled.save(buffer, "PNG", 80)
                 img_data = buffer.data().data()
 
-            # تحويل إلى base64
             base64_str = base64.b64encode(img_data).decode('utf-8')
 
-            # إضافة prefix للتعرف على نوع الصورة
             ext = os.path.splitext(image_path)[1].lower()
             mime_type = {
                 '.png': 'image/png',
@@ -228,23 +405,19 @@ class ClientEditorDialog(QDialog):
             return ""
 
     def get_form_data(self) -> dict[str, Any]:
-        """ يجمع البيانات من الحقول """
+        """يجمع البيانات من الحقول"""
         status = schemas.ClientStatus.ACTIVE if self.status_checkbox.isChecked() else schemas.ClientStatus.ARCHIVED
         logo_text = self.logo_path_label.text()
 
-        # ⚡ تحديد مسار الصورة (تجاهل النص التوضيحي)
         logo_value = ""
         if logo_text and "لم يتم" not in logo_text and "محفوظة في قاعدة البيانات" not in logo_text:
             logo_value = logo_text
 
-        # ⚡ تحويل الصورة إلى base64 للحفظ في قاعدة البيانات
         logo_data = ""
 
-        # حالة 1: تم اختيار صورة جديدة (مسار ملف)
         if logo_value and os.path.exists(logo_value):
             logo_data = self._convert_image_to_base64(logo_value)
             print(f"INFO: تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
-        # حالة 2: الاحتفاظ بالصورة القديمة (عند التعديل)
         elif self.is_editing and self.client_to_edit and hasattr(self.client_to_edit, 'logo_data'):
             logo_data = self.client_to_edit.logo_data or ""
             if logo_data:
@@ -261,13 +434,13 @@ class ClientEditorDialog(QDialog):
             "status": status,
             "client_type": self.client_type_combo.currentText(),
             "work_field": self.work_field_input.text(),
-            "logo_path": logo_value,  # مسار الصورة المحلي (للتوافق)
-            "logo_data": logo_data,   # ⚡ بيانات الصورة بصيغة base64 (للمزامنة)
+            "logo_path": logo_value,
+            "logo_data": logo_data,
             "client_notes": self.notes_input.toPlainText(),
         }
 
     def save_client(self):
-        """ يحفظ (أو يعدل) العميل عبر الخدمة """
+        """يحفظ (أو يعدل) العميل عبر الخدمة"""
         client_data = self.get_form_data()
 
         if not client_data["name"]:

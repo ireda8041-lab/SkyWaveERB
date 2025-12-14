@@ -1,5 +1,4 @@
 import datetime
-import os
 
 from PyQt6.QtCore import QDate, Qt
 from PyQt6.QtWidgets import (
@@ -14,9 +13,12 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 from core import schemas
@@ -25,11 +27,11 @@ from services.quotation_service import QuotationService
 from services.service_service import ServiceService
 from services.settings_service import SettingsService
 from ui.custom_spinbox import CustomSpinBox
-from ui.invoice_scan_widget import InvoiceScanWidget
+from ui.styles import TABLE_STYLE_DARK, create_centered_item
 
 
 class QuotationEditorWindow(QDialog):
-    """نافذة لإنشاء أو تعديل عرض سعر."""
+    """نافذة لإنشاء أو تعديل عرض سعر - تصميم متجاوب."""
 
     def __init__(
         self,
@@ -55,80 +57,155 @@ class QuotationEditorWindow(QDialog):
         else:
             self.setWindowTitle("عرض سعر جديد")
 
-        self.setMinimumWidth(700)
+        # 📱 Responsive: الحد الأدنى فقط
+        self.setMinimumWidth(650)
+        self.setMinimumHeight(550)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
-        from ui.styles import setup_custom_title_bar
+        from ui.styles import COLORS, setup_custom_title_bar
         setup_custom_title_bar(self)
+        
+        # تنسيق عام للنافذة - بسيط ونظيف
+        self.setStyleSheet("""
+            QLabel {
+                font-size: 11px;
+            }
+            QComboBox, QDateEdit, QLineEdit {
+                font-size: 11px;
+                padding: 4px 6px;
+                min-height: 24px;
+            }
+        """)
 
         self.clients_list = self.client_service.get_all_clients()
         self.services_list = self.service_service.get_all_services()
 
-        self.main_layout = QVBoxLayout()
-        self.setLayout(self.main_layout)
+        # 📱 التخطيط الرئيسي
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setSpacing(0)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
 
-        # === Widget المسح الذكي للفواتير ===
-        gemini_api_key = self.settings_service.get_setting("gemini_api_key") or os.getenv("GEMINI_API_KEY")
-        self.scan_widget = InvoiceScanWidget(api_key=gemini_api_key)
-        self.scan_widget.scan_completed.connect(self._on_invoice_scanned)
-        self.scan_widget.scan_failed.connect(self._on_scan_failed)
-        self.main_layout.addWidget(self.scan_widget)
+        # 📱 منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: transparent;
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 10px;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 5px;
+                min-height: 30px;
+            }}
+        """)
 
+        content_widget = QWidget()
+        self.main_layout = QVBoxLayout(content_widget)
+        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(15, 15, 15, 15)
+
+        scroll_area.setWidget(content_widget)
+        outer_layout.addWidget(scroll_area, 1)
+
+        # === بيانات عرض السعر - تصميم بسيط ===
         form_layout = QFormLayout()
+        form_layout.setSpacing(10)
+        form_layout.setContentsMargins(0, 0, 0, 0)
 
+        # العميل
         self.client_combo = QComboBox()
+        self.client_combo.addItem("--- اختر العميل ---", userData=None)
         for client in self.clients_list:
             self.client_combo.addItem(client.name, userData=client)
+        form_layout.addRow("العميل:", self.client_combo)
 
+        # التواريخ
+        dates_layout = QHBoxLayout()
         self.issue_date_input = QDateEdit(QDate.currentDate())
         self.issue_date_input.setCalendarPopup(True)
         self.expiry_date_input = QDateEdit(QDate.currentDate().addDays(14))
         self.expiry_date_input.setCalendarPopup(True)
+        dates_layout.addWidget(QLabel("من:"))
+        dates_layout.addWidget(self.issue_date_input)
+        dates_layout.addWidget(QLabel("إلى:"))
+        dates_layout.addWidget(self.expiry_date_input)
+        dates_layout.addStretch()
+        form_layout.addRow("التاريخ:", dates_layout)
 
+        # العملة
+        self.currency_combo = QComboBox()
+        self.currency_combo.addItem("جنيه مصري (EGP)", userData=schemas.CurrencyCode.EGP)
+        self.currency_combo.addItem("دولار أمريكي (USD)", userData=schemas.CurrencyCode.USD)
+        self.currency_combo.addItem("ريال سعودي (SAR)", userData=schemas.CurrencyCode.SAR)
+        self.currency_combo.addItem("درهم إماراتي (AED)", userData=schemas.CurrencyCode.AED)
+        form_layout.addRow("العملة:", self.currency_combo)
+
+        # الخصم والضريبة
+        finance_layout = QHBoxLayout()
         self.discount_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
         self.discount_rate_input.setValue(0.0)
         self.discount_rate_input.setSuffix(" %")
-
         self.tax_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
         self.default_tax_rate = float(self.settings_service.get_setting("default_tax_rate") or 0.0)
         self.tax_rate_input.setValue(self.default_tax_rate)
         self.tax_rate_input.setSuffix(" %")
+        finance_layout.addWidget(QLabel("الخصم:"))
+        finance_layout.addWidget(self.discount_rate_input)
+        finance_layout.addSpacing(20)
+        finance_layout.addWidget(QLabel("الضريبة:"))
+        finance_layout.addWidget(self.tax_rate_input)
+        finance_layout.addStretch()
+        form_layout.addRow("", finance_layout)
 
-        base_notes = self.settings_service.get_setting("default_notes") or "عرض السعر صالح لمدة 14 يوم."
+        # الملاحظات
+        base_notes = self.settings_service.get_setting("default_notes") or "شكراً لثقتكم في Sky Wave. نسعد بخدمتكم دائماً."
         self.default_notes = base_notes.replace("الفاتورة", "عرض السعر")
         self.notes_input = QLineEdit(self.default_notes)
-
-        form_layout.addRow(QLabel("العميل:"), self.client_combo)
-        form_layout.addRow(QLabel("تاريخ الإصدار:"), self.issue_date_input)
-        form_layout.addRow(QLabel("تاريخ الانتهاء:"), self.expiry_date_input)
-        form_layout.addRow(QLabel("الخصم (%):"), self.discount_rate_input)
-        form_layout.addRow(QLabel("الضريبة (%):"), self.tax_rate_input)
-        form_layout.addRow(QLabel("الملاحظات:"), self.notes_input)
+        form_layout.addRow("الملاحظات:", self.notes_input)
 
         self.main_layout.addLayout(form_layout)
 
+        # فاصل
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setFrameShadow(QFrame.Shadow.Sunken)
+        divider.setStyleSheet("background-color: #374151;")
+        divider.setFixedHeight(1)
         self.main_layout.addWidget(divider)
 
-        self.main_layout.addWidget(QLabel("إضافة بنود عرض السعر:"))
+        # عنوان البنود
+        items_header = QLabel("بنود عرض السعر")
+        items_header.setStyleSheet("font-size: 12px; font-weight: bold; color: #60A5FA; margin: 8px 0;")
+        self.main_layout.addWidget(items_header)
+        
         add_item_layout = QHBoxLayout()
+        add_item_layout.setSpacing(6)
+        
         self.service_combo = QComboBox()
+        self.service_combo.addItem("اختر الخدمة...", userData=None)
         for service in self.services_list:
             self.service_combo.addItem(f"{service.name} ({service.default_price})", userData=service)
 
-        self.item_price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999999)
         self.item_quantity_input = CustomSpinBox(decimals=2, minimum=0.1, maximum=100)
         self.item_quantity_input.setValue(1.0)
-        self.add_item_button = QPushButton("➕ إضافة البند")
+        
+        self.item_price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999999)
+        
+        self.add_item_button = QPushButton("➕ إضافة")
+        self.add_item_button.setFixedHeight(26)
 
         add_item_layout.addWidget(self.service_combo, 3)
         add_item_layout.addWidget(QLabel("الكمية:"))
         add_item_layout.addWidget(self.item_quantity_input, 1)
         add_item_layout.addWidget(QLabel("السعر:"))
         add_item_layout.addWidget(self.item_price_input, 1)
-        add_item_layout.addWidget(self.add_item_button, 1)
+        add_item_layout.addWidget(self.add_item_button)
         self.main_layout.addLayout(add_item_layout)
 
         self.service_combo.currentIndexChanged.connect(self.on_service_selected)
@@ -150,24 +227,64 @@ class QuotationEditorWindow(QDialog):
         self.items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.items_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
+        # تحسين عرض الأعمدة
         header = self.items_table.horizontalHeader()
         if header is not None:
-            header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # الخدمة - يتمدد
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)    # الكمية
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)    # السعر
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)    # الخصم
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)    # الإجمالي
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)    # حذف
+            
+        self.items_table.setColumnWidth(1, 70)   # الكمية
+        self.items_table.setColumnWidth(2, 90)   # السعر
+        self.items_table.setColumnWidth(3, 60)   # الخصم
+        self.items_table.setColumnWidth(4, 90)   # الإجمالي
+        self.items_table.setColumnWidth(5, 45)   # حذف
+        
+        # تنسيق الجدول
+        self.items_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.items_table)
+        self.items_table.verticalHeader().setDefaultSectionSize(35)
+        self.items_table.setMinimumHeight(150)
 
         # تفعيل cellChanged لحساب الإجمالي عند التعديل
         self.items_table.cellChanged.connect(self.on_item_cell_changed)
         self.main_layout.addWidget(self.items_table)
 
-        self.save_button = QPushButton()
-        self.save_button.clicked.connect(self.save_quotation)
-        self.main_layout.addWidget(self.save_button)
-
         self.on_service_selected(0)
 
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
-        apply_arrows_to_all_widgets(self)
+        # 📱 منطقة الأزرار (ثابتة في الأسفل خارج منطقة التمرير)
+        from ui.styles import BUTTON_STYLES
+
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_light']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(15, 12, 15, 12)
+        buttons_layout.setSpacing(10)
+
+        buttons_layout.addStretch()
+
+        self.cancel_button = QPushButton("إلغاء")
+        self.cancel_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.cancel_button.clicked.connect(self.reject)
+
+        self.save_button = QPushButton()
+        self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
+        self.save_button.clicked.connect(self.save_quotation)
+
+        buttons_layout.addWidget(self.cancel_button)
+        buttons_layout.addWidget(self.save_button)
+
+        outer_layout.addWidget(buttons_container)
 
         if self.quote_to_edit:
             self.populate_form_for_edit()
@@ -190,6 +307,14 @@ class QuotationEditorWindow(QDialog):
         self.discount_rate_input.setValue(self.quote_to_edit.discount_rate)
         self.tax_rate_input.setValue(self.quote_to_edit.tax_rate)
         self.notes_input.setText(self.quote_to_edit.notes or "")
+        
+        # تحميل العملة
+        if hasattr(self, 'currency_combo') and self.quote_to_edit.currency:
+            currency = self.quote_to_edit.currency
+            for i in range(self.currency_combo.count()):
+                if self.currency_combo.itemData(i) == currency:
+                    self.currency_combo.setCurrentIndex(i)
+                    break
 
         self.quote_items.clear()
         self.items_table.setRowCount(0)
@@ -236,19 +361,33 @@ class QuotationEditorWindow(QDialog):
         # تعطيل الإشارات مؤقتاً
         self.items_table.blockSignals(True)
 
-        desc_item = QTableWidgetItem(item_schema.description)
+        desc_item = create_centered_item(item_schema.description)
         desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.items_table.setItem(row, 0, desc_item)
-        self.items_table.setItem(row, 1, QTableWidgetItem(f"{item_schema.quantity:.2f}"))
-        self.items_table.setItem(row, 2, QTableWidgetItem(f"{item_schema.unit_price:.2f}"))
-        self.items_table.setItem(row, 3, QTableWidgetItem(f"{item_schema.discount_rate:.2f}"))
+        self.items_table.setItem(row, 1, create_centered_item(f"{item_schema.quantity:.2f}"))
+        self.items_table.setItem(row, 2, create_centered_item(f"{item_schema.unit_price:.2f}"))
+        self.items_table.setItem(row, 3, create_centered_item(f"{item_schema.discount_rate:.2f}"))
 
-        total_item = QTableWidgetItem(f"{item_schema.total:.2f}")
+        total_item = create_centered_item(f"{item_schema.total:.2f}")
         total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         self.items_table.setItem(row, 4, total_item)
 
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setStyleSheet("background-color: #ef4444; color: white;")
+        delete_btn = QPushButton("✕")
+        delete_btn.setFixedSize(35, 26)
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+            }
+        """)
         delete_btn.clicked.connect(lambda _, r=row: self.delete_item(r))
         self.items_table.setCellWidget(row, 5, delete_btn)
 
@@ -323,7 +462,7 @@ class QuotationEditorWindow(QDialog):
                 "discount_rate": self.discount_rate_input.value(),
                 "tax_rate": self.tax_rate_input.value(),
                 "status": schemas.QuotationStatus.DRAFT,
-                "currency": schemas.CurrencyCode.EGP,
+                "currency": self.currency_combo.currentData() if hasattr(self, 'currency_combo') else schemas.CurrencyCode.EGP,
                 "items": self.quote_items,
                 "notes": self.notes_input.text(),
             }
@@ -354,93 +493,3 @@ class QuotationEditorWindow(QDialog):
     def _to_qdate(value: datetime.datetime) -> QDate:
         return QDate(value.year, value.month, value.day)
 
-    # === معالجة نتائج المسح الذكي ===
-
-    def _on_invoice_scanned(self, data: dict):
-        """تعبئة الحقول تلقائياً من نتيجة المسح الذكي"""
-        try:
-            # تعبئة التاريخ
-            invoice_date = data.get('invoice_date', '')
-            if invoice_date:
-                date = QDate.fromString(invoice_date, 'yyyy-MM-dd')
-                if date.isValid():
-                    self.issue_date_input.setDate(date)
-                    self.expiry_date_input.setDate(date.addDays(14))
-
-            # تعبئة الضريبة
-            tax_amount = data.get('tax_amount', 0)
-            total_amount = data.get('total_amount', 0)
-            if tax_amount > 0 and total_amount > 0:
-                # حساب نسبة الضريبة التقريبية
-                subtotal = total_amount - tax_amount
-                if subtotal > 0:
-                    tax_rate = (tax_amount / subtotal) * 100
-                    self.tax_rate_input.setValue(round(tax_rate, 2))
-
-            # تعبئة الملاحظات باسم التاجر
-            merchant_name = data.get('merchant_name', '')
-            if merchant_name:
-                current_notes = self.notes_input.text()
-                self.notes_input.setText(f"فاتورة من: {merchant_name}\n{current_notes}")
-
-            # تعبئة البنود
-            items = data.get('items', [])
-            for item in items:
-                item_name = item.get('name', 'بند')
-                quantity = float(item.get('qty', 1) or 1)
-                price = float(item.get('price', 0) or 0)
-
-                if price > 0:
-                    subtotal_item = quantity * price
-                    item_schema = schemas.QuotationItem(
-                        service_id="scanned_item",
-                        description=item_name,
-                        quantity=quantity,
-                        unit_price=price,
-                        discount_rate=0.0,
-                        discount_amount=0.0,
-                        total=subtotal_item,
-                    )
-                    self.quote_items.append(item_schema)
-
-                    row = self.items_table.rowCount()
-                    self.items_table.insertRow(row)
-                    self.items_table.blockSignals(True)
-
-                    desc_item = QTableWidgetItem(item_schema.description)
-                    desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.items_table.setItem(row, 0, desc_item)
-                    self.items_table.setItem(row, 1, QTableWidgetItem(f"{item_schema.quantity:.2f}"))
-                    self.items_table.setItem(row, 2, QTableWidgetItem(f"{item_schema.unit_price:.2f}"))
-                    self.items_table.setItem(row, 3, QTableWidgetItem(f"{item_schema.discount_rate:.2f}"))
-
-                    total_item = QTableWidgetItem(f"{item_schema.total:.2f}")
-                    total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    self.items_table.setItem(row, 4, total_item)
-
-                    delete_btn = QPushButton("🗑️")
-                    delete_btn.setStyleSheet("background-color: #ef4444; color: white;")
-                    delete_btn.clicked.connect(lambda _, r=row: self.delete_item(r))
-                    self.items_table.setCellWidget(row, 5, delete_btn)
-
-                    self.items_table.blockSignals(False)
-
-            # رسالة نجاح
-            items_count = len(items)
-            QMessageBox.information(
-                self,
-                "✅ تم المسح بنجاح",
-                f"تم استخراج {items_count} بند من الفاتورة.\nيرجى مراجعة البيانات قبل الحفظ."
-            )
-
-        except Exception as e:
-            print(f"ERROR: [QuotationEditor] خطأ في معالجة نتيجة المسح: {e}")
-            QMessageBox.warning(self, "تحذير", f"تم المسح لكن حدث خطأ في التعبئة:\n{e}")
-
-    def _on_scan_failed(self, error_msg: str):
-        """معالجة فشل المسح"""
-        QMessageBox.warning(
-            self,
-            "❌ فشل المسح",
-            f"لم نتمكن من قراءة الفاتورة:\n{error_msg}\n\nيمكنك إدخال البيانات يدوياً."
-        )

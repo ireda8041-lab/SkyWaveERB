@@ -4,7 +4,6 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -18,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from services.template_service import TemplateService
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, get_cairo_font
 from ui.template_manager import TemplateManager
 
 
@@ -27,6 +26,11 @@ class TemplateSettings(QWidget):
 
     def __init__(self, settings_service, parent=None):
         super().__init__(parent)
+        
+        # 📱 تصميم متجاوب
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         self.settings_service = settings_service
 
         # إنشاء خدمة القوالب
@@ -49,7 +53,7 @@ class TemplateSettings(QWidget):
 
         # عنوان القسم
         title_label = QLabel("🎨 إدارة قوالب الفواتير")
-        title_label.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title_label.setFont(get_cairo_font(16, bold=True))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("""
             QLabel {

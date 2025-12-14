@@ -81,14 +81,14 @@ class UpdaterWindow(QMainWindow):
         # العنوان
         title = QLabel("🚀 Sky Wave ERP")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+        title.setFont(QFont("Cairo", 24, QFont.Weight.Bold))
         title.setStyleSheet("color: #00d4ff; background: transparent;")
         frame_layout.addWidget(title)
 
         # العنوان الفرعي
         subtitle = QLabel("جاري تحديث البرنامج...")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setFont(QFont("Segoe UI", 12))
+        subtitle.setFont(QFont("Cairo", 12))
         subtitle.setStyleSheet("color: #ffffff; background: transparent;")
         frame_layout.addWidget(subtitle)
 
@@ -120,7 +120,7 @@ class UpdaterWindow(QMainWindow):
         # حالة التحديث
         self.status_label = QLabel("⏳ جاري التحضير...")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setFont(QFont("Segoe UI", 11))
+        self.status_label.setFont(QFont("Cairo", 11))
         self.status_label.setStyleSheet("color: #aaaaaa; background: transparent;")
         frame_layout.addWidget(self.status_label)
 
@@ -129,7 +129,7 @@ class UpdaterWindow(QMainWindow):
         # زر الإلغاء
         self.cancel_btn = QPushButton("إلغاء")
         self.cancel_btn.setFixedSize(120, 40)
-        self.cancel_btn.setFont(QFont("Segoe UI", 11))
+        self.cancel_btn.setFont(QFont("Cairo", 11))
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;

@@ -491,25 +491,73 @@ class ProjectService:
     # --- (الجديد) دوال الدفعات بقت جوه المشاريع ---
     def create_payment_for_project(self, project: schemas.Project, amount: float, date: datetime, account_id: str) -> schemas.Payment | None:
         """
-        (جديدة) إنشاء دفعة جديدة لمشروع.
+        ⚡ إنشاء دفعة جديدة لمشروع مع التكامل المحاسبي الكامل
+
+        Args:
+            project: المشروع المرتبط بالدفعة
+            amount: مبلغ الدفعة
+            date: تاريخ الدفعة
+            account_id: كود حساب الاستلام (بنك/خزينة)
+
+        Returns:
+            الدفعة المنشأة أو None في حالة الفشل
+
+        Raises:
+            Exception: في حالة وجود دفعة مكررة أو خطأ في قاعدة البيانات
         """
-        print(f"INFO: [ProjectService] استلام طلب دفعة لـ {project.name} بمبلغ {amount}")
+        print(f"INFO: [ProjectService] ⚡ استلام طلب دفعة لـ {project.name} بمبلغ {amount}")
+        print(f"DEBUG: [ProjectService] client_id من المشروع: '{project.client_id}'")
+        print(f"DEBUG: [ProjectService] account_id: '{account_id}'")
+
+        # ⚡ التحقق من صحة البيانات
+        if amount <= 0:
+            raise ValueError("مبلغ الدفعة يجب أن يكون أكبر من صفر")
+
+        if not account_id:
+            raise ValueError("يجب تحديد حساب الاستلام")
+
+        if not project.name:
+            raise ValueError("يجب تحديد المشروع")
 
         try:
+            # تحديد طريقة الدفع من الحساب
+            payment_method = self._get_payment_method_from_account(account_id)
+
+            # ⚡ التحقق من وجود client_id
+            client_id = project.client_id
+            if not client_id:
+                print(f"WARNING: [ProjectService] المشروع {project.name} ليس له client_id!")
+                # محاولة جلب client_id من قاعدة البيانات
+                db_project = self.repo.get_project_by_number(project.name)
+                if db_project and db_project.client_id:
+                    client_id = db_project.client_id
+                    print(f"INFO: [ProjectService] تم جلب client_id من قاعدة البيانات: {client_id}")
+
             payment_data = schemas.Payment(
                 project_id=project.name,
-                client_id=project.client_id,
+                client_id=client_id or "",
                 date=date,
                 amount=amount,
                 account_id=account_id,
+                method=payment_method,
             )
-            created_payment = self.repo.create_payment(payment_data)
+            
+            print(f"DEBUG: [ProjectService] بيانات الدفعة: project_id={payment_data.project_id}, client_id={payment_data.client_id}")
 
-            # (نبلغ الروبوت المحاسبي)
-            self.bus.publish('PAYMENT_RECEIVED', {
+            # ⚡ إنشاء الدفعة في قاعدة البيانات (مع فحص التكرار)
+            created_payment = self.repo.create_payment(payment_data)
+            print(f"DEBUG: [ProjectService] تم إنشاء الدفعة في قاعدة البيانات: ID={created_payment.id}")
+
+            # ⚡ إبلاغ الروبوت المحاسبي (ينشئ القيد تلقائياً)
+            print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECEIVED...")
+            subscribers = self.bus.get_subscriber_count('PAYMENT_RECEIVED')
+            print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECEIVED: {subscribers}")
+            
+            result = self.bus.publish('PAYMENT_RECEIVED', {
                 "payment": created_payment,
                 "project": project
             })
+            print(f"DEBUG: [ProjectService] تم نشر الحدث - عدد المستمعين الذين تم إخطارهم: {result}")
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
             self._auto_update_project_status(project.name, force_update=True)
@@ -518,22 +566,83 @@ class ProjectService:
             app_signals.emit_data_changed('projects')
             app_signals.emit_data_changed('payments')
 
-            print("SUCCESS: [ProjectService] تم تسجيل الدفعة.")
+            print(f"SUCCESS: [ProjectService] ✅ تم تسجيل الدفعة بمبلغ {amount} للمشروع {project.name}")
             return created_payment
 
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل إنشاء الدفعة: {e}")
             raise
 
+    def _get_payment_method_from_account(self, account_code: str) -> str:
+        """⚡ تحديد طريقة الدفع من كود الحساب - يدعم نظام 4 و 6 أرقام"""
+        if not account_code:
+            return "Other"
+
+        try:
+            account = self.repo.get_account_by_code(account_code)
+            if not account:
+                return "Other"
+
+            name = (account.name or "").lower()
+            code = account_code
+
+            # ⚡ البحث بالاسم أولاً (الأكثر دقة)
+            if "vodafone" in name or "فودافون" in name or "v/f" in name or "vf" in name:
+                return "Vodafone Cash"
+            elif "instapay" in name or "انستاباي" in name:
+                return "InstaPay"
+            elif "كاش" in name or "cash" in name or "خزينة" in name or "صندوق" in name:
+                return "Cash"
+            elif "بنك" in name or "bank" in name:
+                return "Bank Transfer"
+            elif "شيك" in name or "check" in name:
+                return "Check"
+            
+            # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
+            # نظام 4 أرقام: 1103 = Vodafone, 1104 = InstaPay, 1101 = Cash, 1102 = Bank
+            # نظام 6 أرقام: 111000 = Vodafone Cash, 111001 = V/F, 111101 = Cash
+            if code in ["1103", "111000"] or code.startswith("1110"):
+                return "Vodafone Cash"
+            elif code in ["1104"] or "instapay" in code.lower():
+                return "InstaPay"
+            elif code in ["1101", "111101"] or code.startswith("1111"):
+                return "Cash"
+            elif code.startswith("1102") or code.startswith("1112"):
+                return "Bank Transfer"
+                
+        except Exception as e:
+            print(f"WARNING: [ProjectService] فشل تحديد طريقة الدفع: {e}")
+
+        return "Other"
+
     def update_payment_for_project(self, payment_id, payment_data: schemas.Payment) -> bool:
-        """⚡ تعديل دفعة مع تحديث حالة المشروع أوتوماتيك"""
+        """
+        ⚡ تعديل دفعة مع تحديث حالة المشروع والقيود المحاسبية أوتوماتيك
+
+        Args:
+            payment_id: معرف الدفعة (SQLite ID أو MongoDB ID)
+            payment_data: بيانات الدفعة المحدثة
+
+        Returns:
+            True إذا نجح التعديل، False خلاف ذلك
+        """
         try:
             project_name = payment_data.project_id
             project = self.repo.get_project_by_number(project_name)
+
+            # ⚡ التحقق من صحة البيانات
+            if payment_data.amount <= 0:
+                print("ERROR: [ProjectService] مبلغ الدفعة يجب أن يكون أكبر من صفر")
+                return False
+
+            # تحديث طريقة الدفع من الحساب
+            if payment_data.account_id:
+                payment_data.method = self._get_payment_method_from_account(payment_data.account_id)
+
             result = self.repo.update_payment(payment_id, payment_data)
 
             if result:
-                # ✅ إبلاغ الروبوت المحاسبي بتعديل الدفعة
+                # ✅ إبلاغ الروبوت المحاسبي بتعديل الدفعة (يحدث القيد تلقائياً)
                 self.bus.publish('PAYMENT_UPDATED', {
                     "payment": payment_data,
                     "project": project
@@ -544,23 +653,38 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
-                print("SUCCESS: [ProjectService] تم تعديل الدفعة وتحديث حالة المشروع")
+                print(f"SUCCESS: [ProjectService] ✅ تم تعديل الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل تعديل الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def delete_payment_for_project(self, payment_id, project_name: str) -> bool:
-        """⚡ حذف دفعة مع تحديث حالة المشروع أوتوماتيك"""
+        """
+        ⚡ حذف دفعة مع تحديث حالة المشروع وعكس القيد المحاسبي أوتوماتيك
+
+        Args:
+            payment_id: معرف الدفعة (SQLite ID أو MongoDB ID)
+            project_name: اسم المشروع المرتبط
+
+        Returns:
+            True إذا نجح الحذف، False خلاف ذلك
+        """
         try:
-            # جلب بيانات الدفعة قبل الحذف
+            # ⚡ جلب بيانات الدفعة قبل الحذف (مهم للقيد العكسي)
             payment = self.repo.get_payment_by_id(payment_id)
+
+            if not payment:
+                print(f"WARNING: [ProjectService] لم يتم العثور على الدفعة: {payment_id}")
+                return False
 
             result = self.repo.delete_payment(payment_id)
 
             if result:
-                # ✅ إبلاغ الروبوت المحاسبي بحذف الدفعة
+                # ✅ إبلاغ الروبوت المحاسبي بحذف الدفعة (ينشئ قيد عكسي تلقائياً)
                 self.bus.publish('PAYMENT_DELETED', {
                     "payment_id": payment_id,
                     "payment": payment,
@@ -572,11 +696,13 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
-                print("SUCCESS: [ProjectService] تم حذف الدفعة وتحديث حالة المشروع")
+                print(f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
         except Exception as e:
             print(f"ERROR: [ProjectService] فشل حذف الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     # (الجديد: دالة تحويل عرض السعر بقت هنا)

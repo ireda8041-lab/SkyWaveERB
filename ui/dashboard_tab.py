@@ -5,12 +5,13 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QHeaderView, QLabel,
     QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget
 )
+
+from ui.styles import get_cairo_font, TABLE_STYLE_DARK, create_centered_item
 
 # مكتبات الرسم البياني
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -35,13 +36,18 @@ def fix_text(text: str) -> str:
 
 
 class StatCard(QFrame):
-    """تصميم الكارت الاحترافي - بدون أقواس مكسورة"""
+    """تصميم الكارت الاحترافي - متجاوب مع الشاشة"""
 
     def __init__(self, title: str, value: str, icon: str, color_hex: str):
         super().__init__()
         self.color_hex = color_hex
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setMinimumHeight(100)
+        
+        # 📱 تجاوب: حد أدنى وأقصى للحجم
+        self.setMinimumHeight(90)
+        self.setMinimumWidth(180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: #1e293b;
@@ -54,18 +60,18 @@ class StatCard(QFrame):
             }}
             QLabel#Title {{
                 color: #94a3b8;
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: bold;
-                font-family: 'Segoe UI', 'Cairo', sans-serif;
+                font-family: 'Cairo';
             }}
             QLabel#Value {{
                 color: white;
                 font-weight: bold;
-                font-size: 24px;
-                font-family: 'Segoe UI', 'Cairo', sans-serif;
+                font-size: 20px;
+                font-family: 'Cairo';
             }}
             QLabel#Icon {{
-                font-size: 32px;
+                font-size: 28px;
             }}
         """)
 
@@ -154,12 +160,15 @@ class FinancialChart(FigureCanvas):
 
 
 class DashboardTab(QWidget):
-    """لوحة التحكم الرئيسية - مصدر بيانات موحد"""
+    """لوحة التحكم الرئيسية - مصدر بيانات موحد - متجاوب"""
 
     def __init__(self, accounting_service: AccountingService, parent=None):
         super().__init__(parent)
         self.accounting_service = accounting_service
+        
+        # 📱 تجاوب: سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(600, 400)
 
         # تفعيل الاتجاه من اليمين لليسار
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -168,15 +177,15 @@ class DashboardTab(QWidget):
 
     def init_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(15, 15, 15, 15)
         self.setLayout(main_layout)
 
         # === 1. العنوان مع زر التحديث ===
         header_layout = QHBoxLayout()
 
         header = QLabel("📊 لوحة القيادة والمؤشرات المالية")
-        header.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        header.setFont(get_cairo_font(18, bold=True))
         header.setStyleSheet("color: white;")
 
         self.refresh_btn = QPushButton("🔄 تحديث")
@@ -188,7 +197,7 @@ class DashboardTab(QWidget):
                 font-weight: bold;
                 border-radius: 8px;
                 font-size: 13px;
-                font-family: 'Segoe UI', 'Cairo', sans-serif;
+                font-family: 'Cairo';
             }
             QPushButton:hover { background-color: #2563eb; }
         """)
@@ -199,19 +208,20 @@ class DashboardTab(QWidget):
         header_layout.addWidget(self.refresh_btn)
         main_layout.addLayout(header_layout)
 
-        # === 2. الكروت الإحصائية (4 كروت) ===
+        # === 2. الكروت الإحصائية (4 كروت) - متجاوبة ===
         cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(15)
+        cards_layout.setSpacing(12)
 
         self.card_sales = StatCard("إجمالي المبيعات", "0.00 EGP", "💼", "#3b82f6")
         self.card_collected = StatCard("النقدية المحصلة", "0.00 EGP", "💰", "#10b981")
         self.card_receivables = StatCard("مستحقات آجلة", "0.00 EGP", "📝", "#f59e0b")
         self.card_expenses = StatCard("المصروفات", "0.00 EGP", "💸", "#ef4444")
 
-        cards_layout.addWidget(self.card_sales)
-        cards_layout.addWidget(self.card_collected)
-        cards_layout.addWidget(self.card_receivables)
-        cards_layout.addWidget(self.card_expenses)
+        # 📱 تجاوب: كل كارت يأخذ نفس المساحة
+        cards_layout.addWidget(self.card_sales, 1)
+        cards_layout.addWidget(self.card_collected, 1)
+        cards_layout.addWidget(self.card_receivables, 1)
+        cards_layout.addWidget(self.card_expenses, 1)
         main_layout.addLayout(cards_layout)
 
         # === 3. القسم السفلي (الرسم البياني + الجدول) ===
@@ -237,7 +247,7 @@ class DashboardTab(QWidget):
             font-size: 14px;
             border: none;
             background: transparent;
-            font-family: 'Segoe UI', 'Cairo', sans-serif;
+            font-family: 'Cairo';
         """)
         chart_layout.addWidget(lbl_chart)
 
@@ -264,36 +274,23 @@ class DashboardTab(QWidget):
             font-size: 14px;
             border: none;
             background: transparent;
-            font-family: 'Segoe UI', 'Cairo', sans-serif;
+            font-family: 'Cairo';
         """)
         table_layout.addWidget(lbl_table)
 
         self.recent_table = QTableWidget()
         self.recent_table.setColumnCount(3)
         self.recent_table.setHorizontalHeaderLabels(["التاريخ", "الوصف", "المبلغ"])
-        self.recent_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self.recent_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # التاريخ
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # الوصف - يتمدد
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ
         self.recent_table.verticalHeader().setVisible(False)
-        self.recent_table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.recent_table.setStyleSheet("""
-            QTableWidget {
-                background-color: #0f172a;
-                border: none;
-                color: #e2e8f0;
-                gridline-color: #334155;
-                border-radius: 8px;
-                font-family: 'Segoe UI', 'Cairo', sans-serif;
-            }
-            QHeaderView::section {
-                background-color: #1e293b;
-                color: #94a3b8;
-                border: none;
-                padding: 8px;
-                font-weight: bold;
-            }
-            QTableWidget::item {
-                padding: 5px;
-            }
-        """)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.recent_table)
+        self.recent_table.setStyleSheet(TABLE_STYLE_DARK)
+        self.recent_table.verticalHeader().setDefaultSectionSize(32)
         table_layout.addWidget(self.recent_table)
         bottom_layout.addWidget(table_container, stretch=2)
 
@@ -353,16 +350,9 @@ class DashboardTab(QWidget):
                         desc_val = str(entry[1]) if len(entry) > 1 else ''
                         amount_val = entry[2] if len(entry) > 2 else 0
 
-                    date_item = QTableWidgetItem(date_val)
-                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.recent_table.setItem(i, 0, date_item)
-
-                    desc_item = QTableWidgetItem(desc_val)
-                    self.recent_table.setItem(i, 1, desc_item)
-
-                    amount_item = QTableWidgetItem(f"{amount_val:,.2f}")
-                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.recent_table.setItem(i, 2, amount_item)
+                    self.recent_table.setItem(i, 0, create_centered_item(date_val))
+                    self.recent_table.setItem(i, 1, create_centered_item(desc_val))
+                    self.recent_table.setItem(i, 2, create_centered_item(f"{amount_val:,.2f}"))
 
                 print("INFO: [Dashboard] ✅ تم تحديث الداشبورد بنجاح")
             except Exception as e:

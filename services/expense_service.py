@@ -33,7 +33,7 @@ logger = get_logger(__name__)
 
 class ExpenseService:
     """
-    قسم المصروفات (Service Layer).
+    ⚡ قسم المصروفات (Service Layer) - محسّن للأداء
     يحتوي على منطق العمل الخاص بإدارة المصروفات.
     """
 
@@ -47,17 +47,41 @@ class ExpenseService:
         """
         self.repo = repository
         self.bus = event_bus
-        logger.info("قسم المصروفات (ExpenseService) جاهز")
+        
+        # ⚡ Cache للمصروفات
+        self._cache_time: float = 0
+        self._cached_expenses: list[schemas.Expense] | None = None
+        self._cache_ttl = 30  # 30 ثانية
+        
+        logger.info("⚡ قسم المصروفات (ExpenseService) جاهز")
+
+    def invalidate_cache(self):
+        """⚡ إبطال الـ cache"""
+        self._cached_expenses = None
+        self._cache_time = 0
 
     def get_all_expenses(self) -> list[schemas.Expense]:
         """
-        جلب كل المصروفات
+        ⚡ جلب كل المصروفات (مع cache)
 
         Returns:
             قائمة بجميع المصروفات
         """
+        import time
         try:
-            return self.repo.get_all_expenses()
+            # ⚡ استخدام الـ cache
+            now = time.time()
+            if self._cached_expenses and (now - self._cache_time) < self._cache_ttl:
+                return self._cached_expenses
+
+            # جلب من قاعدة البيانات
+            expenses = self.repo.get_all_expenses()
+
+            # تحديث الـ cache
+            self._cached_expenses = expenses
+            self._cache_time = now
+
+            return expenses
         except Exception as e:
             logger.error(f"[ExpenseService] فشل جلب المصروفات: {e}", exc_info=True)
             return []
@@ -94,6 +118,9 @@ class ExpenseService:
             # حفظ المصروف
             created_expense = self.repo.create_expense(expense_data)
 
+            # ⚡ إبطال الـ cache
+            self.invalidate_cache()
+
             # نشر الحدث للمحاسبة (سيتم التعامل معه في accounting_service)
             self.bus.publish('EXPENSE_CREATED', {'expense': created_expense})
 
@@ -125,6 +152,8 @@ class ExpenseService:
         try:
             result = self.repo.update_expense(expense_id, expense_data)
             if result:
+                # ⚡ إبطال الـ cache
+                self.invalidate_cache()
                 self.bus.publish('EXPENSE_UPDATED', expense_data)
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
@@ -151,6 +180,8 @@ class ExpenseService:
         try:
             result = self.repo.delete_expense(expense_id)
             if result:
+                # ⚡ إبطال الـ cache
+                self.invalidate_cache()
                 self.bus.publish('EXPENSE_DELETED', {'id': expense_id})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')

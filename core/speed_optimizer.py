@@ -1,26 +1,34 @@
 """
 ⚡ محسّن السرعة - Sky Wave ERP
 يوفر أدوات لتسريع البرنامج بشكل كبير
+الإصدار المحسّن مع دعم أفضل للـ threading
 """
 
 import functools
 import threading
 import time
+import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+
+# ⚡ إعدادات الأداء
+DEFAULT_CACHE_SIZE = 1000
+DEFAULT_TTL_SECONDS = 60
+MAX_CACHE_MEMORY_MB = 50  # الحد الأقصى للذاكرة
 
 
 class LRUCache:
     """
     ⚡ Cache ذكي مع حد أقصى للحجم وانتهاء صلاحية
+    محسّن للأداء مع دعم التنظيف التلقائي
     """
 
-    def __init__(self, maxsize: int = 1000, ttl_seconds: int = 300):
+    def __init__(self, maxsize: int = DEFAULT_CACHE_SIZE, ttl_seconds: int = DEFAULT_TTL_SECONDS):
         """
         Args:
             maxsize: الحد الأقصى للعناصر
-            ttl_seconds: مدة صلاحية العنصر بالثواني (افتراضي 5 دقائق)
+            ttl_seconds: مدة صلاحية العنصر بالثواني (افتراضي 60 ثانية)
         """
         self.maxsize = maxsize
         self.ttl = ttl_seconds
@@ -29,10 +37,15 @@ class LRUCache:
         self._lock = threading.RLock()
         self._hits = 0
         self._misses = 0
+        self._last_cleanup = time.time()
+        self._cleanup_interval = 30  # تنظيف كل 30 ثانية
 
     def get(self, key: str) -> Any | None:
         """جلب قيمة من الـ cache"""
         with self._lock:
+            # ⚡ تنظيف دوري
+            self._maybe_cleanup()
+            
             if key not in self._cache:
                 self._misses += 1
                 return None
@@ -48,6 +61,21 @@ class LRUCache:
             self._cache.move_to_end(key)
             self._hits += 1
             return self._cache[key]
+    
+    def _maybe_cleanup(self):
+        """⚡ تنظيف دوري للعناصر المنتهية الصلاحية"""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        
+        self._last_cleanup = now
+        expired_keys = [
+            k for k, t in self._timestamps.items()
+            if now - t > self.ttl
+        ]
+        for key in expired_keys:
+            self._cache.pop(key, None)
+            self._timestamps.pop(key, None)
 
     def set(self, key: str, value: Any) -> None:
         """تخزين قيمة في الـ cache"""

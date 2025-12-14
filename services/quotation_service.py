@@ -14,7 +14,8 @@ logger = get_logger(__name__)
 
 class QuotationService:
     """
-    قسم عروض الأسعار - يتعامل مع إنشاء وإدارة عروض الأسعار وتحويلها لمشاريع
+    ⚡ قسم عروض الأسعار - محسّن للأداء
+    يتعامل مع إنشاء وإدارة عروض الأسعار وتحويلها لمشاريع
     """
 
     def __init__(
@@ -34,17 +35,41 @@ class QuotationService:
         self.repo = repository
         self.bus = event_bus
         self.project_service = project_service
-        logger.info("قسم عروض الأسعار (QuotationService) جاهز")
+        
+        # ⚡ Cache لعروض الأسعار
+        self._cache_time: float = 0
+        self._cached_quotations: list[schemas.Quotation] | None = None
+        self._cache_ttl = 30  # 30 ثانية
+        
+        logger.info("⚡ قسم عروض الأسعار (QuotationService) جاهز")
+
+    def invalidate_cache(self):
+        """⚡ إبطال الـ cache"""
+        self._cached_quotations = None
+        self._cache_time = 0
 
     def get_all_quotations(self) -> list[schemas.Quotation]:
         """
-        جلب كل عروض الأسعار
+        ⚡ جلب كل عروض الأسعار (مع cache)
 
         Returns:
             قائمة بجميع عروض الأسعار
         """
+        import time
         try:
-            return self.repo.get_all_quotations()
+            # ⚡ استخدام الـ cache
+            now = time.time()
+            if self._cached_quotations and (now - self._cache_time) < self._cache_ttl:
+                return self._cached_quotations
+
+            # جلب من قاعدة البيانات
+            quotations = self.repo.get_all_quotations()
+
+            # تحديث الـ cache
+            self._cached_quotations = quotations
+            self._cache_time = now
+
+            return quotations
         except Exception as e:
             logger.error(f"[QuotationService] فشل جلب عروض الأسعار: {e}", exc_info=True)
             return []

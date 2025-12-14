@@ -266,7 +266,7 @@ class SyncWorker(QThread):
         self.wait()
 
 
-class AdvancedSyncManager(QObject):
+class AdvancedSyncManagerV3(QObject):
     """مدير المزامنة المتقدم"""
 
     # إشارات

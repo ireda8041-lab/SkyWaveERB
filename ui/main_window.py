@@ -1,12 +1,12 @@
 # الملف: ui/main_window.py
 
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QMainWindow, QMessageBox, QTabWidget, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QMainWindow, QMessageBox, QTabWidget, QVBoxLayout, QWidget, QFrame, QHBoxLayout, QLabel, QPushButton
 
 from core.keyboard_shortcuts import KeyboardShortcutManager  # (الجديد) مدير الاختصارات
-from core.sync_manager import SyncManager  # (الجديد) مدير المزامنة
+from core.sync_manager_v3 import SyncManagerV3  # (الجديد) مدير المزامنة المحسن
 from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.expense_service import ExpenseService
@@ -25,19 +25,23 @@ from ui.client_manager import ClientManagerTab
 # (استيراد التابات الجديدة)
 from ui.dashboard_tab import DashboardTab
 from ui.expense_manager import ExpenseManagerTab  # (التاب الجديد بتاع المصروفات)
-from ui.notification_widget import NotificationWidget  # (الجديد) ويدجت الإشعارات
+# تم حذف نظام الإشعارات
 from ui.payments_manager import PaymentsManagerTab  # (الجديد) تاب الدفعات
 from ui.project_manager import ProjectManagerTab
 from ui.quotation_manager import QuotationManagerTab
 from ui.service_manager import ServiceManagerTab
 from ui.settings_tab import SettingsTab
 from ui.shortcuts_help_dialog import ShortcutsHelpDialog  # (الجديد) نافذة مساعدة الاختصارات
+from ui.styles import COLORS  # ألوان التطبيق
 
 
 class MainWindow(QMainWindow):
     """
     (معدلة) الشاشة الرئيسية (بتابات المحاسبة والمصروفات الجديدة)
     """
+    
+    # إشارات للمزامنة
+    sync_completed = pyqtSignal(dict)
 
     def __init__(
         self,
@@ -50,12 +54,12 @@ class MainWindow(QMainWindow):
         invoice_service: InvoiceService,
         quotation_service: QuotationService,
         project_service: ProjectService,
-        sync_manager: SyncManager | None = None,
         notification_service: NotificationService | None = None,
         printing_service = None,
         export_service = None,
         advanced_sync_manager = None,
         smart_scan_service = None,
+        sync_manager = None,  # 🔥 نظام المزامنة الجديد
     ):
         super().__init__()
 
@@ -81,6 +85,7 @@ class MainWindow(QMainWindow):
         self.export_service = export_service
         self.advanced_sync_manager = advanced_sync_manager
         self.smart_scan_service = smart_scan_service
+        self.sync_manager = sync_manager  # 🔥 نظام المزامنة الجديد
 
         role_display = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
         self.setWindowTitle(f"Sky Wave ERP - {current_user.full_name or current_user.username} ({role_display})")
@@ -101,16 +106,25 @@ class MainWindow(QMainWindow):
         primary_screen = QApplication.primaryScreen()
         if primary_screen is None:
             raise RuntimeError("No primary screen available")
-        screen = primary_screen.availableGeometry()
-        screen.width()
-        screen.height()
+        screen_geometry = primary_screen.availableGeometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
 
         # تعيين الحد الأدنى للنافذة (حجم صغير يناسب أي شاشة)
         self.setMinimumSize(QSize(1024, 600))
 
-        # فتح النافذة بحجم الشاشة الكامل
-        self.setGeometry(screen)
-        self.showMaximized()
+        # تعيين حجم النافذة بنسبة 90% من حجم الشاشة (أكثر راحة)
+        window_width = int(screen_width * 0.9)
+        window_height = int(screen_height * 0.9)
+        
+        # توسيط النافذة في الشاشة
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        self.setGeometry(x, y, window_width, window_height)
+        
+        # يمكن للمستخدم تكبير النافذة إذا أراد
+        # self.showMaximized()  # معطل افتراضياً لراحة أكبر
 
         # جعل النافذة قابلة لتغيير الحجم بشكل ديناميكي
         self.setWindowFlags(Qt.WindowType.Window)
@@ -119,35 +133,19 @@ class MainWindow(QMainWindow):
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-        # إنشاء شريط الأدوات (Toolbar) في الأعلى
-        toolbar = self.addToolBar("الأدوات الرئيسية")
-        if toolbar is not None:
-            toolbar.setMovable(False)
+        # تم إزالة الهيدر - زر المزامنة موجود في الـ Status Bar
+        
+        # ربط signal اكتمال المزامنة
+        self.sync_completed.connect(self._on_full_sync_completed)
 
-            # إضافة spacer لدفع الويدجتات إلى اليمين
-            from PyQt6.QtWidgets import QSizePolicy
-            spacer = QWidget()
-            spacer.setSizePolicy(
-                QSizePolicy.Policy.Expanding,
-                QSizePolicy.Policy.Preferred
-            )
-            toolbar.addWidget(spacer)
+        # إعداد مؤقت لفحص مواعيد استحقاق المشاريع (كل 24 ساعة)
+        from PyQt6.QtCore import QTimer
+        self.project_check_timer = QTimer()
+        self.project_check_timer.timeout.connect(self._check_project_due_dates_background)
+        self.project_check_timer.start(86400000)  # 24 ساعة
 
-            # إضافة ويدجت الإشعارات في شريط الأدوات (أعلى)
-            if self.notification_service:
-                self.notification_widget = NotificationWidget(self.notification_service)
-                toolbar.addWidget(self.notification_widget)
-
-            # إعداد مؤقت لفحص مواعيد استحقاق المشاريع (كل 24 ساعة)
-            from PyQt6.QtCore import QTimer
-            self.project_check_timer = QTimer()
-            self.project_check_timer.timeout.connect(
-                self._check_project_due_dates_background
-            )
-            self.project_check_timer.start(86400000)  # 24 ساعة بالميلي ثانية
-
-            # ⚡ فحص أولي في الخلفية بعد 10 ثواني (لتجنب التجميد)
-            QTimer.singleShot(10000, self._check_project_due_dates_background)
+        # ⚡ فحص أولي في الخلفية بعد 10 ثواني
+        QTimer.singleShot(10000, self._check_project_due_dates_background)
 
         # إعداد اختصارات لوحة المفاتيح
         self.shortcuts_manager = KeyboardShortcutManager(self)
@@ -162,45 +160,51 @@ class MainWindow(QMainWindow):
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tabs.setMinimumSize(QSize(400, 300))  # حد أدنى صغير للتجاوب
 
-        # تحسين شكل التابات (Dark Blue Theme - زي الصورة)
+        # تحسين شكل التابات - تصميم احترافي حديث
         self.tabs.setStyleSheet("""
             QTabWidget::pane {
-                border: 1px solid #003366;
-                background-color: #001a3a;
-                border-radius: 8px;
-            }
-
-            QTabBar::tab {
-                background-color: #002040;
-                color: #ffffff;
-                padding: 12px 20px;
-                margin: 2px;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: bold;
-                min-width: 120px;
-                border: 2px solid transparent;
-            }
-
-            QTabBar::tab:hover {
-                background-color: #003366;
-                border: 2px solid #4a90e2;
-                transform: translateY(-2px);
-            }
-
-            QTabBar::tab:selected {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4a90e2, stop:1 #357abd);
-                color: white;
-                border: 2px solid #4a90e2;
-                box-shadow: 0 4px 8px rgba(74, 144, 226, 0.3);
-            }
-
-            QTabBar::tab:!selected {
-                margin-top: 4px;
+                border: none;
+                background-color: #001A3A;
             }
 
             QTabBar {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                    stop:0 #0D3461, stop:1 #052045);
                 qproperty-drawBase: 0;
+                border-bottom: 1px solid #1E3A5F;
+            }
+
+            QTabBar::tab {
+                background-color: transparent;
+                color: #7A9BC5;
+                padding: 11px 22px;
+                margin: 0px;
+                border: none;
+                border-right: 1px solid rgba(30, 58, 95, 0.5);
+                font-size: 13px;
+                font-weight: 600;
+                min-width: 85px;
+            }
+
+            QTabBar::tab:hover {
+                color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(10, 108, 241, 0.25), stop:1 rgba(10, 108, 241, 0.1));
+            }
+
+            QTabBar::tab:selected {
+                color: #FFFFFF;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #0A6CF1, stop:1 #0550B8);
+                border-right: 1px solid #0A6CF1;
+            }
+
+            QTabBar::tab:first {
+                border-left: none;
+            }
+
+            QTabBar::tab:last {
+                border-right: none;
             }
         """)
 
@@ -246,13 +250,18 @@ class MainWindow(QMainWindow):
 
         # ربط زرار المزامنة اللحظية
         self.status_bar.sync_indicator.sync_requested.connect(self._on_instant_sync)
+        
+        # ربط زر المزامنة الكاملة
+        self.status_bar.full_sync_requested.connect(self._on_full_sync_clicked)
 
         # إنشاء container widget للـ tabs
         central_widget = QWidget()
         central_layout = QVBoxLayout(central_widget)
-        central_layout.setContentsMargins(5, 5, 5, 5)  # هوامش صغيرة
+        central_layout.setContentsMargins(5, 5, 5, 5)
         central_layout.setSpacing(0)
-        central_layout.addWidget(self.tabs, 1)  # stretch factor = 1 للتمدد الكامل
+        
+        # إضافة الـ tabs
+        central_layout.addWidget(self.tabs, 1)
 
         # إضافة الـ central widget
         self.setCentralWidget(central_widget)
@@ -263,15 +272,24 @@ class MainWindow(QMainWindow):
         central_widget.setMinimumSize(QSize(400, 300))
 
         # ✅ إضافة شريط الحالة في الأسفل باستخدام QStatusBar
-        from PyQt6.QtWidgets import QStatusBar
+        from PyQt6.QtWidgets import QSizePolicy, QStatusBar
         qt_status_bar = QStatusBar()
-        qt_status_bar.setFixedHeight(45)
+        qt_status_bar.setFixedHeight(60)  # تطابق مع ارتفاع StatusBarWidget
+        qt_status_bar.setSizeGripEnabled(False)  # إزالة المقبض
+        
+        # إضافة StatusBarWidget بحيث يملأ العرض كاملاً
+        self.status_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         qt_status_bar.addPermanentWidget(self.status_bar, 1)
         self.setStatusBar(qt_status_bar)
 
         # ✅ التأكد من أن الشريط السفلي دائمًا مرئي
         self.status_bar.setVisible(True)
         qt_status_bar.setVisible(True)
+        
+        # ✅ إزالة الحواف والهوامش لجعل البار كامل
+        qt_status_bar.setContentsMargins(0, 0, 0, 0)
+        qt_status_bar.layout().setContentsMargins(0, 0, 0, 0)
+        qt_status_bar.layout().setSpacing(0)
 
         # === شاشة التحميل المتراكبة - معطلة لتجنب التجميد ===
         # البيانات تحمل في الخلفية بدون الحاجة لشاشة تحميل
@@ -279,7 +297,7 @@ class MainWindow(QMainWindow):
 
         # --- 4. إعداد المزامنة (إذا لم يتم تمريرها) ---
         if not self.sync_manager:
-            self.sync_manager = SyncManager(self.accounting_service.repo)
+            self.sync_manager = SyncManagerV3(self.accounting_service.repo)
 
         # إعداد المزامنة التلقائية كل 10 دقائق
         self.setup_auto_sync()
@@ -374,7 +392,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
 
         # 10. Settings
-        self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo)
+        self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo, current_user=self.current_user)
         self.tabs.addTab(self.settings_tab, "🔧 الإعدادات")
         QApplication.processEvents()
 
@@ -715,6 +733,142 @@ class MainWindow(QMainWindow):
             print(f"ERROR: خطأ في بدء المزامنة اللحظية: {e}")
             self.status_bar.update_sync_status("error")
 
+    def _on_full_sync_clicked(self):
+        """
+        🔥 مزامنة كاملة - مسح البيانات المحلية وإعادة التحميل من MongoDB
+        """
+        # تأكيد من المستخدم
+        reply = QMessageBox.question(
+            self,
+            "🔄 مزامنة كاملة",
+            "هذه العملية ستقوم بـ:\n\n"
+            "1️⃣ رفع أي تغييرات محلية معلقة\n"
+            "2️⃣ مسح قاعدة البيانات المحلية بالكامل\n"
+            "3️⃣ إعادة تحميل كل البيانات من السيرفر\n\n"
+            "⚠️ تأكد من وجود اتصال بالإنترنت\n\n"
+            "هل تريد المتابعة؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # التحقق من وجود sync_manager
+        if not self.sync_manager:
+            QMessageBox.warning(
+                self,
+                "خطأ",
+                "نظام المزامنة غير متاح. يرجى إعادة تشغيل البرنامج."
+            )
+            return
+
+        # التحقق من الاتصال
+        if not self.sync_manager.is_online:
+            QMessageBox.warning(
+                self,
+                "غير متصل",
+                "لا يوجد اتصال بالإنترنت.\n"
+                "يرجى التحقق من الاتصال والمحاولة مرة أخرى."
+            )
+            return
+
+        # تعطيل الزر أثناء المزامنة
+        if hasattr(self, 'status_bar') and hasattr(self.status_bar, 'full_sync_btn'):
+            self.status_bar.full_sync_btn.setEnabled(False)
+            self.status_bar.full_sync_btn.setText("⏳ جاري...")
+
+        import threading
+
+        def do_full_sync():
+            """تنفيذ المزامنة الكاملة في thread منفصل"""
+            try:
+                print("INFO: 🔥 بدء المزامنة الكاملة...")
+
+                # استخدام نظام المزامنة الجديد
+                from core.startup_sync import get_startup_sync
+                
+                # الحصول على repository
+                repo = None
+                if self.sync_manager and hasattr(self.sync_manager, 'repo'):
+                    repo = self.sync_manager.repo
+                elif self.sync_manager and hasattr(self.sync_manager, 'repository'):
+                    repo = self.sync_manager.repository
+                
+                startup_sync = get_startup_sync(repo)
+                
+                if startup_sync:
+                    result = startup_sync.force_sync_now()
+                elif self.sync_manager:
+                    # fallback للنظام القديم
+                    result = self.sync_manager.safe_sync_all()
+                else:
+                    result = {'success': False, 'error': 'نظام المزامنة غير متاح'}
+
+                # تحديث الواجهة في الـ main thread باستخدام signal
+                try:
+                    self.sync_completed.emit(result)
+                except Exception as signal_error:
+                    print(f"WARNING: فشل في إرسال signal: {signal_error}")
+                    try:
+                        self._on_full_sync_completed(result)
+                    except:
+                        pass
+
+            except Exception as e:
+                print(f"ERROR: فشلت المزامنة الكاملة: {e}")
+                import traceback
+                traceback.print_exc()
+                try:
+                    self.sync_completed.emit({'success': False, 'error': str(e)})
+                except:
+                    pass
+
+        # تشغيل المزامنة في الخلفية
+        sync_thread = threading.Thread(target=do_full_sync, daemon=True)
+        sync_thread.start()
+
+    def _on_full_sync_completed(self, result: object):
+        """
+        معالج اكتمال المزامنة الكاملة
+        """
+        # إعادة تفعيل الزر
+        if hasattr(self, 'status_bar') and hasattr(self.status_bar, 'full_sync_btn'):
+            self.status_bar.full_sync_btn.setEnabled(True)
+            self.status_bar.full_sync_btn.setText("🔄 مزامنة")
+
+        if isinstance(result, dict):
+            if result.get('success'):
+                total_synced = result.get('total_synced', 0)
+                QMessageBox.information(
+                    self,
+                    "✅ اكتملت المزامنة",
+                    f"تمت المزامنة بنجاح!\n\n"
+                    f"📊 إجمالي السجلات: {total_synced}\n\n"
+                    "سيتم تحديث الواجهة الآن..."
+                )
+
+                # تحديث الواجهة
+                self.on_sync_completed()
+            else:
+                error = result.get('error', 'خطأ غير معروف')
+                reason = result.get('reason', '')
+                
+                if reason == 'offline':
+                    msg = "لا يوجد اتصال بالإنترنت"
+                elif reason == 'already_syncing':
+                    msg = "المزامنة جارية بالفعل"
+                else:
+                    msg = f"فشلت المزامنة: {error}"
+
+                QMessageBox.warning(self, "❌ فشلت المزامنة", msg)
+        else:
+            QMessageBox.warning(
+                self,
+                "❌ خطأ",
+                "حدث خطأ غير متوقع أثناء المزامنة"
+            )
+
     def _handle_logout(self):
         """معالج تسجيل الخروج"""
         reply = QMessageBox.question(
@@ -754,6 +908,8 @@ class MainWindow(QMainWindow):
         self.shortcuts_manager.new_project.connect(self._on_new_project)
         self.shortcuts_manager.new_client.connect(self._on_new_client)
         self.shortcuts_manager.new_expense.connect(self._on_new_expense)
+        self.shortcuts_manager.new_quotation.connect(self._on_new_quotation)
+        self.shortcuts_manager.new_payment.connect(self._on_new_payment)
 
         # اختصارات التنقل والبحث
         self.shortcuts_manager.search_activated.connect(self._on_search_activated)
@@ -761,30 +917,39 @@ class MainWindow(QMainWindow):
 
         # اختصارات المساعدة
         self.shortcuts_manager.show_help.connect(self._on_show_help)
+        
+        # اختصارات إضافية
+        self.shortcuts_manager.full_sync.connect(self._on_full_sync_clicked)
+        self.shortcuts_manager.delete_selected.connect(self._on_delete_selected)
+        self.shortcuts_manager.select_all.connect(self._on_select_all)
+        self.shortcuts_manager.copy_selected.connect(self._on_copy_selected)
+        self.shortcuts_manager.export_excel.connect(self._on_export_excel)
+        self.shortcuts_manager.print_current.connect(self._on_print_current)
+        self.shortcuts_manager.save_data.connect(self._on_save_data)
 
     def _on_new_project(self):
         """معالج اختصار مشروع جديد"""
         # التبديل إلى تاب المشاريع
         self.tabs.setCurrentIndex(1)
-        # محاولة فتح نافذة مشروع جديد
-        if hasattr(self.projects_tab, 'on_add_project'):
-            self.projects_tab.on_add_project()
+        # فتح نافذة مشروع جديد بعد تأخير بسيط
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.projects_tab.open_editor(project_to_edit=None))
 
     def _on_new_client(self):
         """معالج اختصار عميل جديد"""
         # التبديل إلى تاب العملاء
         self.tabs.setCurrentIndex(5)
-        # محاولة فتح نافذة عميل جديد
-        if hasattr(self.clients_tab, 'on_add_client'):
-            self.clients_tab.on_add_client()
+        # فتح نافذة عميل جديد بعد تأخير بسيط
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.clients_tab.open_editor(client_to_edit=None))
 
     def _on_new_expense(self):
         """معالج اختصار مصروف جديد"""
         # التبديل إلى تاب المصروفات
         self.tabs.setCurrentIndex(3)
-        # محاولة فتح نافذة مصروف جديد
-        if hasattr(self.expense_tab, 'on_add_expense'):
-            self.expense_tab.on_add_expense()
+        # فتح نافذة مصروف جديد بعد تأخير بسيط
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.expense_tab.open_add_dialog())
 
     def _on_search_activated(self):
         """معالج اختصار تفعيل البحث"""
@@ -816,6 +981,85 @@ class MainWindow(QMainWindow):
         """معالج اختصار عرض المساعدة"""
         dialog = ShortcutsHelpDialog(self.shortcuts_manager, self)
         dialog.exec()
+
+    def _on_new_quotation(self):
+        """معالج اختصار عرض سعر جديد"""
+        self.tabs.setCurrentIndex(2)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.quotes_tab.open_quote_editor())
+
+    def _on_new_payment(self):
+        """معالج اختصار دفعة جديدة"""
+        self.tabs.setCurrentIndex(4)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, lambda: self.payments_tab.open_add_dialog())
+
+    def _on_delete_selected(self):
+        """معالج اختصار حذف العنصر المحدد"""
+        current_tab = self.tabs.currentWidget()
+        # البحث عن دالة الحذف في التاب الحالي
+        if hasattr(current_tab, 'delete_selected_payment'):
+            current_tab.delete_selected_payment()
+        elif hasattr(current_tab, 'delete_selected_expense'):
+            current_tab.delete_selected_expense()
+        elif hasattr(current_tab, 'delete_selected_client'):
+            current_tab.delete_selected_client()
+        elif hasattr(current_tab, 'delete_selected'):
+            current_tab.delete_selected()
+        elif hasattr(current_tab, 'on_delete'):
+            current_tab.on_delete()
+
+    def _on_select_all(self):
+        """معالج اختصار تحديد الكل"""
+        current_tab = self.tabs.currentWidget()
+        # البحث عن الجدول في التاب الحالي
+        from PyQt6.QtWidgets import QTableWidget
+        tables = current_tab.findChildren(QTableWidget)
+        for table in tables:
+            if table.isVisible():
+                table.selectAll()
+                break
+
+    def _on_copy_selected(self):
+        """معالج اختصار نسخ المحدد"""
+        current_tab = self.tabs.currentWidget()
+        from PyQt6.QtWidgets import QTableWidget, QApplication
+        tables = current_tab.findChildren(QTableWidget)
+        for table in tables:
+            if table.isVisible() and table.selectedItems():
+                # نسخ البيانات المحددة
+                selected = table.selectedItems()
+                if selected:
+                    text = "\t".join([item.text() for item in selected])
+                    QApplication.clipboard().setText(text)
+                break
+
+    def _on_export_excel(self):
+        """معالج اختصار تصدير Excel"""
+        current_tab = self.tabs.currentWidget()
+        if hasattr(current_tab, 'export_to_excel'):
+            current_tab.export_to_excel()
+        elif hasattr(current_tab, 'on_export'):
+            current_tab.on_export()
+
+    def _on_print_current(self):
+        """معالج اختصار الطباعة"""
+        current_tab = self.tabs.currentWidget()
+        if hasattr(current_tab, 'print_data'):
+            current_tab.print_data()
+        elif hasattr(current_tab, 'on_print'):
+            current_tab.on_print()
+
+    def _on_save_data(self):
+        """معالج اختصار الحفظ"""
+        current_tab = self.tabs.currentWidget()
+        if hasattr(current_tab, 'save_data'):
+            current_tab.save_data()
+        elif hasattr(current_tab, 'on_save'):
+            current_tab.on_save()
+        else:
+            # مزامنة البيانات كبديل
+            self._on_full_sync_clicked()
 
     def apply_permissions(self):
         """تطبيق الصلاحيات حسب دور المستخدم"""

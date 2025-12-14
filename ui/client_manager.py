@@ -3,7 +3,7 @@
 import os
 
 from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 from core import schemas
 from services.client_service import ClientService
 from ui.client_editor_dialog import ClientEditorDialog
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, get_cairo_font, TABLE_STYLE_DARK, create_centered_item
 
 
 class ClientManagerTab(QWidget):
@@ -54,25 +54,37 @@ class ClientManagerTab(QWidget):
 
         self.add_button = QPushButton("➕ إضافة عميل جديد")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
+        self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(client_to_edit=None))
 
         self.edit_button = QPushButton("✏️ تعديل العميل")
         self.edit_button.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_button.setFixedHeight(28)
         self.edit_button.clicked.connect(self.open_editor_for_selected)
+
+        # زر الحذف الاحترافي
+        self.delete_button = QPushButton("🗑️ حذف العميل")
+        self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
+        self.delete_button.setFixedHeight(28)
+        self.delete_button.clicked.connect(self.delete_selected_client)
+        self.delete_button.setEnabled(False)  # معطل حتى يتم اختيار عميل
 
         # زر التصدير
         self.export_button = QPushButton("📊 تصدير Excel")
         self.export_button.setStyleSheet(BUTTON_STYLES["success"])
+        self.export_button.setFixedHeight(28)
         self.export_button.clicked.connect(self.export_clients)
 
         # زر الاستيراد
         self.import_button = QPushButton("📥 استيراد Excel")
         self.import_button.setStyleSheet(BUTTON_STYLES["info"])
+        self.import_button.setFixedHeight(28)
         self.import_button.clicked.connect(self.import_clients)
 
         # زرار التحديث
         self.refresh_button = QPushButton("🔄 تحديث")
         self.refresh_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_clients_data)
 
         self.show_archived_checkbox = QCheckBox("إظهار العملاء المؤرشفين")
@@ -80,6 +92,7 @@ class ClientManagerTab(QWidget):
 
         buttons_layout.addWidget(self.add_button)
         buttons_layout.addWidget(self.edit_button)
+        buttons_layout.addWidget(self.delete_button)
         buttons_layout.addWidget(self.export_button)
         buttons_layout.addWidget(self.import_button)
         buttons_layout.addWidget(self.refresh_button)
@@ -109,31 +122,37 @@ class ClientManagerTab(QWidget):
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
 
+        self.clients_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.clients_table)
         self.clients_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.clients_table.setAlternatingRowColors(True)
         v_header = self.clients_table.verticalHeader()
         if v_header is not None:
-            v_header.setDefaultSectionSize(70)  # ⚡ ارتفاع الصفوف (تم تكبيره)
+            v_header.setDefaultSectionSize(50)
             v_header.setVisible(False)
         h_header = self.clients_table.horizontalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+            # اللوجو ثابت، الاسم والشركة والإيميل يتمددون، الباقي بحجم المحتوى
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # اللوجو
             self.clients_table.setColumnWidth(0, 70)
-            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-            self.clients_table.setColumnWidth(5, 150)
-            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-            self.clients_table.setColumnWidth(6, 150)
-            h_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # الاسم - يتمدد
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الشركة - يتمدد
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الهاتف
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # الإيميل - يتمدد
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # إجمالي المشاريع
+            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # إجمالي المدفوعات
+            h_header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
         self.clients_table.itemSelectionChanged.connect(self.on_client_selection_changed)
 
         # إضافة دبل كليك للتعديل
         self.clients_table.itemDoubleClicked.connect(self.open_editor_for_selected)
+        
+        # إضافة قائمة السياق (كليك يمين)
+        self._setup_context_menu()
 
         table_layout.addWidget(self.clients_table)
         main_layout.addWidget(table_groupbox, 1)
@@ -141,6 +160,19 @@ class ClientManagerTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_clients_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
+
+    def _setup_context_menu(self):
+        """إعداد قائمة السياق (كليك يمين) للجدول"""
+        from core.context_menu import ContextMenuManager
+        
+        ContextMenuManager.setup_table_context_menu(
+            table=self.clients_table,
+            on_view=self.open_editor_for_selected,
+            on_edit=self.open_editor_for_selected,
+            on_delete=self.delete_selected_client,
+            on_refresh=self.load_clients_data,
+            on_export=self.export_clients
+        )
 
     def export_clients(self):
         """تصدير العملاء إلى Excel"""
@@ -253,6 +285,7 @@ class ClientManagerTab(QWidget):
 
     def update_buttons_state(self, has_selection: bool):
         self.edit_button.setEnabled(has_selection)
+        self.delete_button.setEnabled(has_selection)
 
     def on_client_selection_changed(self):
         selected_rows = self.clients_table.selectedIndexes()
@@ -292,23 +325,28 @@ class ClientManagerTab(QWidget):
                 client_payments_total = {}
 
                 try:
-                    self.client_service.repo.sqlite_cursor.execute("""
-                        SELECT client_id, SUM(total_amount) as total_projects
-                        FROM projects
-                        WHERE status != 'مؤرشف' AND status != 'ملغي'
-                        GROUP BY client_id
-                    """)
-                    client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0
-                                            for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                    # ⚡ استخدام cursor منفصل لتجنب مشكلة Recursive cursor
+                    cursor = self.client_service.repo.get_cursor()
+                    try:
+                        cursor.execute("""
+                            SELECT client_id, SUM(total_amount) as total_projects
+                            FROM projects
+                            WHERE status != 'مؤرشف' AND status != 'ملغي'
+                            GROUP BY client_id
+                        """)
+                        client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0
+                                                for row in cursor.fetchall()}
 
-                    self.client_service.repo.sqlite_cursor.execute("""
-                        SELECT client_id, SUM(amount) as total_paid
-                        FROM payments
-                        WHERE client_id IS NOT NULL AND client_id != ''
-                        GROUP BY client_id
-                    """)
-                    client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0
-                                            for row in self.client_service.repo.sqlite_cursor.fetchall()}
+                        cursor.execute("""
+                            SELECT client_id, SUM(amount) as total_paid
+                            FROM payments
+                            WHERE client_id IS NOT NULL AND client_id != ''
+                            GROUP BY client_id
+                        """)
+                        client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0
+                                                for row in cursor.fetchall()}
+                    finally:
+                        cursor.close()
                 except Exception as e:
                     print(f"ERROR: فشل حساب الإجماليات: {e}")
 
@@ -407,10 +445,10 @@ class ClientManagerTab(QWidget):
             if (index + 1) % batch_size == 0:
                 QApplication.processEvents()  # noqa: F823
 
-            self.clients_table.setItem(index, 1, QTableWidgetItem(client.name or ""))
-            self.clients_table.setItem(index, 2, QTableWidgetItem(client.company_name or ""))
-            self.clients_table.setItem(index, 3, QTableWidgetItem(client.phone or ""))
-            self.clients_table.setItem(index, 4, QTableWidgetItem(client.email or ""))
+            self.clients_table.setItem(index, 1, create_centered_item(client.name or ""))
+            self.clients_table.setItem(index, 2, create_centered_item(client.company_name or ""))
+            self.clients_table.setItem(index, 3, create_centered_item(client.phone or ""))
+            self.clients_table.setItem(index, 4, create_centered_item(client.email or ""))
 
             # ⚡ جلب إجماليات العميل
             client_name = client.name
@@ -418,32 +456,23 @@ class ClientManagerTab(QWidget):
             total_payments = client_payments_total.get(client_name, 0.0)
 
             # عرض إجمالي الفواتير
-            total_item = QTableWidgetItem(f"{total_invoices:,.0f} ج.م")
+            total_item = create_centered_item(f"{total_invoices:,.0f} ج.م")
             total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
-            total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             total_item.setForeground(QColor("#2454a5"))
-            total_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
+            total_item.setFont(get_cairo_font(10, bold=True))
             self.clients_table.setItem(index, 5, total_item)
 
             # عرض إجمالي المدفوعات
-            payment_item = QTableWidgetItem(f"{total_payments:,.0f} ج.م")
+            payment_item = create_centered_item(f"{total_payments:,.0f} ج.م")
             payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)
-            payment_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             payment_item.setForeground(QColor("#00a876"))
-            payment_item.setFont(QFont("Cairo", 10, QFont.Weight.Bold))
+            payment_item.setFont(get_cairo_font(10, bold=True))
             self.clients_table.setItem(index, 6, payment_item)
 
-            status_item = QTableWidgetItem(client.status.value)
-            try:
-                if client.status == schemas.ClientStatus.ARCHIVED:
-                    status_item.setBackground(QColor("#ef4444"))
-                    status_item.setForeground(QColor("white"))
-                else:
-                    status_item.setBackground(QColor("#0A6CF1"))
-                    status_item.setForeground(QColor("white"))
-            except Exception as e:
-                print(f"WARNING: فشل تعيين لون الخلفية: {e}")
-            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            # الحالة مع لون الخلفية
+            bg_color = QColor("#ef4444") if client.status == schemas.ClientStatus.ARCHIVED else QColor("#0A6CF1")
+            status_item = create_centered_item(client.status.value, bg_color)
+            status_item.setForeground(QColor("white"))
             self.clients_table.setItem(index, 7, status_item)
 
         print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
@@ -473,3 +502,60 @@ class ClientManagerTab(QWidget):
             QMessageBox.warning(self, "تحذير", "يرجى تحديد عميل من الجدول أولاً.")
             return
         self.open_editor(self.selected_client)
+
+    def delete_selected_client(self):
+        """حذف العميل المحدد بشكل احترافي"""
+        if not self.selected_client:
+            QMessageBox.warning(self, "تحذير", "يرجى اختيار عميل للحذف")
+            return
+
+        # رسالة تأكيد احترافية
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("⚠️ تأكيد الحذف")
+        msg.setText(f"هل أنت متأكد من حذف العميل؟")
+        msg.setInformativeText(
+            f"العميل: {self.selected_client.name}\n"
+            f"الشركة: {self.selected_client.company_name or 'غير محدد'}\n\n"
+            f"⚠️ تحذير: هذا الإجراء لا يمكن التراجع عنه!"
+        )
+        msg.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        msg.setDefaultButton(QMessageBox.StandardButton.No)
+        
+        # تخصيص الأزرار
+        yes_button = msg.button(QMessageBox.StandardButton.Yes)
+        yes_button.setText("نعم، احذف")
+        no_button = msg.button(QMessageBox.StandardButton.No)
+        no_button.setText("إلغاء")
+
+        reply = msg.exec()
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # ⚡ استخدام المعرف الصحيح (_mongo_id أو id)
+                client_id = getattr(self.selected_client, '_mongo_id', None) or str(self.selected_client.id)
+                self.client_service.delete_client(client_id)
+                
+                # رسالة نجاح
+                QMessageBox.information(
+                    self,
+                    "✅ تم الحذف",
+                    f"تم حذف العميل '{self.selected_client.name}' بنجاح"
+                )
+                
+                # تحديث الجدول
+                self.selected_client = None
+                self.load_clients_data()
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "❌ خطأ",
+                    f"فشل حذف العميل:\n{str(e)}"
+                )
+
+    def _on_clients_changed(self):
+        """تحديث الجدول عند تغيير البيانات"""
+        self.load_clients_data()

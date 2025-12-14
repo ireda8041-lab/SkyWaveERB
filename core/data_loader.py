@@ -2,11 +2,21 @@
 """
 ⚡ نظام تحميل البيانات في الخلفية (Background Data Loader)
 يمنع تجميد الواجهة أثناء تحميل البيانات من قاعدة البيانات
+الإصدار المحسّن مع دعم الأولويات والإلغاء
 """
 
 from collections.abc import Callable
+from enum import IntEnum
 
 from PyQt6.QtCore import QObject, QRunnable, QThread, QThreadPool, pyqtSignal
+
+
+class LoadPriority(IntEnum):
+    """أولويات التحميل"""
+    CRITICAL = 0  # فوري (الداشبورد)
+    HIGH = 1      # عالي (التاب الحالي)
+    NORMAL = 2    # عادي
+    LOW = 3       # منخفض (التابات غير المفتوحة)
 
 
 class DataLoaderWorker(QThread):
@@ -90,8 +100,15 @@ class BackgroundDataLoader(QObject):
         super().__init__(parent)
         self._active_workers = {}
         self._thread_pool = QThreadPool.globalInstance()
-        # تحديد عدد الـ threads المتاحة
-        self._thread_pool.setMaxThreadCount(4)
+        # ⚡ تحديد عدد الـ threads المتاحة (أقل = أقل استهلاك للموارد)
+        import os
+        cpu_count = os.cpu_count() or 4
+        optimal_threads = min(cpu_count, 4)  # حد أقصى 4 threads
+        self._thread_pool.setMaxThreadCount(optimal_threads)
+        
+        # ⚡ قائمة انتظار للعمليات ذات الأولوية المنخفضة
+        self._pending_operations: list[tuple] = []
+        self._is_busy = False
 
     def load_async(
         self,

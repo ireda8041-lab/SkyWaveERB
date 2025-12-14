@@ -6,7 +6,7 @@
 
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QStandardItem, QStandardItemModel
+from PyQt6.QtGui import QColor, QStandardItem, QStandardItemModel
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -28,7 +28,7 @@ from services.accounting_service import AccountingService
 from services.expense_service import ExpenseService
 from services.project_service import ProjectService
 from ui.account_editor_dialog import AccountEditorDialog
-from ui.styles import BUTTON_STYLES, CHART_OF_ACCOUNTS_TREE_STYLE, COLORS
+from ui.styles import BUTTON_STYLES, CHART_OF_ACCOUNTS_TREE_STYLE, COLORS, get_cairo_font
 
 # ✨ Import Global Events for Real-time Updates
 try:
@@ -37,82 +37,6 @@ try:
 except ImportError:
     EVENTS_AVAILABLE = False
     print("WARNING: Global events not available")
-
-
-# ==================== شجرة الحسابات Enterprise Level (6 أرقام) ====================
-# ✅ نظام 6 أرقام (Scalability) - يدعم 999 حساب فرعي تحت كل بند
-# ✅ فصل COGS (5xxxxx) عن OPEX (6xxxxx) لتحليل الربحية
-# ✅ دفعات مقدمة من العملاء (Unearned Revenue)
-DEFAULT_ACCOUNT_TEMPLATES = [
-    # ==================== 1. الأصول (100000) ====================
-    {"name": "الأصول", "code": "100000", "type": schemas.AccountType.ASSET, "parent_code": None},
-    {"name": "الأصول المتداولة", "code": "110000", "type": schemas.AccountType.ASSET, "parent_code": "100000"},
-    {"name": "النقدية وما في حكمها", "code": "111000", "type": schemas.AccountType.CASH, "parent_code": "110000"},
-    {"name": "الخزائن النقدية", "code": "111100", "type": schemas.AccountType.CASH, "parent_code": "111000"},
-    {"name": "الخزنة الرئيسية (المقر)", "code": "111101", "type": schemas.AccountType.CASH, "parent_code": "111100"},
-    {"name": "عهد نقدية موظفين", "code": "111102", "type": schemas.AccountType.CASH, "parent_code": "111100"},
-    {"name": "الحسابات البنكية", "code": "111200", "type": schemas.AccountType.CASH, "parent_code": "111000"},
-    {"name": "بنك مصر - جاري", "code": "111201", "type": schemas.AccountType.CASH, "parent_code": "111200"},
-    {"name": "المحافظ الإلكترونية", "code": "111300", "type": schemas.AccountType.CASH, "parent_code": "111000"},
-    {"name": "فودافون كاش (الرئيسي)", "code": "111301", "type": schemas.AccountType.CASH, "parent_code": "111300"},
-    {"name": "فودافون كاش (الفرعي)", "code": "111302", "type": schemas.AccountType.CASH, "parent_code": "111300"},
-    {"name": "InstaPay", "code": "111303", "type": schemas.AccountType.CASH, "parent_code": "111300"},
-    {"name": "العملاء وأوراق القبض", "code": "112000", "type": schemas.AccountType.ASSET, "parent_code": "110000"},
-    {"name": "عملاء تجاريين (شركات)", "code": "112100", "type": schemas.AccountType.ASSET, "parent_code": "112000"},
-    {"name": "عملاء أفراد", "code": "112200", "type": schemas.AccountType.ASSET, "parent_code": "112000"},
-    {"name": "أرصدة مدينة أخرى", "code": "113000", "type": schemas.AccountType.ASSET, "parent_code": "110000"},
-    {"name": "مصروفات مدفوعة مقدماً", "code": "113100", "type": schemas.AccountType.ASSET, "parent_code": "113000"},
-    {"name": "سلف العاملين", "code": "113200", "type": schemas.AccountType.ASSET, "parent_code": "113000"},
-    {"name": "الأصول غير المتداولة", "code": "120000", "type": schemas.AccountType.ASSET, "parent_code": "100000"},
-    {"name": "الأصول الثابتة", "code": "121000", "type": schemas.AccountType.ASSET, "parent_code": "120000"},
-    {"name": "أجهزة حاسب آلي وسيرفرات", "code": "121100", "type": schemas.AccountType.ASSET, "parent_code": "121000"},
-    {"name": "أثاث وتجهيزات مكتبية", "code": "121200", "type": schemas.AccountType.ASSET, "parent_code": "121000"},
-
-    # ==================== 2. الخصوم (200000) ====================
-    {"name": "الخصوم", "code": "200000", "type": schemas.AccountType.LIABILITY, "parent_code": None},
-    {"name": "الخصوم المتداولة", "code": "210000", "type": schemas.AccountType.LIABILITY, "parent_code": "200000"},
-    {"name": "الموردين", "code": "211000", "type": schemas.AccountType.LIABILITY, "parent_code": "210000"},
-    {"name": "موردين تشغيل (خدمات تقنية)", "code": "211100", "type": schemas.AccountType.LIABILITY, "parent_code": "211000"},
-    {"name": "مستحقات مستقلين (Freelancers)", "code": "211200", "type": schemas.AccountType.LIABILITY, "parent_code": "211000"},
-    {"name": "أرصدة دائنة أخرى", "code": "212000", "type": schemas.AccountType.LIABILITY, "parent_code": "210000"},
-    {"name": "دفعات مقدمة من العملاء (هام)", "code": "212100", "type": schemas.AccountType.LIABILITY, "parent_code": "212000"},
-    {"name": "ضريبة القيمة المضافة", "code": "212200", "type": schemas.AccountType.LIABILITY, "parent_code": "212000"},
-
-    # ==================== 3. حقوق الملكية (300000) ====================
-    {"name": "حقوق الملكية", "code": "300000", "type": schemas.AccountType.EQUITY, "parent_code": None},
-    {"name": "رأس المال", "code": "310000", "type": schemas.AccountType.EQUITY, "parent_code": "300000"},
-    {"name": "جاري المالك (مسحوبات)", "code": "320000", "type": schemas.AccountType.EQUITY, "parent_code": "300000"},
-    {"name": "الأرباح المرحلة", "code": "330000", "type": schemas.AccountType.EQUITY, "parent_code": "300000"},
-
-    # ==================== 4. الإيرادات (400000) ====================
-    {"name": "الإيرادات", "code": "400000", "type": schemas.AccountType.REVENUE, "parent_code": None},
-    {"name": "إيرادات التشغيل الرئيسية", "code": "410000", "type": schemas.AccountType.REVENUE, "parent_code": "400000"},
-    {"name": "إيرادات خدمات التسويق الرقمي", "code": "410100", "type": schemas.AccountType.REVENUE, "parent_code": "410000"},
-    {"name": "إيرادات تطوير المواقع والتطبيقات", "code": "410200", "type": schemas.AccountType.REVENUE, "parent_code": "410000"},
-    {"name": "إيرادات الباقات والعقود السنوية", "code": "410300", "type": schemas.AccountType.REVENUE, "parent_code": "410000"},
-
-    # ==================== 5. تكاليف الإيرادات - COGS (500000) ====================
-    # ⚡ هذا القسم يخبرك كم كلفك المشروع تقنياً (Direct Costs)
-    {"name": "تكاليف الإيرادات (المباشرة)", "code": "500000", "type": schemas.AccountType.EXPENSE, "parent_code": None},
-    {"name": "تكاليف الحملات والتشغيل", "code": "510000", "type": schemas.AccountType.EXPENSE, "parent_code": "500000"},
-    {"name": "ميزانية إعلانات (Ads Spend)", "code": "510001", "type": schemas.AccountType.EXPENSE, "parent_code": "510000"},
-    {"name": "تكلفة استضافة وسيرفرات", "code": "510002", "type": schemas.AccountType.EXPENSE, "parent_code": "510000"},
-    {"name": "أجور مستقلين (Outsourcing)", "code": "510003", "type": schemas.AccountType.EXPENSE, "parent_code": "510000"},
-
-    # ==================== 6. المصروفات التشغيلية - OPEX (600000) ====================
-    # ⚡ هذا القسم يخبرك كم كلفتك إدارة الشركة (Indirect Costs)
-    {"name": "المصروفات التشغيلية والإدارية", "code": "600000", "type": schemas.AccountType.EXPENSE, "parent_code": None},
-    {"name": "المصروفات التسويقية", "code": "610000", "type": schemas.AccountType.EXPENSE, "parent_code": "600000"},
-    {"name": "دعاية وإعلان للشركة", "code": "610001", "type": schemas.AccountType.EXPENSE, "parent_code": "610000"},
-    {"name": "عمولات البيع", "code": "610002", "type": schemas.AccountType.EXPENSE, "parent_code": "610000"},
-    {"name": "المصروفات الإدارية والعمومية", "code": "620000", "type": schemas.AccountType.EXPENSE, "parent_code": "600000"},
-    {"name": "رواتب الموظفين", "code": "620001", "type": schemas.AccountType.EXPENSE, "parent_code": "620000"},
-    {"name": "إيجار ومرافق", "code": "620002", "type": schemas.AccountType.EXPENSE, "parent_code": "620000"},
-    {"name": "إنترنت واتصالات", "code": "620003", "type": schemas.AccountType.EXPENSE, "parent_code": "620000"},
-    {"name": "اشتراكات برمجيات (SaaS)", "code": "620004", "type": schemas.AccountType.EXPENSE, "parent_code": "620000"},
-    {"name": "المصروفات المالية", "code": "630000", "type": schemas.AccountType.EXPENSE, "parent_code": "600000"},
-    {"name": "رسوم بنكية وعمولات سحب", "code": "630001", "type": schemas.AccountType.EXPENSE, "parent_code": "630000"},
-]
 
 
 class AccountingManagerTab(QWidget):
@@ -131,6 +55,10 @@ class AccountingManagerTab(QWidget):
         self.accounting_service = accounting_service
         self.project_service = project_service
         self.all_accounts_list: list[schemas.Account] = []
+        
+        # ⚡ حماية من التحديث المتكرر
+        self._is_loading = False
+        self._last_refresh_time = 0
 
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -196,27 +124,10 @@ class AccountingManagerTab(QWidget):
         self.refresh_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.refresh_btn.clicked.connect(self.load_accounts_data)
 
-        self.create_defaults_btn = QPushButton("⚙️ إنشاء الحسابات الافتراضية")
-        self.create_defaults_btn.setStyleSheet(BUTTON_STYLES["info"])
-        self.create_defaults_btn.clicked.connect(self.create_default_accounts)
-
-        self.fix_parents_btn = QPushButton("🔧 إصلاح الربط")
-        self.fix_parents_btn.setStyleSheet(BUTTON_STYLES["secondary"])
-        self.fix_parents_btn.setToolTip("إصلاح ربط الحسابات بالآباء الصحيحين")
-        self.fix_parents_btn.clicked.connect(self.fix_accounts_parents)
-
-        self.recalc_balances_btn = QPushButton("🔄 إعادة حساب الأرصدة")
-        self.recalc_balances_btn.setStyleSheet(BUTTON_STYLES["info"])
-        self.recalc_balances_btn.setToolTip("إعادة حساب جميع الأرصدة من القيود المحاسبية")
-        self.recalc_balances_btn.clicked.connect(self.recalculate_all_balances)
-
         buttons_layout.addWidget(self.add_account_btn)
         buttons_layout.addWidget(self.edit_account_btn)
         buttons_layout.addWidget(self.delete_account_btn)
         buttons_layout.addWidget(self.refresh_btn)
-        buttons_layout.addWidget(self.create_defaults_btn)
-        buttons_layout.addWidget(self.fix_parents_btn)
-        buttons_layout.addWidget(self.recalc_balances_btn)
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
 
@@ -362,19 +273,31 @@ class AccountingManagerTab(QWidget):
         return tree_map
 
     def load_accounts_data(self):
-        """⚡ تحميل الحسابات في الخلفية لمنع التجميد"""
-        print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
-
+        """⚡ تحميل الحسابات في الخلفية لمنع التجميد (مع حماية من التحديث المتكرر)"""
+        import time
         from PyQt6.QtWidgets import QApplication
-
         from core.data_loader import get_data_loader
+
+        # ⚡ حماية من التحديث المتكرر (الحد الأدنى 1 ثانية بين كل تحديث)
+        current_time = time.time()
+        if self._is_loading:
+            print("WARNING: [AccManager] ⏳ تحميل جاري بالفعل - تم تجاهل الطلب")
+            return
+        if (current_time - self._last_refresh_time) < 1.0:
+            print("WARNING: [AccManager] ⏳ تحديث متكرر سريع - تم تجاهل الطلب")
+            return
+
+        self._is_loading = True
+        self._last_refresh_time = current_time
+        print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
 
         QApplication.processEvents()
 
-        # دالة جلب البيانات
+        # دالة جلب البيانات (مع إجبار التحديث من قاعدة البيانات)
         def fetch_accounts():
             try:
-                tree_map = self.accounting_service.get_hierarchy_with_balances()
+                # ⚡ إجبار التحديث من قاعدة البيانات (بدون cache)
+                tree_map = self.accounting_service.get_hierarchy_with_balances(force_refresh=True)
                 all_accounts = self.accounting_service.repo.get_all_accounts()
                 return {'tree_map': tree_map, 'all_accounts': all_accounts}
             except Exception as e:
@@ -404,9 +327,13 @@ class AccountingManagerTab(QWidget):
                 print(f"ERROR: [AccManager] فشل تحديث الشجرة: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                # ⚡ إعادة تفعيل التحميل
+                self._is_loading = False
 
         def on_error(error_msg):
             print(f"ERROR: [AccManager] فشل تحميل الحسابات: {error_msg}")
+            self._is_loading = False
 
         # تحميل في الخلفية
         data_loader = get_data_loader()
@@ -481,12 +408,12 @@ class AccountingManagerTab(QWidget):
 
             if is_group:
                 for item in row:
-                    item.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+                    item.setFont(get_cairo_font(10, bold=True))
                     item.setBackground(QColor(COLORS['bg_light']))
                     item.setForeground(QColor(COLORS['text_primary']))
             else:
                 for item in row:
-                    item.setFont(QFont("Segoe UI", 9))
+                    item.setFont(get_cairo_font(9))
                     item.setBackground(QColor(COLORS['bg_medium']))
                     item.setForeground(QColor(COLORS['text_secondary']))
 
@@ -628,196 +555,6 @@ class AccountingManagerTab(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"فشل الحذف: {e}")
 
-    def create_default_accounts(self):
-        """
-        🏢 إنشاء شجرة الحسابات Enterprise Level (6 أرقام)
-
-        ✅ نظام 6 أرقام (Scalability) - يدعم 999 حساب فرعي تحت كل بند
-        ✅ فصل COGS (5xxxxx) عن OPEX (6xxxxx) لتحليل الربحية
-        ✅ دفعات مقدمة من العملاء (Unearned Revenue)
-        """
-        # التحقق من وجود حسابات قديمة (4 أرقام)
-        try:
-            self.all_accounts_list = self.accounting_service.repo.get_all_accounts()
-        except (AttributeError, TypeError) as e:
-            print(f"WARNING: [AccountingManager] فشل جلب الحسابات: {e}")
-            self.all_accounts_list = []
-
-        old_accounts = [acc for acc in self.all_accounts_list if acc.code and len(acc.code) <= 4]
-
-        if old_accounts:
-            # يوجد حسابات قديمة - اسأل المستخدم
-            reply = QMessageBox.question(
-                self, "🔄 ترقية شجرة الحسابات",
-                f"⚠️ تم اكتشاف {len(old_accounts)} حساب بالنظام القديم (4 أرقام).\n\n"
-                "🏢 النظام الجديد Enterprise Level (6 أرقام) يوفر:\n"
-                "• فصل COGS عن OPEX لتحليل الربحية\n"
-                "• دعم 999 حساب فرعي تحت كل بند\n"
-                "• دفعات مقدمة من العملاء (Unearned Revenue)\n\n"
-                "هل تريد:\n"
-                "✅ نعم = حذف الحسابات القديمة وإنشاء الجديدة\n"
-                "❌ لا = إضافة الحسابات الجديدة فقط (بدون حذف)",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel
-            )
-
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-
-            reset_mode = (reply == QMessageBox.StandardButton.Yes)
-        else:
-            # لا يوجد حسابات قديمة - إنشاء مباشر
-            reply = QMessageBox.question(
-                self, "⚙️ إنشاء شجرة الحسابات Enterprise",
-                "🏢 سيتم إنشاء شجرة الحسابات Enterprise Level (6 أرقام).\n\n"
-                "تشمل:\n"
-                "• الأصول (100000) - النقدية، العملاء، البنوك\n"
-                "• الخصوم (200000) - الموردون، الضرائب، دفعات مقدمة\n"
-                "• حقوق الملكية (300000)\n"
-                "• الإيرادات (400000)\n"
-                "• تكاليف الإيرادات COGS (500000)\n"
-                "• المصروفات التشغيلية OPEX (600000)\n\n"
-                "هل تريد المتابعة؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
-            reset_mode = False
-
-        # إنشاء نافذة التقدم
-        from PyQt6.QtWidgets import QProgressDialog
-        progress = QProgressDialog("جاري إنشاء شجرة الحسابات Enterprise...", None, 0, 100, self)
-        progress.setWindowTitle("🏢 شجرة الحسابات Enterprise")
-        progress.setWindowModality(Qt.WindowModality.WindowModal)
-        progress.setStyleSheet(f"""
-            QProgressDialog {{
-                background-color: {COLORS['bg_light']};
-                color: {COLORS['text_primary']};
-                border-radius: 10px;
-            }}
-            QProgressBar {{
-                border: none;
-                border-radius: 5px;
-                background-color: {COLORS['bg_dark']};
-                text-align: center;
-                color: white;
-            }}
-            QProgressBar::chunk {{
-                background-color: {COLORS['success']};
-                border-radius: 5px;
-            }}
-            QLabel {{
-                color: {COLORS['text_primary']};
-                font-size: 13px;
-            }}
-        """)
-        progress.setMinimumWidth(400)
-        progress.show()
-
-        created, skipped, errors, deleted = 0, 0, 0, 0
-
-        try:
-            if reset_mode:
-                # حذف الحسابات القديمة أولاً
-                progress.setLabelText("🗑️ جاري حذف الحسابات القديمة...")
-                progress.setValue(20)
-
-                result = self.accounting_service.reset_to_enterprise_accounts()
-
-                progress.setValue(100)
-                progress.close()
-
-                # استخراج النتائج
-                deleted = result.get("deleted", 0)
-                created = result.get("created", 0)
-                skipped = result.get("skipped", 0)
-                errors = len(result.get("errors", []))
-            else:
-                # إضافة الحسابات الجديدة فقط
-                progress.setLabelText("📊 جاري إنشاء الحسابات الجديدة...")
-                progress.setValue(50)
-
-                result = self.accounting_service.seed_default_accounts()
-
-                progress.setValue(100)
-                progress.close()
-
-                # استخراج النتائج
-                created = result.get("created", 0)
-                skipped = result.get("skipped", 0)
-                errors = len(result.get("errors", []))
-
-        except Exception as e:
-            progress.close()
-            created, skipped, errors = 0, 0, 1
-            print(f"ERROR: فشل إنشاء الحسابات: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(
-                self,
-                "خطأ",
-                f"فشل إنشاء الحسابات:\n{str(e)}"
-            )
-            return
-
-        self.load_accounts_data()
-
-        # رسالة النتيجة بتصميم جميل
-        if created > 0 or skipped > 0 or deleted > 0:
-            result_icon = "✅" if errors == 0 else "⚠️"
-            result_title = "🏢 تم ترقية شجرة الحسابات بنجاح!" if errors == 0 else "تم مع بعض الأخطاء"
-
-            msg = f"{result_icon} {result_title}\n\n"
-
-            if deleted > 0:
-                msg += f"�️ت تم حذف {deleted} حساب قديم (4 أرقام)\n"
-            if created > 0:
-                msg += f"📊 تم إنشاء {created} حساب جديد (6 أرقام)\n"
-            if skipped > 0:
-                msg += f"⏭️ تم تجاوز {skipped} حساب (موجود مسبقاً)\n"
-            if errors > 0:
-                msg += f"❌ فشل إنشاء {errors} حساب\n"
-
-            # إعادة تحميل الحسابات للحصول على العدد الصحيح
-            try:
-                self.all_accounts_list = self.accounting_service.repo.get_all_accounts()
-            except Exception:
-                pass
-
-            msg += f"\n📁 إجمالي الحسابات الآن: {len(self.all_accounts_list)}"
-            msg += "\n\n✅ النظام الجديد يدعم:\n"
-            msg += "• فصل COGS (5xxxxx) عن OPEX (6xxxxx)\n"
-            msg += "• دفعات مقدمة من العملاء (212100)"
-
-            msg_box = QMessageBox(self)
-            msg_box.setWindowTitle("نتيجة إنشاء الحسابات")
-            msg_box.setText(msg)
-            msg_box.setIcon(QMessageBox.Icon.Information if errors == 0 else QMessageBox.Icon.Warning)
-            msg_box.setStyleSheet(f"""
-                QMessageBox {{
-                    background-color: {COLORS['bg_light']};
-                }}
-                QMessageBox QLabel {{
-                    color: {COLORS['text_primary']};
-                    font-size: 13px;
-                    min-width: 300px;
-                }}
-                QPushButton {{
-                    background-color: {COLORS['primary']};
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 20px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: #2563eb;
-                }}
-            """)
-            msg_box.exec()
-        else:
-            QMessageBox.information(self, "معلومة", "جميع الحسابات الافتراضية موجودة بالفعل.")
-
-
     # ✨ STEP 1: Summary Panel Creation
     def create_summary_panel(self):
         """إنشاء لوحة الملخص المالي"""
@@ -845,11 +582,11 @@ class AccountingManagerTab(QWidget):
         title.setStyleSheet(f"""
             font-size: 14px;
             font-weight: bold;
-            color: {COLORS['primary']};
-            padding: 8px;
-            background-color: {COLORS['bg_dark']};
-            border-radius: 6px;
-            border: 1px solid {COLORS['primary']};
+            color: white;
+            padding: 10px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                stop:0 {COLORS['primary']}, stop:1 #0550B8);
+            border-radius: 8px;
         """)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         panel_layout.addWidget(title)
@@ -861,18 +598,20 @@ class AccountingManagerTab(QWidget):
                 font-weight: bold;
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                margin-top: 8px;
-                padding: 8px;
-                background-color: {COLORS['bg_dark']};
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 12px;
+                padding-top: 20px;
+                background-color: {COLORS['bg_medium']};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 2px 6px;
-                background-color: {COLORS['primary']};
+                padding: 4px 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 {COLORS['primary']}, stop:1 #0550B8);
                 color: white;
-                border-radius: 3px;
+                border-radius: 4px;
                 font-size: 11px;
             }}
         """)
@@ -881,13 +620,15 @@ class AccountingManagerTab(QWidget):
         # الأصول
         self.assets_label = QLabel("💰 الأصول: 0.00 جنيه")
         self.assets_label.setStyleSheet(f"""
-            color: {COLORS['success']};
+            color: #10B981;
             font-size: 12px;
             font-weight: bold;
-            padding: 6px;
-            background-color: rgba(16, 185, 129, 0.1);
-            border-radius: 4px;
-            border-left: 3px solid {COLORS['success']};
+            padding: 10px 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.15), stop:1 rgba(16, 185, 129, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            margin: 3px 0;
         """)
         self.assets_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         balance_layout.addWidget(self.assets_label)
@@ -895,13 +636,15 @@ class AccountingManagerTab(QWidget):
         # الخصوم
         self.liabilities_label = QLabel("📉 الخصوم: 0.00 جنيه")
         self.liabilities_label.setStyleSheet(f"""
-            color: {COLORS['danger']};
+            color: {COLORS['warning']};
             font-size: 12px;
             font-weight: bold;
-            padding: 6px;
-            background-color: rgba(239, 68, 68, 0.1);
-            border-radius: 4px;
-            border-left: 3px solid {COLORS['danger']};
+            padding: 10px 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(255, 102, 54, 0.05), stop:0.5 rgba(255, 102, 54, 0.15), stop:1 rgba(255, 102, 54, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(255, 102, 54, 0.3);
+            margin: 3px 0;
         """)
         self.liabilities_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         balance_layout.addWidget(self.liabilities_label)
@@ -912,10 +655,12 @@ class AccountingManagerTab(QWidget):
             color: {COLORS['primary']};
             font-size: 12px;
             font-weight: bold;
-            padding: 6px;
-            background-color: rgba(59, 130, 246, 0.1);
-            border-radius: 4px;
-            border-left: 3px solid {COLORS['primary']};
+            padding: 10px 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(10, 108, 241, 0.05), stop:0.5 rgba(10, 108, 241, 0.15), stop:1 rgba(10, 108, 241, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(10, 108, 241, 0.3);
+            margin: 3px 0;
         """)
         self.equity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         balance_layout.addWidget(self.equity_label)
@@ -930,18 +675,20 @@ class AccountingManagerTab(QWidget):
                 font-weight: bold;
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                margin-top: 8px;
-                padding: 8px;
-                background-color: {COLORS['bg_dark']};
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 12px;
+                padding-top: 20px;
+                background-color: {COLORS['bg_medium']};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 2px 6px;
-                background-color: {COLORS['warning']};
+                padding: 4px 10px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 {COLORS['warning']}, stop:1 #E55A2B);
                 color: white;
-                border-radius: 3px;
+                border-radius: 4px;
                 font-size: 11px;
             }}
         """)
@@ -950,13 +697,15 @@ class AccountingManagerTab(QWidget):
         # الإيرادات
         self.revenue_summary_label = QLabel("📈 الإيرادات: 0.00 جنيه")
         self.revenue_summary_label.setStyleSheet(f"""
-            color: {COLORS['success']};
+            color: #10B981;
             font-size: 12px;
             font-weight: bold;
-            padding: 6px;
-            background-color: rgba(16, 185, 129, 0.1);
-            border-radius: 4px;
-            border-left: 3px solid {COLORS['success']};
+            padding: 10px 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.15), stop:1 rgba(16, 185, 129, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            margin: 3px 0;
         """)
         self.revenue_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pl_layout.addWidget(self.revenue_summary_label)
@@ -967,10 +716,12 @@ class AccountingManagerTab(QWidget):
             color: {COLORS['danger']};
             font-size: 12px;
             font-weight: bold;
-            padding: 6px;
-            background-color: rgba(239, 68, 68, 0.1);
-            border-radius: 4px;
-            border-left: 3px solid {COLORS['danger']};
+            padding: 10px 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(255, 79, 216, 0.05), stop:0.5 rgba(255, 79, 216, 0.15), stop:1 rgba(255, 79, 216, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(255, 79, 216, 0.3);
+            margin: 3px 0;
         """)
         self.expenses_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pl_layout.addWidget(self.expenses_summary_label)
@@ -978,19 +729,20 @@ class AccountingManagerTab(QWidget):
         # خط فاصل
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet(f"background-color: {COLORS['border']}; max-height: 1px;")
+        separator.setStyleSheet(f"background-color: {COLORS['border']}; max-height: 1px; margin: 8px 0;")
         pl_layout.addWidget(separator)
 
         # صافي الربح
         self.net_profit_summary_label = QLabel("💎 صافي الربح: 0.00 جنيه")
         self.net_profit_summary_label.setStyleSheet(f"""
-            color: {COLORS['success']};
+            color: #10B981;
             font-size: 13px;
             font-weight: bold;
-            padding: 8px;
-            background-color: rgba(16, 185, 129, 0.1);
-            border-radius: 6px;
-            border: 1px solid {COLORS['success']};
+            padding: 12px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.2), stop:1 rgba(16, 185, 129, 0.05));
+            border-radius: 8px;
+            border: 1px solid rgba(16, 185, 129, 0.4);
         """)
         self.net_profit_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         pl_layout.addWidget(self.net_profit_summary_label)
@@ -1097,98 +849,6 @@ class AccountingManagerTab(QWidget):
             print(f"ERROR: [AccManager] فشل تحديث الملخص المالي: {e}")
             import traceback
             traceback.print_exc()
-
-    def fix_accounts_parents(self):
-        """إصلاح ربط الحسابات بالآباء الصحيحين"""
-        reply = QMessageBox.question(
-            self, "🔧 إصلاح ربط الحسابات",
-            "سيتم إصلاح ربط جميع الحسابات بالآباء الصحيحين.\n\n"
-            "هذا سيضمن أن:\n"
-            "• الحسابات الفرعية مرتبطة بالمجموعات الصحيحة\n"
-            "• شجرة الحسابات تعمل بشكل صحيح\n"
-            "• الأرصدة التراكمية تُحسب بشكل صحيح\n\n"
-            "هل تريد المتابعة؟",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.No:
-            return
-
-        try:
-            # استدعاء دالة الإصلاح من الخدمة
-            result = self.accounting_service.fix_accounts_parent_codes()
-
-            # إعادة تحميل البيانات
-            self.load_accounts_data()
-
-            # عرض النتيجة
-            if result.get('success'):
-                QMessageBox.information(
-                    self,
-                    "✅ تم الإصلاح",
-                    f"تم إصلاح ربط الحسابات بنجاح!\n\n"
-                    f"📊 تم تحديث: {result.get('updated', 0)} حساب\n"
-                    f"⏭️ تم تخطي: {result.get('skipped', 0)} حساب (صحيح بالفعل)"
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    "⚠️ تم مع أخطاء",
-                    f"تم الإصلاح مع بعض الأخطاء:\n\n"
-                    f"📊 تم تحديث: {result.get('updated', 0)} حساب\n"
-                    f"❌ أخطاء: {len(result.get('errors', []))}"
-                )
-
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "❌ خطأ",
-                f"فشل إصلاح الحسابات:\n\n{str(e)}"
-            )
-
-    def recalculate_all_balances(self):
-        """إعادة حساب جميع الأرصدة من القيود المحاسبية"""
-        reply = QMessageBox.question(
-            self, "🔄 إعادة حساب الأرصدة",
-            "سيتم إعادة حساب جميع أرصدة الحسابات من القيود المحاسبية.\n\n"
-            "هذا مفيد في حالة:\n"
-            "• عدم تطابق الأرصدة مع القيود\n"
-            "• ظهور أرصدة صفرية بشكل خاطئ\n"
-            "• بعد استيراد بيانات جديدة\n\n"
-            "هل تريد المتابعة؟",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.No:
-            return
-
-        try:
-            # استدعاء دالة إعادة الحساب من الخدمة
-            success = self.accounting_service.recalculate_all_balances()
-
-            # إعادة تحميل البيانات
-            self.load_accounts_data()
-
-            # عرض النتيجة
-            if success:
-                QMessageBox.information(
-                    self,
-                    "✅ تم بنجاح",
-                    "تم إعادة حساب جميع الأرصدة من القيود المحاسبية بنجاح!\n\n"
-                    "الأرصدة الآن تعكس القيود الفعلية."
-                )
-            else:
-                QMessageBox.warning(
-                    self,
-                    "⚠️ تحذير",
-                    "حدثت مشكلة أثناء إعادة حساب الأرصدة.\n"
-                    "راجع سجل الأخطاء للمزيد من التفاصيل."
-                )
-
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "❌ خطأ",
-                f"فشل إعادة حساب الأرصدة:\n\n{str(e)}"
-            )
 
     # ✨ STEP 3: ENABLE LEDGER - Ledger Window Method
     def open_ledger_window(self, index):

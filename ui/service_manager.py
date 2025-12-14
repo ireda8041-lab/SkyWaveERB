@@ -21,7 +21,7 @@ from core import schemas
 from core.logger import get_logger
 from services.service_service import ServiceService
 from ui.service_editor_dialog import ServiceEditorDialog
-from ui.styles import BUTTON_STYLES
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
 
 logger = get_logger(__name__)
 
@@ -60,14 +60,17 @@ class ServiceManagerTab(QWidget):
 
         self.add_button = QPushButton("➕ إضافة خدمة جديدة")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
+        self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(service_to_edit=None))
 
         self.edit_button = QPushButton("✏️ تعديل الخدمة")
         self.edit_button.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_button.setFixedHeight(28)
         self.edit_button.clicked.connect(self.open_editor_for_selected)
 
         self.archive_button = QPushButton("❌ أرشفة الخدمة")
         self.archive_button.setStyleSheet(BUTTON_STYLES["danger"])
+        self.archive_button.setFixedHeight(28)
         self.archive_button.clicked.connect(self.archive_selected_service)
 
         self.show_archived_checkbox = QCheckBox("إظهار الخدمات المؤرشفة")
@@ -76,6 +79,7 @@ class ServiceManagerTab(QWidget):
         # زرار التحديث
         self.refresh_button = QPushButton("🔄 تحديث")
         self.refresh_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_services_data)
 
         buttons_layout.addWidget(self.add_button)
@@ -106,15 +110,22 @@ class ServiceManagerTab(QWidget):
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
 
+        self.services_table.setStyleSheet(TABLE_STYLE_DARK)
+        # إصلاح مشكلة انعكاس الأعمدة في RTL
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.services_table)
         self.services_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.services_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.services_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         h_header = self.services_table.horizontalHeader()
         v_header = self.services_table.verticalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # الاسم - يتمدد
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # الفئة
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # السعر
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
         if v_header is not None:
-            v_header.setDefaultSectionSize(45)  # ⚡ ارتفاع الصفوف
+            v_header.setDefaultSectionSize(32)
             v_header.setVisible(False)
         self.services_table.itemSelectionChanged.connect(self.on_service_selection_changed)
 
@@ -177,22 +188,14 @@ class ServiceManagerTab(QWidget):
                 for index, service in enumerate(self.services_list):
                     self.services_table.insertRow(index)
 
-                    name_item = QTableWidgetItem(service.name)
-                    name_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.services_table.setItem(index, 0, name_item)
+                    self.services_table.setItem(index, 0, create_centered_item(service.name))
+                    self.services_table.setItem(index, 1, create_centered_item(service.category or ""))
+                    self.services_table.setItem(index, 2, create_centered_item(f"{service.default_price:,.2f}"))
 
-                    category_item = QTableWidgetItem(service.category or "")
-                    category_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.services_table.setItem(index, 1, category_item)
-
-                    price_item = QTableWidgetItem(f"{service.default_price:,.2f}")
-                    price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    self.services_table.setItem(index, 2, price_item)
-
-                    status_item = QTableWidgetItem(service.status.value)
-                    status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    # الحالة مع لون الخلفية
+                    bg_color = QColor("#ef4444") if service.status == schemas.ServiceStatus.ARCHIVED else None
+                    status_item = create_centered_item(service.status.value, bg_color)
                     if service.status == schemas.ServiceStatus.ARCHIVED:
-                        status_item.setBackground(QColor("#ef4444"))
                         status_item.setForeground(QColor("white"))
                     self.services_table.setItem(index, 3, status_item)
 

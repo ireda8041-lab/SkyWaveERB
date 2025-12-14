@@ -108,28 +108,31 @@ class PDFGenerator:
             return str(text)
 
     def _register_arabic_fonts(self) -> str:
-        """تسجيل الخطوط العربية"""
+        """تسجيل خط Cairo العربي"""
         try:
-            # محاولة تحميل Arial من Windows
-            font_paths = [
-                "C:/Windows/Fonts/arial.ttf",           # Windows
-                "/System/Library/Fonts/Arial.ttf",      # macOS
-                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
-                "assets/fonts/arial.ttf"                # مجلد المشروع
-            ]
+            import sys
+            
+            # تحديد مسار خط Cairo
+            if getattr(sys, 'frozen', False):
+                base_path = sys._MEIPASS
+            else:
+                base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            
+            # مسار خط Cairo
+            cairo_font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
+            
+            if os.path.exists(cairo_font_path):
+                try:
+                    pdfmetrics.registerFont(TTFont('CairoFont', cairo_font_path))
+                    print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {cairo_font_path}")
+                    return 'CairoFont'
+                except Exception as e:
+                    print(f"WARNING: [PDFGenerator] فشل تحميل خط Cairo: {e}")
+            else:
+                print(f"⚠️ [PDFGenerator] خط Cairo غير موجود: {cairo_font_path}")
 
-            for font_path in font_paths:
-                if os.path.exists(font_path):
-                    try:
-                        pdfmetrics.registerFont(TTFont('ArabicFont', font_path))
-                        print(f"✅ [PDFGenerator] تم تحميل الخط العربي: {font_path}")
-                        return 'ArabicFont'
-                    except Exception as e:
-                        print(f"WARNING: [PDFGenerator] فشل تحميل الخط {font_path}: {e}")
-                        continue
-
-            # إذا فشل تحميل جميع الخطوط، استخدم الخط الافتراضي
-            print("⚠️ [PDFGenerator] لم يتم العثور على خط عربي، سيتم استخدام الخط الافتراضي")
+            # إذا فشل تحميل الخط، استخدم الخط الافتراضي
+            print("⚠️ [PDFGenerator] سيتم استخدام الخط الافتراضي")
             return 'Helvetica'
 
         except Exception as e:

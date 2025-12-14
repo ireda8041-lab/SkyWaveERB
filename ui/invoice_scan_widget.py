@@ -13,7 +13,7 @@ import os
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QFont
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
 )
 
-from ui.styles import COLORS
+from ui.styles import COLORS, get_cairo_font
 
 
 class InvoiceScanWorker(QThread):
@@ -95,26 +95,27 @@ class InvoiceScanWidget(QFrame):
     def _setup_ui(self):
         """إعداد واجهة المستخدم"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(20, 25, 20, 20)
+        layout.setSpacing(8)
 
-        # أيقونة
+        # أيقونة - حجم أكبر للوضوح
         self._icon_label = QLabel("📷")
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._icon_label.setFont(QFont("Segoe UI Emoji", 40))
+        self._icon_label.setStyleSheet("font-size: 48px;")
         layout.addWidget(self._icon_label)
 
         # النص الرئيسي
         self._text_label = QLabel("اسحب صورة الفاتورة هنا")
         self._text_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._text_label.setWordWrap(True)
-        self._text_label.setFont(QFont("Cairo", 14, QFont.Weight.Bold))
+        self._text_label.setFont(get_cairo_font(14, bold=True))
+        self._text_label.setStyleSheet(f"color: {COLORS.get('text_primary', '#ffffff')};")
         layout.addWidget(self._text_label)
 
         # النص الفرعي
         self._sub_label = QLabel("أو اضغط لاختيار ملف • يدعم JPG, PNG, WEBP")
         self._sub_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._sub_label.setFont(QFont("Cairo", 10))
+        self._sub_label.setFont(get_cairo_font(11))
         self._sub_label.setStyleSheet(f"color: {COLORS.get('text_secondary', '#888')};")
         layout.addWidget(self._sub_label)
 
@@ -272,21 +273,32 @@ class InvoiceScanWidget(QFrame):
         """)
 
     def _show_error(self, message: str):
-        """عرض حالة الخطأ"""
+        """عرض حالة الخطأ بشكل هادئ"""
         self._is_loading = False
-        danger = COLORS.get('danger', '#EF4444')
+        warning = COLORS.get('warning', '#F59E0B')
         
-        self._icon_label.setText("❌")
-        self._text_label.setText(message)
-        self._sub_label.setText("")
+        # تحديد نوع الخطأ لعرض رسالة مناسبة
+        if "API" in message or "مفتاح" in message:
+            self._icon_label.setText("🔑")
+            self._text_label.setText("ميزة المسح الذكي غير مفعّلة")
+            self._sub_label.setText("أضف مفتاح Gemini API في الإعدادات لتفعيلها")
+            self._sub_label.setStyleSheet(f"color: {warning};")
+            border_color = warning
+        else:
+            self._icon_label.setText("⚠️")
+            self._text_label.setText(message)
+            self._sub_label.setText("يمكنك إدخال البيانات يدوياً")
+            self._sub_label.setStyleSheet(f"color: {COLORS.get('text_secondary', '#888')};")
+            border_color = COLORS.get('danger', '#EF4444')
+        
         self._retry_btn.setVisible(True)
         self.setEnabled(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         self.setStyleSheet(f"""
             InvoiceScanWidget {{
-                background-color: rgba(239, 68, 68, 0.1);
-                border: 2px solid {danger};
+                background-color: rgba(245, 158, 11, 0.08);
+                border: 2px dashed {border_color};
                 border-radius: 16px;
             }}
         """)
