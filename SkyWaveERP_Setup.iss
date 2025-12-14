@@ -34,7 +34,7 @@ DisableDirPage=no
 
 ; ملفات الإخراج
 OutputDir=installer_output
-OutputBaseFilename=SkyWave-Setup-{#MyAppVersion}
+OutputBaseFilename=SkyWaveERP-Setup-{#MyAppVersion}
 SetupIconFile=icon.ico
 
 ; الضغط (أفضل ضغط)

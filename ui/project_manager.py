@@ -1519,7 +1519,7 @@ class ProjectManagerTab(QWidget):
         if selected:
             row = selected[0].row()
             project_name = self.projects_table.item(row, 1).text()
-            project = self.project_service.get_project_by_name(project_name)
+            project = self.project_service.get_project_by_id(project_name)
             if project:
                 from ui.project_profit_dialog import ProjectProfitDialog
                 dialog = ProjectProfitDialog(project, self.project_service, self)
@@ -1531,7 +1531,7 @@ class ProjectManagerTab(QWidget):
         if selected:
             row = selected[0].row()
             project_name = self.projects_table.item(row, 1).text()
-            project = self.project_service.get_project_by_name(project_name)
+            project = self.project_service.get_project_by_id(project_name)
             if project and hasattr(self, 'printing_service') and self.printing_service:
                 self.printing_service.print_invoice(project)
 
