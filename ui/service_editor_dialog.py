@@ -8,6 +8,7 @@ from typing import Any
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
 from core import schemas
 from services.service_service import ServiceService
 from ui.custom_spinbox import CustomSpinBox
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class ServiceEditorDialog(QDialog):
@@ -145,18 +147,56 @@ class ServiceEditorDialog(QDialog):
         price_cont.addWidget(price_label)
         self.price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999_999)
         self.price_input.setDecimals(2)
+        self.price_input.setSuffix(" ج.م")
         price_cont.addWidget(self.price_input)
         row1.addLayout(price_cont, 1)
 
-        # الفئة
+        # الفئة (ComboBox قابل للتعديل)
         cat_cont = QVBoxLayout()
         cat_cont.setSpacing(2)
         cat_label = QLabel("📂 الفئة")
         cat_label.setStyleSheet(label_style)
         cat_cont.addWidget(cat_label)
-        self.category_input = QLineEdit()
-        self.category_input.setStyleSheet(field_style)
-        self.category_input.setPlaceholderText("SEO, Web...")
+        
+        # SmartFilterComboBox مع فلترة ذكية
+        self.category_input = SmartFilterComboBox()
+        self.category_input.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 25px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px;
+                border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                selection-background-color: {COLORS['primary']};
+            }}
+        """)
+        
+        # ⚡ تحميل الفئات الموجودة
+        self._load_existing_categories()
+        
+        self.category_input.lineEdit().setPlaceholderText("اكتب للبحث أو أضف فئة جديدة...")
+        
         cat_cont.addWidget(self.category_input)
         row1.addLayout(cat_cont, 1)
 
@@ -170,7 +210,7 @@ class ServiceEditorDialog(QDialog):
         self.description_input = QTextEdit()
         self.description_input.setStyleSheet(field_style)
         self.description_input.setPlaceholderText("وصف الخدمة...")
-        self.description_input.setFixedHeight(60)
+        self.description_input.setMinimumHeight(120)
         layout.addWidget(self.description_input)
 
         # === الحالة ===
@@ -233,11 +273,38 @@ class ServiceEditorDialog(QDialog):
             self.load_service_data()
             self.save_button.setText("💾 حفظ")
 
+    def _load_existing_categories(self):
+        """⚡ تحميل الفئات الموجودة من الخدمات الحالية"""
+        try:
+            services = self.service_service.get_all_services()
+            categories = set()
+            
+            for service in services:
+                if service.category and service.category.strip():
+                    categories.add(service.category.strip())
+            
+            # ترتيب الفئات أبجدياً وإضافتها
+            sorted_categories = sorted(categories)
+            self.category_input.addItem("")  # خيار فارغ
+            for cat in sorted_categories:
+                self.category_input.addItem(cat)
+                
+        except Exception as e:
+            print(f"WARNING: [ServiceEditorDialog] فشل تحميل الفئات: {e}")
+
     def load_service_data(self):
         self.name_input.setText(self.service_to_edit.name)
         self.description_input.setText(self.service_to_edit.description or "")
         self.price_input.setValue(self.service_to_edit.default_price)
-        self.category_input.setText(self.service_to_edit.category or "")
+        
+        # ⚡ تعيين الفئة في ComboBox
+        category = self.service_to_edit.category or ""
+        index = self.category_input.findText(category)
+        if index >= 0:
+            self.category_input.setCurrentIndex(index)
+        else:
+            self.category_input.setCurrentText(category)
+        
         self.status_checkbox.setChecked(
             self.service_to_edit.status == schemas.ServiceStatus.ACTIVE
         )
@@ -252,7 +319,7 @@ class ServiceEditorDialog(QDialog):
             "name": self.name_input.text(),
             "description": self.description_input.toPlainText(),
             "default_price": self.price_input.value(),
-            "category": self.category_input.text(),
+            "category": self.category_input.currentText().strip(),  # ⚡ من ComboBox
             "status": status,
         }
 

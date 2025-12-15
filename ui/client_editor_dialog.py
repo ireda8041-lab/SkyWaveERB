@@ -27,7 +27,9 @@ from PyQt6.QtWidgets import (
 )
 
 from core import schemas
+from core.custom_fields_manager import custom_fields
 from services.client_service import ClientService
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class ClientEditorDialog(QDialog):
@@ -90,9 +92,9 @@ class ClientEditorDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(14, 14, 14, 14)
 
-        # ستايل الحقول
+        # ستايل الحقول مع أسهم واضحة (RTL)
         field_style = f"""
-            QLineEdit, QComboBox {{
+            QLineEdit {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
@@ -101,15 +103,32 @@ class ClientEditorDialog(QDialog):
                 font-size: 11px;
                 min-height: 16px;
             }}
-            QLineEdit:hover, QComboBox:hover {{
+            QLineEdit:hover {{
                 border-color: {COLORS['primary']};
             }}
-            QLineEdit:focus, QComboBox:focus {{
+            QLineEdit:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QComboBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 25px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QComboBox:focus {{
                 border: 1px solid {COLORS['primary']};
             }}
             QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px;
                 border: none;
-                width: 20px;
             }}
             QComboBox::down-arrow {{
                 image: url(assets/down-arrow.png);
@@ -228,9 +247,50 @@ class ClientEditorDialog(QDialog):
         work_label = QLabel("مجال العمل")
         work_label.setStyleSheet(label_style)
         work_cont.addWidget(work_label)
-        self.work_field_input = QLineEdit()
-        self.work_field_input.setStyleSheet(field_style)
-        self.work_field_input.setPlaceholderText("تجارة، خدمات...")
+        
+        # SmartFilterComboBox مع فلترة ذكية
+        self.work_field_input = SmartFilterComboBox()
+        self.work_field_input.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 25px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px;
+                border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                selection-background-color: {COLORS['primary']};
+                selection-color: white;
+                padding: 4px;
+            }}
+        """)
+        
+        # تحميل مجالات العمل (الافتراضية + المخصصة)
+        self.work_field_input.addItem("")  # خيار فارغ
+        business_fields = custom_fields.get_all_business_fields()
+        for field in business_fields:
+            self.work_field_input.addItem(field)
+        self.work_field_input.lineEdit().setPlaceholderText("اكتب للبحث أو أدخل مجال جديد...")
+        
         work_cont.addWidget(self.work_field_input)
         row4.addLayout(work_cont, 1)
         
@@ -347,7 +407,13 @@ class ClientEditorDialog(QDialog):
         self.country_input.setText(self.client_to_edit.country or "")
         self.vat_input.setText(self.client_to_edit.vat_number or "")
         self.client_type_combo.setCurrentText(self.client_to_edit.client_type or "فرد")
-        self.work_field_input.setText(self.client_to_edit.work_field or "")
+        # تعيين مجال العمل في ComboBox
+        work_field = self.client_to_edit.work_field or ""
+        index = self.work_field_input.findText(work_field)
+        if index >= 0:
+            self.work_field_input.setCurrentIndex(index)
+        else:
+            self.work_field_input.setCurrentText(work_field)
 
         has_logo_data = hasattr(self.client_to_edit, 'logo_data') and self.client_to_edit.logo_data
         logo_path = self.client_to_edit.logo_path or ""
@@ -433,7 +499,7 @@ class ClientEditorDialog(QDialog):
             "vat_number": self.vat_input.text(),
             "status": status,
             "client_type": self.client_type_combo.currentText(),
-            "work_field": self.work_field_input.text(),
+            "work_field": self.work_field_input.currentText(),
             "logo_path": logo_value,
             "logo_data": logo_data,
             "client_notes": self.notes_input.toPlainText(),
@@ -448,6 +514,11 @@ class ClientEditorDialog(QDialog):
             return
 
         try:
+            # حفظ مجال العمل الجديد إذا لم يكن موجوداً
+            work_field = client_data.get("work_field", "")
+            if work_field and work_field.strip():
+                custom_fields.add_value("business_fields", work_field)
+            
             if self.is_editing:
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
                 self.client_service.update_client(client_id, client_data)

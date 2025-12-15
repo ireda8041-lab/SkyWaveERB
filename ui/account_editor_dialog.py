@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from core import schemas
 from services.accounting_service import AccountingService
 from ui.custom_spinbox import CustomSpinBox
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class AccountEditorDialog(QDialog):
@@ -150,11 +151,10 @@ class AccountEditorDialog(QDialog):
         self.type_combo.currentIndexChanged.connect(self._on_type_changed)
         form_layout.addRow("نوع الحساب:", self.type_combo)
 
-        # 4. Parent Account (Critical) - with smart filtering
-        self.parent_combo = QComboBox()
+        # 4. Parent Account (Critical) - SmartFilterComboBox مع فلترة
+        self.parent_combo = SmartFilterComboBox()
         self.parent_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.parent_combo.addItem("-- بدون أب (حساب رئيسي) --", userData=None)
-        self.parent_combo.setEditable(True)  # Enable auto-complete
         self._populate_parent_accounts()
         form_layout.addRow("الحساب الأب:", self.parent_combo)
 

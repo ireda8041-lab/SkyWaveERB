@@ -34,6 +34,7 @@ from services.client_service import ClientService
 from services.project_service import ProjectService
 from ui.custom_spinbox import CustomSpinBox
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
+from ui.smart_combobox import SmartFilterComboBox
 
 
 def to_decimal(value) -> Decimal:
@@ -136,9 +137,9 @@ class NewPaymentDialog(QDialog):
         project_label.setStyleSheet(label_style)
         layout.addWidget(project_label)
 
-        self.project_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.project_combo = SmartFilterComboBox()
         self.project_combo.setStyleSheet(field_style)
-        self.project_combo.setPlaceholderText("اختر المشروع...")
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
         layout.addWidget(self.project_combo)
 
@@ -171,9 +172,9 @@ class NewPaymentDialog(QDialog):
         acc_label.setStyleSheet(label_style)
         layout.addWidget(acc_label)
         
-        self.account_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.account_combo = SmartFilterComboBox()
         self.account_combo.setStyleSheet(field_style)
-        self.account_combo.setPlaceholderText("اختر حساب البنك/الخزينة...")
         self.account_combo.currentIndexChanged.connect(self._update_payment_method)
         layout.addWidget(self.account_combo)
 
@@ -188,6 +189,7 @@ class NewPaymentDialog(QDialog):
         amount_label.setStyleSheet(label_style)
         amount_container.addWidget(amount_label)
         self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
+        self.amount_input.setSuffix(" ج.م")
         self.amount_input.valueChanged.connect(self._validate_payment)
         amount_container.addWidget(self.amount_input)
         row1.addLayout(amount_container, 1)
@@ -303,6 +305,7 @@ class NewPaymentDialog(QDialog):
                         pass
                 display = f"📁 {proj.name}{client_name}"
                 self.project_combo.addItem(display, userData=proj)
+            self.project_combo.lineEdit().setPlaceholderText("اكتب للبحث عن المشروع...")
         except Exception as e:
             print(f"ERROR: [NewPaymentDialog] فشل تحميل المشاريع: {e}")
 
@@ -312,6 +315,7 @@ class NewPaymentDialog(QDialog):
             for acc in accounts:
                 display = f"💰 {acc.name} ({acc.code})"
                 self.account_combo.addItem(display, userData=acc)
+            self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث عن الحساب...")
         except Exception as e:
             print(f"ERROR: [NewPaymentDialog] فشل تحميل الحسابات: {e}")
 
@@ -510,19 +514,22 @@ class PaymentEditorDialog(QDialog):
         layout = QVBoxLayout()
         form = QFormLayout()
 
-        # حساب الاستلام
-        self.account_combo = QComboBox()
-        for acc in accounts:
+        # حساب الاستلام (SmartFilterComboBox مع فلترة)
+        self.account_combo = SmartFilterComboBox()
+        selected_index = 0
+        for i, acc in enumerate(accounts):
             display_text = f"💰 {acc.name} ({acc.code})"
             self.account_combo.addItem(display_text, userData=acc)
             if acc.code == payment.account_id:
-                self.account_combo.setCurrentIndex(self.account_combo.count() - 1)
+                selected_index = i
+        self.account_combo.setCurrentIndex(selected_index)
 
         # ربط تغيير الحساب بتحديث طريقة الدفع
         self.account_combo.currentIndexChanged.connect(self._update_payment_method_from_account)
 
         # المبلغ
         self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
+        self.amount_input.setSuffix(" ج.م")
         self.amount_input.setValue(payment.amount)
         self.amount_input.setStyleSheet("font-size: 14px; font-weight: bold;")
 

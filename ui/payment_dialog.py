@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from core import schemas
 from ui.custom_spinbox import CustomSpinBox
+from ui.smart_combobox import SmartFilterComboBox
 
 
 def to_decimal(value) -> Decimal:
@@ -171,12 +172,13 @@ class PaymentDialog(QDialog):
         acc_label.setStyleSheet(label_style)
         layout.addWidget(acc_label)
 
-        self.account_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.account_combo = SmartFilterComboBox()
         self.account_combo.setStyleSheet(field_style)
-        self.account_combo.setPlaceholderText("اختر حساب البنك/الخزينة...")
         for acc in self.accounts:
             display_text = f"💰 {acc.name} ({acc.code})"
             self.account_combo.addItem(display_text, userData=acc)
+        self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث عن الحساب...")
         layout.addWidget(self.account_combo)
 
         # === صف المبلغ والتاريخ ===
@@ -190,6 +192,7 @@ class PaymentDialog(QDialog):
         amount_label.setStyleSheet(label_style)
         amount_cont.addWidget(amount_label)
         self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
+        self.amount_input.setSuffix(" ج.م")
         default_amount = float(self.remaining_amount) if self.remaining_amount > 0 else 0.01
         self.amount_input.setValue(default_amount)
         self.amount_input.valueChanged.connect(self._validate_payment)

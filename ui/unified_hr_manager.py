@@ -145,6 +145,16 @@ class UnifiedHRManager(QWidget):
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         from ui.styles import fix_table_rtl
         fix_table_rtl(self.employees_table)
+        
+        # ⚡ إضافة قائمة السياق (كليك يمين)
+        from core.context_menu import ContextMenuManager
+        ContextMenuManager.setup_table_context_menu(
+            table=self.employees_table,
+            on_view=self.edit_employee,
+            on_edit=self.edit_employee,
+            on_refresh=self.load_employees
+        )
+        
         layout.addWidget(self.employees_table)
         
         # معلومات الموظف المحدد
@@ -188,6 +198,11 @@ class UnifiedHRManager(QWidget):
     
     def _on_employee_selected(self):
         """عند اختيار موظف"""
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         row = self.employees_table.currentRow()
         if 0 <= row < len(self.employees):
             self.current_employee = self.employees[row]
@@ -1319,13 +1334,44 @@ class PayLoanDialog(QDialog):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        self.setStyleSheet("""
-            QDialog { background-color: #001a3a; color: #ffffff; }
-            QLabel { color: #ffffff; }
-            QDoubleSpinBox, QComboBox {
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #001a3a; color: #ffffff; }}
+            QLabel {{ color: #ffffff; }}
+            QDoubleSpinBox, QComboBox {{
                 background-color: #002040; color: #ffffff;
-                border: 2px solid #003366; border-radius: 6px; padding: 8px;
-            }
+                border: 2px solid #003366; border-radius: 6px; padding: 8px 10px 8px 28px;
+            }}
+            QDoubleSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-top-left-radius: 4px;
+            }}
+            QDoubleSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-bottom-left-radius: 4px;
+            }}
+            QDoubleSpinBox::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QDoubleSpinBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px; border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
         """)
         
         info = QLabel(f"المبلغ المتبقي: {self.remaining:.2f} ج.م\nالقسط الشهري: {self.monthly:.2f} ج.م")
@@ -1398,13 +1444,44 @@ class ManualAttendanceDialog(QDialog):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        self.setStyleSheet("""
-            QDialog { background-color: #001a3a; color: #ffffff; }
-            QLabel { color: #ffffff; }
-            QDateEdit, QTimeEdit, QComboBox {
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #001a3a; color: #ffffff; }}
+            QLabel {{ color: #ffffff; }}
+            QDateEdit, QTimeEdit, QComboBox {{
                 background-color: #002040; color: #ffffff;
-                border: 2px solid #003366; border-radius: 6px; padding: 8px;
-            }
+                border: 2px solid #003366; border-radius: 6px; padding: 8px 10px 8px 28px;
+            }}
+            QDateEdit::up-button, QTimeEdit::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-top-left-radius: 4px;
+            }}
+            QDateEdit::down-button, QTimeEdit::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-bottom-left-radius: 4px;
+            }}
+            QDateEdit::up-arrow, QTimeEdit::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QDateEdit::down-arrow, QTimeEdit::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px; border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
         """)
         
         form = QFormLayout()
@@ -1483,13 +1560,44 @@ class LeaveRequestDialog(QDialog):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        self.setStyleSheet("""
-            QDialog { background-color: #001a3a; color: #ffffff; }
-            QLabel { color: #ffffff; }
-            QDateEdit, QComboBox, QTextEdit {
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #001a3a; color: #ffffff; }}
+            QLabel {{ color: #ffffff; }}
+            QDateEdit, QComboBox, QTextEdit {{
                 background-color: #002040; color: #ffffff;
-                border: 2px solid #003366; border-radius: 6px; padding: 8px;
-            }
+                border: 2px solid #003366; border-radius: 6px; padding: 8px 10px 8px 28px;
+            }}
+            QDateEdit::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-top-left-radius: 4px;
+            }}
+            QDateEdit::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-bottom-left-radius: 4px;
+            }}
+            QDateEdit::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QDateEdit::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px; border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
         """)
         
         form = QFormLayout()
@@ -1724,14 +1832,45 @@ class EditSalaryDialog(QDialog):
         layout = QVBoxLayout()
         self.setLayout(layout)
         
-        self.setStyleSheet("""
-            QDialog { background-color: #001a3a; color: #ffffff; }
-            QLabel { color: #ffffff; }
-            QDoubleSpinBox, QComboBox {
+        self.setStyleSheet(f"""
+            QDialog {{ background-color: #001a3a; color: #ffffff; }}
+            QLabel {{ color: #ffffff; }}
+            QDoubleSpinBox, QComboBox {{
                 background-color: #002040; color: #ffffff;
-                border: 2px solid #003366; border-radius: 6px; padding: 8px;
-            }
-            QGroupBox {
+                border: 2px solid #003366; border-radius: 6px; padding: 8px 10px 8px 28px;
+            }}
+            QDoubleSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-top-left-radius: 4px;
+            }}
+            QDoubleSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 20px; height: 14px;
+                background: #003366; border: none;
+                border-bottom-left-radius: 4px;
+            }}
+            QDoubleSpinBox::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QDoubleSpinBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 22px; border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QGroupBox {{
                 background-color: #002040;
                 border: 2px solid #003366;
                 border-radius: 8px;
@@ -1739,7 +1878,7 @@ class EditSalaryDialog(QDialog):
                 padding-top: 15px;
                 font-weight: bold;
                 color: #4a90e2;
-            }
+            }}
         """)
         
         # معلومات الموظف

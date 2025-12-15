@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
+from ui.smart_combobox import SmartFilterComboBox
 
 # مسار ملف إعدادات المهام
 TASK_SETTINGS_FILE = "task_settings.json"
@@ -591,7 +592,7 @@ class TaskService:
 
 
 class TaskSettingsDialog(QDialog):
-    """نافذة إعدادات المهام - تصميم متجاوب"""
+    """نافذة إعدادات المهام - تصميم متوافق مع باقي الأقسام"""
 
     def __init__(self, settings: TaskSettings, parent=None):
         super().__init__(parent)
@@ -599,7 +600,6 @@ class TaskSettingsDialog(QDialog):
         self.result_settings: TaskSettings | None = None
 
         self.setWindowTitle("⚙️ إعدادات المهام")
-        # 📱 Responsive: الحد الأدنى فقط
         self.setMinimumWidth(420)
         self.setMinimumHeight(450)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -614,252 +614,234 @@ class TaskSettingsDialog(QDialog):
         self.load_settings()
 
     def init_ui(self):
-        """تهيئة الواجهة - تصميم متجاوب"""
-        # 📱 التخطيط الرئيسي
+        """تهيئة الواجهة - تصميم متوافق مع باقي البرنامج"""
+        # ستايلات الحقول - الأسهم على اليسار (RTL)
+        field_style = f"""
+            QSpinBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 22px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QSpinBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QSpinBox:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QSpinBox::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 18px;
+                height: 14px;
+                border: none;
+                background: transparent;
+            }}
+            QSpinBox::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 18px;
+                height: 14px;
+                border: none;
+                background: transparent;
+            }}
+            QSpinBox::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QSpinBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+        """
+        
+        radio_style = f"color: {COLORS['text_primary']}; font-size: 11px; padding: 4px;"
+        checkbox_style = f"color: {COLORS['text_primary']}; font-size: 11px;"
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
+
+        # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
         main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 📱 منطقة التمرير
+        # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet(f"""
             QScrollArea {{
                 border: none;
-                background-color: transparent;
+                background-color: {COLORS['bg_dark']};
             }}
             QScrollBar:vertical {{
                 background-color: {COLORS['bg_medium']};
-                width: 10px;
-                border-radius: 5px;
+                width: 6px;
+                border-radius: 3px;
             }}
             QScrollBar::handle:vertical {{
                 background-color: {COLORS['primary']};
-                border-radius: 5px;
-                min-height: 30px;
+                border-radius: 3px;
+                min-height: 20px;
             }}
         """)
 
         content_widget = QWidget()
+        content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
         layout = QVBoxLayout(content_widget)
         layout.setSpacing(12)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        # العنوان
-        header = QLabel("⚙️ إعدادات نظام المهام")
-        header.setStyleSheet(f"""
-            QLabel {{
-                font-size: 16px;
-                font-weight: bold;
-                color: {COLORS['primary']};
-                padding: 10px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {COLORS['bg_light']}, stop:1 {COLORS['bg_medium']});
-                border-radius: 8px;
-            }}
-        """)
-        layout.addWidget(header)
-
-        # === مجموعة إعدادات تاريخ الانتهاء ===
-        due_date_group = QGroupBox("📅 عند انتهاء تاريخ المهمة")
-        due_date_group.setFont(get_cairo_font(12, bold=True))
-        due_date_layout = QVBoxLayout()
-        due_date_layout.setSpacing(10)
-        due_date_layout.setContentsMargins(12, 15, 12, 12)
+        # === إعدادات تاريخ الانتهاء ===
+        due_date_label = QLabel("📅 عند انتهاء تاريخ المهمة:")
+        due_date_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(due_date_label)
 
         self.due_date_action_group = QButtonGroup(self)
 
-        # ستايل موحد للـ RadioButtons مع خط Cairo لضمان ظهور النص العربي
-        radio_style = f"""
-            QRadioButton {{
-                font-family: 'Cairo', 'Segoe UI', sans-serif;
-                font-size: 13px;
-                padding: 6px 0;
-                color: {COLORS.get('text_primary', '#ffffff')};
-                spacing: 8px;
-            }}
-            QRadioButton::indicator {{
-                width: 18px;
-                height: 18px;
-            }}
-        """
-
-        self.radio_keep_visible = QRadioButton("تبقى ظاهرة مع تحذير (متأخرة)")
-        self.radio_keep_visible.setFont(get_cairo_font(12))
+        self.radio_keep_visible = QRadioButton("🔔 تبقى ظاهرة مع تحذير (متأخرة)")
         self.radio_keep_visible.setStyleSheet(radio_style)
         self.due_date_action_group.addButton(self.radio_keep_visible)
-        due_date_layout.addWidget(self.radio_keep_visible)
+        layout.addWidget(self.radio_keep_visible)
 
-        self.radio_move_completed = QRadioButton("تنتقل تلقائياً للمهام المنتهية")
-        self.radio_move_completed.setFont(get_cairo_font(12))
+        self.radio_move_completed = QRadioButton("✅ تنتقل تلقائياً للمهام المنتهية")
         self.radio_move_completed.setStyleSheet(radio_style)
         self.due_date_action_group.addButton(self.radio_move_completed)
-        due_date_layout.addWidget(self.radio_move_completed)
+        layout.addWidget(self.radio_move_completed)
 
-        self.radio_hide = QRadioButton("تختفي من القائمة (تبقى في قاعدة البيانات)")
-        self.radio_hide.setFont(get_cairo_font(12))
+        self.radio_hide = QRadioButton("👁️ تختفي من القائمة (تبقى في قاعدة البيانات)")
         self.radio_hide.setStyleSheet(radio_style)
         self.due_date_action_group.addButton(self.radio_hide)
-        due_date_layout.addWidget(self.radio_hide)
+        layout.addWidget(self.radio_hide)
 
-        auto_delete_layout = QHBoxLayout()
-        self.radio_auto_delete = QRadioButton("تُحذف تلقائياً بعد")
-        self.radio_auto_delete.setFont(get_cairo_font(12))
+        auto_delete_row = QHBoxLayout()
+        auto_delete_row.setSpacing(8)
+        self.radio_auto_delete = QRadioButton("🗑️ تُحذف تلقائياً بعد")
         self.radio_auto_delete.setStyleSheet(radio_style)
         self.due_date_action_group.addButton(self.radio_auto_delete)
-        auto_delete_layout.addWidget(self.radio_auto_delete)
+        auto_delete_row.addWidget(self.radio_auto_delete)
 
         self.auto_delete_days = QSpinBox()
         self.auto_delete_days.setRange(1, 365)
         self.auto_delete_days.setValue(7)
         self.auto_delete_days.setSuffix(" يوم")
-        self.auto_delete_days.setFixedWidth(90)
-        self.auto_delete_days.setMinimumHeight(28)
-        auto_delete_layout.addWidget(self.auto_delete_days)
-        auto_delete_layout.addStretch()
+        self.auto_delete_days.setFixedWidth(110)
+        self.auto_delete_days.setStyleSheet(field_style)
+        auto_delete_row.addWidget(self.auto_delete_days)
+        auto_delete_row.addStretch()
+        layout.addLayout(auto_delete_row)
 
-        due_date_layout.addLayout(auto_delete_layout)
-        due_date_group.setLayout(due_date_layout)
-        layout.addWidget(due_date_group)
+        # فاصل
+        layout.addSpacing(8)
 
-        # ستايل موحد للـ CheckBox
-        checkbox_style = f"""
-            QCheckBox {{
-                font-family: 'Cairo', 'Segoe UI', sans-serif;
-                font-size: 13px;
-                padding: 4px 0;
-                color: {COLORS.get('text_primary', '#ffffff')};
-                spacing: 8px;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-            }}
-        """
+        # === إعدادات التذكيرات ===
+        reminder_label = QLabel("⏰ التذكيرات:")
+        reminder_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(reminder_label)
 
-        # === مجموعة إعدادات التذكيرات ===
-        reminder_group = QGroupBox("⏰ التذكيرات")
-        reminder_group.setFont(get_cairo_font(12, bold=True))
-        reminder_layout = QVBoxLayout()
-        reminder_layout.setSpacing(10)
-        reminder_layout.setContentsMargins(12, 15, 12, 12)
-
-        self.reminder_enabled = QCheckBox("تفعيل التذكيرات")
-        self.reminder_enabled.setFont(get_cairo_font(12))
+        self.reminder_enabled = QCheckBox("🔔 تفعيل التذكيرات")
         self.reminder_enabled.setStyleSheet(checkbox_style)
-        reminder_layout.addWidget(self.reminder_enabled)
+        layout.addWidget(self.reminder_enabled)
 
-        default_reminder_layout = QHBoxLayout()
-        default_reminder_label = QLabel("وقت التذكير الافتراضي:")
-        default_reminder_label.setFont(get_cairo_font(12))
-        default_reminder_layout.addWidget(default_reminder_label)
+        reminder_row = QHBoxLayout()
+        reminder_row.setSpacing(8)
+        reminder_time_label = QLabel("⏱️ وقت التذكير:")
+        reminder_time_label.setStyleSheet(label_style)
+        reminder_row.addWidget(reminder_time_label)
 
         self.default_reminder_minutes = QSpinBox()
         self.default_reminder_minutes.setRange(5, 1440)
         self.default_reminder_minutes.setValue(30)
-        self.default_reminder_minutes.setMinimumHeight(32)
-        self.default_reminder_minutes.setMinimumWidth(160)
         self.default_reminder_minutes.setSuffix(" دقيقة قبل")
-        self.default_reminder_minutes.setFont(get_cairo_font(11))
-        default_reminder_layout.addWidget(self.default_reminder_minutes)
-        default_reminder_layout.addStretch()
+        self.default_reminder_minutes.setFixedWidth(140)
+        self.default_reminder_minutes.setStyleSheet(field_style)
+        reminder_row.addWidget(self.default_reminder_minutes)
+        reminder_row.addStretch()
+        layout.addLayout(reminder_row)
 
-        reminder_layout.addLayout(default_reminder_layout)
-
-        self.sound_notification = QCheckBox("تشغيل صوت عند التذكير")
-        self.sound_notification.setFont(get_cairo_font(12))
+        self.sound_notification = QCheckBox("🔊 تشغيل صوت عند التذكير")
         self.sound_notification.setStyleSheet(checkbox_style)
-        reminder_layout.addWidget(self.sound_notification)
+        layout.addWidget(self.sound_notification)
 
-        reminder_group.setLayout(reminder_layout)
-        layout.addWidget(reminder_group)
+        # فاصل
+        layout.addSpacing(8)
 
-        # === مجموعة إعدادات العرض ===
-        display_group = QGroupBox("👁️ العرض")
-        display_group.setFont(get_cairo_font(12, bold=True))
-        display_layout = QVBoxLayout()
-        display_layout.setSpacing(10)
-        display_layout.setContentsMargins(12, 15, 12, 12)
+        # === إعدادات العرض ===
+        display_label = QLabel("👁️ العرض:")
+        display_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(display_label)
 
-        self.show_completed = QCheckBox("عرض المهام المكتملة في القائمة الرئيسية")
-        self.show_completed.setFont(get_cairo_font(12))
+        self.show_completed = QCheckBox("✅ عرض المهام المكتملة في القائمة الرئيسية")
         self.show_completed.setStyleSheet(checkbox_style)
-        display_layout.addWidget(self.show_completed)
+        layout.addWidget(self.show_completed)
 
-        self.show_overdue_warning = QCheckBox("عرض تحذير للمهام المتأخرة")
-        self.show_overdue_warning.setFont(get_cairo_font(12))
+        self.show_overdue_warning = QCheckBox("⚠️ عرض تحذير للمهام المتأخرة")
         self.show_overdue_warning.setStyleSheet(checkbox_style)
-        display_layout.addWidget(self.show_overdue_warning)
+        layout.addWidget(self.show_overdue_warning)
 
-        display_group.setLayout(display_layout)
-        layout.addWidget(display_group)
+        # فاصل
+        layout.addSpacing(8)
 
-        # === مجموعة الأرشفة التلقائية ===
-        archive_group = QGroupBox("📦 الأرشفة التلقائية")
-        archive_group.setFont(get_cairo_font(12, bold=True))
-        archive_layout = QVBoxLayout()
-        archive_layout.setSpacing(10)
-        archive_layout.setContentsMargins(12, 15, 12, 12)
+        # === الأرشفة التلقائية ===
+        archive_label = QLabel("📦 الأرشفة التلقائية:")
+        archive_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        layout.addWidget(archive_label)
 
-        self.auto_archive = QCheckBox("أرشفة المهام المكتملة تلقائياً")
-        self.auto_archive.setFont(get_cairo_font(12))
+        self.auto_archive = QCheckBox("📁 أرشفة المهام المكتملة تلقائياً")
         self.auto_archive.setStyleSheet(checkbox_style)
-        archive_layout.addWidget(self.auto_archive)
+        layout.addWidget(self.auto_archive)
 
-        archive_days_layout = QHBoxLayout()
-        archive_days_label = QLabel("أرشفة بعد:")
-        archive_days_label.setFont(get_cairo_font(12))
-        archive_days_layout.addWidget(archive_days_label)
+        archive_row = QHBoxLayout()
+        archive_row.setSpacing(8)
+        archive_days_label = QLabel("📅 أرشفة بعد:")
+        archive_days_label.setStyleSheet(label_style)
+        archive_row.addWidget(archive_days_label)
 
         self.archive_after_days = QSpinBox()
         self.archive_after_days.setRange(1, 365)
         self.archive_after_days.setValue(30)
-        self.archive_after_days.setSuffix(" يوم من الإكمال")
-        self.archive_after_days.setMinimumHeight(28)
-        archive_days_layout.addWidget(self.archive_after_days)
-        archive_days_layout.addStretch()
-
-        archive_layout.addLayout(archive_days_layout)
-        archive_group.setLayout(archive_layout)
-        layout.addWidget(archive_group)
+        self.archive_after_days.setSuffix(" يوم")
+        self.archive_after_days.setFixedWidth(110)
+        self.archive_after_days.setStyleSheet(field_style)
+        archive_row.addWidget(self.archive_after_days)
+        archive_row.addStretch()
+        layout.addLayout(archive_row)
 
         layout.addStretch()
 
         scroll_area.setWidget(content_widget)
         main_layout.addWidget(scroll_area, 1)
 
-        # 📱 منطقة الأزرار (ثابتة في الأسفل)
+        # منطقة الأزرار
         buttons_container = QWidget()
         buttons_container.setStyleSheet(f"""
             QWidget {{
-                background-color: {COLORS['bg_light']};
+                background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
         """)
         buttons_layout = QHBoxLayout(buttons_container)
-        buttons_layout.setContentsMargins(15, 12, 15, 12)
-        buttons_layout.setSpacing(10)
+        buttons_layout.setContentsMargins(14, 10, 14, 10)
+        buttons_layout.setSpacing(8)
 
         buttons_layout.addStretch()
 
         save_btn = QPushButton("💾 حفظ")
         save_btn.setStyleSheet(BUTTON_STYLES["primary"])
-        save_btn.setMinimumHeight(36)
-        save_btn.setMinimumWidth(100)
-        save_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        save_btn.setFixedSize(90, 30)
         save_btn.clicked.connect(self.save_settings)
         buttons_layout.addWidget(save_btn)
 
         cancel_btn = QPushButton("إلغاء")
         cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
-        cancel_btn.setMinimumHeight(36)
-        cancel_btn.setMinimumWidth(100)
-        cancel_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        cancel_btn.setFixedSize(70, 30)
         cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(cancel_btn)
 
         main_layout.addWidget(buttons_container)
-
 
     def load_settings(self):
         """تحميل الإعدادات الحالية"""
@@ -912,7 +894,7 @@ class TaskSettingsDialog(QDialog):
 
 
 class TaskEditorDialog(QDialog):
-    """نافذة إضافة/تعديل مهمة"""
+    """نافذة إضافة/تعديل مهمة - تصميم متوافق مع باقي الأقسام"""
 
     def __init__(self, task: Task | None = None, parent=None, project_service=None, client_service=None, default_settings: TaskSettings = None):
         super().__init__(parent)
@@ -927,10 +909,10 @@ class TaskEditorDialog(QDialog):
         self.clients_list: list[Any] = []
         self._load_projects_and_clients()
 
-        self.setWindowTitle("تعديل مهمة" if self.is_editing else "مهمة جديدة")
-        self.setMinimumWidth(480)
-        self.setMinimumHeight(520)
-        self.resize(520, 580)
+        self.setWindowTitle("✏️ تعديل مهمة" if self.is_editing else "➕ مهمة جديدة")
+        self.setMinimumWidth(420)
+        self.setMinimumHeight(500)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         try:
             from ui.styles import setup_custom_title_bar
@@ -960,166 +942,320 @@ class TaskEditorDialog(QDialog):
             print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
 
     def init_ui(self):
-        """تهيئة الواجهة"""
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
-        layout.setContentsMargins(15, 15, 15, 15)
+        """تهيئة الواجهة - تصميم متوافق مع باقي البرنامج"""
+        # ستايلات الحقول مع إظهار الأسهم داخل الحقل
+        field_style = f"""
+            QLineEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QLineEdit:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {COLORS['primary']};
+            }}
+            QComboBox {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 22px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QComboBox:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 20px;
+                border: none;
+                background: transparent;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                selection-background-color: {COLORS['primary']};
+                selection-color: white;
+            }}
+            QSpinBox, QDateEdit, QTimeEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 7px 10px 7px 22px;
+                font-size: 11px;
+                min-height: 16px;
+            }}
+            QSpinBox:hover, QDateEdit:hover, QTimeEdit:hover {{
+                border-color: {COLORS['primary']};
+            }}
+            QSpinBox::up-button, QDateEdit::up-button, QTimeEdit::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 18px;
+                height: 14px;
+                border: none;
+                background: transparent;
+            }}
+            QSpinBox::down-button, QDateEdit::down-button, QTimeEdit::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 18px;
+                height: 14px;
+                border: none;
+                background: transparent;
+            }}
+            QSpinBox::up-arrow, QDateEdit::up-arrow, QTimeEdit::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QSpinBox::down-arrow, QDateEdit::down-arrow, QTimeEdit::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px;
+                height: 10px;
+            }}
+            QTextEdit {{
+                background-color: {COLORS['bg_medium']};
+                color: {COLORS['text_primary']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 5px;
+                padding: 6px;
+                font-size: 11px;
+            }}
+        """
+        
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
+        checkbox_style = f"color: {COLORS['text_primary']}; font-size: 11px;"
 
-        header_label = QLabel("✏️ تعديل مهمة" if self.is_editing else "➕ إضافة مهمة جديدة")
-        header_label.setStyleSheet(f"""
-            QLabel {{
-                font-size: 16px;
-                font-weight: bold;
-                color: {COLORS['primary']};
-                padding: 10px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {COLORS['bg_light']}, stop:1 {COLORS['bg_medium']});
-                border-radius: 8px;
+        # التخطيط الرئيسي
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                border: none;
+                background-color: {COLORS['bg_dark']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {COLORS['bg_medium']};
+                width: 6px;
+                border-radius: 3px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {COLORS['primary']};
+                border-radius: 3px;
+                min-height: 20px;
             }}
         """)
-        layout.addWidget(header_label)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
-
-        form_widget = QWidget()
-        form_layout = QFormLayout()
-        form_layout.setSpacing(10)
-        form_layout.setContentsMargins(5, 5, 5, 5)
-        form_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        content_widget = QWidget()
+        content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(8)
+        layout.setContentsMargins(14, 14, 14, 14)
 
         # عنوان المهمة
+        title_label = QLabel("📝 العنوان *")
+        title_label.setStyleSheet(label_style)
+        layout.addWidget(title_label)
         self.title_input = QLineEdit()
+        self.title_input.setStyleSheet(field_style)
         self.title_input.setPlaceholderText("أدخل عنوان المهمة...")
-        self.title_input.setMinimumHeight(32)
-        form_layout.addRow("العنوان:", self.title_input)
+        layout.addWidget(self.title_input)
 
         # الوصف
+        desc_label = QLabel("📋 الوصف")
+        desc_label.setStyleSheet(label_style)
+        layout.addWidget(desc_label)
         self.description_input = QTextEdit()
-        self.description_input.setPlaceholderText("أدخل وصف المهمة (اختياري)...")
-        self.description_input.setMinimumHeight(60)
-        self.description_input.setMaximumHeight(80)
-        form_layout.addRow("الوصف:", self.description_input)
+        self.description_input.setStyleSheet(field_style)
+        self.description_input.setPlaceholderText("وصف المهمة (اختياري)...")
+        self.description_input.setFixedHeight(60)
+        layout.addWidget(self.description_input)
 
-        # الأولوية والفئة
-        priority_category_layout = QHBoxLayout()
-        priority_category_layout.setSpacing(8)
-
+        # صف الأولوية والفئة
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+        
+        priority_cont = QVBoxLayout()
+        priority_cont.setSpacing(2)
+        priority_label = QLabel("⚡ الأولوية")
+        priority_label.setStyleSheet(label_style)
+        priority_cont.addWidget(priority_label)
         self.priority_combo = QComboBox()
-        self.priority_combo.setMinimumHeight(32)
+        self.priority_combo.setStyleSheet(field_style)
         for priority in TaskPriority:
             icon = '🔴' if priority == TaskPriority.URGENT else '🟠' if priority == TaskPriority.HIGH else '🟡' if priority == TaskPriority.MEDIUM else '🟢'
             self.priority_combo.addItem(f"{icon} {priority.value}", priority)
         self.priority_combo.setCurrentIndex(1)
-        priority_category_layout.addWidget(self.priority_combo)
-
+        priority_cont.addWidget(self.priority_combo)
+        row1.addLayout(priority_cont, 1)
+        
+        category_cont = QVBoxLayout()
+        category_cont.setSpacing(2)
+        category_label = QLabel("📁 الفئة")
+        category_label.setStyleSheet(label_style)
+        category_cont.addWidget(category_label)
         self.category_combo = QComboBox()
-        self.category_combo.setMinimumHeight(32)
+        self.category_combo.setStyleSheet(field_style)
         for category in TaskCategory:
             self.category_combo.addItem(category.value, category)
-        priority_category_layout.addWidget(self.category_combo)
+        category_cont.addWidget(self.category_combo)
+        row1.addLayout(category_cont, 1)
+        
+        layout.addLayout(row1)
 
-        form_layout.addRow("الأولوية / الفئة:", priority_category_layout)
-
-        # تاريخ ووقت الاستحقاق
-        date_time_layout = QHBoxLayout()
-        date_time_layout.setSpacing(8)
-
+        # صف التاريخ والوقت
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        
+        date_cont = QVBoxLayout()
+        date_cont.setSpacing(2)
+        date_label = QLabel("📅 تاريخ الاستحقاق")
+        date_label.setStyleSheet(label_style)
+        date_cont.addWidget(date_label)
         self.due_date_input = QDateEdit()
         self.due_date_input.setCalendarPopup(True)
         self.due_date_input.setDate(QDate.currentDate().addDays(1))
-        self.due_date_input.setMinimumHeight(32)
-        date_time_layout.addWidget(self.due_date_input)
-
+        self.due_date_input.setStyleSheet(field_style)
+        date_cont.addWidget(self.due_date_input)
+        row2.addLayout(date_cont, 1)
+        
+        time_cont = QVBoxLayout()
+        time_cont.setSpacing(2)
+        time_label = QLabel("⏰ الوقت")
+        time_label.setStyleSheet(label_style)
+        time_cont.addWidget(time_label)
         self.due_time_input = QTimeEdit()
         self.due_time_input.setTime(QTime(12, 0))
-        self.due_time_input.setMinimumHeight(32)
-        date_time_layout.addWidget(self.due_time_input)
-
-        form_layout.addRow("تاريخ الاستحقاق:", date_time_layout)
+        self.due_time_input.setStyleSheet(field_style)
+        time_cont.addWidget(self.due_time_input)
+        row2.addLayout(time_cont, 1)
+        
+        layout.addLayout(row2)
 
         # الحالة (للتعديل فقط)
         if self.is_editing:
+            status_label = QLabel("📊 الحالة")
+            status_label.setStyleSheet(label_style)
+            layout.addWidget(status_label)
             self.status_combo = QComboBox()
-            self.status_combo.setMinimumHeight(32)
+            self.status_combo.setStyleSheet(field_style)
             for status in TaskStatus:
                 icon = "⏳" if status == TaskStatus.TODO else "🔄" if status == TaskStatus.IN_PROGRESS else "✅" if status == TaskStatus.COMPLETED else "❌"
                 self.status_combo.addItem(f"{icon} {status.value}", status)
-            form_layout.addRow("الحالة:", self.status_combo)
+            layout.addWidget(self.status_combo)
 
-        # المشروع المرتبط
-        self.project_combo = QComboBox()
-        self.project_combo.setMinimumHeight(32)
-        self.project_combo.setEditable(True)
-        self.project_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        # صف المشروع والعميل
+        row3 = QHBoxLayout()
+        row3.setSpacing(8)
+        
+        project_cont = QVBoxLayout()
+        project_cont.setSpacing(2)
+        project_label = QLabel("📁 المشروع")
+        project_label.setStyleSheet(label_style)
+        project_cont.addWidget(project_label)
+        # SmartFilterComboBox مع فلترة ذكية
+        self.project_combo = SmartFilterComboBox()
+        self.project_combo.setStyleSheet(field_style)
         self.project_combo.addItem("-- بدون مشروع --", "")
         for project_id, project_name in self.projects_list:
-            self.project_combo.addItem(f"{project_name}", project_id)
-        self.project_combo.lineEdit().setPlaceholderText("اختر أو ابحث عن مشروع...")
-        form_layout.addRow("المشروع:", self.project_combo)
-
-        # العميل المرتبط
-        self.client_combo = QComboBox()
-        self.client_combo.setMinimumHeight(32)
-        self.client_combo.setEditable(True)
-        self.client_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            self.project_combo.addItem(project_name, project_id)
+        project_cont.addWidget(self.project_combo)
+        row3.addLayout(project_cont, 1)
+        
+        client_cont = QVBoxLayout()
+        client_cont.setSpacing(2)
+        client_label = QLabel("👤 العميل")
+        client_label.setStyleSheet(label_style)
+        client_cont.addWidget(client_label)
+        # SmartFilterComboBox مع فلترة ذكية
+        self.client_combo = SmartFilterComboBox()
+        self.client_combo.setStyleSheet(field_style)
         self.client_combo.addItem("-- بدون عميل --", "")
         for client_id, client_name in self.clients_list:
-            self.client_combo.addItem(f"{client_name}", client_id)
-        self.client_combo.lineEdit().setPlaceholderText("اختر أو ابحث عن عميل...")
-        form_layout.addRow("العميل:", self.client_combo)
+            self.client_combo.addItem(client_name, client_id)
+        client_cont.addWidget(self.client_combo)
+        row3.addLayout(client_cont, 1)
+        
+        layout.addLayout(row3)
 
         # التذكير
-        reminder_layout = QHBoxLayout()
-        reminder_layout.setSpacing(8)
-
-        self.reminder_checkbox = QCheckBox("تفعيل التذكير")
+        reminder_row = QHBoxLayout()
+        reminder_row.setSpacing(8)
+        self.reminder_checkbox = QCheckBox("⏰ تفعيل التذكير")
         self.reminder_checkbox.setChecked(self.default_settings.reminder_enabled)
-        reminder_layout.addWidget(self.reminder_checkbox)
+        self.reminder_checkbox.setStyleSheet(checkbox_style)
+        reminder_row.addWidget(self.reminder_checkbox)
 
         self.reminder_minutes = QSpinBox()
-        self.reminder_minutes.setMinimumHeight(32)
         self.reminder_minutes.setRange(5, 1440)
         self.reminder_minutes.setValue(self.default_settings.default_reminder_minutes)
         self.reminder_minutes.setSuffix(" دقيقة قبل")
-        reminder_layout.addWidget(self.reminder_minutes)
+        self.reminder_minutes.setFixedWidth(140)
+        self.reminder_minutes.setStyleSheet(field_style)
+        reminder_row.addWidget(self.reminder_minutes)
+        reminder_row.addStretch()
+        layout.addLayout(reminder_row)
 
-        form_layout.addRow("التذكير:", reminder_layout)
+        layout.addStretch()
 
-        form_widget.setLayout(form_layout)
-        scroll.setWidget(form_widget)
-        layout.addWidget(scroll, 1)
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area, 1)
 
-        # أزرار التحكم
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(10)
+        # منطقة الأزرار
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['bg_medium']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(14, 10, 14, 10)
+        buttons_layout.setSpacing(8)
+
+        buttons_layout.addStretch()
 
         save_btn = QPushButton("💾 حفظ")
         save_btn.setStyleSheet(BUTTON_STYLES["primary"])
-        save_btn.setMinimumHeight(36)
-        save_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        save_btn.setFixedSize(90, 30)
         save_btn.clicked.connect(self.save_task)
         buttons_layout.addWidget(save_btn)
 
         if self.is_editing:
-            quick_complete_btn = QPushButton("✅ إكمال")
-            quick_complete_btn.setStyleSheet(BUTTON_STYLES["success"])
-            quick_complete_btn.setMinimumHeight(36)
-            quick_complete_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            quick_complete_btn.clicked.connect(self._quick_complete)
-            buttons_layout.addWidget(quick_complete_btn)
+            complete_btn = QPushButton("✅ إكمال")
+            complete_btn.setStyleSheet(BUTTON_STYLES["success"])
+            complete_btn.setFixedSize(80, 30)
+            complete_btn.clicked.connect(self._quick_complete)
+            buttons_layout.addWidget(complete_btn)
 
         cancel_btn = QPushButton("إلغاء")
         cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
-        cancel_btn.setMinimumHeight(36)
-        cancel_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        cancel_btn.setFixedSize(70, 30)
         cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(cancel_btn)
 
-        layout.addLayout(buttons_layout)
-        self.setLayout(layout)
-
+        main_layout.addWidget(buttons_container)
 
     def load_task_data(self):
         """تحميل بيانات المهمة للتعديل"""
@@ -1523,24 +1659,58 @@ class TodoManagerWidget(QWidget):
 
         # === تفاصيل المهمة المحددة ===
         details_group = QGroupBox("📝 تفاصيل المهمة")
+        details_group.setStyleSheet(f"""
+            QGroupBox {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['bg_medium']},
+                    stop:1 {COLORS['bg_light']});
+                border: 1px solid {COLORS['border']};
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 8px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 12px;
+                background: {COLORS['primary']};
+                border-radius: 6px;
+                color: white;
+                font-weight: bold;
+            }}
+        """)
         details_layout = QVBoxLayout()
-        details_layout.setSpacing(8)
-        details_layout.setContentsMargins(12, 15, 12, 12)
+        details_layout.setSpacing(10)
+        details_layout.setContentsMargins(12, 20, 12, 12)
         details_group.setLayout(details_layout)
 
         self.task_title_label = QLabel("اختر مهمة لعرض التفاصيل")
-        self.task_title_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 15px; font-weight: bold; padding: 5px 0;")
+        self.task_title_label.setStyleSheet(f"""
+            color: {COLORS['text_primary']}; 
+            font-size: 14px; 
+            font-weight: bold; 
+            padding: 8px;
+            background: {COLORS['bg_light']};
+            border-radius: 6px;
+        """)
         self.task_title_label.setWordWrap(True)
         details_layout.addWidget(self.task_title_label)
 
         self.task_description_label = QLabel("")
-        self.task_description_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 13px; padding: 5px 0;")
+        self.task_description_label.setStyleSheet(f"""
+            color: {COLORS['text_secondary']}; 
+            font-size: 12px; 
+            padding: 8px;
+            background: {COLORS['bg_medium']};
+            border-radius: 6px;
+            border-left: 3px solid {COLORS['primary']};
+        """)
         self.task_description_label.setWordWrap(True)
-        self.task_description_label.setMaximumHeight(80)
+        self.task_description_label.setMinimumHeight(60)
         details_layout.addWidget(self.task_description_label)
 
         self.task_info_label = QLabel("")
-        self.task_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px; padding: 5px 0;")
+        self.task_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px; padding: 5px 0;")
         self.task_info_label.setWordWrap(True)
         details_layout.addWidget(self.task_info_label)
 
@@ -1548,44 +1718,67 @@ class TodoManagerWidget(QWidget):
 
         # === أزرار الإجراءات السريعة ===
         quick_actions_group = QGroupBox("⚡ إجراءات سريعة")
+        quick_actions_group.setStyleSheet(f"""
+            QGroupBox {{
+                background: {COLORS['bg_medium']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 10px;
+                margin-top: 12px;
+                padding-top: 8px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 12px;
+                background: {COLORS['warning']};
+                border-radius: 6px;
+                color: white;
+                font-weight: bold;
+            }}
+        """)
         quick_actions_layout = QVBoxLayout()
-        quick_actions_layout.setSpacing(10)
-        quick_actions_layout.setContentsMargins(12, 15, 12, 12)
+        quick_actions_layout.setSpacing(8)
+        quick_actions_layout.setContentsMargins(10, 18, 10, 10)
         quick_actions_group.setLayout(quick_actions_layout)
 
+        # صف أول: إكمال وقيد التنفيذ
         quick_btn_layout = QHBoxLayout()
-        quick_btn_layout.setSpacing(10)
+        quick_btn_layout.setSpacing(8)
 
         self.quick_complete_btn = QPushButton("✅ إكمال")
         self.quick_complete_btn.setStyleSheet(BUTTON_STYLES["success"])
-        self.quick_complete_btn.setMinimumHeight(40)
+        self.quick_complete_btn.setMinimumHeight(36)
+        self.quick_complete_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.quick_complete_btn.clicked.connect(self.complete_selected_task)
         self.quick_complete_btn.setEnabled(False)
         quick_btn_layout.addWidget(self.quick_complete_btn)
 
         self.quick_progress_btn = QPushButton("🔄 قيد التنفيذ")
         self.quick_progress_btn.setStyleSheet(BUTTON_STYLES["warning"])
-        self.quick_progress_btn.setMinimumHeight(40)
+        self.quick_progress_btn.setMinimumHeight(36)
+        self.quick_progress_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.quick_progress_btn.clicked.connect(self._set_in_progress)
         self.quick_progress_btn.setEnabled(False)
         quick_btn_layout.addWidget(self.quick_progress_btn)
 
         quick_actions_layout.addLayout(quick_btn_layout)
 
-        # أزرار الأرشفة والاستعادة
+        # صف ثاني: أرشفة واستعادة
         archive_btn_layout = QHBoxLayout()
-        archive_btn_layout.setSpacing(10)
+        archive_btn_layout.setSpacing(8)
 
         self.archive_btn = QPushButton("📦 أرشفة")
         self.archive_btn.setStyleSheet(BUTTON_STYLES["secondary"])
-        self.archive_btn.setMinimumHeight(40)
+        self.archive_btn.setMinimumHeight(36)
+        self.archive_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.archive_btn.clicked.connect(self._archive_selected_task)
         self.archive_btn.setEnabled(False)
         archive_btn_layout.addWidget(self.archive_btn)
 
         self.restore_btn = QPushButton("♻️ استعادة")
         self.restore_btn.setStyleSheet(BUTTON_STYLES["info"])
-        self.restore_btn.setMinimumHeight(40)
+        self.restore_btn.setMinimumHeight(36)
+        self.restore_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
         self.restore_btn.clicked.connect(self._restore_selected_task)
         self.restore_btn.setEnabled(False)
         archive_btn_layout.addWidget(self.restore_btn)
@@ -1598,45 +1791,55 @@ class TodoManagerWidget(QWidget):
 
 
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
-        """إنشاء بطاقة إحصائية بسيطة واحترافية - تصميم محسّن"""
+        """إنشاء بطاقة إحصائية احترافية مع تأثيرات بصرية"""
         from PyQt6.QtWidgets import QSizePolicy
         
         card = QFrame()
-        card.setFixedHeight(75)
-        card.setMinimumWidth(90)
+        card.setFixedHeight(80)
+        card.setMinimumWidth(95)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         card.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['bg_medium']};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {COLORS['bg_medium']},
+                    stop:1 {COLORS['bg_light']});
                 border: 2px solid {color};
                 border-radius: 12px;
+            }}
+            QFrame:hover {{
+                border: 2px solid {color};
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {color}22,
+                    stop:1 {COLORS['bg_medium']});
             }}
         """)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(4)
-        card_layout.setContentsMargins(8, 8, 8, 8)
+        card_layout.setSpacing(2)
+        card_layout.setContentsMargins(6, 8, 6, 8)
 
-        title_label = QLabel(title)
-        title_label.setStyleSheet(f"""
-            color: {COLORS['text_secondary']}; 
-            font-size: 12px; 
-            font-weight: bold; 
-            background: transparent;
-        """)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        card_layout.addWidget(title_label)
-
+        # القيمة أولاً (أكبر)
         value_label = QLabel(value)
         value_label.setObjectName("value_label")
         value_label.setStyleSheet(f"""
             color: {color}; 
-            font-size: 22px; 
+            font-size: 26px; 
             font-weight: bold; 
             background: transparent;
         """)
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(value_label)
+
+        # العنوان تحت القيمة
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"""
+            color: {COLORS['text_secondary']}; 
+            font-size: 11px; 
+            font-weight: 500; 
+            background: transparent;
+        """)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        card_layout.addWidget(title_label)
 
         return card
 
@@ -1648,6 +1851,11 @@ class TodoManagerWidget(QWidget):
 
     def on_task_selection_changed(self):
         """معالج تغيير اختيار المهمة"""
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         selected_rows = self.tasks_table.selectedIndexes()
         if selected_rows:
             row = selected_rows[0].row()

@@ -25,6 +25,7 @@ from services.expense_service import ExpenseService
 from services.project_service import ProjectService
 from services.settings_service import SettingsService
 from ui.custom_spinbox import CustomSpinBox
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class ExpenseEditorDialog(QDialog):
@@ -183,7 +184,8 @@ class ExpenseEditorDialog(QDialog):
         project_label.setStyleSheet(label_style)
         content_layout.addWidget(project_label)
         
-        self.project_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.project_combo = SmartFilterComboBox()
         self.project_combo.setStyleSheet(field_style)
         self.project_combo.addItem("-- بدون مشروع --", userData=None)
         for project in self.projects_list:
@@ -200,11 +202,12 @@ class ExpenseEditorDialog(QDialog):
         pay_label = QLabel("💳 من حساب")
         pay_label.setStyleSheet(label_style)
         pay_container.addWidget(pay_label)
-        self.account_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.account_combo = SmartFilterComboBox()
         self.account_combo.setStyleSheet(field_style)
-        self.account_combo.setPlaceholderText("اختر...")
         for acc in self.cash_accounts:
             self.account_combo.addItem(acc.name, userData=acc.code)
+        self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث...")
         pay_container.addWidget(self.account_combo)
         row1.addLayout(pay_container, 1)
         
@@ -214,11 +217,12 @@ class ExpenseEditorDialog(QDialog):
         cat_label = QLabel("📂 فئة المصروف")
         cat_label.setStyleSheet(label_style)
         cat_container.addWidget(cat_label)
-        self.category_combo = QComboBox()
+        # SmartFilterComboBox مع فلترة ذكية
+        self.category_combo = SmartFilterComboBox()
         self.category_combo.setStyleSheet(field_style)
-        self.category_combo.setPlaceholderText("اختر...")
         for acc in self.expense_accounts:
             self.category_combo.addItem(acc.name, userData=acc.code)
+        self.category_combo.lineEdit().setPlaceholderText("اكتب للبحث...")
         cat_container.addWidget(self.category_combo)
         row1.addLayout(cat_container, 1)
         
@@ -235,7 +239,7 @@ class ExpenseEditorDialog(QDialog):
         amount_label.setStyleSheet(label_style)
         amount_container.addWidget(amount_label)
         self.amount_input = CustomSpinBox(decimals=2, minimum=0, maximum=9_999_999)
-        self.amount_input.setSuffix(" ")
+        self.amount_input.setSuffix(" ج.م")
         self.amount_input.valueChanged.connect(self._validate_amount)
         amount_container.addWidget(self.amount_input)
         row2.addLayout(amount_container, 2)

@@ -21,6 +21,7 @@ from datetime import datetime
 import re
 
 from ui.styles import BUTTON_STYLES
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class SmartEmployeeDialog(QDialog):
@@ -220,18 +221,18 @@ class SmartEmployeeDialog(QDialog):
         self.national_id_input.textChanged.connect(self._validate_national_id)
         basic_layout.addRow("الرقم القومي:", self.national_id_input)
         
-        # الوظيفة (مع اقتراحات)
-        self.position_input = QComboBox()
-        self.position_input.setEditable(True)
-        self.position_input.addItems([""] + self.COMMON_POSITIONS)
+        # الوظيفة (SmartFilterComboBox مع فلترة)
+        self.position_input = SmartFilterComboBox()
+        for pos in [""] + self.COMMON_POSITIONS:
+            self.position_input.addItem(pos)
         self.position_input.setCurrentText("")
         self.position_input.currentTextChanged.connect(self._on_position_changed)
         basic_layout.addRow("الوظيفة *:", self.position_input)
         
-        # القسم (مع اقتراحات)
-        self.department_input = QComboBox()
-        self.department_input.setEditable(True)
-        self.department_input.addItems([""] + self.DEPARTMENTS)
+        # القسم (SmartFilterComboBox مع فلترة)
+        self.department_input = SmartFilterComboBox()
+        for dept in [""] + self.DEPARTMENTS:
+            self.department_input.addItem(dept)
         self.department_input.setCurrentText("")
         basic_layout.addRow("القسم:", self.department_input)
         
@@ -345,10 +346,10 @@ class SmartEmployeeDialog(QDialog):
         bank_layout = QFormLayout()
         bank_group.setLayout(bank_layout)
         
-        # البنك
-        self.bank_name_input = QComboBox()
-        self.bank_name_input.setEditable(True)
-        self.bank_name_input.addItems([""] + self.BANKS)
+        # البنك (SmartFilterComboBox مع فلترة)
+        self.bank_name_input = SmartFilterComboBox()
+        for bank in [""] + self.BANKS:
+            self.bank_name_input.addItem(bank)
         self.bank_name_input.setCurrentText("")
         bank_layout.addRow("اسم البنك:", self.bank_name_input)
         

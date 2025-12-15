@@ -706,18 +706,15 @@ class TemplateService(BaseService):
         project: schemas.Project,
         client_info: dict[str, str],
         template_id: int | None = None,
-        payments: list[dict[str, Any]] | None = None
+        payments: list[dict[str, Any]] | None = None,
+        use_pdf: bool = True  # ⚡ PDF افتراضي
     ) -> bool:
-        """معاينة القالب - حفظ كـ PDF وفتحه"""
+        """معاينة القالب - توليد PDF سريع وفتحه"""
         try:
-            # إنتاج HTML
-            html_content = self.generate_invoice_html(project, client_info, template_id, payments)
-
-            # ⚡ حفظ كـ PDF بدلاً من HTML
-            # تحديد مجلد الصادرات
             import sys
             from pathlib import Path
 
+            # تحديد مجلد الصادرات
             if getattr(sys, 'frozen', False):
                 install_path = Path(sys.executable).parent
             else:
@@ -726,44 +723,110 @@ class TemplateService(BaseService):
             exports_dir = install_path / "exports"
             exports_dir.mkdir(parents=True, exist_ok=True)
 
-            # توليد اسم الملف - (اسم الشركة أو العميل) - اسم المشروع
+            # توليد اسم الملف
             company_name = client_info.get('company_name', '')
             client_name = client_info.get('name', '')
             project_name = getattr(project, 'name', 'project') if not isinstance(project, dict) else project.get('name', 'project')
 
-            # استخدم اسم الشركة لو موجود، وإلا اسم العميل
             display_name = company_name if company_name else client_name
             display_name = self._sanitize_filename(display_name) if display_name else 'client'
             project_name_safe = self._sanitize_filename(project_name) if project_name else 'project'
 
             filename = f"{display_name} - {project_name_safe}"
 
-            # حذف الملف القديم إذا كان موجوداً
-            old_pdf_path = os.path.join(str(exports_dir), f"{filename}.pdf")
-            if os.path.exists(old_pdf_path):
-                try:
-                    os.remove(old_pdf_path)
-                    print(f"INFO: [TemplateService] تم حذف الملف القديم: {old_pdf_path}")
-                except Exception as e:
-                    print(f"WARNING: [TemplateService] فشل حذف الملف القديم: {e}")
+            # توليد HTML
+            html_content = self.generate_invoice_html(project, client_info, template_id, payments)
 
-            # توليد PDF
-            pdf_path = self._generate_pdf(html_content, str(exports_dir), filename)
+            if use_pdf:
+                # ⚡ توليد PDF سريع
+                pdf_path = os.path.join(str(exports_dir), f"{filename}.pdf")
+                
+                # حذف الملف القديم
+                if os.path.exists(pdf_path):
+                    try:
+                        os.remove(pdf_path)
+                    except Exception:
+                        pass
 
-            if pdf_path and os.path.exists(pdf_path):
-                # فتح PDF
-                self._open_file(pdf_path)
-                print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
-                return True
+                pdf_path = self._generate_pdf_fast(html_content, str(exports_dir), filename)
+
+                if pdf_path and os.path.exists(pdf_path):
+                    self._open_file(pdf_path)
+                    print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
+                    return True
+                else:
+                    # Fallback: فتح HTML
+                    print("WARNING: [TemplateService] فشل PDF، جاري فتح HTML...")
+                    html_path = os.path.join(str(exports_dir), f"{filename}.html")
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                    self._open_file(html_path)
+                    return True
             else:
-                print("ERROR: [TemplateService] فشل إنشاء PDF")
-                return False
+                # فتح HTML مباشرة
+                html_path = os.path.join(str(exports_dir), f"{filename}.html")
+                with open(html_path, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+                self._open_file(html_path)
+                print(f"✅ [TemplateService] تم فتح HTML: {html_path}")
+                return True
 
         except Exception as e:
             print(f"ERROR: خطأ في معاينة القالب: {e}")
             import traceback
             traceback.print_exc()
             return False
+    
+    def _generate_pdf_fast(self, html_content: str, exports_dir: str, filename: str) -> str | None:
+        """⚡ توليد PDF سريع - يجرب عدة طرق"""
+        pdf_path = os.path.join(exports_dir, f"{filename}.pdf")
+        
+        # ⚡ محاولة 1: WeasyPrint (الأسرع)
+        try:
+            from weasyprint import CSS, HTML
+            print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
+            HTML(string=html_content, base_url=self.templates_dir).write_pdf(
+                pdf_path,
+                stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
+            )
+            if os.path.exists(pdf_path):
+                print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
+                return pdf_path
+        except ImportError:
+            print("INFO: [TemplateService] WeasyPrint غير متوفر")
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+        
+        # ⚡ محاولة 2: pdfkit (wkhtmltopdf)
+        try:
+            import pdfkit
+            print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
+            options = {
+                'page-size': 'A4',
+                'margin-top': '0mm',
+                'margin-right': '0mm',
+                'margin-bottom': '0mm',
+                'margin-left': '0mm',
+                'encoding': 'UTF-8',
+                'no-outline': None,
+                'quiet': ''
+            }
+            pdfkit.from_string(html_content, pdf_path, options=options)
+            if os.path.exists(pdf_path):
+                print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
+                return pdf_path
+        except ImportError:
+            print("INFO: [TemplateService] pdfkit غير متوفر")
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
+        
+        # ⚡ محاولة 3: PyQt6 WebEngine (أبطأ لكن موجود)
+        try:
+            return self._generate_pdf_with_qt(html_content, pdf_path)
+        except Exception as e:
+            print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+        
+        return None
 
     def _sanitize_filename(self, name: str) -> str:
         """تنظيف اسم الملف من الأحرف غير المسموحة"""
@@ -810,9 +873,8 @@ class TemplateService(BaseService):
             return None
 
     def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> str | None:
-        """توليد PDF باستخدام PyQt6"""
+        """توليد PDF باستخدام PyQt6 - محسّن للسرعة"""
         try:
-
             from PyQt6.QtCore import QEventLoop, QTimer, QUrl
             from PyQt6.QtWebEngineWidgets import QWebEngineView
             from PyQt6.QtWidgets import QApplication
@@ -822,21 +884,32 @@ class TemplateService(BaseService):
                 app = QApplication([])
 
             web_view = QWebEngineView()
-            pdf_generated = [False]
+            pdf_done = [False]
+            loop = QEventLoop()
+
+            def on_pdf_saved(file_path):
+                """عند اكتمال حفظ PDF"""
+                pdf_done[0] = True
+                loop.quit()
 
             def on_load_finished(ok):
                 if ok:
+                    # ⚡ ربط إشارة اكتمال PDF
+                    web_view.page().pdfPrintingFinished.connect(on_pdf_saved)
                     web_view.page().printToPdf(pdf_path)
-                    pdf_generated[0] = True
                 else:
                     print("ERROR: [TemplateService] فشل تحميل HTML")
+                    loop.quit()
 
             web_view.loadFinished.connect(on_load_finished)
             web_view.setHtml(html_content, QUrl.fromLocalFile(self.templates_dir + "/"))
 
-            loop = QEventLoop()
-            QTimer.singleShot(3000, loop.quit)
+            # ⚡ انتظار أقصى 5 ثواني (بدلاً من 3 ثواني ثابتة)
+            QTimer.singleShot(5000, loop.quit)
             loop.exec()
+
+            # تنظيف
+            web_view.deleteLater()
 
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
                 print("✅ [TemplateService] تم إنشاء PDF باستخدام PyQt6")

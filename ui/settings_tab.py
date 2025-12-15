@@ -38,6 +38,7 @@ from core.repository import Repository
 from services.settings_service import SettingsService
 from ui.currency_editor_dialog import CurrencyEditorDialog
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class SettingsTab(QWidget):
@@ -121,80 +122,224 @@ class SettingsTab(QWidget):
             self.load_users()
 
     def setup_company_tab(self):
-        """إعداد تاب بيانات الشركة"""
+        """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب"""
+        from PyQt6.QtWidgets import QFrame, QGridLayout, QSizePolicy
+        
         layout = QVBoxLayout(self.company_tab)
-
-        # معلومات الشركة
-        info_group = QGroupBox("📋 معلومات الشركة")
-        info_form = QFormLayout()
-
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
+        
+        # ستايل الحقول المحسن
+        input_style = """
+            QLineEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
+                min-height: 18px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #0A6CF1;
+            }
+            QLineEdit:hover {
+                border: 1px solid #3d6a9f;
+            }
+        """
+        label_style = "color: #60a5fa; font-size: 11px; font-weight: bold;"
+        
+        # === التخطيط الأفقي الرئيسي ===
+        main_h = QHBoxLayout()
+        main_h.setSpacing(20)
+        
+        # === الجانب الأيسر: الحقول ===
+        fields_frame = QFrame()
+        fields_frame.setStyleSheet("""
+            QFrame {
+                background: rgba(13, 33, 55, 0.5);
+                border: 1px solid rgba(45, 74, 111, 0.4);
+                border-radius: 10px;
+            }
+        """)
+        fields_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        fields_container = QVBoxLayout(fields_frame)
+        fields_container.setContentsMargins(15, 15, 15, 15)
+        fields_container.setSpacing(10)
+        
+        # عنوان القسم
+        fields_title = QLabel("📋 بيانات الشركة")
+        fields_title.setStyleSheet("color: #93C5FD; font-size: 13px; font-weight: bold;")
+        fields_container.addWidget(fields_title)
+        
+        fields_layout = QGridLayout()
+        fields_layout.setSpacing(8)
+        fields_layout.setColumnStretch(0, 1)
+        fields_layout.setColumnStretch(1, 1)
+        
+        # اسم الشركة
+        name_lbl = QLabel("🏢 اسم الشركة")
+        name_lbl.setStyleSheet(label_style)
         self.company_name_input = QLineEdit()
-        self.company_name_input.setPlaceholderText("اسم الشركة")
-        self.company_name_input.setStyleSheet(self._get_input_style())
-
-        self.company_address_input = QTextEdit()
+        self.company_name_input.setPlaceholderText("أدخل اسم الشركة...")
+        self.company_name_input.setStyleSheet(input_style)
+        fields_layout.addWidget(name_lbl, 0, 0)
+        fields_layout.addWidget(self.company_name_input, 1, 0)
+        
+        # العنوان
+        addr_lbl = QLabel("📍 العنوان")
+        addr_lbl.setStyleSheet(label_style)
+        self.company_address_input = QLineEdit()
         self.company_address_input.setPlaceholderText("العنوان الكامل...")
-        self.company_address_input.setMaximumHeight(60)
-        self.company_address_input.setStyleSheet(self._get_input_style())
-
+        self.company_address_input.setStyleSheet(input_style)
+        fields_layout.addWidget(addr_lbl, 0, 1)
+        fields_layout.addWidget(self.company_address_input, 1, 1)
+        
+        # الهاتف
+        phone_lbl = QLabel("📱 رقم الهاتف")
+        phone_lbl.setStyleSheet(label_style)
         self.company_phone_input = QLineEdit()
-        self.company_phone_input.setPlaceholderText("رقم الهاتف")
-        self.company_phone_input.setStyleSheet(self._get_input_style())
-
+        self.company_phone_input.setPlaceholderText("+20 10 123 4567")
+        self.company_phone_input.setStyleSheet(input_style)
+        fields_layout.addWidget(phone_lbl, 2, 0)
+        fields_layout.addWidget(self.company_phone_input, 3, 0)
+        
+        # البريد
+        email_lbl = QLabel("📧 البريد الإلكتروني")
+        email_lbl.setStyleSheet(label_style)
         self.company_email_input = QLineEdit()
-        self.company_email_input.setPlaceholderText("مثال: info@company.com")
-        self.company_email_input.setStyleSheet(self._get_input_style())
-
+        self.company_email_input.setPlaceholderText("info@company.com")
+        self.company_email_input.setStyleSheet(input_style)
+        fields_layout.addWidget(email_lbl, 2, 1)
+        fields_layout.addWidget(self.company_email_input, 3, 1)
+        
+        # الموقع
+        web_lbl = QLabel("🌐 موقع الشركة")
+        web_lbl.setStyleSheet(label_style)
+        self.company_website_input = QLineEdit()
+        self.company_website_input.setPlaceholderText("www.company.com")
+        self.company_website_input.setStyleSheet(input_style)
+        fields_layout.addWidget(web_lbl, 4, 0)
+        fields_layout.addWidget(self.company_website_input, 5, 0)
+        
+        # الرقم الضريبي
+        vat_lbl = QLabel("🔢 الرقم الضريبي")
+        vat_lbl.setStyleSheet(label_style)
         self.company_vat_input = QLineEdit()
         self.company_vat_input.setPlaceholderText("أدخل الرقم الضريبي")
-        self.company_vat_input.setStyleSheet(self._get_input_style())
-
-        self.company_website_input = QLineEdit()
-        self.company_website_input.setPlaceholderText("مثال: www.skywaveads.com")
-        self.company_website_input.setStyleSheet(self._get_input_style())
-
-        info_form.addRow(QLabel("🏢 اسم الشركة:"), self.company_name_input)
-        info_form.addRow(QLabel("📍 العنوان:"), self.company_address_input)
-        info_form.addRow(QLabel("📞 رقم الهاتف:"), self.company_phone_input)
-        info_form.addRow(QLabel("📧 البريد الإلكتروني:"), self.company_email_input)
-        info_form.addRow(QLabel("🌐 موقع الشركة:"), self.company_website_input)
-        info_form.addRow(QLabel("🔢 الرقم الضريبي:"), self.company_vat_input)
-
-        info_group.setLayout(info_form)
-        layout.addWidget(info_group)
-
-        # لوجو الشركة
-        logo_group = QGroupBox("لوجو الشركة")
-        logo_layout = QVBoxLayout()
-
+        self.company_vat_input.setStyleSheet(input_style)
+        fields_layout.addWidget(vat_lbl, 4, 1)
+        fields_layout.addWidget(self.company_vat_input, 5, 1)
+        
+        fields_container.addLayout(fields_layout)
+        main_h.addWidget(fields_frame, 3)
+        
+        # === الجانب الأيمن: اللوجو ===
+        logo_frame = QFrame()
+        logo_frame.setStyleSheet("""
+            QFrame {
+                background: rgba(13, 33, 55, 0.5);
+                border: 1px solid rgba(45, 74, 111, 0.4);
+                border-radius: 10px;
+            }
+        """)
+        logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        logo_container = QVBoxLayout(logo_frame)
+        logo_container.setContentsMargins(15, 15, 15, 15)
+        logo_container.setSpacing(10)
+        logo_container.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+        
+        logo_title = QLabel("🖼️ شعار الشركة")
+        logo_title.setStyleSheet("color: #93C5FD; font-size: 13px; font-weight: bold;")
+        logo_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_container.addWidget(logo_title)
+        
+        # إطار اللوجو
         self.logo_preview = QLabel()
-        self.logo_preview.setFixedSize(200, 150)
+        self.logo_preview.setFixedSize(130, 130)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logo_preview.setStyleSheet("""
             QLabel {
-                border: 2px dashed #4a90e2;
-                border-radius: 8px;
-                background-color: #1a1d29;
+                background: #0d2137;
+                border: 2px dashed #3d6a9f;
+                border-radius: 10px;
+                color: #64748B;
+                font-size: 11px;
             }
         """)
-        self.logo_preview.setText("لا يوجد لوجو")
-
-        self.select_logo_btn = QPushButton("📷 اختيار لوجو")
-        self.select_logo_btn.setStyleSheet(BUTTON_STYLES["primary"])
+        self.logo_preview.setText("📷\nلا يوجد شعار")
+        logo_container.addWidget(self.logo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
+        
+        # أزرار اللوجو
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.select_logo_btn = QPushButton("📷 اختيار")
+        self.select_logo_btn.setStyleSheet("""
+            QPushButton {
+                background: #0A6CF1;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 14px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #2563eb; }
+        """)
         self.select_logo_btn.clicked.connect(self.select_logo_file)
-
-        logo_layout.addWidget(self.logo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
-        logo_layout.addWidget(self.select_logo_btn)
-        logo_group.setLayout(logo_layout)
-        layout.addWidget(logo_group)
-
-        # زرار الحفظ
+        
+        self.remove_logo_btn = QPushButton("🗑️")
+        self.remove_logo_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(239, 68, 68, 0.15);
+                color: #FCA5A5;
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                border-radius: 5px;
+                padding: 8px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover { background: rgba(239, 68, 68, 0.3); }
+        """)
+        self.remove_logo_btn.clicked.connect(self._remove_logo)
+        
+        btn_layout.addWidget(self.select_logo_btn)
+        btn_layout.addWidget(self.remove_logo_btn)
+        logo_container.addLayout(btn_layout)
+        
+        # نص توضيحي
+        hint_lbl = QLabel("PNG, JPG • 200×200 px")
+        hint_lbl.setStyleSheet("color: #64748B; font-size: 9px;")
+        hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_container.addWidget(hint_lbl)
+        
+        main_h.addWidget(logo_frame, 1)
+        
+        layout.addLayout(main_h, 1)
+        
+        # زر الحفظ
         self.save_company_btn = QPushButton("💾 حفظ بيانات الشركة")
-        self.save_company_btn.setStyleSheet(BUTTON_STYLES["success"])
+        self.save_company_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #34d399);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 30px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #059669; }
+        """)
         self.save_company_btn.clicked.connect(self.save_settings)
         layout.addWidget(self.save_company_btn)
 
-        layout.addStretch()
+    def _remove_logo(self):
+        """حذف اللوجو الحالي"""
+        self.logo_preview.clear()
+        self.logo_preview.setText("📷\nلا يوجد شعار")
+        self.logo_preview.setProperty("logo_path", "")
 
     def setup_currency_tab(self):
         """إعداد تاب إدارة العملات"""
@@ -453,7 +598,11 @@ class SettingsTab(QWidget):
         if file_path:
             pixmap = QPixmap(file_path)
             if not pixmap.isNull():
-                scaled = pixmap.scaled(180, 130, Qt.AspectRatioMode.KeepAspectRatio)
+                scaled = pixmap.scaled(
+                    120, 120, 
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
                 self.logo_preview.setPixmap(scaled)
                 self.logo_preview.setProperty("logo_path", file_path)
 
@@ -476,9 +625,15 @@ class SettingsTab(QWidget):
             if logo_path and os.path.exists(logo_path):
                 pixmap = QPixmap(logo_path)
                 if not pixmap.isNull():
-                    scaled = pixmap.scaled(180, 130, Qt.AspectRatioMode.KeepAspectRatio)
+                    scaled = pixmap.scaled(
+                        120, 120,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
                     self.logo_preview.setPixmap(scaled)
                     self.logo_preview.setProperty("logo_path", logo_path)
+            else:
+                self.logo_preview.setText("📷\nلا يوجد شعار")
         except Exception as e:
             print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
 
@@ -488,7 +643,7 @@ class SettingsTab(QWidget):
             logo_path = self.logo_preview.property("logo_path") or ""
             new_settings = {
                 "company_name": self.company_name_input.text(),
-                "company_address": self.company_address_input.toPlainText(),
+                "company_address": self.company_address_input.text(),
                 "company_phone": self.company_phone_input.text(),
                 "company_email": self.company_email_input.text(),
                 "company_website": self.company_website_input.text(),
@@ -1021,21 +1176,17 @@ class SettingsTab(QWidget):
         form_group = QGroupBox("⚙️ إعدادات الحسابات الافتراضية")
         form_layout = QFormLayout()
 
-        # الخزينة الافتراضية
-        self.default_treasury_combo = QComboBox()
-        self.default_treasury_combo.setPlaceholderText("اختر حساب الخزينة الافتراضي...")
+        # الخزينة الافتراضية (SmartFilterComboBox مع فلترة)
+        self.default_treasury_combo = SmartFilterComboBox()
 
-        # حساب الإيرادات الافتراضي
-        self.default_revenue_combo = QComboBox()
-        self.default_revenue_combo.setPlaceholderText("اختر حساب الإيرادات الافتراضي...")
+        # حساب الإيرادات الافتراضي (SmartFilterComboBox مع فلترة)
+        self.default_revenue_combo = SmartFilterComboBox()
 
-        # حساب الضرائب الافتراضي
-        self.default_tax_combo = QComboBox()
-        self.default_tax_combo.setPlaceholderText("اختر حساب الضرائب الافتراضي...")
+        # حساب الضرائب الافتراضي (SmartFilterComboBox مع فلترة)
+        self.default_tax_combo = SmartFilterComboBox()
 
-        # حساب العملاء الافتراضي
-        self.default_client_combo = QComboBox()
-        self.default_client_combo.setPlaceholderText("اختر حساب العملاء الافتراضي...")
+        # حساب العملاء الافتراضي (SmartFilterComboBox مع فلترة)
+        self.default_client_combo = SmartFilterComboBox()
 
         form_layout.addRow(QLabel("💰 الخزينة الافتراضية (1111):"), self.default_treasury_combo)
         form_layout.addRow(QLabel("📈 إيرادات الخدمات (4100):"), self.default_revenue_combo)
@@ -1120,7 +1271,7 @@ class SettingsTab(QWidget):
             print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
 
-    def _populate_account_combo(self, combo: QComboBox, accounts: list, default_code: str | None = None):
+    def _populate_account_combo(self, combo, accounts: list, default_code: str | None = None):
         """ملء ComboBox بالحسابات"""
         combo.clear()
         combo.addItem("-- اختر حساباً --", userData=None)

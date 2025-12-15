@@ -37,67 +37,71 @@ class CustomSpinBox(QWidget):
         buttons_layout.setContentsMargins(0, 0, 0, 0)
         buttons_layout.setSpacing(1)
 
-        # إنشاء أزرار + و -
-        self.btn_plus = QPushButton("+")
-        self.btn_minus = QPushButton("−")
+        # إنشاء أزرار الأسهم (فوق وتحت)
+        self.btn_plus = QPushButton("▲")
+        self.btn_minus = QPushButton("▼")
 
-        # تنسيق الأزرار - أفقية بجانب بعض
-        button_style_plus = """
+        # تنسيق الأزرار - أسهم فوق وتحت
+        button_style_up = """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(16, 185, 129, 0.5),
-                    stop:1 rgba(16, 185, 129, 0.3));
-                border: 1px solid rgba(16, 185, 129, 0.7);
+                    stop:0 #1e3a5f,
+                    stop:1 #0f2744);
+                border: 1px solid #374151;
                 border-radius: 2px;
                 border-bottom-left-radius: 0px;
                 border-bottom-right-radius: 0px;
-                color: #F8FAFC;
-                font-size: 10px;
+                border-bottom: none;
+                color: #94a3b8;
+                font-size: 7px;
                 font-weight: bold;
-                min-width: 16px;
-                max-width: 16px;
+                min-width: 18px;
+                max-width: 18px;
                 min-height: 11px;
                 max-height: 11px;
                 padding: 0px;
                 margin: 0px;
             }
             QPushButton:hover {
-                background: rgba(16, 185, 129, 0.7);
+                background: #0A6CF1;
+                color: white;
             }
             QPushButton:pressed {
-                background: rgba(16, 185, 129, 0.9);
+                background: #0958d9;
             }
         """
         
-        button_style_minus = """
+        button_style_down = """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(239, 68, 68, 0.5),
-                    stop:1 rgba(239, 68, 68, 0.3));
-                border: 1px solid rgba(239, 68, 68, 0.7);
+                    stop:0 #1e3a5f,
+                    stop:1 #0f2744);
+                border: 1px solid #374151;
                 border-radius: 2px;
                 border-top-left-radius: 0px;
                 border-top-right-radius: 0px;
-                color: #F8FAFC;
-                font-size: 10px;
+                border-top: none;
+                color: #94a3b8;
+                font-size: 7px;
                 font-weight: bold;
-                min-width: 16px;
-                max-width: 16px;
+                min-width: 18px;
+                max-width: 18px;
                 min-height: 11px;
                 max-height: 11px;
                 padding: 0px;
                 margin: 0px;
             }
             QPushButton:hover {
-                background: rgba(239, 68, 68, 0.7);
+                background: #0A6CF1;
+                color: white;
             }
             QPushButton:pressed {
-                background: rgba(239, 68, 68, 0.9);
+                background: #0958d9;
             }
         """
 
-        self.btn_plus.setStyleSheet(button_style_plus)
-        self.btn_minus.setStyleSheet(button_style_minus)
+        self.btn_plus.setStyleSheet(button_style_up)
+        self.btn_minus.setStyleSheet(button_style_down)
 
         # تنسيق SpinBox - مصغر ومتناسق
         spinbox_style = """

@@ -96,9 +96,9 @@ class ServiceManagerTab(QWidget):
         table_groupbox.setLayout(table_layout)
 
         self.services_table = QTableWidget()
-        self.services_table.setColumnCount(4)
+        self.services_table.setColumnCount(5)
         self.services_table.setHorizontalHeaderLabels(
-            ["الاسم", "الفئة", "السعر الافتراضي", "الحالة"]
+            ["الاسم", "الوصف", "الفئة", "السعر الافتراضي", "الحالة"]
         )
 
         # === UNIVERSAL SEARCH BAR ===
@@ -120,10 +120,11 @@ class ServiceManagerTab(QWidget):
         h_header = self.services_table.horizontalHeader()
         v_header = self.services_table.verticalHeader()
         if h_header is not None:
-            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # الاسم - يتمدد
-            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # الفئة
-            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # السعر
-            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # الاسم
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # الوصف - يتمدد
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # الفئة
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # السعر
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
         if v_header is not None:
             v_header.setDefaultSectionSize(32)
             v_header.setVisible(False)
@@ -131,6 +132,9 @@ class ServiceManagerTab(QWidget):
 
         # إضافة دبل كليك للتعديل
         self.services_table.itemDoubleClicked.connect(self.open_editor_for_selected)
+        
+        # ⚡ إضافة قائمة السياق (كليك يمين)
+        self._setup_context_menu()
 
         table_layout.addWidget(self.services_table)
         main_layout.addWidget(table_groupbox, 1)
@@ -138,12 +142,28 @@ class ServiceManagerTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_services_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
+    
+    def _setup_context_menu(self):
+        """إعداد قائمة السياق (كليك يمين) للجدول"""
+        from core.context_menu import ContextMenuManager
+        
+        ContextMenuManager.setup_table_context_menu(
+            table=self.services_table,
+            on_view=self.open_editor_for_selected,
+            on_edit=self.open_editor_for_selected,
+            on_refresh=self.load_services_data
+        )
 
     def update_buttons_state(self, has_selection: bool):
         self.edit_button.setEnabled(has_selection)
         self.archive_button.setEnabled(has_selection)
 
     def on_service_selection_changed(self):
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         selected_rows = self.services_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()
@@ -189,15 +209,28 @@ class ServiceManagerTab(QWidget):
                     self.services_table.insertRow(index)
 
                     self.services_table.setItem(index, 0, create_centered_item(service.name))
-                    self.services_table.setItem(index, 1, create_centered_item(service.category or ""))
-                    self.services_table.setItem(index, 2, create_centered_item(f"{service.default_price:,.2f}"))
+                    
+                    # ⚡ الوصف (مختصر إذا كان طويل)
+                    description = service.description or ""
+                    description = description.strip()
+                    if description:
+                        display_desc = description[:50] + "..." if len(description) > 50 else description
+                        desc_item = create_centered_item(display_desc)
+                        desc_item.setToolTip(description)  # عرض الوصف الكامل عند التمرير
+                    else:
+                        desc_item = create_centered_item("-")
+                        desc_item.setForeground(QColor("#666666"))
+                    self.services_table.setItem(index, 1, desc_item)
+                    
+                    self.services_table.setItem(index, 2, create_centered_item(service.category or ""))
+                    self.services_table.setItem(index, 3, create_centered_item(f"{service.default_price:,.2f}"))
 
                     # الحالة مع لون الخلفية
                     bg_color = QColor("#ef4444") if service.status == schemas.ServiceStatus.ARCHIVED else None
                     status_item = create_centered_item(service.status.value, bg_color)
                     if service.status == schemas.ServiceStatus.ARCHIVED:
                         status_item.setForeground(QColor("white"))
-                    self.services_table.setItem(index, 3, status_item)
+                    self.services_table.setItem(index, 4, status_item)
 
                     self.services_table.setRowHeight(index, 40)
 

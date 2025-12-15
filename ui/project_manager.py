@@ -33,7 +33,7 @@ from services.project_service import ProjectService
 from services.service_service import ServiceService
 from services.accounting_service import AccountingService
 from ui.styles import BUTTON_STYLES, TABLE_STYLE, GROUPBOX_STYLE, COLORS, TABLE_STYLE_DARK, create_centered_item
-from ui.auto_open_combobox import SimpleComboBox
+from ui.smart_combobox import SmartFilterComboBox
 
 
 class ProjectItemDialog(QDialog):
@@ -66,7 +66,8 @@ class ProjectItemDialog(QDialog):
         layout = QVBoxLayout()
 
         form = QFormLayout()
-        self.service_combo = SimpleComboBox()
+        # SmartFilterComboBox للخدمة مع فلترة
+        self.service_combo = SmartFilterComboBox()
         for service in services_list:
             self.service_combo.addItem(service.name, userData=service)
 
@@ -74,6 +75,7 @@ class ProjectItemDialog(QDialog):
         self.quantity_input.setValue(1.0)
 
         self.unit_price_input = CustomSpinBox(decimals=2, minimum=0.0, maximum=1_000_000)
+        self.unit_price_input.setSuffix(" ج.م")
         if services_list:
             self.unit_price_input.setValue(services_list[0].default_price)
 
@@ -256,16 +258,12 @@ class ProjectEditorDialog(QDialog):
         basic_layout.setSpacing(4)
         basic_layout.setContentsMargins(6, 12, 6, 6)
 
-        # استخدام SimpleComboBox - بسيط وآمن
-        self.client_combo = SimpleComboBox()
+        # SmartFilterComboBox للعميل مع فلترة
+        self.client_combo = SmartFilterComboBox()
         self.client_combo.addItem("--- اختر العميل ---", userData=None)
         for client in self.clients_list:
             self.client_combo.addItem(client.name, userData=client)
         self.client_combo.setCurrentIndex(0)
-        
-        # إعداد البحث السريع
-        client_names = [client.name for client in self.clients_list]
-        self.client_combo.setup_completer(client_names)
 
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("مثال: باقة SEO - العميل س")
@@ -307,17 +305,14 @@ class ProjectEditorDialog(QDialog):
         items_layout.setContentsMargins(6, 12, 6, 6)
         add_item_layout = QHBoxLayout()
         add_item_layout.setSpacing(4)
-        # استخدام SimpleComboBox - بسيط وآمن
-        self.service_combo = SimpleComboBox()
+        # SmartFilterComboBox للخدمة مع فلترة
+        self.service_combo = SmartFilterComboBox()
         self.service_combo.addItem("اختر الخدمة أو الباقة...", userData=None)
         for service in self.services_list:
             self.service_combo.addItem(f"{service.name} ({service.default_price})", userData=service)
         self.service_combo.setCurrentIndex(0)
-        
-        # إعداد البحث السريع
-        service_names = [service.name for service in self.services_list]
-        self.service_combo.setup_completer(service_names)
         self.item_price_input = CustomSpinBox(decimals=2, minimum=0, maximum=9999999999)
+        self.item_price_input.setSuffix(" ج.م")
         self.item_quantity_input = CustomSpinBox(decimals=2, minimum=0.1, maximum=100)
         self.item_quantity_input.setValue(1.0)
         self.add_item_button = QPushButton("➕ إضافة البند")
@@ -334,7 +329,7 @@ class ProjectEditorDialog(QDialog):
         items_layout.addLayout(add_item_layout)
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(6)
-        self.items_table.setHorizontalHeaderLabels(["البند", "الكمية", "السعر", "خصم %", "الإجمالي", "حذف"])
+        self.items_table.setHorizontalHeaderLabels(["البند", "الكمية", "السعر", "خصم", "الإجمالي", "حذف"])
         
         # تفعيل التحرير البسيط للكمية والسعر والخصم
         self.items_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.SelectedClicked)
@@ -375,8 +370,21 @@ class ProjectEditorDialog(QDialog):
         totals_form = QFormLayout()
         totals_form.setSpacing(4)
         totals_form.setContentsMargins(6, 12, 6, 6)
+        
+        # الخصم (نسبة أو مبلغ)
+        discount_layout = QHBoxLayout()
+        discount_layout.setSpacing(4)
+        self.discount_type_combo = QComboBox()
+        self.discount_type_combo.addItem("نسبة %", "percent")
+        self.discount_type_combo.addItem("مبلغ", "amount")
+        self.discount_type_combo.setFixedWidth(70)
+        self.discount_type_combo.currentIndexChanged.connect(self._on_discount_type_changed)
+        
         self.discount_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
         self.discount_rate_input.setSuffix(" %")
+        discount_layout.addWidget(self.discount_type_combo)
+        discount_layout.addWidget(self.discount_rate_input)
+        
         self.tax_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
         self.tax_rate_input.setSuffix(" %")
         if self.service_service and getattr(self.service_service, "settings_service", None):
@@ -390,7 +398,7 @@ class ProjectEditorDialog(QDialog):
         self.total_label.setStyleSheet("color: #0A6CF1;")
         self.discount_rate_input.valueChanged.connect(self.update_totals)
         self.tax_rate_input.valueChanged.connect(self.update_totals)
-        totals_form.addRow(QLabel("الخصم (%):"), self.discount_rate_input)
+        totals_form.addRow(QLabel("الخصم:"), discount_layout)
         totals_form.addRow(QLabel("الضريبة (%):"), self.tax_rate_input)
         totals_form.addRow(QLabel("<b>الإجمالي النهائي:</b>"), self.total_label)
         totals_group.setLayout(totals_form)
@@ -505,7 +513,7 @@ class ProjectEditorDialog(QDialog):
         amount_label.setFixedWidth(70)
         self.payment_amount_input = CustomSpinBox(decimals=2, minimum=0, maximum=9999999)
         self.payment_amount_input.setValue(0.0)
-        self.payment_amount_input.setSuffix(" EGP")
+        self.payment_amount_input.setSuffix(" ج.م")
         amount_row.addWidget(amount_label)
         amount_row.addWidget(self.payment_amount_input, 1)
         payment_layout.addLayout(amount_row)
@@ -524,14 +532,12 @@ class ProjectEditorDialog(QDialog):
         account_row = QHBoxLayout()
         account_label = QLabel("🏦 الحساب:")
         account_label.setFixedWidth(70)
-        self.payment_account_combo = SimpleComboBox()
+        # SmartFilterComboBox للحساب مع فلترة
+        self.payment_account_combo = SmartFilterComboBox()
         self.payment_account_combo.addItem("اختر الحساب...", userData=None)
         for acc in self.cash_accounts:
             display_text = f"{acc.name} ({acc.code})"
             self.payment_account_combo.addItem(display_text, userData=acc)
-        
-        account_names = [acc.name for acc in self.cash_accounts]
-        self.payment_account_combo.setup_completer(account_names)
         self._auto_select_default_treasury()
         account_row.addWidget(account_label)
         account_row.addWidget(self.payment_account_combo, 1)
@@ -731,11 +737,11 @@ class ProjectEditorDialog(QDialog):
             price_item.setBackground(QColor("#1A202C"))
             self.items_table.setItem(index, 2, price_item)
             
-            # عمود الخصم (قابل للتعديل، في الوسط)
-            discount_text = str(item.discount_rate) if item.discount_rate > 0 else "0"
+            # عمود الخصم بالمبلغ (قابل للتعديل، في الوسط)
+            discount_text = f"{item.discount_amount:.2f}" if item.discount_amount > 0 else "0"
             discount_item = QTableWidgetItem(discount_text)
             discount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
-            discount_item.setToolTip("دبل كليك للتعديل (بدون %)")
+            discount_item.setToolTip("دبل كليك للتعديل (بالجنيه)")
             discount_item.setBackground(QColor("#1A202C"))
             self.items_table.setItem(index, 3, discount_item)
             
@@ -828,19 +834,28 @@ class ProjectEditorDialog(QDialog):
                     cell_item.setText(str(item.unit_price))
                     return
                     
-            elif column == 3:  # الخصم
+            elif column == 3:  # الخصم بالمبلغ
                 try:
-                    discount_text = cell_text.replace('%', '').strip()
-                    item.discount_rate = float(discount_text) if discount_text else 0
+                    discount_text = cell_text.replace('ج.م', '').strip()
+                    item.discount_amount = float(discount_text) if discount_text else 0
+                    # حساب النسبة من المبلغ للحفظ
+                    subtotal = item.quantity * item.unit_price
+                    if subtotal > 0:
+                        item.discount_rate = (item.discount_amount / subtotal) * 100
+                    else:
+                        item.discount_rate = 0
                 except ValueError:
-                    cell_item.setText(str(item.discount_rate))
+                    cell_item.setText(f"{item.discount_amount:.2f}")
                     return
             
             # إعادة حساب الإجمالي
             subtotal = item.quantity * item.unit_price
-            discount_amount = subtotal * (item.discount_rate / 100)
-            item.discount_amount = discount_amount
-            item.total = subtotal - discount_amount
+            # الخصم بالمبلغ مباشرة (لا يتجاوز الإجمالي)
+            item.discount_amount = min(item.discount_amount, subtotal)
+            item.total = subtotal - item.discount_amount
+            # تحديث النسبة
+            if subtotal > 0:
+                item.discount_rate = (item.discount_amount / subtotal) * 100
             
             # تحديث عمود الإجمالي
             total_item = self.items_table.item(row, 4)
@@ -857,9 +872,12 @@ class ProjectEditorDialog(QDialog):
         """إعادة حساب إجمالي البند"""
         item = self.project_items[row]
         subtotal = item.quantity * item.unit_price
-        discount_amount = subtotal * (item.discount_rate / 100)
-        item.discount_amount = discount_amount
-        item.total = subtotal - discount_amount
+        # الخصم بالمبلغ مباشرة (لا يتجاوز الإجمالي)
+        item.discount_amount = min(item.discount_amount, subtotal)
+        item.total = subtotal - item.discount_amount
+        # تحديث النسبة
+        if subtotal > 0:
+            item.discount_rate = (item.discount_amount / subtotal) * 100
         
         # تحديث عمود الإجمالي في الجدول
         total_item = self.items_table.item(row, 4)
@@ -869,10 +887,31 @@ class ProjectEditorDialog(QDialog):
         # تحديث الإجماليات الكلية
         self.update_totals()
 
+    def _on_discount_type_changed(self, index):
+        """تغيير نوع الخصم (نسبة أو مبلغ)"""
+        discount_type = self.discount_type_combo.currentData()
+        if discount_type == "percent":
+            self.discount_rate_input.setMaximum(100)
+            self.discount_rate_input.setSuffix(" %")
+        else:
+            self.discount_rate_input.setMaximum(999999999)
+            self.discount_rate_input.setSuffix(" ج.م")
+        self.update_totals()
+
     def update_totals(self):
         subtotal = sum(item.total for item in self.project_items)
-        discount_rate = self.discount_rate_input.value()
-        discount_amount = subtotal * (discount_rate / 100)
+        
+        # حساب الخصم حسب النوع
+        discount_type = self.discount_type_combo.currentData()
+        discount_value = self.discount_rate_input.value()
+        
+        if discount_type == "amount":
+            # الخصم بالمبلغ مباشرة
+            discount_amount = min(discount_value, subtotal)  # لا يتجاوز الإجمالي
+        else:
+            # الخصم بالنسبة
+            discount_amount = subtotal * (discount_value / 100)
+        
         taxable_amount = subtotal - discount_amount
         tax_rate = self.tax_rate_input.value()
         tax_amount = taxable_amount * (tax_rate / 100)
@@ -1066,6 +1105,17 @@ class ProjectEditorDialog(QDialog):
                 return
 
         # 1. تجميع بيانات المشروع
+        # حساب الخصم حسب النوع
+        discount_type = self.discount_type_combo.currentData()
+        discount_value = self.discount_rate_input.value()
+        subtotal = sum(item.total for item in self.project_items)
+        
+        if discount_type == "amount" and discount_value > 0 and subtotal > 0:
+            # تحويل المبلغ لنسبة للحفظ
+            discount_rate = (discount_value / subtotal) * 100
+        else:
+            discount_rate = discount_value
+        
         project_data = {
             "name": self.name_input.text(),
             "client_id": selected_client.name,
@@ -1074,7 +1124,7 @@ class ProjectEditorDialog(QDialog):
             "start_date": self.start_date_input.dateTime().toPyDateTime(),
             "end_date": self.end_date_input.dateTime().toPyDateTime(),
             "items": self.project_items,
-            "discount_rate": self.discount_rate_input.value(),
+            "discount_rate": discount_rate,
             "tax_rate": self.tax_rate_input.value(),
             "project_notes": self.notes_input.toPlainText(),
             "currency": schemas.CurrencyCode.EGP
@@ -1097,10 +1147,12 @@ class ProjectEditorDialog(QDialog):
             }
 
         # حساب إجمالي المشروع للتحقق من نسبة الدفعة المقدمة
-        subtotal = sum(item.total for item in self.project_items)
-        discount_rate = self.discount_rate_input.value()
-        discount_amount = subtotal * (discount_rate / 100)
-        taxable_amount = subtotal - discount_amount
+        # (subtotal و discount_rate تم حسابهم أعلاه)
+        if discount_type == "amount":
+            discount_amount_calc = min(discount_value, subtotal)
+        else:
+            discount_amount_calc = subtotal * (discount_rate / 100)
+        taxable_amount = subtotal - discount_amount_calc
         tax_rate = self.tax_rate_input.value()
         tax_amount = taxable_amount * (tax_rate / 100)
         total_amount = taxable_amount + tax_amount
@@ -1490,22 +1542,97 @@ class ProjectManagerTab(QWidget):
 
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
-        from core.context_menu import ContextMenuManager
+        from core.context_menu import RightClickBlocker
         
-        # إجراءات مخصصة للمشاريع
-        custom_actions = [
-            ("إضافة دفعة", "💰", self._add_payment_for_selected, True),
-            ("عرض الربحية", "📊", self._show_profit_dialog, True),
-            ("طباعة الفاتورة", "🖨️", self._print_invoice, True),
-        ]
+        # ⚡ تثبيت فلتر لتحديد flag الكليك يمين
+        self._right_click_blocker = RightClickBlocker(self.projects_table, self.projects_table)
+        self.projects_table.viewport().installEventFilter(self._right_click_blocker)
         
-        ContextMenuManager.setup_table_context_menu(
-            table=self.projects_table,
-            on_view=self.open_editor_for_selected,
-            on_edit=self.open_editor_for_selected,
-            on_refresh=self.load_projects_data,
-            custom_actions=custom_actions
-        )
+        self.projects_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.projects_table.customContextMenuRequested.connect(self._show_custom_context_menu)
+    
+    def _show_custom_context_menu(self, position):
+        """⚡ عرض قائمة السياق"""
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        from ui.styles import COLORS
+        
+        # الحصول على الصف تحت الماوس
+        item = self.projects_table.itemAt(position)
+        if not item:
+            return
+        
+        row = item.row()
+        
+        # تحديد الصف وتحديث selected_project
+        current_selection = self.projects_table.selectedIndexes()
+        current_row = current_selection[0].row() if current_selection else -1
+        
+        if current_row != row:
+            self.projects_table.selectRow(row)
+        
+        # تحديث selected_project يدوياً
+        project_name_item = self.projects_table.item(row, 1)
+        if project_name_item:
+            project_name = project_name_item.text()
+            for proj in self.projects_list:
+                if proj.name == project_name:
+                    self.selected_project = proj
+                    break
+        
+        # إنشاء القائمة
+        menu = QMenu(self.projects_table)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['bg_medium']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 5px;
+            }}
+            QMenu::item {{
+                background-color: transparent;
+                color: {COLORS['text_primary']};
+                padding: 8px 25px 8px 15px;
+                border-radius: 4px;
+                margin: 2px 5px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['primary']};
+                color: white;
+            }}
+        """)
+        
+        # إضافة الإجراءات
+        view_action = QAction("👁️ عرض التفاصيل", self.projects_table)
+        view_action.triggered.connect(self.open_editor_for_selected)
+        menu.addAction(view_action)
+        
+        edit_action = QAction("✏️ تعديل", self.projects_table)
+        edit_action.triggered.connect(self.open_editor_for_selected)
+        menu.addAction(edit_action)
+        
+        menu.addSeparator()
+        
+        payment_action = QAction("💰 إضافة دفعة", self.projects_table)
+        payment_action.triggered.connect(self.open_payment_dialog)
+        menu.addAction(payment_action)
+        
+        profit_action = QAction("📊 عرض الربحية", self.projects_table)
+        profit_action.triggered.connect(self._show_profit_dialog)
+        menu.addAction(profit_action)
+        
+        print_action = QAction("🖨️ طباعة الفاتورة", self.projects_table)
+        print_action.triggered.connect(self._print_invoice)
+        menu.addAction(print_action)
+        
+        menu.addSeparator()
+        
+        refresh_action = QAction("🔄 تحديث", self.projects_table)
+        refresh_action.triggered.connect(self.load_projects_data)
+        menu.addAction(refresh_action)
+        
+        # عرض القائمة
+        menu.exec(self.projects_table.viewport().mapToGlobal(position))
     
     def _add_payment_for_selected(self):
         """إضافة دفعة للمشروع المحدد"""
@@ -1536,7 +1663,12 @@ class ProjectManagerTab(QWidget):
                 self.printing_service.print_invoice(project)
 
     def on_project_selection_changed(self):
-        """ (معدلة) تملى لوحة المعاينة بكل التفاصيل """
+        """ (معدلة) تملى لوحة المعاينة بكل التفاصيل - ⚡ محسّنة للسرعة """
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين (لمنع التحميل المتكرر)
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         selected_rows = self.projects_table.selectedIndexes()
         if selected_rows:
             selected_row = selected_rows[0].row()
@@ -1568,101 +1700,8 @@ class ProjectManagerTab(QWidget):
             # حفظ ID المشروع للمهام
             project_id_for_tasks = getattr(self.selected_project, 'id', None) or getattr(self.selected_project, '_mongo_id', project_name)
             
-            # (1. جلب الأرقام الرئيسية)
-            profit_data = self.project_service.get_project_profitability(project_name)
-            self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
-            self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
-            self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
-            
-            # (2. جلب الدفعات المرتبطة)
-            try:
-                payments = self.project_service.get_payments_for_project(project_name)
-                self.preview_payments_table.setRowCount(0)
-                
-                if payments and len(payments) > 0:
-                    for i, pay in enumerate(payments):
-                        self.preview_payments_table.insertRow(i)
-                        # معالجة التاريخ بأمان
-                        try:
-                            if hasattr(pay.date, 'strftime'):
-                                date_str = pay.date.strftime("%Y-%m-%d")
-                            else:
-                                date_str = str(pay.date)[:10]
-                        except (AttributeError, ValueError, TypeError):
-                            date_str = "N/A"
-                        
-                        # عرض اسم الحساب بدلاً من ID
-                        account_name = "نقدي"  # افتراضي
-                        try:
-                            account = self.accounting_service.repo.get_account_by_code(pay.account_id)
-                            if account:
-                                account_name = account.name
-                            else:
-                                account = self.accounting_service.repo.get_account_by_id(pay.account_id)
-                                if account:
-                                    account_name = account.name
-                                else:
-                                    account_name = str(pay.account_id)
-                        except Exception as acc_err:
-                            print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
-                            account_name = str(pay.account_id)
-                        
-                        # ترتيب الأعمدة: [الحساب, المبلغ, التاريخ]
-                        self.preview_payments_table.setItem(i, 0, QTableWidgetItem(account_name))
-                        self.preview_payments_table.setItem(i, 1, QTableWidgetItem(f"{pay.amount:,.2f}"))
-                        self.preview_payments_table.setItem(i, 2, QTableWidgetItem(date_str))
-                else:
-                    # إضافة صف يوضح عدم وجود دفعات
-                    self.preview_payments_table.insertRow(0)
-                    no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
-                    no_data_item.setForeground(QColor("gray"))
-                    self.preview_payments_table.setItem(0, 0, no_data_item)
-                    self.preview_payments_table.setSpan(0, 0, 1, 3)
-                    
-            except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل تحميل الدفعات: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # (3. جلب المصروفات المرتبطة)
-            try:
-                expenses = self.project_service.get_expenses_for_project(project_name)
-                self.preview_expenses_table.setRowCount(0)
-                
-                if expenses and len(expenses) > 0:
-                    for i, exp in enumerate(expenses):
-                        self.preview_expenses_table.insertRow(i)
-                        # معالجة التاريخ بأمان
-                        try:
-                            if hasattr(exp.date, 'strftime'):
-                                date_str = exp.date.strftime("%Y-%m-%d")
-                            else:
-                                date_str = str(exp.date)[:10]
-                        except (AttributeError, ValueError, TypeError):
-                            date_str = "N/A"
-                        
-                        # ترتيب الأعمدة: [المبلغ, الوصف, التاريخ]
-                        self.preview_expenses_table.setItem(i, 0, QTableWidgetItem(f"{exp.amount:,.2f}"))
-                        self.preview_expenses_table.setItem(i, 1, QTableWidgetItem(exp.description or exp.category))
-                        self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(date_str))
-                else:
-                    # إضافة صف يوضح عدم وجود مصروفات
-                    self.preview_expenses_table.insertRow(0)
-                    no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
-                    no_data_item.setForeground(QColor("gray"))
-                    self.preview_expenses_table.setItem(0, 0, no_data_item)
-                    self.preview_expenses_table.setSpan(0, 0, 1, 3)
-                    
-            except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل تحميل المصروفات: {e}")
-                import traceback
-                traceback.print_exc()
-            
-            # (4. جلب المهام المرتبطة بالمشروع)
-            try:
-                self._load_project_tasks(project_id_for_tasks)
-            except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
+            # ⚡ تحميل البيانات في الخلفية لمنع التجميد
+            self._load_preview_data_async(project_name, project_id_for_tasks)
             
             return
 
@@ -1673,6 +1712,203 @@ class ProjectManagerTab(QWidget):
         self.print_button.setEnabled(False)
         self.preview_template_button.setEnabled(False)  # ✅ تعطيل زرار المعاينة
         self.preview_groupbox.setVisible(False)
+
+    def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
+        """⚡ تحميل بيانات المعاينة في الخلفية"""
+        from core.data_loader import get_data_loader
+        
+        data_loader = get_data_loader()
+        
+        # ⚡ 1. تحميل الأرقام الرئيسية (الربحية)
+        def fetch_profitability():
+            return self.project_service.get_project_profitability(project_name)
+        
+        def on_profitability_loaded(profit_data):
+            if self.selected_project and self.selected_project.name == project_name:
+                self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
+                self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
+                self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
+        
+        data_loader.load_async(
+            operation_name=f"profitability_{project_name}",
+            load_function=fetch_profitability,
+            on_success=on_profitability_loaded,
+            use_thread_pool=True
+        )
+        
+        # ⚡ 2. تحميل الدفعات
+        def fetch_payments():
+            return self.project_service.get_payments_for_project(project_name)
+        
+        def on_payments_loaded(payments):
+            if self.selected_project and self.selected_project.name == project_name:
+                self._populate_payments_table(payments)
+        
+        data_loader.load_async(
+            operation_name=f"payments_{project_name}",
+            load_function=fetch_payments,
+            on_success=on_payments_loaded,
+            use_thread_pool=True
+        )
+        
+        # ⚡ 3. تحميل المصروفات
+        def fetch_expenses():
+            return self.project_service.get_expenses_for_project(project_name)
+        
+        def on_expenses_loaded(expenses):
+            if self.selected_project and self.selected_project.name == project_name:
+                self._populate_expenses_table(expenses)
+        
+        data_loader.load_async(
+            operation_name=f"expenses_{project_name}",
+            load_function=fetch_expenses,
+            on_success=on_expenses_loaded,
+            use_thread_pool=True
+        )
+        
+        # ⚡ 4. تحميل المهام
+        def fetch_tasks():
+            from ui.todo_manager import TaskService
+            task_service = TaskService()
+            return task_service.get_tasks_by_project(str(project_id_for_tasks))
+        
+        def on_tasks_loaded(tasks):
+            if self.selected_project and self.selected_project.name == project_name:
+                self._populate_tasks_table(tasks)
+        
+        data_loader.load_async(
+            operation_name=f"tasks_{project_name}",
+            load_function=fetch_tasks,
+            on_success=on_tasks_loaded,
+            use_thread_pool=True
+        )
+
+    def _populate_payments_table(self, payments):
+        """⚡ ملء جدول الدفعات"""
+        try:
+            self.preview_payments_table.setRowCount(0)
+            
+            if payments and len(payments) > 0:
+                for i, pay in enumerate(payments):
+                    self.preview_payments_table.insertRow(i)
+                    # معالجة التاريخ بأمان
+                    try:
+                        if hasattr(pay.date, 'strftime'):
+                            date_str = pay.date.strftime("%Y-%m-%d")
+                        else:
+                            date_str = str(pay.date)[:10]
+                    except (AttributeError, ValueError, TypeError):
+                        date_str = "N/A"
+                    
+                    # عرض اسم الحساب بدلاً من ID
+                    account_name = "نقدي"  # افتراضي
+                    try:
+                        account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+                        if account:
+                            account_name = account.name
+                        else:
+                            account = self.accounting_service.repo.get_account_by_id(pay.account_id)
+                            if account:
+                                account_name = account.name
+                            else:
+                                account_name = str(pay.account_id)
+                    except Exception as acc_err:
+                        print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                        account_name = str(pay.account_id)
+                    
+                    # ترتيب الأعمدة: [الحساب, المبلغ, التاريخ]
+                    self.preview_payments_table.setItem(i, 0, QTableWidgetItem(account_name))
+                    self.preview_payments_table.setItem(i, 1, QTableWidgetItem(f"{pay.amount:,.2f}"))
+                    self.preview_payments_table.setItem(i, 2, QTableWidgetItem(date_str))
+            else:
+                # إضافة صف يوضح عدم وجود دفعات
+                self.preview_payments_table.insertRow(0)
+                no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
+                no_data_item.setForeground(QColor("gray"))
+                self.preview_payments_table.setItem(0, 0, no_data_item)
+                self.preview_payments_table.setSpan(0, 0, 1, 3)
+                
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل ملء جدول الدفعات: {e}")
+
+    def _populate_expenses_table(self, expenses):
+        """⚡ ملء جدول المصروفات"""
+        try:
+            self.preview_expenses_table.setRowCount(0)
+            
+            if expenses and len(expenses) > 0:
+                for i, exp in enumerate(expenses):
+                    self.preview_expenses_table.insertRow(i)
+                    # معالجة التاريخ بأمان
+                    try:
+                        if hasattr(exp.date, 'strftime'):
+                            date_str = exp.date.strftime("%Y-%m-%d")
+                        else:
+                            date_str = str(exp.date)[:10]
+                    except (AttributeError, ValueError, TypeError):
+                        date_str = "N/A"
+                    
+                    # ترتيب الأعمدة: [المبلغ, الوصف, التاريخ]
+                    self.preview_expenses_table.setItem(i, 0, QTableWidgetItem(f"{exp.amount:,.2f}"))
+                    self.preview_expenses_table.setItem(i, 1, QTableWidgetItem(exp.description or exp.category))
+                    self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(date_str))
+            else:
+                # إضافة صف يوضح عدم وجود مصروفات
+                self.preview_expenses_table.insertRow(0)
+                no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
+                no_data_item.setForeground(QColor("gray"))
+                self.preview_expenses_table.setItem(0, 0, no_data_item)
+                self.preview_expenses_table.setSpan(0, 0, 1, 3)
+                
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
+
+    def _populate_tasks_table(self, tasks):
+        """⚡ ملء جدول المهام"""
+        try:
+            self.preview_tasks_table.setRowCount(0)
+            
+            if tasks and len(tasks) > 0:
+                for i, task in enumerate(tasks):
+                    self.preview_tasks_table.insertRow(i)
+                    
+                    # عنوان المهمة
+                    self.preview_tasks_table.setItem(i, 0, QTableWidgetItem(task.title))
+                    
+                    # الأولوية
+                    priority_item = QTableWidgetItem(task.priority.value)
+                    priority_colors = {
+                        "منخفضة": QColor("#10B981"),
+                        "متوسطة": QColor("#0A6CF1"),
+                        "عالية": QColor("#FF6636"),
+                        "عاجلة": QColor("#FF4FD8")
+                    }
+                    priority_item.setForeground(priority_colors.get(task.priority.value, QColor("white")))
+                    self.preview_tasks_table.setItem(i, 1, priority_item)
+                    
+                    # الحالة
+                    status_item = QTableWidgetItem(task.status.value)
+                    status_colors = {
+                        "قيد الانتظار": QColor("#B0C4DE"),
+                        "قيد التنفيذ": QColor("#FF6636"),
+                        "مكتملة": QColor("#10B981"),
+                        "ملغاة": QColor("#FF4FD8")
+                    }
+                    status_item.setForeground(status_colors.get(task.status.value, QColor("white")))
+                    self.preview_tasks_table.setItem(i, 2, status_item)
+                    
+                    # تاريخ الاستحقاق
+                    due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
+                    self.preview_tasks_table.setItem(i, 3, QTableWidgetItem(due_str))
+            else:
+                self.preview_tasks_table.insertRow(0)
+                no_data_item = QTableWidgetItem("لا توجد مهام مرتبطة")
+                no_data_item.setForeground(QColor("gray"))
+                self.preview_tasks_table.setItem(0, 0, no_data_item)
+                self.preview_tasks_table.setSpan(0, 0, 1, 4)
+                
+        except Exception as e:
+            print(f"ERROR: [ProjectManager] فشل ملء جدول المهام: {e}")
 
     def load_projects_data(self):
         """⚡ تحميل بيانات المشاريع في الخلفية لمنع التجميد"""
@@ -1703,6 +1939,9 @@ class ProjectManagerTab(QWidget):
         def on_data_loaded(projects):
             try:
                 self.projects_list = projects
+                
+                # ⚡ مسح الجدول قبل إضافة البيانات الجديدة (لمنع التكرار)
+                self.projects_table.setRowCount(0)
                 
                 # إنشاء العناصر مع محاذاة للوسط
                 def create_centered_item(text):
@@ -1768,53 +2007,12 @@ class ProjectManagerTab(QWidget):
         self.load_projects_data()
 
     def _load_project_tasks(self, project_id: str):
-        """تحميل المهام المرتبطة بالمشروع"""
+        """تحميل المهام المرتبطة بالمشروع (متزامن - للاستخدام بعد إضافة مهمة)"""
         try:
             from ui.todo_manager import TaskService
             task_service = TaskService()
             tasks = task_service.get_tasks_by_project(str(project_id))
-            
-            self.preview_tasks_table.setRowCount(0)
-            
-            if tasks and len(tasks) > 0:
-                for i, task in enumerate(tasks):
-                    self.preview_tasks_table.insertRow(i)
-                    
-                    # عنوان المهمة
-                    self.preview_tasks_table.setItem(i, 0, QTableWidgetItem(task.title))
-                    
-                    # الأولوية
-                    priority_item = QTableWidgetItem(task.priority.value)
-                    priority_colors = {
-                        "منخفضة": QColor("#10B981"),
-                        "متوسطة": QColor("#0A6CF1"),
-                        "عالية": QColor("#FF6636"),
-                        "عاجلة": QColor("#FF4FD8")
-                    }
-                    priority_item.setForeground(priority_colors.get(task.priority.value, QColor("white")))
-                    self.preview_tasks_table.setItem(i, 1, priority_item)
-                    
-                    # الحالة
-                    status_item = QTableWidgetItem(task.status.value)
-                    status_colors = {
-                        "قيد الانتظار": QColor("#B0C4DE"),
-                        "قيد التنفيذ": QColor("#FF6636"),
-                        "مكتملة": QColor("#10B981"),
-                        "ملغاة": QColor("#FF4FD8")
-                    }
-                    status_item.setForeground(status_colors.get(task.status.value, QColor("white")))
-                    self.preview_tasks_table.setItem(i, 2, status_item)
-                    
-                    # تاريخ الاستحقاق
-                    due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
-                    self.preview_tasks_table.setItem(i, 3, QTableWidgetItem(due_str))
-            else:
-                self.preview_tasks_table.insertRow(0)
-                no_data_item = QTableWidgetItem("لا توجد مهام مرتبطة")
-                no_data_item.setForeground(QColor("gray"))
-                self.preview_tasks_table.setItem(0, 0, no_data_item)
-                self.preview_tasks_table.setSpan(0, 0, 1, 4)
-                
+            self._populate_tasks_table(tasks)
         except Exception as e:
             print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
             self.preview_tasks_table.setRowCount(0)
@@ -2089,50 +2287,50 @@ class ProjectManagerTab(QWidget):
     
 
     def _get_payments_list(self, project_name: str) -> list:
-        """جلب قائمة الدفعات للمشروع"""
+        """جلب قائمة الدفعات للمشروع - محسّن للسرعة"""
         payments_list = []
         try:
             payments = self.project_service.get_payments_for_project(project_name)
-            print(f"INFO: [ProjectManager] تم جلب {len(payments)} دفعة للمشروع {project_name}")
+            if not payments:
+                return []
+            
+            # ⚡ تخزين الحسابات مؤقتاً لتجنب الاستعلامات المتكررة
+            accounts_cache = {}
             
             for payment in payments:
                 account_name = "نقدي"
-                if hasattr(payment, 'account_id') and payment.account_id:
-                    try:
-                        account = self.accounting_service.repo.get_account_by_code(payment.account_id)
-                        if account:
-                            account_name = account.name
-                        else:
-                            account = self.accounting_service.repo.get_account_by_id(payment.account_id)
-                            if account:
-                                account_name = account.name
-                            else:
-                                account_name = str(payment.account_id)
-                    except Exception:
-                        account_name = str(payment.account_id)
+                account_id = getattr(payment, 'account_id', None)
                 
+                if account_id:
+                    # ⚡ استخدام الكاش
+                    if account_id in accounts_cache:
+                        account_name = accounts_cache[account_id]
+                    else:
+                        try:
+                            account = self.accounting_service.repo.get_account_by_code(account_id)
+                            if not account:
+                                account = self.accounting_service.repo.get_account_by_id(account_id)
+                            account_name = account.name if account else str(account_id)
+                            accounts_cache[account_id] = account_name
+                        except Exception:
+                            account_name = str(account_id)
+                            accounts_cache[account_id] = account_name
+                
+                # تحويل التاريخ
                 payment_date = payment.date
                 if hasattr(payment_date, 'strftime'):
                     date_str = payment_date.strftime("%Y-%m-%d")
-                elif isinstance(payment_date, str):
-                    date_str = payment_date[:10]
                 else:
-                    date_str = str(payment_date)[:10]
-                
-                try:
-                    amount_val = float(payment.amount)
-                except (ValueError, TypeError, AttributeError):
-                    amount_val = 0.0
+                    date_str = str(payment_date)[:10] if payment_date else ""
                 
                 payments_list.append({
                     'date': date_str,
-                    'amount': amount_val,
-                    'method': payment.method if hasattr(payment, 'method') else account_name,
+                    'amount': float(payment.amount) if payment.amount else 0.0,
+                    'method': getattr(payment, 'method', account_name),
                     'account_name': account_name,
-                    'account_id': str(payment.account_id) if hasattr(payment, 'account_id') else ''
+                    'account_id': str(account_id) if account_id else ''
                 })
             
-            print(f"INFO: [ProjectManager] تم تجهيز {len(payments_list)} دفعة للطباعة")
         except Exception as e:
             print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
         

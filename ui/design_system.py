@@ -364,11 +364,31 @@ class InputFactory:
         size_config = INPUT_SIZES[size]
         
         return f"""
-            QLineEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QDateEdit, QComboBox {{
+            QLineEdit, QTextEdit {{
                 background-color: {Colors.BG_MEDIUM};
                 border: 2px solid {Colors.BORDER};
                 border-radius: 8px;
                 padding: {size_config['padding']};
+                min-height: {size_config['min_height']}px;
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {size_config['font_size']}px;
+                font-family: '{Typography.FONT_FAMILY}';
+            }}
+            QSpinBox, QDoubleSpinBox, QDateEdit {{
+                background-color: {Colors.BG_MEDIUM};
+                border: 2px solid {Colors.BORDER};
+                border-radius: 8px;
+                padding: 8px 10px 8px 28px;
+                min-height: {size_config['min_height']}px;
+                color: {Colors.TEXT_PRIMARY};
+                font-size: {size_config['font_size']}px;
+                font-family: '{Typography.FONT_FAMILY}';
+            }}
+            QComboBox {{
+                background-color: {Colors.BG_MEDIUM};
+                border: 2px solid {Colors.BORDER};
+                border-radius: 8px;
+                padding: 8px 10px 8px 28px;
                 min-height: {size_config['min_height']}px;
                 color: {Colors.TEXT_PRIMARY};
                 font-size: {size_config['font_size']}px;
@@ -382,9 +402,39 @@ class InputFactory:
             QDoubleSpinBox:hover, QDateEdit:hover, QComboBox:hover {{
                 border: 2px solid {Colors.PRIMARY_LIGHT};
             }}
-            QComboBox::drop-down {{
+            QSpinBox::up-button, QDoubleSpinBox::up-button, QDateEdit::up-button {{
+                subcontrol-origin: border;
+                subcontrol-position: top left;
+                width: 22px; height: 14px;
+                background: {Colors.BG_LIGHT};
                 border: none;
-                width: 30px;
+                border-top-left-radius: 6px;
+            }}
+            QSpinBox::down-button, QDoubleSpinBox::down-button, QDateEdit::down-button {{
+                subcontrol-origin: border;
+                subcontrol-position: bottom left;
+                width: 22px; height: 14px;
+                background: {Colors.BG_LIGHT};
+                border: none;
+                border-bottom-left-radius: 6px;
+            }}
+            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow, QDateEdit::up-arrow {{
+                image: url(assets/up-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QSpinBox::down-arrow, QDoubleSpinBox::down-arrow, QDateEdit::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
+            }}
+            QComboBox::drop-down {{
+                subcontrol-origin: border;
+                subcontrol-position: center left;
+                width: 24px;
+                border: none;
+            }}
+            QComboBox::down-arrow {{
+                image: url(assets/down-arrow.png);
+                width: 10px; height: 10px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {Colors.BG_MEDIUM};

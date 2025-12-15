@@ -288,6 +288,11 @@ class ClientManagerTab(QWidget):
         self.delete_button.setEnabled(has_selection)
 
     def on_client_selection_changed(self):
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         selected_rows = self.clients_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()

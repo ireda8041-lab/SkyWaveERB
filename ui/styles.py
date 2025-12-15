@@ -477,12 +477,12 @@ QLineEdit:focus {{
     border: 1px solid {COLORS['primary']};
 }}
 
-/* ComboBox - خلفية فاتحة */
+/* ComboBox - مع سهم واضح (RTL) */
 QComboBox {{
     background-color: {COLORS['bg_medium']};
     border: 1px solid #374151;
     border-radius: 4px;
-    padding: 8px 12px;
+    padding: 8px 12px 8px 28px;
     min-height: 36px;
     min-width: 150px;
     color: #F8FAFC;
@@ -491,6 +491,20 @@ QComboBox {{
 
 QComboBox:focus {{
     border: 1px solid {COLORS['primary']};
+}}
+
+QComboBox::drop-down {{
+    subcontrol-origin: border;
+    subcontrol-position: center left;
+    width: 24px;
+    border: none;
+    background: transparent;
+}}
+
+QComboBox::down-arrow {{
+    image: url(assets/down-arrow.png);
+    width: 12px;
+    height: 12px;
 }}
 
 QComboBox QAbstractItemView {{
@@ -509,27 +523,69 @@ QComboBox QLineEdit {{
     selection-background-color: {COLORS['primary']};
 }}
 
-/* DateEdit - خلفية فاتحة */
-QDateEdit {{
+/* DateEdit & TimeEdit - مع أسهم واضحة (RTL) */
+QDateEdit, QTimeEdit {{
     background-color: {COLORS['bg_medium']};
     border: 1px solid #374151;
     border-radius: 4px;
-    padding: 6px 10px;
+    padding: 6px 10px 6px 28px;
     min-height: 32px;
     color: #F8FAFC;
     font-size: 13px;
 }}
 
-QDateEdit:focus {{
+QDateEdit:focus, QTimeEdit:focus {{
     border: 1px solid {COLORS['primary']};
 }}
 
-/* SpinBox & DoubleSpinBox - مع أزرار واضحة */
+QDateEdit::up-button, QTimeEdit::up-button {{
+    subcontrol-origin: border;
+    subcontrol-position: top left;
+    width: 22px;
+    height: 15px;
+    background-color: {COLORS['bg_light']};
+    border: none;
+    border-right: 1px solid #374151;
+    border-top-left-radius: 4px;
+}}
+
+QDateEdit::up-button:hover, QTimeEdit::up-button:hover {{
+    background-color: {COLORS['primary']};
+}}
+
+QDateEdit::down-button, QTimeEdit::down-button {{
+    subcontrol-origin: border;
+    subcontrol-position: bottom left;
+    width: 22px;
+    height: 15px;
+    background-color: {COLORS['bg_light']};
+    border: none;
+    border-right: 1px solid #374151;
+    border-bottom-left-radius: 4px;
+}}
+
+QDateEdit::down-button:hover, QTimeEdit::down-button:hover {{
+    background-color: {COLORS['primary']};
+}}
+
+QDateEdit::up-arrow, QTimeEdit::up-arrow {{
+    image: url(assets/up-arrow.png);
+    width: 10px;
+    height: 10px;
+}}
+
+QDateEdit::down-arrow, QTimeEdit::down-arrow {{
+    image: url(assets/down-arrow.png);
+    width: 10px;
+    height: 10px;
+}}
+
+/* SpinBox & DoubleSpinBox - مع أسهم واضحة (RTL) */
 QSpinBox, QDoubleSpinBox {{
     background-color: {COLORS['bg_medium']};
     border: 1px solid #374151;
     border-radius: 4px;
-    padding: 6px 30px 6px 10px;
+    padding: 6px 10px 6px 28px;
     min-height: 32px;
     color: #F8FAFC;
     font-size: 13px;
@@ -541,45 +597,44 @@ QSpinBox:focus, QDoubleSpinBox:focus {{
 
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
     subcontrol-origin: border;
-    subcontrol-position: top right;
-    width: 24px;
-    height: 16px;
-    background-color: rgba(10, 108, 241, 0.3);
+    subcontrol-position: top left;
+    width: 22px;
+    height: 15px;
+    background-color: {COLORS['bg_light']};
     border: none;
-    border-left: 1px solid #374151;
-    border-top-right-radius: 4px;
+    border-right: 1px solid #374151;
+    border-top-left-radius: 4px;
 }}
 
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover {{
-    background-color: rgba(10, 108, 241, 0.5);
+    background-color: {COLORS['primary']};
 }}
 
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border;
-    subcontrol-position: bottom right;
-    width: 24px;
-    height: 16px;
-    background-color: rgba(10, 108, 241, 0.3);
+    subcontrol-position: bottom left;
+    width: 22px;
+    height: 15px;
+    background-color: {COLORS['bg_light']};
     border: none;
-    border-left: 1px solid #374151;
-    border-bottom-right-radius: 4px;
+    border-right: 1px solid #374151;
+    border-bottom-left-radius: 4px;
 }}
 
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
-    background-color: rgba(10, 108, 241, 0.5);
+    background-color: {COLORS['primary']};
 }}
 
-/* استخدام علامات + و - بدلاً من الأسهم */
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    image: none;
-    width: 0;
-    height: 0;
+    image: url(assets/up-arrow.png);
+    width: 10px;
+    height: 10px;
 }}
 
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    image: none;
-    width: 0;
-    height: 0;
+    image: url(assets/down-arrow.png);
+    width: 10px;
+    height: 10px;
 }}
 
 QTextEdit {{

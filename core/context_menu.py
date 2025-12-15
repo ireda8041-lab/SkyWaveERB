@@ -5,14 +5,54 @@
 يوفر قوائم سياقية للجداول والعناصر المختلفة
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QCursor
-from PyQt6.QtWidgets import QMenu, QTableWidget, QWidget
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QEvent
+from PyQt6.QtGui import QAction, QCursor, QMouseEvent
+from PyQt6.QtWidgets import QMenu, QTableWidget, QWidget, QApplication
 
 from core.logger import get_logger
 from ui.styles import COLORS
 
 logger = get_logger(__name__)
+
+
+def is_right_click_active() -> bool:
+    """
+    ⚡ التحقق إذا كان الكليك يمين مضغوط حالياً
+    يتحقق من زر الماوس المضغوط أو من الـ flag
+    """
+    # التحقق من زر الماوس المضغوط حالياً
+    buttons = QApplication.mouseButtons()
+    if buttons & Qt.MouseButton.RightButton:
+        return True
+    # التحقق من الـ flag (للحالات اللي الزر اترفع فيها)
+    return RightClickBlocker.is_right_clicking
+
+
+class RightClickBlocker(QObject):
+    """
+    ⚡ فلتر لتتبع الكليك يمين
+    """
+    is_right_clicking = False
+    
+    def __init__(self, table: QTableWidget = None, parent=None):
+        super().__init__(parent)
+        self.table = table
+    
+    def eventFilter(self, obj, event):
+        if self.table and obj == self.table.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.RightButton:
+                    RightClickBlocker.is_right_clicking = True
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                if event.button() == Qt.MouseButton.RightButton:
+                    # تأخير إعادة التعيين
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(200, self._reset_flag)
+        return False
+    
+    @staticmethod
+    def _reset_flag():
+        RightClickBlocker.is_right_clicking = False
 
 
 class ContextMenuManager:
@@ -77,7 +117,18 @@ class ContextMenuManager:
         """
         table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         
+        # ⚡ تثبيت فلتر لتحديد flag الكليك يمين
+        right_click_blocker = RightClickBlocker(table, table)
+        table.viewport().installEventFilter(right_click_blocker)
+        table._right_click_blocker = right_click_blocker
+        
         def show_context_menu(position):
+            # تحديد الصف تحت الماوس
+            item = table.itemAt(position)
+            if item:
+                row = item.row()
+                table.selectRow(row)
+            
             menu = QMenu(table)
             menu.setStyleSheet(ContextMenuManager.MENU_STYLE)
             

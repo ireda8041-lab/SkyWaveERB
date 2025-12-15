@@ -9,13 +9,14 @@ class SimpleComboBox(QComboBox):
     """
     ComboBox احترافي مع:
     - كتابة حرة
-    - بحث ذكي أثناء الكتابة
+    - بدون auto-complete مزعج
     - تحديد النص عند التركيز
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, enable_completer=False):
         super().__init__(parent)
 
+        self._enable_completer = enable_completer
         self.setEditable(True)
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.setMaxVisibleItems(15)
@@ -27,6 +28,22 @@ class SimpleComboBox(QComboBox):
 
         # علامة لمعرفة إذا كان أول مرة
         self._first_focus = True
+        
+        # إلغاء الـ auto-complete المزعج افتراضياً
+        if not enable_completer:
+            self.setCompleter(None)
+    
+    def addItem(self, *args, **kwargs):
+        """إضافة عنصر مع إلغاء auto-complete"""
+        super().addItem(*args, **kwargs)
+        if not self._enable_completer:
+            self.setCompleter(None)
+    
+    def addItems(self, texts):
+        """إضافة عناصر مع إلغاء auto-complete"""
+        super().addItems(texts)
+        if not self._enable_completer:
+            self.setCompleter(None)
 
     def _do_select_all(self):
         """تحديد كل النص"""

@@ -417,6 +417,11 @@ class TemplateManager(QWidget):
 
     def on_selection_changed(self):
         """عند تغيير التحديد"""
+        # ⚡ تجاهل التحديث إذا كان الكليك يمين
+        from core.context_menu import is_right_click_active
+        if is_right_click_active():
+            return
+        
         selected_rows = self.templates_table.selectionModel().selectedRows()
         has_selection = len(selected_rows) > 0
 
