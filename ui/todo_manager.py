@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
+from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item, get_arrow_url
 from ui.smart_combobox import SmartFilterComboBox
 
 # مسار ملف إعدادات المهام
@@ -649,12 +649,12 @@ class TaskSettingsDialog(QDialog):
                 background: transparent;
             }}
             QSpinBox::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px;
                 height: 10px;
             }}
             QSpinBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}
@@ -980,7 +980,7 @@ class TaskEditorDialog(QDialog):
                 background: transparent;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}
@@ -1020,12 +1020,12 @@ class TaskEditorDialog(QDialog):
                 background: transparent;
             }}
             QSpinBox::up-arrow, QDateEdit::up-arrow, QTimeEdit::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px;
                 height: 10px;
             }}
             QSpinBox::down-arrow, QDateEdit::down-arrow, QTimeEdit::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}

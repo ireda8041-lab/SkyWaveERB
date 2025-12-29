@@ -117,6 +117,27 @@ class ClientService:
             if not existing_client:
                 raise Exception("العميل غير موجود للتعديل")
 
+            # ⚡ التعامل الذكي مع logo_data
+            if 'logo_data' in new_data:
+                if new_data['logo_data'] == "__DELETE__":
+                    # المستخدم يريد حذف الصورة صراحة
+                    new_data['logo_data'] = ""
+                    new_data['logo_path'] = ""
+                    logger.info(f"[ClientService] 🗑️ حذف logo_data")
+                elif new_data['logo_data']:
+                    # صورة جديدة
+                    logger.info(f"[ClientService] 📷 تحديث logo_data ({len(new_data['logo_data'])} حرف)")
+                else:
+                    # logo_data فارغ - الاحتفاظ بالقديم
+                    if existing_client.logo_data:
+                        new_data['logo_data'] = existing_client.logo_data
+                        logger.info(f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)")
+            else:
+                # logo_data غير موجود في new_data - الاحتفاظ بالقديم
+                if existing_client.logo_data:
+                    new_data['logo_data'] = existing_client.logo_data
+                    logger.info(f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)")
+
             updated_client_schema = existing_client.model_copy(update=new_data)
             saved_client = self.repo.update_client(client_id, updated_client_schema)
             self.invalidate_cache()  # ⚡ إبطال الـ cache

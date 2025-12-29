@@ -90,7 +90,7 @@ class NewPaymentDialog(QDialog):
 
     def _setup_ui(self):
         """إعداد الواجهة - تصميم احترافي"""
-        from ui.styles import COLORS
+        from ui.styles import COLORS, get_arrow_url
         
         layout = QVBoxLayout()
         layout.setSpacing(10)
@@ -116,7 +116,7 @@ class NewPaymentDialog(QDialog):
                 width: 22px;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}

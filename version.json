@@ -1,17 +1,18 @@
 {
-  "version": "1.1.6",
-  "version_name": "Updater Fix & UI Improvements - Sky Wave ERP",
+  "version": "1.1.7",
+  "version_name": "Logo Sync Fix - Sky Wave ERP",
   "release_date": "2025-12-29",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.1.6/SkyWaveERP-Setup-1.1.6.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.1.7/SkyWaveERP-Setup-1.1.7.exe",
   "changelog": [
-    "إصلاح مشكلة RuntimeError: lost sys.stdin في المحدث",
-    "تحسين واجهة المحدث بتصميم احترافي",
-    "إزالة الحدود من عناصر الواجهة",
-    "زوايا منحنية ناعمة للنافذة",
-    "تحسينات في الأداء والاستقرار"
+    "إصلاح مشكلة مزامنة صور العملاء بين الأجهزة",
+    "حماية الصور من الحذف غير المقصود أثناء المزامنة",
+    "إضافة زر حذف الصورة في نافذة تعديل العميل",
+    "تحسين عرض الصور في جدول العملاء",
+    "إصلاح مشكلة حذف العملاء من قاعدة البيانات",
+    "تحسينات في أداء المزامنة"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "إصلاح مشكلة المحدث وتحسينات في الواجهة",
-  "notes_en": "Updater fix and UI improvements"
+  "notes_ar": "إصلاح مزامنة صور العملاء بين الأجهزة",
+  "notes_en": "Fix client logo sync between devices"
 }

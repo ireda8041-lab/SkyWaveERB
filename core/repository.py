@@ -1029,6 +1029,12 @@ class Repository:
             try:
                 # نحول الـ Pydantic model لـ dict عشان Mongo يفهمه
                 client_dict = client_data.model_dump(exclude={"_mongo_id"})
+                
+                # ⚡ التأكد من حفظ logo_data بشكل صحيح
+                if client_data.logo_data:
+                    client_dict['logo_data'] = client_data.logo_data
+                    print(f"INFO: [Repo] حفظ logo_data ({len(client_data.logo_data)} حرف) في MongoDB")
+                
                 result = self.mongo_db.clients.insert_one(client_dict)
                 mongo_id = str(result.inserted_id)
 
@@ -1086,6 +1092,24 @@ class Repository:
                 update_dict = client_data.model_dump(exclude={"_mongo_id", "id", "created_at"})
                 update_dict['last_modified'] = now_dt
                 update_dict['status'] = client_data.status.value
+                
+                # ⚡ التعامل الذكي مع logo_data
+                # لو logo_data فارغ، نجيب القيمة الموجودة في MongoDB ونحتفظ بيها
+                if not client_data.logo_data:
+                    try:
+                        existing = self.mongo_db.clients.find_one(
+                            {"$or": [{"_id": self._to_objectid(client_id)}, {"_mongo_id": client_id}]},
+                            {"logo_data": 1}
+                        )
+                        if existing and existing.get('logo_data'):
+                            # الاحتفاظ بالصورة الموجودة في السحابة
+                            del update_dict['logo_data']
+                            print(f"INFO: [Repo] الاحتفاظ بـ logo_data الموجود في MongoDB")
+                    except Exception:
+                        pass
+                else:
+                    update_dict['logo_data'] = client_data.logo_data
+                    print(f"INFO: [Repo] حفظ logo_data ({len(client_data.logo_data)} حرف) في MongoDB")
 
                 self.mongo_db.clients.update_one(
                     {"$or": [{"_id": self._to_objectid(client_id)}, {"_mongo_id": client_id}]},
@@ -1115,7 +1139,11 @@ class Repository:
             self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
             rows = self.sqlite_cursor.fetchall()
             clients_list = [schemas.Client(**dict(row)) for row in rows]
-            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي.")
+            
+            # ⚡ تسجيل عدد العملاء اللي عندهم صور
+            clients_with_logo = sum(1 for c in clients_list if c.logo_data)
+            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي ({clients_with_logo} عميل لديه صورة)")
+            
             return clients_list
         except Exception as e:
             print(f"ERROR: فشل جلب العملاء من SQLite: {e}")
@@ -1425,19 +1453,33 @@ class Repository:
 
         # جلب _mongo_id قبل الحذف
         self.sqlite_cursor.execute(
-            "SELECT _mongo_id FROM clients WHERE id = ? OR _mongo_id = ?",
+            "SELECT id, _mongo_id, name FROM clients WHERE id = ? OR _mongo_id = ?",
             (client_id_num, client_id)
         )
         row = self.sqlite_cursor.fetchone()
-        mongo_id = row[0] if row else client_id
+        
+        if row:
+            local_id = row[0]
+            mongo_id = row[1] if row[1] else client_id
+            client_name = row[2]
+            print(f"INFO: [Repo] العميل المراد حذفه: {client_name} (local_id={local_id}, mongo_id={mongo_id})")
+        else:
+            print(f"WARNING: [Repo] العميل غير موجود في SQLite! client_id={client_id}")
+            mongo_id = client_id
+            local_id = client_id_num
 
         # حذف من SQLite
         self.sqlite_cursor.execute(
             "DELETE FROM clients WHERE id = ? OR _mongo_id = ?",
-            (client_id_num, client_id)
+            (local_id, client_id)
         )
+        deleted_rows = self.sqlite_cursor.rowcount
         self.sqlite_conn.commit()
-        print(f"INFO: [Repo] ✅ تم حذف العميل من SQLite")
+        
+        if deleted_rows > 0:
+            print(f"INFO: [Repo] ✅ تم حذف {deleted_rows} سجل من SQLite")
+        else:
+            print(f"WARNING: [Repo] ❌ لم يتم حذف أي سجل من SQLite!")
 
         # حذف من MongoDB
         if self.online:
@@ -1455,7 +1497,7 @@ class Repository:
             except Exception as e:
                 print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
 
-        return True
+        return deleted_rows > 0
 
     def update_journal_entry_by_doc_id(self, doc_id: str, new_lines: list[schemas.JournalEntryLine], new_description: str) -> bool:
         """

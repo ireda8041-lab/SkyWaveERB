@@ -152,6 +152,15 @@ class StartupSync:
             # 📊 طباعة تقرير المطابقة
             self.print_sync_report()
             
+            # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
+            try:
+                from core.signals import app_signals
+                app_signals.emit_data_changed('clients')
+                app_signals.emit_data_changed('projects')
+                logger.info("📢 تم إرسال إشارات تحديث الواجهة")
+            except Exception as e:
+                logger.warning(f"⚠️ فشل إرسال إشارات التحديث: {e}")
+            
             # استدعاء callbacks
             for callback in self._callbacks:
                 try:
@@ -422,6 +431,11 @@ class StartupSync:
             else:
                 data[key] = value
         
+        # ⚡ تأكيد حفظ logo_data للعملاء
+        if 'logo_data' in columns and doc.get('logo_data'):
+            data['logo_data'] = doc['logo_data']
+            logger.info(f"  📷 تم جلب logo_data ({len(doc['logo_data'])} حرف)")
+        
         return data
     
     def _cleanup_duplicates(self):
@@ -495,6 +509,15 @@ class StartupSync:
             self._cleanup_duplicates()
             
             elapsed = time.time() - start_time
+            
+            # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
+            try:
+                from core.signals import app_signals
+                app_signals.emit_data_changed('clients')
+                app_signals.emit_data_changed('projects')
+                logger.info("📢 تم إرسال إشارات تحديث الواجهة")
+            except Exception as e:
+                logger.warning(f"⚠️ فشل إرسال إشارات التحديث: {e}")
             
             return {
                 'success': True,

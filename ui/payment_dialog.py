@@ -78,7 +78,7 @@ class PaymentDialog(QDialog):
         self._init_ui()
 
     def _init_ui(self):
-        from ui.styles import BUTTON_STYLES, COLORS
+        from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -132,7 +132,7 @@ class PaymentDialog(QDialog):
                 width: 20px;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}

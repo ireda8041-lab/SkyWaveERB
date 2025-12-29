@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QGridLayout, QLineEdit, QTimeEdit
 )
 
-from ui.styles import BUTTON_STYLES, get_cairo_font, TABLE_STYLE_DARK, create_centered_item
+from ui.styles import BUTTON_STYLES, get_cairo_font, TABLE_STYLE_DARK, create_centered_item, get_arrow_url
 from services.hr_service import HRService
 
 
@@ -1373,11 +1373,11 @@ class PayLoanDialog(QDialog):
                 border-bottom-left-radius: 4px;
             }}
             QDoubleSpinBox::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px; height: 10px;
             }}
             QDoubleSpinBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
             QComboBox::drop-down {{
@@ -1386,7 +1386,7 @@ class PayLoanDialog(QDialog):
                 width: 22px; border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
         """)
@@ -1487,11 +1487,11 @@ class ManualAttendanceDialog(QDialog):
                 border-bottom-left-radius: 4px;
             }}
             QDateEdit::up-arrow, QTimeEdit::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px; height: 10px;
             }}
             QDateEdit::down-arrow, QTimeEdit::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
             QComboBox::drop-down {{
@@ -1500,7 +1500,7 @@ class ManualAttendanceDialog(QDialog):
                 width: 22px; border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
         """)
@@ -1607,11 +1607,11 @@ class LeaveRequestDialog(QDialog):
                 border-bottom-left-radius: 4px;
             }}
             QDateEdit::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px; height: 10px;
             }}
             QDateEdit::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
             QComboBox::drop-down {{
@@ -1620,7 +1620,7 @@ class LeaveRequestDialog(QDialog):
                 width: 22px; border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
         """)
@@ -1883,11 +1883,11 @@ class EditSalaryDialog(QDialog):
                 border-bottom-left-radius: 4px;
             }}
             QDoubleSpinBox::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({get_arrow_url("up")});
                 width: 10px; height: 10px;
             }}
             QDoubleSpinBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
             QComboBox::drop-down {{
@@ -1896,7 +1896,7 @@ class EditSalaryDialog(QDialog):
                 width: 22px; border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px; height: 10px;
             }}
             QGroupBox {{

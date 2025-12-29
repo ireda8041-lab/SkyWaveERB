@@ -112,6 +112,15 @@ class UnifiedSyncManagerV3(QObject):
 
             logger.info(f"✅ اكتملت المزامنة: {results['total_synced']} سجل")
             self.sync_completed.emit(results)
+            
+            # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
+            try:
+                from core.signals import app_signals
+                app_signals.emit_data_changed('clients')
+                app_signals.emit_data_changed('projects')
+                logger.info("📢 تم إرسال إشارات تحديث الواجهة")
+            except Exception as e:
+                logger.warning(f"⚠️ فشل إرسال إشارات التحديث: {e}")
 
         except Exception as e:
             logger.error(f"❌ خطأ في المزامنة الكاملة: {e}")
@@ -168,6 +177,14 @@ class UnifiedSyncManagerV3(QObject):
 
                 # تصفية الحقول
                 filtered = {k: v for k, v in item_data.items() if k in table_columns}
+                
+                # ⚡ تسجيل لو logo_data موجود
+                if table_name == 'clients' and 'logo_data' in item_data and item_data['logo_data']:
+                    if 'logo_data' in filtered:
+                        logger.info(f"📷 [{unique_value}] logo_data سيتم حفظه ({len(filtered['logo_data'])} حرف)")
+                    else:
+                        logger.warning(f"⚠️ [{unique_value}] logo_data تم تجاهله! (غير موجود في أعمدة الجدول)")
+                        logger.warning(f"   أعمدة الجدول: {table_columns}")
 
                 if local_id:
                     # تحديث السجل الموجود
@@ -260,6 +277,13 @@ class UnifiedSyncManagerV3(QObject):
         item = dict(data)
         item.pop('_id', None)
         item.pop('id', None)
+
+        # ⚡ التأكد من جلب logo_data بشكل صحيح
+        if 'logo_data' in data and data['logo_data']:
+            item['logo_data'] = data['logo_data']
+            client_name = data.get('name', 'غير معروف')
+            logger.info(f"📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة")
+            print(f"INFO: 📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة")
 
         # تحويل التواريخ
         date_fields = [
@@ -398,6 +422,16 @@ class UnifiedSyncManagerV3(QObject):
         """تحضير البيانات للرفع للسحابة"""
         clean = {k: v for k, v in data.items()
                  if k not in ['id', '_mongo_id', 'sync_status']}
+
+        # ⚡ إزالة logo_data و logo_path إذا كانوا فارغين (لمنع الكتابة فوق القيمة الموجودة في السحابة)
+        if 'logo_data' in clean and not clean['logo_data']:
+            del clean['logo_data']
+            logger.debug("📷 تم تجاهل logo_data الفارغ (لن يتم الكتابة فوق السحابة)")
+        elif 'logo_data' in clean and clean['logo_data']:
+            logger.info(f"📷 رفع logo_data ({len(clean['logo_data'])} حرف) للسحابة")
+        
+        if 'logo_path' in clean and not clean['logo_path']:
+            del clean['logo_path']
 
         # تحويل التواريخ
         for field in ['created_at', 'last_modified', 'date', 'issue_date',

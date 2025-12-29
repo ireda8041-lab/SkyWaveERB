@@ -4,6 +4,8 @@
 يوفر تجربة مستخدم متسقة ومتجاوبة على جميع أحجام الشاشات
 """
 
+import os
+import sys
 from enum import Enum
 from typing import Optional, Tuple
 
@@ -25,6 +27,15 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+def _get_asset_path_ds(filename):
+    """الحصول على المسار الصحيح للـ assets"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, "assets", filename).replace("\\", "/")
 
 
 # ============================================================
@@ -419,11 +430,11 @@ class InputFactory:
                 border-bottom-left-radius: 6px;
             }}
             QSpinBox::up-arrow, QDoubleSpinBox::up-arrow, QDateEdit::up-arrow {{
-                image: url(assets/up-arrow.png);
+                image: url({_get_asset_path_ds("up-arrow.png")});
                 width: 10px; height: 10px;
             }}
             QSpinBox::down-arrow, QDoubleSpinBox::down-arrow, QDateEdit::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({_get_asset_path_ds("down-arrow.png")});
                 width: 10px; height: 10px;
             }}
             QComboBox::drop-down {{
@@ -433,7 +444,7 @@ class InputFactory:
                 border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({_get_asset_path_ds("down-arrow.png")});
                 width: 10px; height: 10px;
             }}
             QComboBox QAbstractItemView {{

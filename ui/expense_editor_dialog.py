@@ -102,7 +102,7 @@ class ExpenseEditorDialog(QDialog):
         return fallback_currencies
 
     def init_ui(self):
-        from ui.styles import BUTTON_STYLES, COLORS
+        from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
         
         # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)
@@ -160,7 +160,7 @@ class ExpenseEditorDialog(QDialog):
                 width: 20px;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}

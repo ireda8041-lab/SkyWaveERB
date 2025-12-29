@@ -409,6 +409,7 @@ class ClientManagerTab(QWidget):
 
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            logo_label.setFixedSize(50, 50)  # ⚡ تحديد حجم ثابت
 
             pixmap = None
 
@@ -423,9 +424,13 @@ class ClientManagerTab(QWidget):
 
                     img_bytes = base64.b64decode(logo_data)
                     pixmap = QPixmap()
-                    pixmap.loadFromData(img_bytes)
-                except Exception:
-                    # ⚡ تجاهل الخطأ بصمت لتجنب البطء
+                    if pixmap.loadFromData(img_bytes):
+                        print(f"INFO: ✅ تم تحميل صورة العميل '{client.name}' من base64 ({len(client.logo_data)} حرف)")
+                    else:
+                        print(f"WARNING: ⚠️ فشل تحميل صورة العميل '{client.name}' - loadFromData فشل")
+                        pixmap = None
+                except Exception as e:
+                    print(f"WARNING: ⚠️ فشل تحميل صورة العميل '{client.name}': {e}")
                     pixmap = None
 
             # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
@@ -436,11 +441,12 @@ class ClientManagerTab(QWidget):
             # عرض الصورة أو أيقونة افتراضية
             if pixmap and not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
-                    QSize(50, 50),
+                    QSize(48, 48),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
                 logo_label.setPixmap(scaled_pixmap)
+                logo_label.setStyleSheet("background: transparent;")
             else:
                 logo_label.setText("👤")
                 logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
@@ -542,7 +548,13 @@ class ClientManagerTab(QWidget):
             try:
                 # ⚡ استخدام المعرف الصحيح (_mongo_id أو id)
                 client_id = getattr(self.selected_client, '_mongo_id', None) or str(self.selected_client.id)
-                self.client_service.delete_client(client_id)
+                print(f"DEBUG: [delete_selected_client] حذف العميل: {self.selected_client.name}")
+                print(f"DEBUG: [delete_selected_client] _mongo_id: {getattr(self.selected_client, '_mongo_id', None)}")
+                print(f"DEBUG: [delete_selected_client] id: {self.selected_client.id}")
+                print(f"DEBUG: [delete_selected_client] client_id المستخدم: {client_id}")
+                
+                result = self.client_service.delete_client(client_id)
+                print(f"DEBUG: [delete_selected_client] نتيجة الحذف: {result}")
                 
                 # رسالة نجاح
                 QMessageBox.information(

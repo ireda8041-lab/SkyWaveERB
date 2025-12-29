@@ -16,9 +16,14 @@ def _get_asset_path(filename):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, "assets", filename).replace("\\", "/")
 
-# مسارات الأسهم
+# مسارات الأسهم (مع تحويل backslash لـ forward slash للـ CSS)
 DOWN_ARROW_PATH = _get_asset_path("down-arrow.png")
 UP_ARROW_PATH = _get_asset_path("up-arrow.png")
+
+def get_arrow_url(arrow_type: str = "down") -> str:
+    """الحصول على مسار السهم بصيغة URL للـ CSS"""
+    path = UP_ARROW_PATH if arrow_type == "up" else DOWN_ARROW_PATH
+    return path.replace("\\", "/")
 
 # ألوان SkyWave Brand Identity
 COLORS = {
@@ -502,7 +507,7 @@ QComboBox::drop-down {{
 }}
 
 QComboBox::down-arrow {{
-    image: url(assets/down-arrow.png);
+    image: url({get_arrow_url("down")});
     width: 12px;
     height: 12px;
 }}
@@ -569,13 +574,13 @@ QDateEdit::down-button:hover, QTimeEdit::down-button:hover {{
 }}
 
 QDateEdit::up-arrow, QTimeEdit::up-arrow {{
-    image: url(assets/up-arrow.png);
+    image: url({get_arrow_url("up")});
     width: 10px;
     height: 10px;
 }}
 
 QDateEdit::down-arrow, QTimeEdit::down-arrow {{
-    image: url(assets/down-arrow.png);
+    image: url({get_arrow_url("down")});
     width: 10px;
     height: 10px;
 }}
@@ -626,13 +631,13 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{
 }}
 
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
-    image: url(assets/up-arrow.png);
+    image: url({get_arrow_url("up")});
     width: 10px;
     height: 10px;
 }}
 
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
-    image: url(assets/down-arrow.png);
+    image: url({get_arrow_url("down")});
     width: 10px;
     height: 10px;
 }}

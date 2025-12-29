@@ -59,7 +59,7 @@ class ClientEditorDialog(QDialog):
         self.init_ui()
 
     def init_ui(self):
-        from ui.styles import BUTTON_STYLES, COLORS
+        from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
 
         # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)
@@ -131,7 +131,7 @@ class ClientEditorDialog(QDialog):
                 border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}
@@ -270,7 +270,7 @@ class ClientEditorDialog(QDialog):
                 border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}
@@ -317,6 +317,8 @@ class ClientEditorDialog(QDialog):
         self.logo_path_label = QLabel("لم يتم اختيار صورة")
         self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px;")
         self.logo_path_label.setWordWrap(True)
+        
+        # زرار اختيار الصورة
         select_logo_btn = QPushButton("اختيار...")
         select_logo_btn.setStyleSheet(f"""
             QPushButton {{
@@ -332,8 +334,27 @@ class ClientEditorDialog(QDialog):
             }}
         """)
         select_logo_btn.clicked.connect(self.select_logo_file)
+        
+        # زرار حذف الصورة
+        self.delete_logo_btn = QPushButton("🗑️ حذف")
+        self.delete_logo_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #dc2626;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 12px;
+                font-size: 10px;
+            }}
+            QPushButton:hover {{
+                background-color: #b91c1c;
+            }}
+        """)
+        self.delete_logo_btn.clicked.connect(self.delete_logo)
+        
         logo_layout.addWidget(self.logo_path_label, 1)
         logo_layout.addWidget(select_logo_btn)
+        logo_layout.addWidget(self.delete_logo_btn)
         layout.addLayout(logo_layout)
 
         # الملاحظات
@@ -396,6 +417,21 @@ class ClientEditorDialog(QDialog):
             normalized = file_path.replace("/", "\\")
             self.logo_path_label.setText(normalized)
             self.logo_path_label.setStyleSheet("font-style: normal; color: #111827;")
+
+    def delete_logo(self):
+        """حذف صورة العميل"""
+        from ui.styles import COLORS
+        
+        # إعادة تعيين الـ label
+        self.logo_path_label.setText("لم يتم اختيار صورة")
+        self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px; font-style: italic;")
+        
+        # مسح بيانات الصورة من العميل الحالي (لو موجود)
+        if self.is_editing and self.client_to_edit:
+            self.client_to_edit.logo_data = None
+            self.client_to_edit.logo_path = None
+        
+        print("INFO: تم حذف صورة العميل")
 
     def load_client_data(self):
         """يملأ الحقول ببيانات العميل القديمة"""
@@ -476,20 +512,26 @@ class ClientEditorDialog(QDialog):
         logo_text = self.logo_path_label.text()
 
         logo_value = ""
-        if logo_text and "لم يتم" not in logo_text and "محفوظة في قاعدة البيانات" not in logo_text:
+        logo_data = None  # None = لم يتم تحديد (سيتم الاحتفاظ بالقديم)
+        
+        # التحقق من حالة الصورة
+        if "لم يتم" in logo_text:
+            # تم حذف الصورة صراحة
+            logo_value = ""
+            logo_data = "__DELETE__"  # علامة خاصة للحذف
+            print("INFO: 🗑️ سيتم حذف صورة العميل")
+        elif "محفوظة في قاعدة البيانات" in logo_text:
+            # الاحتفاظ بالصورة القديمة (لا نرسل logo_data)
+            logo_data = None  # None = الاحتفاظ بالقديم
+            print("INFO: 📷 الاحتفاظ بالصورة القديمة")
+        else:
+            # صورة جديدة من مسار محلي
             logo_value = logo_text
+            if logo_value and os.path.exists(logo_value):
+                logo_data = self._convert_image_to_base64(logo_value)
+                print(f"INFO: 📷 تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
 
-        logo_data = ""
-
-        if logo_value and os.path.exists(logo_value):
-            logo_data = self._convert_image_to_base64(logo_value)
-            print(f"INFO: تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
-        elif self.is_editing and self.client_to_edit and hasattr(self.client_to_edit, 'logo_data'):
-            logo_data = self.client_to_edit.logo_data or ""
-            if logo_data:
-                print(f"INFO: الاحتفاظ بالصورة القديمة ({len(logo_data)} حرف)")
-
-        return {
+        result = {
             "name": self.name_input.text(),
             "company_name": self.company_input.text(),
             "email": self.email_input.text(),
@@ -501,13 +543,22 @@ class ClientEditorDialog(QDialog):
             "client_type": self.client_type_combo.currentText(),
             "work_field": self.work_field_input.currentText(),
             "logo_path": logo_value,
-            "logo_data": logo_data,
             "client_notes": self.notes_input.toPlainText(),
         }
+        
+        # إضافة logo_data فقط إذا تم تحديده
+        if logo_data is not None:
+            result["logo_data"] = logo_data
+        
+        return result
 
     def save_client(self):
         """يحفظ (أو يعدل) العميل عبر الخدمة"""
         client_data = self.get_form_data()
+        
+        # ⚡ تسجيل بيانات الصورة
+        print(f"DEBUG: [save_client] logo_path = {client_data.get('logo_path', '')}")
+        print(f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}")
 
         if not client_data["name"]:
             QMessageBox.warning(self, "خطأ", "اسم العميل مطلوب")
@@ -521,9 +572,11 @@ class ClientEditorDialog(QDialog):
             
             if self.is_editing:
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
+                print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 self.client_service.update_client(client_id, client_data)
                 QMessageBox.information(self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح.")
             else:
+                print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 new_client_schema = schemas.Client(**client_data)
                 self.client_service.create_client(new_client_schema)
                 QMessageBox.information(self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح.")

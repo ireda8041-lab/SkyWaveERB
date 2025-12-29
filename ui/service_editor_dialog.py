@@ -60,7 +60,7 @@ class ServiceEditorDialog(QDialog):
 
     def _init_ui(self):
         """إعداد واجهة المستخدم"""
-        from ui.styles import BUTTON_STYLES, COLORS
+        from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
 
         # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)
@@ -180,7 +180,7 @@ class ServiceEditorDialog(QDialog):
                 border: none;
             }}
             QComboBox::down-arrow {{
-                image: url(assets/down-arrow.png);
+                image: url({get_arrow_url("down")});
                 width: 10px;
                 height: 10px;
             }}
