@@ -423,15 +423,28 @@ class UnifiedSyncManagerV3(QObject):
         clean = {k: v for k, v in data.items()
                  if k not in ['id', '_mongo_id', 'sync_status']}
 
-        # ⚡ إزالة logo_data و logo_path إذا كانوا فارغين (لمنع الكتابة فوق القيمة الموجودة في السحابة)
-        if 'logo_data' in clean and not clean['logo_data']:
-            del clean['logo_data']
-            logger.debug("📷 تم تجاهل logo_data الفارغ (لن يتم الكتابة فوق السحابة)")
-        elif 'logo_data' in clean and clean['logo_data']:
-            logger.info(f"📷 رفع logo_data ({len(clean['logo_data'])} حرف) للسحابة")
+        # ⚡ التعامل مع logo_data
+        # إذا كان logo_data فارغ و logo_path فارغ = المستخدم حذف الصورة صراحة
+        # إذا كان logo_data فارغ و logo_path موجود = لا نريد الكتابة فوق السحابة
+        logo_data_value = clean.get('logo_data', None)
+        logo_path_value = clean.get('logo_path', None)
+        
+        if 'logo_data' in clean:
+            if logo_data_value:
+                # صورة جديدة - رفعها للسحابة
+                logger.info(f"📷 رفع logo_data ({len(logo_data_value)} حرف) للسحابة")
+            elif not logo_path_value:
+                # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
+                clean['logo_data'] = ""  # إرسال قيمة فارغة صريحة للحذف
+                logger.info("🗑️ حذف logo_data من السحابة (حذف صريح)")
+            else:
+                # logo_data فارغ لكن logo_path موجود = لا نريد الكتابة فوق السحابة
+                del clean['logo_data']
+                logger.debug("📷 تم تجاهل logo_data الفارغ (لن يتم الكتابة فوق السحابة)")
         
         if 'logo_path' in clean and not clean['logo_path']:
-            del clean['logo_path']
+            # إذا كان logo_path فارغ، نرسل قيمة فارغة صريحة
+            clean['logo_path'] = ""
 
         # تحويل التواريخ
         for field in ['created_at', 'last_modified', 'date', 'issue_date',

@@ -167,6 +167,54 @@ class UpdateManager:
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
             return False
+    
+    def run_installer_and_wait(self, setup_path, signals=None):
+        """Run installer in VERYSILENT mode and wait for completion"""
+        try:
+            if not os.path.exists(setup_path):
+                self.emit_detail(f"File not found: {setup_path}")
+                return False
+            
+            # Use VERYSILENT to hide the installer window completely
+            # /SUPPRESSMSGBOXES suppresses message boxes
+            # /NORESTART prevents automatic restart
+            args = [setup_path, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS']
+            
+            self.emit_detail("Running silent installation...")
+            self.emit_status("Installing... Please wait")
+            
+            # Run and wait for completion
+            process = subprocess.Popen(args, shell=False)
+            
+            # Monitor the process
+            start_time = time.time()
+            while process.poll() is None:
+                if self.cancelled:
+                    process.terminate()
+                    return False
+                
+                elapsed = int(time.time() - start_time)
+                self.emit_detail(f"Installing... ({elapsed}s)")
+                time.sleep(1)
+                
+                # Timeout after 5 minutes
+                if elapsed > 300:
+                    self.emit_detail("Installation timeout!")
+                    process.terminate()
+                    return False
+            
+            # Check exit code
+            exit_code = process.returncode
+            if exit_code == 0:
+                self.emit_detail("Installation completed successfully!")
+                return True
+            else:
+                self.emit_detail(f"Installer exited with code: {exit_code}")
+                return False
+                
+        except Exception as e:
+            self.emit_detail(f"Installer error: {str(e)}")
+            return False
 
 
 if HAS_GUI:
@@ -352,7 +400,7 @@ if HAS_GUI:
                     QPushButton { background: rgba(16, 185, 129, 0.2); border: none; border-radius: 20px; color: #10B981; font-weight: bold; }
                     QPushButton:hover { background: #10B981; color: white; }
                 """)
-                QTimer.singleShot(3000, self.close)
+                # Don't auto-close - let _restart_app handle it
             else:
                 self.status_label.setText("✗ " + message)
                 self.status_label.setStyleSheet("color: #EF4444; background: transparent; border: none;")
@@ -400,17 +448,34 @@ if HAS_GUI:
                     return
                 
                 self.signals.progress.emit(90)
+                self.signals.status.emit("Installing update...")
+                self.signals.detail.emit("Starting silent installation...")
                 
-                # Run installer
-                if not self.update_manager.run_installer(self.setup_path):
-                    self.signals.finished.emit(False, "Failed to start installer")
+                # Run installer in SILENT mode and WAIT for it to complete
+                if not self.update_manager.run_installer_and_wait(self.setup_path, self.signals):
+                    self.signals.finished.emit(False, "Installation failed")
                     return
                 
                 self.signals.progress.emit(100)
-                self.signals.finished.emit(True, "Installer started!")
+                self.signals.finished.emit(True, "Update completed! Restarting...")
+                
+                # Restart the app after successful update
+                QTimer.singleShot(2000, self._restart_app)
                 
             except Exception as e:
                 self.signals.finished.emit(False, str(e))
+        
+        def _restart_app(self):
+            """Restart Sky Wave ERP after update"""
+            try:
+                app_exe = os.path.join(self.app_folder, "SkyWaveERP.exe")
+                if os.path.exists(app_exe):
+                    subprocess.Popen([app_exe], shell=False)
+                    self.signals.detail.emit("App restarted successfully!")
+            except Exception as e:
+                self.signals.detail.emit(f"Could not restart app: {e}")
+            finally:
+                QTimer.singleShot(1000, self.close)
 
 
 def run_console_updater(setup_path=None, app_folder=None, download_url=None):

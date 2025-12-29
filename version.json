@@ -1,18 +1,16 @@
 {
-  "version": "1.1.8",
+  "version": "1.2.0",
   "version_name": "Logo Sync Fix - Sky Wave ERP",
   "release_date": "2025-12-29",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.1.8/SkyWaveERP-Setup-1.1.8.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.2.0/SkyWaveERP-Setup-1.2.0.exe",
   "changelog": [
-    "إصلاح مشكلة مزامنة صور العملاء بين الأجهزة",
-    "حماية الصور من الحذف غير المقصود أثناء المزامنة",
-    "إضافة زر حذف الصورة في نافذة تعديل العميل",
-    "تحسين عرض الصور في جدول العملاء",
-    "إصلاح مشكلة حذف العملاء من قاعدة البيانات",
-    "تحسينات في أداء المزامنة"
+    "إصلاح مشكلة حذف صور العملاء من السحابة",
+    "حذف الصورة يتزامن تلقائياً مع كل الأجهزة",
+    "تحسين آلية المزامنة للصور"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "إصلاح مزامنة صور العملاء بين الأجهزة",
-  "notes_en": "Fix client logo sync between devices"
+  "notes_ar": "إصلاح مزامنة حذف صور العملاء",
+  "notes_en": "Fix client logo deletion cloud sync"
 }
+ 

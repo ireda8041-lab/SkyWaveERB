@@ -41,6 +41,7 @@ class ClientEditorDialog(QDialog):
         self.client_service = client_service
         self.client_to_edit = client_to_edit
         self.is_editing = client_to_edit is not None
+        self._logo_deleted = False  # ⚡ flag لتتبع حذف الصورة
 
         if self.is_editing and client_to_edit is not None:
             self.setWindowTitle(f"تعديل العميل: {client_to_edit.name}")
@@ -417,6 +418,7 @@ class ClientEditorDialog(QDialog):
             normalized = file_path.replace("/", "\\")
             self.logo_path_label.setText(normalized)
             self.logo_path_label.setStyleSheet("font-style: normal; color: #111827;")
+            self._logo_deleted = False  # ⚡ إعادة تعيين flag الحذف عند اختيار صورة جديدة
 
     def delete_logo(self):
         """حذف صورة العميل"""
@@ -426,12 +428,15 @@ class ClientEditorDialog(QDialog):
         self.logo_path_label.setText("لم يتم اختيار صورة")
         self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px; font-style: italic;")
         
+        # ⚡ تعيين flag للحذف الصريح
+        self._logo_deleted = True
+        
         # مسح بيانات الصورة من العميل الحالي (لو موجود)
         if self.is_editing and self.client_to_edit:
             self.client_to_edit.logo_data = None
             self.client_to_edit.logo_path = None
         
-        print("INFO: تم حذف صورة العميل")
+        print("INFO: 🗑️ تم تحديد صورة العميل للحذف")
 
     def load_client_data(self):
         """يملأ الحقول ببيانات العميل القديمة"""
@@ -514,16 +519,21 @@ class ClientEditorDialog(QDialog):
         logo_value = ""
         logo_data = None  # None = لم يتم تحديد (سيتم الاحتفاظ بالقديم)
         
-        # التحقق من حالة الصورة
-        if "لم يتم" in logo_text:
-            # تم حذف الصورة صراحة
+        # ⚡ التحقق من حالة الصورة باستخدام flag الحذف
+        if self._logo_deleted:
+            # تم حذف الصورة صراحة بالضغط على زر الحذف
             logo_value = ""
             logo_data = "__DELETE__"  # علامة خاصة للحذف
-            print("INFO: 🗑️ سيتم حذف صورة العميل")
+            print("INFO: 🗑️ سيتم حذف صورة العميل (flag)")
         elif "محفوظة في قاعدة البيانات" in logo_text:
             # الاحتفاظ بالصورة القديمة (لا نرسل logo_data)
             logo_data = None  # None = الاحتفاظ بالقديم
             print("INFO: 📷 الاحتفاظ بالصورة القديمة")
+        elif "لم يتم" in logo_text:
+            # لم يتم اختيار صورة (عميل جديد بدون صورة)
+            logo_value = ""
+            logo_data = ""
+            print("INFO: ℹ️ عميل بدون صورة")
         else:
             # صورة جديدة من مسار محلي
             logo_value = logo_text

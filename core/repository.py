@@ -1094,22 +1094,30 @@ class Repository:
                 update_dict['status'] = client_data.status.value
                 
                 # ⚡ التعامل الذكي مع logo_data
-                # لو logo_data فارغ، نجيب القيمة الموجودة في MongoDB ونحتفظ بيها
-                if not client_data.logo_data:
+                logo_data_value = client_data.logo_data
+                logo_path_value = client_data.logo_path
+                
+                if logo_data_value:
+                    # صورة جديدة - رفعها للسحابة
+                    update_dict['logo_data'] = logo_data_value
+                    print(f"INFO: [Repo] 📷 حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB")
+                elif not logo_path_value:
+                    # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
+                    update_dict['logo_data'] = ""
+                    update_dict['logo_path'] = ""
+                    print(f"INFO: [Repo] 🗑️ حذف logo_data من MongoDB (حذف صريح)")
+                else:
+                    # logo_data فارغ لكن logo_path موجود = الاحتفاظ بالقديم
                     try:
                         existing = self.mongo_db.clients.find_one(
                             {"$or": [{"_id": self._to_objectid(client_id)}, {"_mongo_id": client_id}]},
                             {"logo_data": 1}
                         )
                         if existing and existing.get('logo_data'):
-                            # الاحتفاظ بالصورة الموجودة في السحابة
                             del update_dict['logo_data']
-                            print(f"INFO: [Repo] الاحتفاظ بـ logo_data الموجود في MongoDB")
+                            print(f"INFO: [Repo] 📷 الاحتفاظ بـ logo_data الموجود في MongoDB")
                     except Exception:
                         pass
-                else:
-                    update_dict['logo_data'] = client_data.logo_data
-                    print(f"INFO: [Repo] حفظ logo_data ({len(client_data.logo_data)} حرف) في MongoDB")
 
                 self.mongo_db.clients.update_one(
                     {"$or": [{"_id": self._to_objectid(client_id)}, {"_mongo_id": client_id}]},

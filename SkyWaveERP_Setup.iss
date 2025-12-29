@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "1.1.8"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Sky Wave Ads"
 #define MyAppURL "https://skywaveads.com"
 #define MyAppExeName "SkyWaveERP.exe"
