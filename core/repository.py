@@ -1412,6 +1412,51 @@ class Repository:
 
         return True
 
+    def delete_client_permanently(self, client_id: str) -> bool:
+        """
+        حذف عميل نهائياً من قاعدة البيانات (Hard Delete)
+        """
+        print(f"INFO: [Repo] جاري حذف العميل نهائياً ID: {client_id}")
+
+        try:
+            client_id_num = int(client_id)
+        except ValueError:
+            client_id_num = 0
+
+        # جلب _mongo_id قبل الحذف
+        self.sqlite_cursor.execute(
+            "SELECT _mongo_id FROM clients WHERE id = ? OR _mongo_id = ?",
+            (client_id_num, client_id)
+        )
+        row = self.sqlite_cursor.fetchone()
+        mongo_id = row[0] if row else client_id
+
+        # حذف من SQLite
+        self.sqlite_cursor.execute(
+            "DELETE FROM clients WHERE id = ? OR _mongo_id = ?",
+            (client_id_num, client_id)
+        )
+        self.sqlite_conn.commit()
+        print(f"INFO: [Repo] ✅ تم حذف العميل من SQLite")
+
+        # حذف من MongoDB
+        if self.online:
+            try:
+                result = self.mongo_db.clients.delete_one(
+                    {"$or": [
+                        {"_id": self._to_objectid(mongo_id)},
+                        {"_id": self._to_objectid(client_id)}
+                    ]}
+                )
+                if result.deleted_count > 0:
+                    print(f"INFO: [Repo] ✅ تم حذف العميل من MongoDB")
+                else:
+                    print(f"WARNING: [Repo] العميل غير موجود في MongoDB")
+            except Exception as e:
+                print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
+
+        return True
+
     def update_journal_entry_by_doc_id(self, doc_id: str, new_lines: list[schemas.JournalEntryLine], new_description: str) -> bool:
         """
         (جديدة) تحديث قيد يومية موجود (للروبوت المحاسبي).
@@ -3198,6 +3243,51 @@ class Repository:
             print(f"ERROR: [Repo] فشل أرشفة الخدمة: {e}")
             return False
 
+    def delete_service_permanently(self, service_id: str) -> bool:
+        """
+        حذف خدمة نهائياً من قاعدة البيانات (Hard Delete)
+        """
+        print(f"INFO: [Repo] جاري حذف الخدمة نهائياً ID: {service_id}")
+
+        try:
+            service_id_num = int(service_id)
+        except ValueError:
+            service_id_num = 0
+
+        # جلب _mongo_id قبل الحذف
+        self.sqlite_cursor.execute(
+            "SELECT _mongo_id FROM services WHERE id = ? OR _mongo_id = ?",
+            (service_id_num, service_id)
+        )
+        row = self.sqlite_cursor.fetchone()
+        mongo_id = row[0] if row else service_id
+
+        # حذف من SQLite
+        self.sqlite_cursor.execute(
+            "DELETE FROM services WHERE id = ? OR _mongo_id = ?",
+            (service_id_num, service_id)
+        )
+        self.sqlite_conn.commit()
+        print(f"INFO: [Repo] ✅ تم حذف الخدمة من SQLite")
+
+        # حذف من MongoDB
+        if self.online:
+            try:
+                result = self.mongo_db.services.delete_one(
+                    {"$or": [
+                        {"_id": self._to_objectid(mongo_id)},
+                        {"_id": self._to_objectid(service_id)}
+                    ]}
+                )
+                if result.deleted_count > 0:
+                    print(f"INFO: [Repo] ✅ تم حذف الخدمة من MongoDB")
+                else:
+                    print(f"WARNING: [Repo] الخدمة غير موجودة في MongoDB")
+            except Exception as e:
+                print(f"WARNING: [Repo] فشل حذف الخدمة من MongoDB: {e}")
+
+        return True
+
     def get_archived_services(self) -> list[schemas.Service]:
         """ (جديدة) جلب كل الخدمات "المؤرشفة" فقط """
         archived_status = schemas.ServiceStatus.ARCHIVED.value
@@ -3613,11 +3703,47 @@ class Repository:
             if existing:
                 invoice_number = existing[0]
             else:
-                # ولّد رقم جديد
-                self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
-                max_id = self.sqlite_cursor.fetchone()[0] or 0
-                new_seq = max_id + 1
-                invoice_number = f"SW-{97161 + new_seq}"
+                # ⚡ جلب أعلى رقم فاتورة من كلا الجدولين لتجنب التكرار
+                max_num = 97161  # الرقم الأساسي
+                
+                # من جدول invoice_numbers
+                self.sqlite_cursor.execute(
+                    "SELECT invoice_number FROM invoice_numbers WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+                )
+                result1 = self.sqlite_cursor.fetchone()
+                if result1 and result1[0]:
+                    try:
+                        num1 = int(result1[0].replace('SW-', ''))
+                        max_num = max(max_num, num1)
+                    except ValueError:
+                        pass
+                
+                # من جدول projects
+                self.sqlite_cursor.execute(
+                    "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+                )
+                result2 = self.sqlite_cursor.fetchone()
+                if result2 and result2[0]:
+                    try:
+                        num2 = int(result2[0].replace('SW-', ''))
+                        max_num = max(max_num, num2)
+                    except ValueError:
+                        pass
+                
+                # توليد الرقم الجديد
+                invoice_number = f"SW-{max_num + 1}"
+                
+                # ⚡ التحقق من عدم وجود تكرار
+                while True:
+                    self.sqlite_cursor.execute(
+                        "SELECT COUNT(*) FROM projects WHERE invoice_number = ?",
+                        (invoice_number,)
+                    )
+                    if self.sqlite_cursor.fetchone()[0] == 0:
+                        break
+                    # إذا كان موجوداً، زد الرقم
+                    max_num += 1
+                    invoice_number = f"SW-{max_num + 1}"
 
                 # احفظ الرقم الجديد في جدول الأرقام الثابتة
                 self.sqlite_cursor.execute(
@@ -3632,9 +3758,22 @@ class Repository:
             )
             self.sqlite_conn.commit()
             project_data.invoice_number = invoice_number
-        except Exception:
-            # fallback للطريقة القديمة
-            invoice_number = f"SW-{97161 + int(local_id)}"
+        except Exception as e:
+            print(f"WARNING: خطأ في توليد رقم الفاتورة: {e}")
+            # fallback: استخدم أعلى رقم + 1
+            self.sqlite_cursor.execute(
+                "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+            )
+            result = self.sqlite_cursor.fetchone()
+            if result and result[0]:
+                try:
+                    last_num = int(result[0].replace('SW-', ''))
+                    invoice_number = f"SW-{last_num + 1}"
+                except ValueError:
+                    invoice_number = f"SW-{97161 + int(local_id)}"
+            else:
+                invoice_number = f"SW-{97161 + int(local_id)}"
+            
             self.sqlite_cursor.execute(
                 "UPDATE projects SET invoice_number = ? WHERE id = ?",
                 (invoice_number, local_id)

@@ -46,6 +46,10 @@ class TemplateEditorDialog(QDialog):
         self.setMinimumWidth(700)
         self.setMinimumHeight(500)
         
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar

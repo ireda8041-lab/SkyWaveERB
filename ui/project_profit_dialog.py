@@ -166,9 +166,9 @@ class ProjectProfitDialog(QDialog):
         layout.addWidget(progress_frame)
 
         # === الجداول ===
-        tables_splitter = QSplitter(Qt.Orientation.Horizontal)
-        tables_splitter.setHandleWidth(6)
-        tables_splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {COLORS['border']}; }}")
+        self.tables_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.tables_splitter.setHandleWidth(6)
+        self.tables_splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {COLORS['border']}; }}")
 
         # جدول الدفعات
         payments_frame = QFrame()
@@ -218,11 +218,11 @@ class ProjectProfitDialog(QDialog):
         self._setup_table(self.expenses_table)
         exp_layout.addWidget(self.expenses_table)
 
-        tables_splitter.addWidget(payments_frame)
-        tables_splitter.addWidget(expenses_frame)
-        tables_splitter.setSizes([450, 450])
+        self.tables_splitter.addWidget(payments_frame)
+        self.tables_splitter.addWidget(expenses_frame)
+        self.tables_splitter.setSizes([450, 450])
 
-        layout.addWidget(tables_splitter, 1)
+        layout.addWidget(self.tables_splitter, 1)
 
         scroll_area.setWidget(content_widget)
         main_layout.addWidget(scroll_area, 1)
@@ -418,3 +418,16 @@ class ProjectProfitDialog(QDialog):
             return str(payment.account_id)
         except Exception:
             return str(payment.account_id)
+
+    def resizeEvent(self, event):
+        """تغيير اتجاه الـ splitter حسب عرض النافذة"""
+        super().resizeEvent(event)
+        width = self.width()
+        
+        if hasattr(self, 'tables_splitter'):
+            if width < 700:
+                if self.tables_splitter.orientation() != Qt.Orientation.Vertical:
+                    self.tables_splitter.setOrientation(Qt.Orientation.Vertical)
+            else:
+                if self.tables_splitter.orientation() != Qt.Orientation.Horizontal:
+                    self.tables_splitter.setOrientation(Qt.Orientation.Horizontal)

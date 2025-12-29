@@ -1,265 +1,287 @@
 # الملف: ui/shortcuts_help_dialog.py
-
 """
 نافذة مساعدة اختصارات لوحة المفاتيح
-تعرض جميع الاختصارات المتاحة
+تصميم احترافي متجاوب
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
-    QTabWidget,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from ui.styles import get_cairo_font, create_centered_item
-
 
 class ShortcutsHelpDialog(QDialog):
-    """
-    نافذة مساعدة الاختصارات
-    - عرض جميع الاختصارات المتاحة
-    - تصنيف الاختصارات حسب الفئة
-    - تصميم احترافي وسهل القراءة
-    """
+    """نافذة مساعدة الاختصارات"""
 
     def __init__(self, shortcuts_manager, parent=None):
         super().__init__(parent)
         self.shortcuts_manager = shortcuts_manager
-        self.init_ui()
+        self._setup_ui()
 
-    def init_ui(self):
-        """تهيئة الواجهة"""
-        from PyQt6.QtWidgets import QSizePolicy
-
-        self.setWindowTitle("اختصارات لوحة المفاتيح")
-        
-        # تصميم متجاوب - حد أدنى فقط
-        self.setMinimumSize(750, 550)
+    def _setup_ui(self):
+        """إعداد الواجهة"""
+        self.setWindowTitle("⌨️ اختصارات لوحة المفاتيح")
+        self.setMinimumSize(550, 450)
+        self.resize(650, 550)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setModal(True)
 
-        # تطبيق شريط العنوان المخصص
+        # شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
             setup_custom_title_bar(self)
-        except (ImportError, AttributeError):
-            # الدالة غير متوفرة
+        except:
             pass
 
-        layout = QVBoxLayout()
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(15)
-
-        # العنوان مع خلفية ملونة (ألوان SkyWave Brand) - تصميم احترافي
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-
-        from ui.styles import COLORS
-
-        header_frame = QWidget()
-        header_frame.setStyleSheet(f"""
-            QWidget {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {COLORS['primary']}, stop:0.5 #005BC5, stop:1 #8B2CF5);
-                border-radius: 16px;
-                padding: 25px;
-            }}
-        """)
-
-        # إضافة ظل للهيدر
-        header_shadow = QGraphicsDropShadowEffect()
-        header_shadow.setBlurRadius(20)
-        header_shadow.setColor(QColor(10, 108, 241, 100))
-        header_shadow.setOffset(0, 5)
-        header_frame.setGraphicsEffect(header_shadow)
-
-        title_layout = QHBoxLayout()
-        title_layout.setSpacing(20)
-
-        # أيقونة مع خلفية دائرية
-        icon_container = QWidget()
-        icon_container.setFixedSize(70, 70)
-        icon_container.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 0.2);
-                border-radius: 35px;
+        # الخلفية
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #001A3A;
             }
         """)
-        icon_layout = QVBoxLayout(icon_container)
-        icon_layout.setContentsMargins(0, 0, 0, 0)
-        icon_label = QLabel("⌨️")
-        icon_label.setStyleSheet("font-size: 36px; background: transparent;")
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_layout.addWidget(icon_label)
-        title_layout.addWidget(icon_container)
 
-        title_text_layout = QVBoxLayout()
-        title_text_layout.setSpacing(8)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        title = QLabel("اختصارات لوحة المفاتيح")
-        title.setStyleSheet("font-size: 26px; font-weight: bold; color: white; background: transparent;")
-        title_text_layout.addWidget(title)
+        # الهيدر
+        layout.addWidget(self._create_header())
 
-        # الوصف
-        description = QLabel("استخدم هذه الاختصارات لتسريع عملك وزيادة إنتاجيتك ⚡")
-        description.setStyleSheet("color: rgba(255, 255, 255, 0.9); font-size: 14px; background: transparent;")
-        title_text_layout.addWidget(description)
+        # المحتوى
+        layout.addWidget(self._create_content(), 1)
 
-        title_layout.addLayout(title_text_layout, 1)
-        header_frame.setLayout(title_layout)
+        # الفوتر
+        layout.addWidget(self._create_footer())
 
-        layout.addWidget(header_frame)
-
-        # التابات للفئات مع تصميم محسّن (ألوان SkyWave Brand) - تصميم احترافي
-        tabs = QTabWidget()
-        tabs.setStyleSheet(f"""
-            QTabWidget::pane {{
-                border: 2px solid {COLORS['primary']};
-                border-radius: 12px;
-                background-color: {COLORS['bg_dark']};
-                padding: 15px;
-                margin-top: -1px;
-            }}
-            QTabBar::tab {{
-                padding: 14px 28px;
-                margin: 2px 4px;
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['bg_medium']}, stop:1 {COLORS['bg_light']});
-                border: 1px solid {COLORS['border']};
-                border-bottom: none;
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-                color: {COLORS['text_secondary']};
-                font-size: 13px;
-                font-weight: bold;
-            }}
-            QTabBar::tab:selected {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['primary']}, stop:1 #005BC5);
-                color: white;
-                border: 2px solid {COLORS['primary']};
-                border-bottom: none;
-            }}
-            QTabBar::tab:hover:!selected {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {COLORS['bg_light']}, stop:1 {COLORS['bg_medium']});
-                color: white;
-            }}
+    def _create_header(self) -> QWidget:
+        """إنشاء الهيدر"""
+        header = QFrame()
+        header.setFixedHeight(90)
+        header.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0A6CF1, stop:1 #0550B8);
+            }
         """)
 
-        # الحصول على الاختصارات مصنفة
+        layout = QHBoxLayout(header)
+        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(15)
+
+        # أيقونة
+        icon = QLabel("⌨️")
+        icon.setStyleSheet("""
+            font-size: 36px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 25px;
+            padding: 8px;
+        """)
+        icon.setFixedSize(55, 55)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(icon)
+
+        # النصوص
+        text_box = QVBoxLayout()
+        text_box.setSpacing(4)
+
+        title = QLabel("اختصارات لوحة المفاتيح")
+        title.setStyleSheet("color: white; font-size: 20px; font-weight: bold; background: transparent;")
+        text_box.addWidget(title)
+
+        subtitle = QLabel("استخدم هذه الاختصارات لتسريع عملك ⚡")
+        subtitle.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 12px; background: transparent;")
+        text_box.addWidget(subtitle)
+
+        layout.addLayout(text_box, 1)
+        return header
+
+    def _create_content(self) -> QWidget:
+        """إنشاء المحتوى"""
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #0A2A55;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #0A6CF1;
+                border-radius: 4px;
+                min-height: 30px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0;
+            }
+        """)
+
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(15, 15, 15, 15)
+        content_layout.setSpacing(15)
+
+        # الحصول على الاختصارات
         categories = self.shortcuts_manager.get_shortcuts_by_category()
 
-        # إنشاء تاب لكل فئة
-        for category_name, shortcuts in categories.items():
-            if shortcuts:  # فقط إذا كانت الفئة تحتوي على اختصارات
-                tab = self._create_category_tab(category_name, shortcuts)
-                tabs.addTab(tab, category_name)
+        icons = {
+            'إنشاء': '➕',
+            'تنقل وبحث': '🔍',
+            'تحرير': '✏️',
+            'حفظ وإغلاق': '💾',
+            'مساعدة': '❓',
+            'التابات': '📑'
+        }
 
-        layout.addWidget(tabs)
+        for cat_name, shortcuts in categories.items():
+            if shortcuts:
+                section = self._create_section(cat_name, icons.get(cat_name, '📌'), shortcuts)
+                content_layout.addWidget(section)
 
-        # زر الإغلاق
-        close_button = QPushButton("إغلاق")
-        # استخدام الأنماط الموحدة
-        from ui.styles import BUTTON_STYLES
-        close_button.setStyleSheet(BUTTON_STYLES["primary"])
-        close_button.clicked.connect(self.accept)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        return scroll
 
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(close_button)
-        layout.addLayout(button_layout)
+    def _create_section(self, title: str, icon: str, shortcuts: list) -> QWidget:
+        """إنشاء قسم فئة"""
+        section = QFrame()
+        section.setStyleSheet("""
+            QFrame {
+                background: rgba(10, 42, 85, 0.5);
+                border: 1px solid rgba(10, 108, 241, 0.3);
+                border-radius: 10px;
+                padding: 10px;
+            }
+        """)
 
-        self.setLayout(layout)
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
 
-    def _create_category_tab(self, category_name: str, shortcuts: list) -> QWidget:
-        """
-        إنشاء تاب لفئة معينة
+        # عنوان الفئة
+        header = QLabel(f"{icon} {title}")
+        header.setStyleSheet("""
+            color: #0A6CF1;
+            font-size: 14px;
+            font-weight: bold;
+            padding-bottom: 5px;
+            border-bottom: 1px solid rgba(10, 108, 241, 0.3);
+            background: transparent;
+        """)
+        layout.addWidget(header)
 
-        Args:
-            category_name: اسم الفئة
-            shortcuts: قائمة الاختصارات
+        # الاختصارات
+        for shortcut in shortcuts:
+            row = self._create_shortcut_row(shortcut['key'], shortcut['description'])
+            layout.addWidget(row)
 
-        Returns:
-            ويدجت التاب
-        """
-        widget = QWidget()
-        layout = QVBoxLayout()
+        return section
 
-        # جدول الاختصارات
-        table = QTableWidget()
-        table.setColumnCount(2)
-        table.setHorizontalHeaderLabels(["الاختصار", "الوصف"])
-        table.setRowCount(len(shortcuts))
+    def _create_shortcut_row(self, key: str, description: str) -> QWidget:
+        """إنشاء صف اختصار"""
+        row = QFrame()
+        row.setStyleSheet("""
+            QFrame {
+                background: rgba(5, 32, 69, 0.6);
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QFrame:hover {
+                background: rgba(10, 108, 241, 0.15);
+            }
+        """)
+        row.setFixedHeight(40)
 
-        # تنسيق الجدول بالأنماط الموحدة
-        from ui.styles import TABLE_STYLE_DARK
-        table.setStyleSheet(TABLE_STYLE_DARK)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(12)
 
-        v_header = table.verticalHeader()
-        if v_header is not None:
-            v_header.setVisible(False)
-        table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        # المفتاح
+        key_label = QLabel(key)
+        key_label.setStyleSheet("""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #0A6CF1, stop:1 #0550B8);
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 5px 12px;
+            border-radius: 5px;
+            min-width: 70px;
+        """)
+        key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(key_label)
 
-        # ملء الجدول (ألوان SkyWave Brand) - تصميم احترافي
-        for row, shortcut in enumerate(shortcuts):
-            # عمود الاختصار مع تصميم محسّن
-            key_text = shortcut['key']
-            key_item = QTableWidgetItem(f"  {key_text}  ")
-            key_font = get_cairo_font(14, bold=True)
-            key_item.setFont(key_font)
-            key_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            # تلوين متناوب للصفوف
-            if row % 2 == 0:
-                key_item.setBackground(QColor("#0A6CF1"))  # Primary Blue
-            else:
-                key_item.setBackground(QColor("#005BC5"))  # Darker Blue
-            key_item.setForeground(QColor("white"))
-            table.setItem(row, 0, key_item)
+        # الوصف
+        desc_label = QLabel(description)
+        desc_label.setStyleSheet("""
+            color: #EAF3FF;
+            font-size: 12px;
+            background: transparent;
+        """)
+        layout.addWidget(desc_label, 1)
 
-            # عمود الوصف
-            desc_item = QTableWidgetItem(f"  {shortcut['description']}")
-            desc_font = get_cairo_font(14)
-            desc_item.setFont(desc_font)
-            if row % 2 == 0:
-                desc_item.setBackground(QColor("#0A2A55"))  # bg_medium
-            else:
-                desc_item.setBackground(QColor("#052045"))  # bg_light
-            desc_item.setForeground(QColor("#EAF3FF"))  # text_primary
-            table.setItem(row, 1, desc_item)
+        return row
 
-        # ضبط عرض الأعمدة
-        header = table.horizontalHeader()
-        if header is not None:
-            header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    def _create_footer(self) -> QWidget:
+        """إنشاء الفوتر"""
+        footer = QFrame()
+        footer.setFixedHeight(55)
+        footer.setStyleSheet("""
+            QFrame {
+                background: #0A2A55;
+                border-top: 1px solid #1E3A5F;
+            }
+        """)
 
-        # ضبط ارتفاع الصفوف
-        v_header = table.verticalHeader()
-        if v_header is not None:
-            v_header.setDefaultSectionSize(50)
+        layout = QHBoxLayout(footer)
+        layout.setContentsMargins(15, 10, 15, 10)
 
-        layout.addWidget(table)
-        widget.setLayout(layout)
+        tip = QLabel("💡 اضغط F1 في أي وقت لعرض هذه النافذة")
+        tip.setStyleSheet("color: #B0C4DE; font-size: 11px; background: transparent;")
+        layout.addWidget(tip)
 
-        return widget
+        layout.addStretch()
+
+        close_btn = QPushButton("إغلاق")
+        close_btn.setFixedSize(90, 32)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #0A6CF1, stop:1 #0550B8);
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2563eb, stop:1 #1d4ed8);
+            }
+        """)
+        close_btn.clicked.connect(self.accept)
+        layout.addWidget(close_btn)
+
+        return footer
 
     def keyPressEvent(self, event):
-        """معالج الضغط على المفاتيح"""
-        # إغلاق النافذة عند الضغط على Esc
+        """إغلاق بـ Escape"""
         if event.key() == Qt.Key.Key_Escape:
             self.accept()
         else:
             super().keyPressEvent(event)
-
-
-# تم إنشاء الملف بنجاح

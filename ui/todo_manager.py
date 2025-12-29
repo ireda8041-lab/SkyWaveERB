@@ -1458,8 +1458,9 @@ class TodoManagerWidget(QWidget):
         # === الجزء الأيسر (الجدول والأزرار) ===
         left_panel = QVBoxLayout()
 
-        # === شريط الأزرار العلوي ===
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ مهمة جديدة")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
@@ -1496,15 +1497,15 @@ class TodoManagerWidget(QWidget):
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.refresh_tasks)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.complete_button)
-        buttons_layout.addWidget(self.delete_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.settings_button)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.complete_button)
+        self.toolbar.addButton(self.delete_button)
+        self.toolbar.addButton(self.refresh_button)
+        self.toolbar.addButton(self.settings_button)
 
-        left_panel.addLayout(buttons_layout)
+        left_panel.addWidget(self.toolbar)
 
         # === فلاتر البحث ===
         filter_layout = QHBoxLayout()
@@ -1593,8 +1594,8 @@ class TodoManagerWidget(QWidget):
         from PyQt6.QtWidgets import QSizePolicy
         
         self.preview_groupbox = QGroupBox("📊 معاينة المهمة والإحصائيات")
-        self.preview_groupbox.setMinimumWidth(320)
-        self.preview_groupbox.setMaximumWidth(400)
+        self.preview_groupbox.setMinimumWidth(280)
+        # ⚡ إزالة setMaximumWidth للتجاوب التلقائي
         self.preview_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         preview_layout = QVBoxLayout()
         preview_layout.setSpacing(8)

@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\asynchronous\bulk.py
+# hypothesis_version: 6.148.3
+
+['_id', 'arrayFilters', 'code', 'collation', 'comment', 'document', 'hint', 'let', 'limit', 'multi', 'nInserted', 'nMatched', 'nModified', 'nRemoved', 'nUpserted', 'ok', 'ordered', 'q', 'replace', 'sort', 'u', 'upsert', 'upserted', 'w', 'writeConcern', 'writeConcernError', 'writeConcernErrors', 'writeErrors']

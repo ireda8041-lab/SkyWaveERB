@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\error_handler.py
+# hypothesis_version: 6.148.3
+
+['AttributeError', 'AuthenticationError', 'ConnectionError', 'DatabaseError', 'DuplicateKeyError', 'E11000', 'ERROR', 'FileNotFoundError', 'IOError', 'IntegrityError', 'KeyError', 'MemoryError', 'NetworkTimeout', 'PermissionError', 'RuntimeError', 'SkyWaveERP', 'SystemError', 'TypeError', 'ValidationError', 'ValueError', 'WARNING', '__main__', 'context', 'exception_message', 'exception_type', 'test_connection', 'test_critical', 'test_duplicate', 'timestamp', 'traceback', 'تحذير', 'خطأ', 'معلومة', 'نوع بيانات غير صحيح.']

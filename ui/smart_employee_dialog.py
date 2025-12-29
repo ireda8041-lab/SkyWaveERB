@@ -78,6 +78,10 @@ class SmartEmployeeDialog(QDialog):
         # تصميم متجاوب - حد أدنى فقط
         self.setMinimumSize(750, 550)
         
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
@@ -156,6 +160,11 @@ class SmartEmployeeDialog(QDialog):
         
         # تابات لتنظيم البيانات
         self.tabs = QTabWidget()
+        
+        # ⚡ جعل التابات تتمدد
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)
+        
         layout.addWidget(self.tabs)
         
         # تاب المعلومات الأساسية

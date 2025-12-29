@@ -56,7 +56,9 @@ class ServiceManagerTab(QWidget):
         from core.signals import app_signals
         app_signals.services_changed.connect(self._on_services_changed)
 
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ إضافة خدمة جديدة")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
@@ -82,14 +84,14 @@ class ServiceManagerTab(QWidget):
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_services_data)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.archive_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.show_archived_checkbox)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.archive_button)
+        self.toolbar.addButton(self.refresh_button)
+        self.toolbar.addWidget(self.show_archived_checkbox)
 
-        main_layout.addLayout(buttons_layout)
+        main_layout.addWidget(self.toolbar)
 
         table_groupbox = QGroupBox("قايمة الخدمات والباقات")
         table_layout = QVBoxLayout()

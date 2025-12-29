@@ -60,6 +60,11 @@ class SettingsTab(QWidget):
 
         # إنشاء التابات الفرعية
         self.tabs = QTabWidget()
+        
+        # ⚡ جعل التابات الفرعية تتمدد لتملأ العرض تلقائياً
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
+        
         main_layout.addWidget(self.tabs)
 
         # تاب بيانات الشركة

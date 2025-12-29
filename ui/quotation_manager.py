@@ -54,8 +54,9 @@ class QuotationManagerTab(QWidget):
         from core.signals import app_signals
         app_signals.quotations_changed.connect(self._on_quotations_changed)
 
-        buttons_layout = QHBoxLayout()
-        buttons_layout.setSpacing(6)
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_quote_button = QPushButton("➕ إضافة عرض سعر")
         self.add_quote_button.setStyleSheet(BUTTON_STYLES["primary"])
@@ -77,13 +78,13 @@ class QuotationManagerTab(QWidget):
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_quotations_data)
 
-        buttons_layout.addWidget(self.add_quote_button)
-        buttons_layout.addWidget(self.edit_quote_button)
-        buttons_layout.addWidget(self.convert_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_quote_button)
+        self.toolbar.addButton(self.edit_quote_button)
+        self.toolbar.addButton(self.convert_button)
+        self.toolbar.addButton(self.refresh_button)
 
-        layout.addLayout(buttons_layout)
+        layout.addWidget(self.toolbar)
 
         layout.addWidget(QLabel("أحدث عروض الأسعار:"))
         self.quotes_table = QTableWidget()

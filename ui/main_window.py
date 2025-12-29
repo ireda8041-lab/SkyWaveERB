@@ -154,13 +154,18 @@ class MainWindow(QMainWindow):
 
         # --- 1. إنشاء الـ Tab Widget ---
         self.tabs = QTabWidget()
+        
+        # ⚡ جعل التابات تتمدد لتملأ العرض تلقائياً
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setUsesScrollButtons(False)  # إيقاف أزرار التمرير لأن التابات تتمدد
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
 
         # جعل الـ tabs متجاوبة مع حجم الشاشة بشكل كامل
         from PyQt6.QtWidgets import QSizePolicy
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.tabs.setMinimumSize(QSize(400, 300))  # حد أدنى صغير للتجاوب
 
-        # تحسين شكل التابات - تصميم احترافي حديث
+        # تحسين شكل التابات - تصميم احترافي حديث متجاوب
         self.tabs.setStyleSheet("""
             QTabWidget::pane {
                 border: none;
@@ -177,13 +182,12 @@ class MainWindow(QMainWindow):
             QTabBar::tab {
                 background-color: transparent;
                 color: #7A9BC5;
-                padding: 11px 22px;
+                padding: 12px 15px;
                 margin: 0px;
                 border: none;
                 border-right: 1px solid rgba(30, 58, 95, 0.5);
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 600;
-                min-width: 85px;
             }
 
             QTabBar::tab:hover {
@@ -197,6 +201,32 @@ class MainWindow(QMainWindow):
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #0A6CF1, stop:1 #0550B8);
                 border-right: 1px solid #0A6CF1;
+            }
+            
+            QTabBar::tab:first {
+                border-left: none;
+            }
+
+            QTabBar::tab:last {
+                border-right: none;
+            }
+            
+            /* أزرار التمرير للتابات */
+            QTabBar::scroller {
+                width: 35px;
+            }
+            
+            QTabBar QToolButton {
+                background-color: #0D3461;
+                border: 1px solid #1E3A5F;
+                border-radius: 4px;
+                color: white;
+                padding: 5px;
+                font-size: 14px;
+            }
+            
+            QTabBar QToolButton:hover {
+                background-color: #0A6CF1;
             }
 
             QTabBar::tab:first {

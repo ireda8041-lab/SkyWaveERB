@@ -1209,12 +1209,27 @@ class ProjectManagerTab(QWidget):
         self.projects_list: List[schemas.Project] = []
         self.selected_project: Optional[schemas.Project] = None
 
-        main_layout = QHBoxLayout()
-        self.setLayout(main_layout)
+        # === استخدام Splitter للتجاوب التلقائي ===
+        from PyQt6.QtWidgets import QSplitter, QSizePolicy, QScrollArea
+        
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(outer_layout)
 
         # جعل التاب متجاوب مع حجم الشاشة
-        from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        # Splitter رئيسي يتحول من أفقي لعمودي حسب الحجم
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #334155;
+                width: 3px;
+                margin: 0 3px;
+            }
+        """)
+        outer_layout.addWidget(self.main_splitter)
         
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
@@ -1223,10 +1238,15 @@ class ProjectManagerTab(QWidget):
 
 
         # --- 1. الجزء الأيسر (الجدول والأزرار) ---
-        left_panel = QVBoxLayout()
-        buttons_layout = QHBoxLayout()
+        left_widget = QWidget()
+        left_panel = QVBoxLayout(left_widget)
+        left_panel.setContentsMargins(5, 5, 5, 5)
         
-        self.add_button = QPushButton("➕ إضافة مشروع جديد")
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
+        
+        self.add_button = QPushButton("➕ مشروع جديد")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(project_to_edit=None))
@@ -1258,10 +1278,7 @@ class ProjectManagerTab(QWidget):
         self.print_button.clicked.connect(self.print_invoice)
         self.print_button.setEnabled(False)
 
-        # WhatsApp button removed - feature disabled
-
         # أزرار قوالب الفواتير
-        
         self.preview_template_button = QPushButton("👁️ معاينة الفاتورة")
         self.preview_template_button.setStyleSheet(BUTTON_STYLES["info"])
         self.preview_template_button.setFixedHeight(28)
@@ -1277,16 +1294,17 @@ class ProjectManagerTab(QWidget):
         self.show_archived_checkbox = QCheckBox("إظهار المشاريع المؤرشفة")
         self.show_archived_checkbox.clicked.connect(self.load_projects_data)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.payment_button)
-        buttons_layout.addWidget(self.profit_button)
-        buttons_layout.addWidget(self.print_button)
-        buttons_layout.addWidget(self.preview_template_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.show_archived_checkbox)
-        left_panel.addLayout(buttons_layout)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.payment_button)
+        self.toolbar.addButton(self.profit_button)
+        self.toolbar.addButton(self.print_button)
+        self.toolbar.addButton(self.preview_template_button)
+        self.toolbar.addButton(self.refresh_button)
+        self.toolbar.addWidget(self.show_archived_checkbox)
+        
+        left_panel.addWidget(self.toolbar)
 
         table_groupbox = QGroupBox("قايمة المشاريع")
         table_layout = QVBoxLayout()
@@ -1336,11 +1354,18 @@ class ProjectManagerTab(QWidget):
         
         table_layout.addWidget(self.projects_table)
         left_panel.addWidget(table_groupbox, 1)
-        main_layout.addLayout(left_panel, 3)
+        
+        # إضافة الجزء الأيسر للـ splitter
+        self.main_splitter.addWidget(left_widget)
 
         # --- 2. لوحة معاينة ربحية المشروع (تصميم احترافي) ---
+        # وضعها في ScrollArea للتمرير عند الحاجة
+        preview_scroll = QScrollArea()
+        preview_scroll.setWidgetResizable(True)
+        preview_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        preview_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        
         self.preview_groupbox = QGroupBox()
-        self.preview_groupbox.setMinimumWidth(340)
         self.preview_groupbox.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
         self.preview_groupbox.setStyleSheet(f"""
             QGroupBox {{
@@ -1409,11 +1434,29 @@ class ProjectManagerTab(QWidget):
         # إضافة مساحة مرنة في النهاية
         preview_layout.addStretch()
 
-        main_layout.addWidget(self.preview_groupbox, 1)
+        preview_scroll.setWidget(self.preview_groupbox)
+        self.main_splitter.addWidget(preview_scroll)
+        
+        # تعيين النسب الافتراضية للـ splitter (70% للجدول، 30% للمعاينة)
+        self.main_splitter.setStretchFactor(0, 7)
+        self.main_splitter.setStretchFactor(1, 3)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_projects_data() - يتم استدعاؤها من MainWindow
         self.on_project_selection_changed()
+    
+    def resizeEvent(self, event):
+        """تغيير اتجاه الـ splitter حسب عرض النافذة"""
+        super().resizeEvent(event)
+        width = self.width()
+        
+        # إذا كان العرض صغير، نحول لعمودي
+        if width < 900:
+            if self.main_splitter.orientation() != Qt.Orientation.Vertical:
+                self.main_splitter.setOrientation(Qt.Orientation.Vertical)
+        else:
+            if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
+                self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
 
     def create_kpi_card(self, title: str, value: str, color: str) -> QFrame:
         card = QFrame()

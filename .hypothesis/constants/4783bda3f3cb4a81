@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\operations.py
+# hypothesis_version: 6.148.3
+
+[', ', '__document', '_array_filters', '_collation', '_doc', '_filter', '_hint', '_namespace', '_sort', '_upsert', 'abortTransaction', 'aggregate', 'array_filters', 'bulkWrite', 'collation', 'commitTransaction', 'count', 'create', 'createIndexes', 'createSearchIndexes', 'definition', 'delete', 'distinct', 'drop', 'dropDatabase', 'dropIndexes', 'dropSearchIndexes', 'endSessions', 'filter', 'find', 'findAndModify', 'getMore', 'insert', 'key', 'killCursors', 'listCollections', 'listDatabases', 'listIndexes', 'listSearchIndexes', 'name', 'rename', 'testOperation', 'type', 'update', 'updateIndex', 'updateSearchIndex', 'upsert', '{}({})', '{}({}{})']

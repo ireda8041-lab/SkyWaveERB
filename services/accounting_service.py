@@ -2615,3 +2615,358 @@ class AccountingService:
                 "errors": errors + [error_msg],
                 "message": error_msg
             }
+
+
+    # ==================== Enhanced Dashboard Methods ====================
+    # Requirements: 1.2, 1.4, 2.1, 2.2, 4.2
+
+    def get_kpis_with_trends(
+        self,
+        start_date: datetime,
+        end_date: datetime
+    ) -> dict:
+        """
+        جلب KPIs مع بيانات الفترة السابقة للمقارنة
+        
+        يحسب KPIs للفترة المحددة ويقارنها بالفترة السابقة المماثلة
+        لحساب نسبة التغير واتجاه الاتجاه.
+        
+        Args:
+            start_date: تاريخ بداية الفترة
+            end_date: تاريخ نهاية الفترة
+            
+        Returns:
+            dict مع KPIs وقيمها الحالية والسابقة:
+            {
+                "total_revenue": {"current": float, "previous": float},
+                "total_expenses": {"current": float, "previous": float},
+                "net_profit": {"current": float, "previous": float},
+                "cash_collected": {"current": float, "previous": float},
+                "receivables": {"current": float, "previous": float}
+            }
+            
+        Requirements: 1.2, 1.4
+        """
+        print(f"INFO: [AccountingService] جلب KPIs مع الاتجاهات من {start_date} إلى {end_date}")
+        
+        try:
+            # حساب طول الفترة لتحديد الفترة السابقة المماثلة
+            period_length = (end_date - start_date).days + 1
+            previous_end = start_date - timedelta(days=1)
+            previous_start = previous_end - timedelta(days=period_length - 1)
+            
+            # جلب بيانات الفترة الحالية
+            current_data = self._calculate_period_kpis(start_date, end_date)
+            
+            # جلب بيانات الفترة السابقة
+            previous_data = self._calculate_period_kpis(previous_start, previous_end)
+            
+            return {
+                "total_revenue": {
+                    "current": current_data.get("total_revenue", 0.0),
+                    "previous": previous_data.get("total_revenue", 0.0)
+                },
+                "total_expenses": {
+                    "current": current_data.get("total_expenses", 0.0),
+                    "previous": previous_data.get("total_expenses", 0.0)
+                },
+                "net_profit": {
+                    "current": current_data.get("net_profit", 0.0),
+                    "previous": previous_data.get("net_profit", 0.0)
+                },
+                "cash_collected": {
+                    "current": current_data.get("cash_collected", 0.0),
+                    "previous": previous_data.get("cash_collected", 0.0)
+                },
+                "receivables": {
+                    "current": current_data.get("receivables", 0.0),
+                    "previous": previous_data.get("receivables", 0.0)
+                }
+            }
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل جلب KPIs مع الاتجاهات: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "total_revenue": {"current": 0.0, "previous": 0.0},
+                "total_expenses": {"current": 0.0, "previous": 0.0},
+                "net_profit": {"current": 0.0, "previous": 0.0},
+                "cash_collected": {"current": 0.0, "previous": 0.0},
+                "receivables": {"current": 0.0, "previous": 0.0}
+            }
+
+    def _calculate_period_kpis(self, start_date: datetime, end_date: datetime) -> dict:
+        """
+        حساب KPIs لفترة محددة
+        
+        Args:
+            start_date: تاريخ البداية
+            end_date: تاريخ النهاية
+            
+        Returns:
+            dict مع قيم KPIs للفترة
+        """
+        try:
+            total_revenue = 0.0
+            total_expenses = 0.0
+            cash_collected = 0.0
+            
+            # جلب قيود اليومية للفترة
+            all_entries = self.repo.get_all_journal_entries()
+            
+            # جلب معلومات الحسابات
+            all_accounts = self.repo.get_all_accounts()
+            account_types = {acc.code: acc.type for acc in all_accounts if acc.code}
+            
+            for entry in all_entries:
+                entry_date = entry.date
+                if not entry_date:
+                    continue
+                    
+                # التحقق من أن القيد ضمن الفترة
+                if not (start_date <= entry_date <= end_date):
+                    continue
+                
+                for line in entry.lines:
+                    acc_code = getattr(line, 'account_code', None) or str(line.account_id)
+                    acc_type = account_types.get(acc_code)
+                    
+                    if acc_type == schemas.AccountType.REVENUE:
+                        total_revenue += line.credit
+                    elif acc_type == schemas.AccountType.EXPENSE:
+                        total_expenses += line.debit
+            
+            # جلب الدفعات المحصلة للفترة
+            if hasattr(self.repo, 'get_all_payments'):
+                all_payments = self.repo.get_all_payments()
+                for payment in all_payments:
+                    payment_date = payment.date
+                    if payment_date and start_date <= payment_date <= end_date:
+                        cash_collected += payment.amount
+            
+            # حساب المستحقات (من المشاريع)
+            receivables = 0.0
+            if hasattr(self.repo, 'get_all_projects'):
+                all_projects = self.repo.get_all_projects()
+                for project in all_projects:
+                    project_start = getattr(project, 'start_date', None)
+                    if project_start and start_date <= project_start <= end_date:
+                        # المستحقات = إجمالي المشروع - المدفوع
+                        project_total = getattr(project, 'total_amount', 0) or 0
+                        # جلب الدفعات للمشروع
+                        project_id = project._mongo_id or str(project.id)
+                        project_payments = 0.0
+                        if hasattr(self.repo, 'get_payments_by_project'):
+                            payments = self.repo.get_payments_by_project(project_id)
+                            project_payments = sum(p.amount for p in payments)
+                        receivables += max(0, project_total - project_payments)
+            
+            net_profit = total_revenue - total_expenses
+            
+            return {
+                "total_revenue": total_revenue,
+                "total_expenses": total_expenses,
+                "net_profit": net_profit,
+                "cash_collected": cash_collected,
+                "receivables": receivables
+            }
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل حساب KPIs للفترة: {e}")
+            return {
+                "total_revenue": 0.0,
+                "total_expenses": 0.0,
+                "net_profit": 0.0,
+                "cash_collected": 0.0,
+                "receivables": 0.0
+            }
+
+    def get_cash_flow_data(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        period: str = "monthly"
+    ) -> dict:
+        """
+        جلب بيانات التدفق النقدي مجمعة حسب الفترة الزمنية
+        
+        Args:
+            start_date: تاريخ البداية
+            end_date: تاريخ النهاية
+            period: الفترة الزمنية للتجميع ("daily", "weekly", "monthly")
+            
+        Returns:
+            dict مع بيانات التدفق النقدي:
+            {
+                "inflows": [(date_str, amount), ...],
+                "outflows": [(date_str, amount), ...],
+                "net_flow": [(date_str, amount), ...]
+            }
+            
+        Requirements: 2.1, 2.2
+        """
+        print(f"INFO: [AccountingService] جلب بيانات التدفق النقدي ({period}) من {start_date} إلى {end_date}")
+        
+        try:
+            # جمع البيانات الخام
+            raw_inflows: list[tuple[datetime, float]] = []
+            raw_outflows: list[tuple[datetime, float]] = []
+            
+            # جلب الدفعات (التدفقات الداخلة)
+            if hasattr(self.repo, 'get_all_payments'):
+                all_payments = self.repo.get_all_payments()
+                for payment in all_payments:
+                    payment_date = payment.date
+                    if payment_date and start_date <= payment_date <= end_date:
+                        raw_inflows.append((payment_date, payment.amount))
+            
+            # جلب المصروفات (التدفقات الخارجة)
+            if hasattr(self.repo, 'get_all_expenses'):
+                all_expenses = self.repo.get_all_expenses()
+                for expense in all_expenses:
+                    expense_date = expense.date
+                    if expense_date and start_date <= expense_date <= end_date:
+                        raw_outflows.append((expense_date, expense.amount))
+            
+            # تجميع البيانات حسب الفترة
+            aggregated_inflows = self._aggregate_cash_flow_by_period(raw_inflows, period)
+            aggregated_outflows = self._aggregate_cash_flow_by_period(raw_outflows, period)
+            
+            # حساب صافي التدفق
+            all_periods = set(aggregated_inflows.keys()) | set(aggregated_outflows.keys())
+            net_flow = {}
+            for period_key in all_periods:
+                inflow = aggregated_inflows.get(period_key, 0.0)
+                outflow = aggregated_outflows.get(period_key, 0.0)
+                net_flow[period_key] = inflow - outflow
+            
+            # تحويل إلى قوائم مرتبة
+            sorted_periods = sorted(all_periods)
+            
+            return {
+                "inflows": [(p, aggregated_inflows.get(p, 0.0)) for p in sorted_periods],
+                "outflows": [(p, aggregated_outflows.get(p, 0.0)) for p in sorted_periods],
+                "net_flow": [(p, net_flow.get(p, 0.0)) for p in sorted_periods]
+            }
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل جلب بيانات التدفق النقدي: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "inflows": [],
+                "outflows": [],
+                "net_flow": []
+            }
+
+    def _aggregate_cash_flow_by_period(
+        self,
+        data: list[tuple[datetime, float]],
+        period: str
+    ) -> dict[str, float]:
+        """
+        تجميع بيانات التدفق النقدي حسب الفترة الزمنية
+        
+        Args:
+            data: قائمة من (التاريخ، المبلغ)
+            period: الفترة الزمنية ("daily", "weekly", "monthly")
+            
+        Returns:
+            dict مع المفتاح = الفترة والقيمة = المجموع
+            
+        Requirements: 2.2
+        """
+        aggregated: dict[str, float] = {}
+        
+        for date_val, amount in data:
+            if period == "daily":
+                # التجميع اليومي: YYYY-MM-DD
+                period_key = date_val.strftime("%Y-%m-%d")
+            elif period == "weekly":
+                # التجميع الأسبوعي: YYYY-WXX (رقم الأسبوع)
+                year, week, _ = date_val.isocalendar()
+                period_key = f"{year}-W{week:02d}"
+            else:  # monthly
+                # التجميع الشهري: YYYY-MM
+                period_key = date_val.strftime("%Y-%m")
+            
+            if period_key not in aggregated:
+                aggregated[period_key] = 0.0
+            aggregated[period_key] += amount
+        
+        return aggregated
+
+    def get_filtered_data_by_date_range(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        data_type: str = "all"
+    ) -> dict:
+        """
+        فلترة البيانات المالية حسب نطاق التاريخ
+        
+        Args:
+            start_date: تاريخ البداية
+            end_date: تاريخ النهاية
+            data_type: نوع البيانات ("all", "payments", "expenses", "projects", "journal_entries")
+            
+        Returns:
+            dict مع البيانات المفلترة
+            
+        Requirements: 4.2
+        """
+        print(f"INFO: [AccountingService] فلترة البيانات ({data_type}) من {start_date} إلى {end_date}")
+        
+        result = {
+            "payments": [],
+            "expenses": [],
+            "projects": [],
+            "journal_entries": []
+        }
+        
+        try:
+            # فلترة الدفعات
+            if data_type in ["all", "payments"] and hasattr(self.repo, 'get_all_payments'):
+                all_payments = self.repo.get_all_payments()
+                result["payments"] = [
+                    p for p in all_payments
+                    if p.date and start_date <= p.date <= end_date
+                ]
+            
+            # فلترة المصروفات
+            if data_type in ["all", "expenses"] and hasattr(self.repo, 'get_all_expenses'):
+                all_expenses = self.repo.get_all_expenses()
+                result["expenses"] = [
+                    e for e in all_expenses
+                    if e.date and start_date <= e.date <= end_date
+                ]
+            
+            # فلترة المشاريع
+            if data_type in ["all", "projects"] and hasattr(self.repo, 'get_all_projects'):
+                all_projects = self.repo.get_all_projects()
+                result["projects"] = [
+                    p for p in all_projects
+                    if (getattr(p, 'start_date', None) and 
+                        start_date <= p.start_date <= end_date)
+                ]
+            
+            # فلترة قيود اليومية
+            if data_type in ["all", "journal_entries"]:
+                all_entries = self.repo.get_all_journal_entries()
+                result["journal_entries"] = [
+                    e for e in all_entries
+                    if e.date and start_date <= e.date <= end_date
+                ]
+            
+            print(f"INFO: [AccountingService] تم فلترة: {len(result['payments'])} دفعة، "
+                  f"{len(result['expenses'])} مصروف، {len(result['projects'])} مشروع، "
+                  f"{len(result['journal_entries'])} قيد")
+            
+            return result
+            
+        except Exception as e:
+            print(f"ERROR: [AccountingService] فشل فلترة البيانات: {e}")
+            import traceback
+            traceback.print_exc()
+            return result

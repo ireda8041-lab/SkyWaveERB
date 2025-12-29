@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "1.1.5"
+#define MyAppVersion "1.1.6"
 #define MyAppPublisher "Sky Wave Ads"
 #define MyAppURL "https://skywaveads.com"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -73,6 +73,9 @@ Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 
 ; نسخ الأيقونة
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+; نسخ المحدث
+Source: "updater.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; اختصار في قائمة Start

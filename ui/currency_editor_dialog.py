@@ -148,6 +148,10 @@ class CurrencyEditorDialog(QDialog):
         # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar

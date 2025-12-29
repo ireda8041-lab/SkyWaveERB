@@ -122,25 +122,25 @@ class ServiceService:
 
     def delete_service(self, service_id: str) -> bool:
         """
-        أرشفة خدمة (Soft Delete)
+        حذف خدمة نهائياً (Hard Delete)
 
         Args:
-            service_id: معرف الخدمة المراد أرشفتها
+            service_id: معرف الخدمة المراد حذفها
 
         Returns:
             True في حالة النجاح، False في حالة الفشل
 
         Raises:
-            Exception: في حالة فشل عملية الأرشفة
+            Exception: في حالة فشل عملية الحذف
         """
-        logger.info(f"[ServiceService] استلام طلب أرشفة الخدمة ID: {service_id}")
+        logger.info(f"[ServiceService] استلام طلب حذف الخدمة نهائياً ID: {service_id}")
         try:
-            success = self.repo.archive_service_by_id(service_id)
+            success = self.repo.delete_service_permanently(service_id)
             if success:
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('services')
-                logger.info("[ServiceService] تم أرشفة الخدمة بنجاح")
+                logger.info("[ServiceService] ✅ تم حذف الخدمة نهائياً")
             return success
         except Exception as e:
-            logger.error(f"[ServiceService] فشل أرشفة الخدمة: {e}", exc_info=True)
+            logger.error(f"[ServiceService] فشل حذف الخدمة: {e}", exc_info=True)
             raise

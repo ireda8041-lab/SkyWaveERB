@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\speed_optimizer.py
+# hypothesis_version: 6.148.3
+
+[0.0, 0.3, 1.0, 100, 200, 500, 1000, 'data_cache', 'hit_rate', 'hits', 'maxsize', 'misses', 'query_cache', 'size']

@@ -49,8 +49,9 @@ class ClientManagerTab(QWidget):
         from core.signals import app_signals
         app_signals.clients_changed.connect(self._on_clients_changed)
 
-
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ إضافة عميل جديد")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
@@ -90,16 +91,16 @@ class ClientManagerTab(QWidget):
         self.show_archived_checkbox = QCheckBox("إظهار العملاء المؤرشفين")
         self.show_archived_checkbox.clicked.connect(self.load_clients_data)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.delete_button)
-        buttons_layout.addWidget(self.export_button)
-        buttons_layout.addWidget(self.import_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.show_archived_checkbox)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.delete_button)
+        self.toolbar.addButton(self.export_button)
+        self.toolbar.addButton(self.import_button)
+        self.toolbar.addButton(self.refresh_button)
+        self.toolbar.addWidget(self.show_archived_checkbox)
 
-        main_layout.addLayout(buttons_layout)
+        main_layout.addWidget(self.toolbar)
 
         table_groupbox = QGroupBox("قايمة العملاء")
         table_layout = QVBoxLayout()

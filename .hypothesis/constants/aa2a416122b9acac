@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\trio\_subprocess_platform\__init__.py
+# hypothesis_version: 6.148.3
+
+['linux', 'nt', 'posix', 'wait_kevent', 'win32']

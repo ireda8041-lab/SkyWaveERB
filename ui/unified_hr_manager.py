@@ -55,6 +55,11 @@ class UnifiedHRManager(QWidget):
         
         # التابات الرئيسية
         self.tabs = QTabWidget()
+        
+        # ⚡ جعل التابات تتمدد لتملأ العرض تلقائياً
+        self.tabs.tabBar().setExpanding(True)
+        self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
+        
         layout.addWidget(self.tabs)
         
         # تاب إدارة الموظفين
@@ -707,6 +712,10 @@ class UnifiedHRManager(QWidget):
         # تابات فرعية
         sub_tabs = QTabWidget()
         
+        # ⚡ جعل التابات الفرعية تتمدد
+        sub_tabs.tabBar().setExpanding(True)
+        sub_tabs.setElideMode(Qt.TextElideMode.ElideNone)
+        
         # تاب الحضور
         attendance_widget = QWidget()
         att_layout = QVBoxLayout()
@@ -1183,6 +1192,10 @@ class LoanDialog(QDialog):
         self.setMinimumWidth(450)
         self.setMinimumHeight(450)
         
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
@@ -1321,6 +1334,10 @@ class PayLoanDialog(QDialog):
         self.setMinimumWidth(400)
         self.setMinimumHeight(300)
         
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
@@ -1430,6 +1447,10 @@ class ManualAttendanceDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(400)
         self.setMinimumHeight(350)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تطبيق شريط العنوان المخصص
         try:
@@ -1546,6 +1567,10 @@ class LeaveRequestDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(400)
         self.setMinimumHeight(400)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تطبيق شريط العنوان المخصص
         try:
@@ -1817,6 +1842,10 @@ class EditSalaryDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(500)
         self.setMinimumHeight(500)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تطبيق شريط العنوان المخصص
         try:

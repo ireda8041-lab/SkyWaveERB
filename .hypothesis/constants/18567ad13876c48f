@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\cursor_shared.py
+# hypothesis_version: 6.148.3
+
+[128, 136, 175, 237, 17406, 28617, 'await_data', 'exhaust', 'no_timeout', 'oplog_replay', 'partial', 'secondary_okay', 'tailable_cursor']

@@ -96,17 +96,27 @@ class AccountingManagerTab(QWidget):
         self.load_accounts_data()
 
     def resizeEvent(self, event):
-        """معالج تغيير حجم النافذة"""
+        """معالج تغيير حجم النافذة - تحويل الـ splitter حسب العرض"""
         super().resizeEvent(event)
-        # لا حاجة لإعادة ضبط الأعمدة - Stretch mode يتكفل بذلك
+        width = self.width()
+        
+        # إذا كان العرض صغير، نحول لعمودي
+        if hasattr(self, 'main_splitter'):
+            if width < 800:
+                if self.main_splitter.orientation() != Qt.Orientation.Vertical:
+                    self.main_splitter.setOrientation(Qt.Orientation.Vertical)
+            else:
+                if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
+                    self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
 
     # ==================== تاب إدارة الحسابات ====================
     def setup_accounts_tab(self, main_layout: QVBoxLayout):
         """إعداد واجهة إدارة الحسابات"""
         layout = main_layout  # استخدام الـ layout الرئيسي مباشرة
 
-        # أزرار التحكم
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_account_btn = QPushButton("➕ إضافة حساب")
         self.add_account_btn.setStyleSheet(BUTTON_STYLES["success"])
@@ -124,20 +134,32 @@ class AccountingManagerTab(QWidget):
         self.refresh_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.refresh_btn.clicked.connect(self.load_accounts_data)
 
-        buttons_layout.addWidget(self.add_account_btn)
-        buttons_layout.addWidget(self.edit_account_btn)
-        buttons_layout.addWidget(self.delete_account_btn)
-        buttons_layout.addWidget(self.refresh_btn)
-        buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_account_btn)
+        self.toolbar.addButton(self.edit_account_btn)
+        self.toolbar.addButton(self.delete_account_btn)
+        self.toolbar.addButton(self.refresh_btn)
+        
+        layout.addWidget(self.toolbar)
 
-        # ✨ STEP 1: LAYOUT SPLIT - 75% Tree (Right), 25% Summary (Left)
-        # Main Horizontal Layout with proper spacing
-        main_h_layout = QHBoxLayout()
-        main_h_layout.setSpacing(15)
-        main_h_layout.setContentsMargins(0, 10, 0, 0)
+        # ✨ استخدام QSplitter للتجاوب التلقائي 100%
+        from PyQt6.QtWidgets import QSplitter
+        
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #334155;
+                width: 3px;
+                margin: 0 3px;
+            }
+        """)
 
-        # --- RIGHT SIDE: TREE CONTAINER (75%) ---
+        # --- LEFT SIDE: SUMMARY PANEL ---
+        self.summary_panel = self.create_summary_panel()
+        self.main_splitter.addWidget(self.summary_panel)
+
+        # --- RIGHT SIDE: TREE CONTAINER ---
         tree_container = QWidget()
         tree_layout = QVBoxLayout(tree_container)
         tree_layout.setContentsMargins(0, 0, 0, 0)
@@ -217,15 +239,14 @@ class AccountingManagerTab(QWidget):
 
         tree_layout.addWidget(self.accounts_tree)
 
-        # --- LEFT SIDE: SUMMARY PANEL ---
-        self.summary_panel = self.create_summary_panel()
+        # إضافة الشجرة للـ splitter
+        self.main_splitter.addWidget(tree_container)
+        
+        # تعيين النسب الافتراضية (20% للملخص، 80% للشجرة)
+        self.main_splitter.setStretchFactor(0, 1)  # الملخص
+        self.main_splitter.setStretchFactor(1, 4)  # الشجرة
 
-        # --- ADD TO MAIN LAYOUT ---
-        # الجدول ياخد 80% والملخص 20%
-        main_h_layout.addWidget(self.summary_panel, 1)   # Stretch factor 1
-        main_h_layout.addWidget(tree_container, 4)       # Stretch factor 4 (أكبر 4 مرات)
-
-        layout.addLayout(main_h_layout)
+        layout.addWidget(self.main_splitter)
 
     def _setup_tree_columns(self):
         """ضبط أعمدة الشجرة - يتم استدعاؤها عند تغيير حجم النافذة"""
@@ -557,195 +578,234 @@ class AccountingManagerTab(QWidget):
 
     # ✨ STEP 1: Summary Panel Creation
     def create_summary_panel(self):
-        """إنشاء لوحة الملخص المالي"""
+        """إنشاء لوحة الملخص المالي - تصميم احترافي متجاوب 100%"""
         panel = QFrame()
-        # ✨ عرض أصغر للـ summary panel عشان الجدول ياخد مساحة أكبر
-        panel.setMinimumWidth(200)
-        panel.setMaximumWidth(250)
-        panel.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        # ✨ حجم متجاوب تلقائياً - بدون قيود ثابتة
+        panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         panel.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['bg_light']};
-                border-left: 3px solid {COLORS['primary']};
-                border-radius: 10px;
-                padding: 8px;
-                min-width: 200px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(10, 42, 85, 0.95),
+                    stop:1 rgba(5, 32, 69, 0.98));
+                border: 1px solid rgba(10, 108, 241, 0.3);
+                border-radius: 12px;
+                padding: 10px;
             }}
         """)
 
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setSpacing(8)
-        panel_layout.setContentsMargins(10, 10, 10, 10)
+        panel_layout.setSpacing(12)
+        panel_layout.setContentsMargins(12, 12, 12, 12)
 
-        # العنوان
+        # العنوان الرئيسي
         title = QLabel("📊 ملخص الوضع المالي")
         title.setStyleSheet(f"""
-            font-size: 14px;
+            font-size: 16px;
             font-weight: bold;
             color: white;
-            padding: 10px;
+            padding: 12px 15px;
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                 stop:0 {COLORS['primary']}, stop:1 #0550B8);
-            border-radius: 8px;
+            border-radius: 10px;
         """)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         panel_layout.addWidget(title)
 
-        # بطاقة الميزانية
-        balance_sheet_card = QGroupBox("الميزانية (Balance Sheet)")
+        # === بطاقة الميزانية ===
+        balance_sheet_card = QGroupBox("📋 الميزانية (Balance Sheet)")
         balance_sheet_card.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: bold;
+                font-size: 13px;
                 color: {COLORS['text_primary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                padding-top: 20px;
-                background-color: {COLORS['bg_medium']};
+                border: 1px solid rgba(10, 108, 241, 0.4);
+                border-radius: 10px;
+                margin-top: 15px;
+                padding: 15px;
+                padding-top: 25px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(10, 42, 85, 0.6),
+                    stop:1 rgba(5, 32, 69, 0.8));
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 4px 10px;
+                subcontrol-position: top center;
+                padding: 5px 15px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 {COLORS['primary']}, stop:1 #0550B8);
                 color: white;
-                border-radius: 4px;
-                font-size: 11px;
+                border-radius: 6px;
+                font-size: 12px;
             }}
         """)
         balance_layout = QVBoxLayout()
+        balance_layout.setSpacing(8)
 
         # الأصول
-        self.assets_label = QLabel("💰 الأصول: 0.00 جنيه")
-        self.assets_label.setStyleSheet(f"""
-            color: #10B981;
-            font-size: 12px;
-            font-weight: bold;
-            padding: 10px 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.15), stop:1 rgba(16, 185, 129, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            margin: 3px 0;
-        """)
-        self.assets_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.assets_label = self._create_summary_item("💰 الأصول", "0.00", "#10B981")
         balance_layout.addWidget(self.assets_label)
 
         # الخصوم
-        self.liabilities_label = QLabel("📉 الخصوم: 0.00 جنيه")
-        self.liabilities_label.setStyleSheet(f"""
-            color: {COLORS['warning']};
-            font-size: 12px;
-            font-weight: bold;
-            padding: 10px 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(255, 102, 54, 0.05), stop:0.5 rgba(255, 102, 54, 0.15), stop:1 rgba(255, 102, 54, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(255, 102, 54, 0.3);
-            margin: 3px 0;
-        """)
-        self.liabilities_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.liabilities_label = self._create_summary_item("📉 الخصوم", "0.00", COLORS['warning'])
         balance_layout.addWidget(self.liabilities_label)
 
         # حقوق الملكية
-        self.equity_label = QLabel("🏦 حقوق الملكية: 0.00 جنيه")
-        self.equity_label.setStyleSheet(f"""
-            color: {COLORS['primary']};
-            font-size: 12px;
-            font-weight: bold;
-            padding: 10px 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(10, 108, 241, 0.05), stop:0.5 rgba(10, 108, 241, 0.15), stop:1 rgba(10, 108, 241, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(10, 108, 241, 0.3);
-            margin: 3px 0;
-        """)
-        self.equity_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.equity_label = self._create_summary_item("🏦 حقوق الملكية", "0.00", COLORS['primary'])
         balance_layout.addWidget(self.equity_label)
 
         balance_sheet_card.setLayout(balance_layout)
         panel_layout.addWidget(balance_sheet_card)
 
-        # بطاقة الأرباح والخسائر
-        pl_card = QGroupBox("الأرباح والخسائر (P&L)")
+        # === بطاقة الأرباح والخسائر ===
+        pl_card = QGroupBox("📈 الأرباح والخسائر (P&L)")
         pl_card.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: bold;
+                font-size: 13px;
                 color: {COLORS['text_primary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-                margin-top: 12px;
-                padding: 12px;
-                padding-top: 20px;
-                background-color: {COLORS['bg_medium']};
+                border: 1px solid rgba(255, 102, 54, 0.4);
+                border-radius: 10px;
+                margin-top: 15px;
+                padding: 15px;
+                padding-top: 25px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(10, 42, 85, 0.6),
+                    stop:1 rgba(5, 32, 69, 0.8));
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 4px 10px;
+                subcontrol-position: top center;
+                padding: 5px 15px;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                     stop:0 {COLORS['warning']}, stop:1 #E55A2B);
                 color: white;
-                border-radius: 4px;
-                font-size: 11px;
+                border-radius: 6px;
+                font-size: 12px;
             }}
         """)
         pl_layout = QVBoxLayout()
+        pl_layout.setSpacing(8)
 
         # الإيرادات
-        self.revenue_summary_label = QLabel("📈 الإيرادات: 0.00 جنيه")
-        self.revenue_summary_label.setStyleSheet(f"""
-            color: #10B981;
-            font-size: 12px;
-            font-weight: bold;
-            padding: 10px 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.15), stop:1 rgba(16, 185, 129, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            margin: 3px 0;
-        """)
-        self.revenue_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.revenue_summary_label = self._create_summary_item("📈 الإيرادات", "0.00", "#10B981")
         pl_layout.addWidget(self.revenue_summary_label)
 
         # المصروفات
-        self.expenses_summary_label = QLabel("📊 المصروفات: 0.00 جنيه")
-        self.expenses_summary_label.setStyleSheet(f"""
-            color: {COLORS['danger']};
-            font-size: 12px;
-            font-weight: bold;
-            padding: 10px 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(255, 79, 216, 0.05), stop:0.5 rgba(255, 79, 216, 0.15), stop:1 rgba(255, 79, 216, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(255, 79, 216, 0.3);
-            margin: 3px 0;
-        """)
-        self.expenses_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.expenses_summary_label = self._create_summary_item("💸 المصروفات", "0.00", COLORS['danger'])
         pl_layout.addWidget(self.expenses_summary_label)
 
         # خط فاصل
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setStyleSheet(f"background-color: {COLORS['border']}; max-height: 1px; margin: 8px 0;")
+        separator.setStyleSheet(f"background-color: rgba(255,255,255,0.2); max-height: 2px; margin: 10px 0;")
         pl_layout.addWidget(separator)
 
-        # صافي الربح
-        self.net_profit_summary_label = QLabel("💎 صافي الربح: 0.00 جنيه")
-        self.net_profit_summary_label.setStyleSheet(f"""
-            color: #10B981;
-            font-size: 13px;
-            font-weight: bold;
-            padding: 12px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 rgba(16, 185, 129, 0.05), stop:0.5 rgba(16, 185, 129, 0.2), stop:1 rgba(16, 185, 129, 0.05));
-            border-radius: 8px;
-            border: 1px solid rgba(16, 185, 129, 0.4);
-        """)
-        self.net_profit_summary_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # صافي الربح - تصميم مميز
+        self.net_profit_summary_label = self._create_profit_item("💎 صافي الربح", "0.00")
         pl_layout.addWidget(self.net_profit_summary_label)
+
+        pl_card.setLayout(pl_layout)
+        panel_layout.addWidget(pl_card)
+
+        # مساحة فارغة في الأسفل
+        panel_layout.addStretch()
+
+        # زر تحديث الملخص
+        refresh_summary_btn = QPushButton("🔄 تحديث الملخص")
+        refresh_summary_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {COLORS['primary']}, stop:1 #0550B8);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 12px 15px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0550B8, stop:1 {COLORS['primary']});
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['secondary']};
+            }}
+        """)
+        refresh_summary_btn.clicked.connect(self.update_summary_labels)
+        panel_layout.addWidget(refresh_summary_btn)
+
+        return panel
+
+    def _create_summary_item(self, title: str, value: str, color: str) -> QFrame:
+        """إنشاء عنصر ملخص مالي"""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(255,255,255,0.02),
+                    stop:0.5 rgba(255,255,255,0.08),
+                    stop:1 rgba(255,255,255,0.02));
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 8px;
+                padding: 8px;
+            }}
+        """)
+        
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(10)
+        
+        # العنوان
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px; background: transparent;")
+        layout.addWidget(title_label)
+        
+        layout.addStretch()
+        
+        # القيمة
+        value_label = QLabel(f"{value} جنيه")
+        value_label.setObjectName("value_label")
+        value_label.setStyleSheet(f"color: {color}; font-size: 14px; font-weight: bold; background: transparent;")
+        layout.addWidget(value_label)
+        
+        # حفظ اللون للتحديث لاحقاً
+        frame.setProperty("value_color", color)
+        
+        return frame
+
+    def _create_profit_item(self, title: str, value: str) -> QFrame:
+        """إنشاء عنصر صافي الربح بتصميم مميز"""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(16, 185, 129, 0.1),
+                    stop:0.5 rgba(16, 185, 129, 0.2),
+                    stop:1 rgba(16, 185, 129, 0.1));
+                border: 2px solid rgba(16, 185, 129, 0.5);
+                border-radius: 10px;
+                padding: 10px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(5)
+        
+        # العنوان
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px; background: transparent;")
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # القيمة
+        value_label = QLabel(f"{value} جنيه")
+        value_label.setObjectName("value_label")
+        value_label.setStyleSheet("color: #10B981; font-size: 18px; font-weight: bold; background: transparent;")
+        value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(value_label)
+        
+        return frame
 
         pl_card.setLayout(pl_layout)
         panel_layout.addWidget(pl_card)
@@ -807,36 +867,15 @@ class AccountingManagerTab(QWidget):
             # حساب صافي الربح = الإيرادات - المصروفات
             net_profit = total_revenue - total_expenses
 
-            # تحديث Labels
-            self.assets_label.setText(f"💰 الأصول: {total_assets:,.2f} جنيه")
-            self.liabilities_label.setText(f"📉 الخصوم: {total_liabilities:,.2f} جنيه")
-            self.equity_label.setText(f"🏦 حقوق الملكية: {total_equity:,.2f} جنيه")
-            self.revenue_summary_label.setText(f"📈 الإيرادات: {total_revenue:,.2f} جنيه")
-            self.expenses_summary_label.setText(f"📊 المصروفات: {total_expenses:,.2f} جنيه")
+            # تحديث Labels باستخدام الدوال المساعدة
+            self._update_summary_value(self.assets_label, total_assets)
+            self._update_summary_value(self.liabilities_label, total_liabilities)
+            self._update_summary_value(self.equity_label, total_equity)
+            self._update_summary_value(self.revenue_summary_label, total_revenue)
+            self._update_summary_value(self.expenses_summary_label, total_expenses)
 
             # تحديث صافي الربح مع تغيير اللون حسب القيمة
-            if net_profit >= 0:
-                self.net_profit_summary_label.setText(f"💎 صافي الربح: {net_profit:,.2f} جنيه")
-                self.net_profit_summary_label.setStyleSheet(f"""
-                    color: {COLORS['success']};
-                    font-size: 13px;
-                    font-weight: bold;
-                    padding: 8px;
-                    background-color: rgba(16, 185, 129, 0.1);
-                    border-radius: 6px;
-                    border: 1px solid {COLORS['success']};
-                """)
-            else:
-                self.net_profit_summary_label.setText(f"💔 صافي الخسارة: {abs(net_profit):,.2f} جنيه")
-                self.net_profit_summary_label.setStyleSheet(f"""
-                    color: {COLORS['danger']};
-                    font-size: 13px;
-                    font-weight: bold;
-                    padding: 8px;
-                    background-color: rgba(239, 68, 68, 0.1);
-                    border-radius: 6px;
-                    border: 1px solid {COLORS['danger']};
-                """)
+            self._update_profit_value(self.net_profit_summary_label, net_profit)
 
             print("INFO: [AccManager] الملخص المالي:")
             print(f"  - الأصول: {total_assets:,.2f}")
@@ -844,6 +883,56 @@ class AccountingManagerTab(QWidget):
             print(f"  - الإيرادات: {total_revenue:,.2f}")
             print(f"  - المصروفات: {total_expenses:,.2f}")
             print(f"  - صافي الربح: {net_profit:,.2f}")
+
+        except Exception as e:
+            print(f"ERROR: [AccManager] فشل تحديث الملخص المالي: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _update_summary_value(self, frame: QFrame, value: float):
+        """تحديث قيمة عنصر الملخص"""
+        try:
+            value_label = frame.findChild(QLabel, "value_label")
+            if value_label:
+                value_label.setText(f"{value:,.2f} جنيه")
+        except Exception as e:
+            print(f"WARNING: فشل تحديث القيمة: {e}")
+
+    def _update_profit_value(self, frame: QFrame, value: float):
+        """تحديث قيمة صافي الربح مع تغيير اللون"""
+        try:
+            value_label = frame.findChild(QLabel, "value_label")
+            if value_label:
+                if value >= 0:
+                    value_label.setText(f"{value:,.2f} جنيه")
+                    value_label.setStyleSheet("color: #10B981; font-size: 18px; font-weight: bold; background: transparent;")
+                    frame.setStyleSheet(f"""
+                        QFrame {{
+                            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 rgba(16, 185, 129, 0.1),
+                                stop:0.5 rgba(16, 185, 129, 0.2),
+                                stop:1 rgba(16, 185, 129, 0.1));
+                            border: 2px solid rgba(16, 185, 129, 0.5);
+                            border-radius: 10px;
+                            padding: 10px;
+                        }}
+                    """)
+                else:
+                    value_label.setText(f"{abs(value):,.2f} جنيه (خسارة)")
+                    value_label.setStyleSheet("color: #EF4444; font-size: 18px; font-weight: bold; background: transparent;")
+                    frame.setStyleSheet(f"""
+                        QFrame {{
+                            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 rgba(239, 68, 68, 0.1),
+                                stop:0.5 rgba(239, 68, 68, 0.2),
+                                stop:1 rgba(239, 68, 68, 0.1));
+                            border: 2px solid rgba(239, 68, 68, 0.5);
+                            border-radius: 10px;
+                            padding: 10px;
+                        }}
+                    """)
+        except Exception as e:
+            print(f"WARNING: فشل تحديث صافي الربح: {e}")
 
         except Exception as e:
             print(f"ERROR: [AccManager] فشل تحديث الملخص المالي: {e}")

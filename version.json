@@ -1,17 +1,17 @@
 {
-  "version": "1.1.5",
-  "version_name": "UI Improvements - Sky Wave ERP",
-  "release_date": "2025-12-15",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.1.5/SkyWaveERP-Setup-1.1.5.exe",
+  "version": "1.1.6",
+  "version_name": "Updater Fix & UI Improvements - Sky Wave ERP",
+  "release_date": "2025-12-29",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.1.6/SkyWaveERP-Setup-1.1.6.exe",
   "changelog": [
-    "تحسين SmartFilterComboBox للبحث والفلترة",
-    "تحسين صفحة بيانات الشركة",
-    "تحسين التصميم ليتناسب مع حجم الشاشة",
-    "إصلاح مشكلة توقف الكتابة في ComboBox",
-    "تحسينات في الأداء والسرعة"
+    "إصلاح مشكلة RuntimeError: lost sys.stdin في المحدث",
+    "تحسين واجهة المحدث بتصميم احترافي",
+    "إزالة الحدود من عناصر الواجهة",
+    "زوايا منحنية ناعمة للنافذة",
+    "تحسينات في الأداء والاستقرار"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "تحسينات في واجهة المستخدم وإصلاح مشاكل البحث",
-  "notes_en": "UI improvements and search fixes"
+  "notes_ar": "إصلاح مشكلة المحدث وتحسينات في الواجهة",
+  "notes_en": "Updater fix and UI improvements"
 }

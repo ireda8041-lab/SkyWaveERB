@@ -528,6 +528,76 @@ class TaskCategory(str, Enum):
     DEADLINE = "موعد نهائي"
 
 
+# ==================== نماذج لوحة التحكم المحسّنة (Enhanced Dashboard) ====================
+
+class KPIData(BaseModel):
+    """
+    نموذج بيانات مؤشر الأداء الرئيسي (KPI)
+    يستخدم لعرض KPIs مع مؤشرات الاتجاه في لوحة التحكم
+    Requirements: 1.4, 1.5, 1.6, 1.7
+    """
+    name: str  # اسم المؤشر (مثل "إجمالي الإيرادات")
+    current_value: float  # القيمة الحالية
+    previous_value: float | None = None  # القيمة السابقة للمقارنة
+
+    @property
+    def change_percentage(self) -> float:
+        """
+        نسبة التغير بين القيمة الحالية والسابقة
+        Returns: النسبة المئوية للتغير
+        Validates: Requirements 1.4
+        """
+        if self.previous_value is None or self.previous_value == 0:
+            return 0.0
+        return ((self.current_value - self.previous_value) / self.previous_value) * 100
+
+    @property
+    def trend_direction(self) -> str:
+        """
+        اتجاه التغير: up (أخضر), down (أحمر), neutral (محايد)
+        Validates: Requirements 1.5, 1.6, 1.7
+        """
+        if self.previous_value is None:
+            return "neutral"
+        if self.current_value > self.previous_value:
+            return "up"
+        elif self.current_value < self.previous_value:
+            return "down"
+        return "neutral"
+
+
+class CashFlowEntry(BaseModel):
+    """
+    نموذج إدخال التدفق النقدي
+    يستخدم لتمثيل التدفقات النقدية الداخلة والخارجة في فترة زمنية
+    Requirements: 2.5
+    """
+    date: datetime  # تاريخ الإدخال
+    inflow: float = 0.0  # التدفق الداخل (الدفعات المحصلة)
+    outflow: float = 0.0  # التدفق الخارج (المصروفات)
+
+    @property
+    def net_flow(self) -> float:
+        """
+        صافي التدفق النقدي = التدفق الداخل - التدفق الخارج
+        Validates: Requirements 2.5
+        """
+        return self.inflow - self.outflow
+
+
+class DashboardSettings(BaseModel):
+    """
+    إعدادات لوحة التحكم
+    يستخدم لحفظ تفضيلات المستخدم للوحة التحكم
+    Requirements: 4.4
+    """
+    auto_refresh_enabled: bool = True  # هل التحديث التلقائي مفعل
+    auto_refresh_interval: int = 30  # فترة التحديث بالثواني
+    selected_period: str = "this_month"  # الفترة المحددة (today, this_week, this_month, this_year, custom)
+    custom_start_date: datetime | None = None  # تاريخ البداية للفترة المخصصة
+    custom_end_date: datetime | None = None  # تاريخ النهاية للفترة المخصصة
+
+
 class Task(BaseSchema):
     """
     نموذج المهمة (من collection 'tasks')

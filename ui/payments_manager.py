@@ -693,8 +693,9 @@ class PaymentsManagerTab(QWidget):
         layout = QVBoxLayout()
         self.setLayout(layout)
 
-        # أزرار التحكم
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         # ⚡ زر إضافة دفعة جديدة
         self.add_button = QPushButton("➕ إضافة دفعة")
@@ -717,12 +718,13 @@ class PaymentsManagerTab(QWidget):
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_payments_data)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.delete_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.delete_button)
+        self.toolbar.addButton(self.refresh_button)
+        
+        layout.addWidget(self.toolbar)
 
         # جدول الدفعات
         self.payments_table = QTableWidget()

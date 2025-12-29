@@ -36,6 +36,10 @@ class UserPermissionsDialog(QDialog):
         # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(600)
         self.setMinimumHeight(500)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar

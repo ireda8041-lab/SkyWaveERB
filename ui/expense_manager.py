@@ -65,8 +65,9 @@ class ExpenseManagerTab(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(layout)
 
-        # أزرار التحكم
-        buttons_layout = QHBoxLayout()
+        # === شريط الأزرار المتجاوب ===
+        from ui.responsive_toolbar import ResponsiveToolbar
+        self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ إضافة مصروف")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
@@ -88,12 +89,13 @@ class ExpenseManagerTab(QWidget):
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_expenses_data)
 
-        buttons_layout.addWidget(self.add_button)
-        buttons_layout.addWidget(self.edit_button)
-        buttons_layout.addWidget(self.delete_button)
-        buttons_layout.addWidget(self.refresh_button)
-        buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)
+        # إضافة الأزرار للـ toolbar المتجاوب
+        self.toolbar.addButton(self.add_button)
+        self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.delete_button)
+        self.toolbar.addButton(self.refresh_button)
+        
+        layout.addWidget(self.toolbar)
 
         # جدول المصروفات
         self.expenses_table = QTableWidget()

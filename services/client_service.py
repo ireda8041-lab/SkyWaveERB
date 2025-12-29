@@ -164,28 +164,29 @@ class ClientService:
 
     def delete_client(self, client_id: str) -> bool:
         """
-        أرشفة عميل (Soft Delete)
+        حذف عميل نهائياً (Hard Delete)
 
         Args:
-            client_id: معرف العميل المراد أرشفته
+            client_id: معرف العميل المراد حذفه
 
         Returns:
             True في حالة النجاح، False في حالة الفشل
 
         Raises:
-            Exception: في حالة فشل عملية الأرشفة
+            Exception: في حالة فشل عملية الحذف
         """
-        logger.info(f"[ClientService] استلام طلب أرشفة العميل ID: {client_id}")
+        logger.info(f"[ClientService] استلام طلب حذف العميل نهائياً ID: {client_id}")
 
         try:
-            success = self.repo.archive_client_by_id(client_id)
+            success = self.repo.delete_client_permanently(client_id)
             if success:
+                self.invalidate_cache()  # ⚡ إبطال الـ cache
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('clients')
-                logger.info("[ClientService] تم أرشفة العميل بنجاح")
+                logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:
-            logger.error(f"[ClientService] فشل أرشفة العميل: {e}", exc_info=True)
+            logger.error(f"[ClientService] فشل حذف العميل: {e}", exc_info=True)
             raise
 
     def get_archived_clients(self) -> list[schemas.Client]:

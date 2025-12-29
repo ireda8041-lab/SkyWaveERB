@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\performance_optimizer.py
+# hypothesis_version: 6.148.3
+
+[0.5, 1.0, 30.0, 100, 500, 1024, '=', '_initialized', 'gc_garbage', 'gc_objects', 'hit_rate', 'hits', 'max_size', 'misses', 'size', 'skywave_local.db', 'weak_refs']
