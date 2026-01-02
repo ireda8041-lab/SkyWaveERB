@@ -25,7 +25,7 @@ if sys.stderr is None:
 
 try:
     from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
-    from PyQt6.QtGui import QFont, QColor
+    from PyQt6.QtGui import QFont, QColor, QFontDatabase
     from PyQt6.QtWidgets import (
         QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow,
         QProgressBar, QPushButton, QVBoxLayout, QWidget, QTextEdit
@@ -35,6 +35,33 @@ except ImportError:
     HAS_GUI = False
 
 APP_NAME = "Sky Wave ERP"
+
+# تحميل خط Cairo
+def get_cairo_font(size=13, bold=False):
+    """الحصول على خط Cairo"""
+    font = QFont("Cairo", size)
+    if bold:
+        font.setWeight(QFont.Weight.Bold)
+    return font
+
+def load_cairo_font():
+    """تحميل خط Cairo من الملف"""
+    try:
+        if getattr(sys, 'frozen', False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
+        if os.path.exists(font_path):
+            font_id = QFontDatabase.addApplicationFont(font_path)
+            if font_id != -1:
+                families = QFontDatabase.applicationFontFamilies(font_id)
+                if families:
+                    return families[0]
+    except Exception:
+        pass
+    return "Cairo"
 
 class UpdateSignals(QObject):
     progress = pyqtSignal(int)
@@ -265,7 +292,7 @@ if HAS_GUI:
             title_layout.setContentsMargins(0, 0, 0, 0)
             
             title = QLabel("Sky Wave ERP")
-            title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+            title.setFont(get_cairo_font(20, bold=True))
             title.setStyleSheet("color: #0A6CF1; background: transparent; border: none;")
             title_layout.addWidget(title)
             title_layout.addStretch()
@@ -284,14 +311,14 @@ if HAS_GUI:
             if self.version_info:
                 ver = self.version_info.get('version', '?')
                 ver_label = QLabel(f"New Version: {ver}")
-                ver_label.setFont(QFont("Segoe UI", 12))
+                ver_label.setFont(get_cairo_font(12))
                 ver_label.setStyleSheet("color: #10B981; background: transparent; border: none;")
                 ver_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 frame_layout.addWidget(ver_label)
 
             # Status
             self.status_label = QLabel("Preparing...")
-            self.status_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+            self.status_label.setFont(get_cairo_font(14, bold=True))
             self.status_label.setStyleSheet("color: white; background: transparent; border: none;")
             self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             frame_layout.addWidget(self.status_label)
@@ -322,7 +349,7 @@ if HAS_GUI:
 
             # Speed
             self.speed_label = QLabel("")
-            self.speed_label.setFont(QFont("Segoe UI", 10))
+            self.speed_label.setFont(get_cairo_font(10))
             self.speed_label.setStyleSheet("color: #64B5F6; background: transparent; border: none;")
             self.speed_label.setAlignment(Qt.AlignmentFlag.AlignRight)
             frame_layout.addWidget(self.speed_label)
@@ -345,7 +372,7 @@ if HAS_GUI:
             # Cancel button
             self.cancel_btn = QPushButton("Cancel")
             self.cancel_btn.setFixedSize(130, 40)
-            self.cancel_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            self.cancel_btn.setFont(get_cairo_font(11, bold=True))
             self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             self.cancel_btn.setStyleSheet("""
                 QPushButton { background: rgba(239, 68, 68, 0.15); border: none; border-radius: 20px; color: #EF4444; }

@@ -1,4 +1,4 @@
-"""الملف: ui/service_manager.py"""
+﻿"""الملف: ui/service_manager.py"""
 
 
 from PyQt6.QtCore import Qt
@@ -22,6 +22,16 @@ from core.logger import get_logger
 from services.service_service import ServiceService
 from ui.service_editor_dialog import ServiceEditorDialog
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 logger = get_logger(__name__)
 
@@ -144,6 +154,10 @@ class ServiceManagerTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_services_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
+        
+        # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
+        from ui.styles import apply_rtl_alignment_to_all_fields
+        apply_rtl_alignment_to_all_fields(self)
     
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
@@ -266,7 +280,7 @@ class ServiceManagerTab(QWidget):
 
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
-        print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
+        safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
         self.load_services_data()
 
     def open_editor(self, service_to_edit: schemas.Service | None):

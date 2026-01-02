@@ -1,4 +1,4 @@
-# الملف: main.py
+﻿# الملف: main.py
 # ruff: noqa: E402
 """
 ⚡ Sky Wave ERP - الملف الرئيسي
@@ -48,15 +48,12 @@ logger.info(f"⚡ {APP_NAME} v{CURRENT_VERSION}")
 # Advanced Sync
 from core.advanced_sync_manager import AdvancedSyncManagerV3
 from core.unified_sync import UnifiedSyncManagerV3
-
-# 🔥 نظام المزامنة الجديد - الإصدار الثالث
 from core.sync_manager_v3 import SyncManagerV3
 
 # Authentication
 from core.auth_models import AuthService
 from core.event_bus import EventBus
 from core.repository import Repository
-from core.sync_manager_v3 import SyncManagerV3
 
 # --- 2. استيراد "الأقسام" (العقل) ---
 from services.accounting_service import AccountingService
@@ -67,7 +64,6 @@ from services.invoice_service import InvoiceService
 from services.notification_service import NotificationService
 from services.printing_service import PrintingService
 from services.project_service import ProjectService
-from services.quotation_service import QuotationService
 from services.service_service import ServiceService
 from services.settings_service import SettingsService
 from services.smart_scan_service import SmartScanService
@@ -104,38 +100,11 @@ class SkyWaveERPApp:
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
 
-        # ⚡ تهيئة مدير المزامنة في Background
-        self.sync_manager = SyncManagerV3(self.repository)
-
-        # 🔄 نظام المزامنة الموحد - MongoDB First
+        # 🔄 نظام المزامنة الموحد - MongoDB First (النظام الرئيسي الوحيد)
         self.unified_sync = UnifiedSyncManagerV3(self.repository)
 
-        # 🔥 نظام المزامنة الجديد - الإصدار الثالث
+        # 🔥 نظام المزامنة V3 - للتوافق مع الواجهة
         self.sync_manager = SyncManagerV3(self.repository)
-
-        def load_sync_items():
-            # تحميل العناصر المعلقة للمزامنة (إذا كانت متاحة)
-            if hasattr(self.sync_manager, 'load_pending_items'):
-                self.sync_manager.load_pending_items()
-            else:
-                # استخدام النظام الجديد
-                status = self.sync_manager.get_sync_status()
-                logger.info(f"حالة المزامنة: {status.get('offline_queue_count', 0)} عنصر معلق")
-            # تنظيف التكرارات عند البدء
-            if self.repository.online:
-                logger.info("🧹 جاري تنظيف التكرارات...")
-                self.unified_sync.remove_duplicates()
-        import threading
-        sync_thread = threading.Thread(target=load_sync_items, daemon=True)
-        sync_thread.start()
-
-        # ⚡ المزامنة التلقائية (Auto Sync)
-        from core.auto_sync import AutoSync
-        self.auto_sync = AutoSync(self.repository)
-        
-        # 🚀 نظام المزامنة عند بدء التشغيل (الجديد)
-        from core.startup_sync import StartupSync, get_startup_sync
-        self.startup_sync = StartupSync(self.repository)
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
@@ -143,6 +112,14 @@ class SkyWaveERPApp:
         # تعيين Repository لـ TaskService
         from ui.todo_manager import TaskService
         TaskService.set_repository(self.repository)
+
+        # تعيين Repository لنظام الإشعارات
+        from ui.notification_system import NotificationManager
+        NotificationManager.set_repository(self.repository)
+
+        # إعداد جسر الإشعارات (يربط الإشارات بالإشعارات)
+        from core.notification_bridge import setup_notification_bridge
+        setup_notification_bridge()
 
         # --- 2. تجهيز "الأقسام" (حقن الاعتمادية) ---
         self.accounting_service = AccountingService(
@@ -171,12 +148,6 @@ class SkyWaveERPApp:
             event_bus=self.event_bus,
             accounting_service=self.accounting_service,
             settings_service=self.settings_service
-        )
-
-        self.quotation_service = QuotationService(
-            repository=self.repository,
-            event_bus=self.event_bus,
-            project_service=self.project_service
         )
 
         self.notification_service = NotificationService(
@@ -445,7 +416,6 @@ class SkyWaveERPApp:
             service_service=self.service_service,
             expense_service=self.expense_service,
             invoice_service=self.invoice_service,
-            quotation_service=self.quotation_service,
             project_service=self.project_service,
             notification_service=self.notification_service,
             printing_service=self.printing_service,
@@ -485,24 +455,29 @@ class SkyWaveERPApp:
         QTimer.singleShot(2000, apply_styles_later)
 
         # 🚀 تفعيل المزامنة عند بدء التشغيل (بعد 2 ثانية)
-        def start_sync_and_refresh():
-            """بدء المزامنة وتحديث الواجهة بعد الاكتمال"""
+        def start_auto_sync_system():
+            """بدء نظام المزامنة التلقائية الاحترافي"""
             try:
-                logger.info("[MainApp] 🚀 بدء المزامنة التلقائية...")
+                logger.info("[MainApp] 🚀 بدء نظام المزامنة التلقائية...")
                 
-                # إضافة callback لتحديث الواجهة
-                self.startup_sync.add_completion_callback(
-                    lambda: QTimer.singleShot(100, main_window.on_sync_completed)
+                # تشغيل نظام المزامنة التلقائية
+                self.unified_sync.start_auto_sync()
+                
+                # ربط إشارة اكتمال المزامنة بتحديث الواجهة
+                self.unified_sync.sync_completed.connect(
+                    lambda result: QTimer.singleShot(100, main_window.on_sync_completed)
                 )
                 
-                # بدء المزامنة في الخلفية
-                self.startup_sync.start_background_sync(delay_seconds=0)
+                # ربط إشارة تغيير الاتصال
+                self.unified_sync.connection_changed.connect(
+                    lambda online: logger.info(f"🔌 حالة الاتصال: {'متصل' if online else 'غير متصل'}")
+                )
                 
             except Exception as e:
-                logger.error(f"[MainApp] ❌ خطأ في المزامنة التلقائية: {e}")
+                logger.error(f"[MainApp] ❌ خطأ في بدء المزامنة التلقائية: {e}")
         
-        QTimer.singleShot(2000, start_sync_and_refresh)
-        logger.info("[MainApp] 🚀 المزامنة ستبدأ بعد 2 ثانية")
+        QTimer.singleShot(2000, start_auto_sync_system)
+        logger.info("[MainApp] 🚀 نظام المزامنة التلقائية سيبدأ بعد 2 ثانية")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -581,11 +556,12 @@ class SkyWaveERPApp:
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
         try:
-            # إيقاف المزامنة التلقائية
-            if hasattr(self, 'auto_sync') and self.auto_sync:
+            # إيقاف المزامنة التلقائية (لو كانت مفعلة)
+            # إيقاف نظام المزامنة الموحد
+            if hasattr(self, 'unified_sync') and self.unified_sync:
                 try:
-                    self.auto_sync.stop_auto_sync()
-                    logger.info("[MainApp] تم إيقاف المزامنة التلقائية")
+                    self.unified_sync.stop_auto_sync()
+                    logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
                 except Exception as e:
                     logger.warning(f"[MainApp] فشل إيقاف المزامنة التلقائية: {e}")
 
@@ -689,7 +665,7 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         )
     except Exception:
         # في حالة فشل معالج الأخطاء نفسه
-        print(f"CRITICAL ERROR: {exc_type.__name__}: {exc_value}")
+        safe_print(f"CRITICAL ERROR: {exc_type.__name__}: {exc_value}")
         traceback.print_exception(exc_type, exc_value, exc_traceback)
 
 # تفعيل معالج الأخطاء العام
@@ -717,6 +693,12 @@ if __name__ == "__main__":
         )
         sys.exit(1)
     finally:
+        # إغلاق نظام الإشعارات
+        try:
+            from ui.notification_system import NotificationManager
+            NotificationManager.shutdown()
+        except Exception:
+            pass
         logger.info("="*80)
         logger.info("إغلاق التطبيق")
         logger.info("="*80)

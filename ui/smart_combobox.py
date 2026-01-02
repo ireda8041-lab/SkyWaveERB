@@ -23,6 +23,10 @@ class SmartFilterComboBox(QComboBox):
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.setMaxVisibleItems(15)
         
+        # ⚡ إعدادات لضمان عرض المحتوى بشكل صحيح
+        self.setMinimumWidth(150)
+        self.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+        
         self._all_items = []
         self._is_filtering = False
         self._popup_visible = False
@@ -35,6 +39,11 @@ class SmartFilterComboBox(QComboBox):
         
         # ربط تغيير النص
         self.lineEdit().textEdited.connect(self._on_text_edited)
+        
+        # ⚡ إعدادات الـ LineEdit الداخلي - محاذاة لليمين للعربية
+        if self.lineEdit():
+            self.lineEdit().setMinimumWidth(100)
+            self.lineEdit().setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         
         # إزالة الـ Completer الافتراضي
         self.setCompleter(None)

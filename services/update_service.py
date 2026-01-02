@@ -1,4 +1,4 @@
-# الملف: services/update_service.py
+﻿# الملف: services/update_service.py
 # خدمة التحقق من التحديثات وتنزيلها
 
 import json
@@ -8,6 +8,16 @@ import sys
 
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class UpdateChecker(QThread):
@@ -225,7 +235,7 @@ class UpdateService:
             return True
 
         except Exception as e:
-            print(f"خطأ في تطبيق التحديث: {e}")
+            safe_print(f"خطأ في تطبيق التحديث: {e}")
             return False
 
     def cleanup_temp_files(self):
@@ -234,4 +244,4 @@ class UpdateService:
             if os.path.exists(self.temp_update_path):
                 os.remove(self.temp_update_path)
         except Exception as e:
-            print(f"تحذير: فشل حذف الملفات المؤقتة: {e}")
+            safe_print(f"تحذير: فشل حذف الملفات المؤقتة: {e}")

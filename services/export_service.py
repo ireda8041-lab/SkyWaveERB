@@ -1,4 +1,4 @@
-# الملف: services/export_service.py
+﻿# الملف: services/export_service.py
 """
 خدمة التصدير - تصدير البيانات إلى Excel, CSV, PDF
 """
@@ -11,12 +11,22 @@ import sys
 from datetime import datetime
 from typing import Any
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 try:
     import pandas as pd
     PANDAS_AVAILABLE = True
 except ImportError:
     PANDAS_AVAILABLE = False
-    print("WARNING: [ExportService] pandas not available. Install with: pip install pandas openpyxl")
+    safe_print("WARNING: [ExportService] pandas not available. Install with: pip install pandas openpyxl")
 
 
 class ExportService:
@@ -38,16 +48,16 @@ class ExportService:
         """إنشاء مجلد التصدير إذا لم يكن موجود"""
         if not os.path.exists(self.export_folder):
             os.makedirs(self.export_folder)
-            print(f"INFO: [ExportService] Created exports folder: {self.export_folder}")
+            safe_print(f"INFO: [ExportService] Created exports folder: {self.export_folder}")
 
     def export_to_excel(self, data: list[dict[str, Any]], filename: str | None = None, sheet_name: str = "البيانات") -> str | None:
         """تصدير البيانات إلى Excel"""
         if not PANDAS_AVAILABLE:
-            print("ERROR: [ExportService] pandas not available for Excel export")
+            safe_print("ERROR: [ExportService] pandas not available for Excel export")
             return None
 
         if not data:
-            print("WARNING: [ExportService] No data to export")
+            safe_print("WARNING: [ExportService] No data to export")
             return None
 
         try:
@@ -68,17 +78,17 @@ class ExportService:
             with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
                 df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-            print(f"INFO: [ExportService] Excel exported: {filepath}")
+            safe_print(f"INFO: [ExportService] Excel exported: {filepath}")
             return filepath
 
         except Exception as e:
-            print(f"ERROR: [ExportService] Failed to export Excel: {e}")
+            safe_print(f"ERROR: [ExportService] Failed to export Excel: {e}")
             return None
 
     def export_to_csv(self, data: list[dict[str, Any]], filename: str | None = None) -> str | None:
         """تصدير البيانات إلى CSV"""
         if not data:
-            print("WARNING: [ExportService] No data to export")
+            safe_print("WARNING: [ExportService] No data to export")
             return None
 
         try:
@@ -100,11 +110,11 @@ class ExportService:
                     writer.writeheader()
                     writer.writerows(data)
 
-            print(f"INFO: [ExportService] CSV exported: {filepath}")
+            safe_print(f"INFO: [ExportService] CSV exported: {filepath}")
             return filepath
 
         except Exception as e:
-            print(f"ERROR: [ExportService] Failed to export CSV: {e}")
+            safe_print(f"ERROR: [ExportService] Failed to export CSV: {e}")
             return None
 
     def export_clients_to_excel(self, clients: list) -> str | None:
@@ -242,9 +252,9 @@ class ExportService:
             else:  # Linux
                 subprocess.run(['xdg-open', filepath])
 
-            print(f"INFO: [ExportService] Opened file: {filepath}")
+            safe_print(f"INFO: [ExportService] Opened file: {filepath}")
         except Exception as e:
-            print(f"ERROR: [ExportService] Failed to open file: {e}")
+            safe_print(f"ERROR: [ExportService] Failed to open file: {e}")
 
     def get_export_folder(self) -> str:
         """الحصول على مجلد التصدير"""

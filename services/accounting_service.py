@@ -1,4 +1,4 @@
-# الملف: services/accounting_service.py
+﻿# الملف: services/accounting_service.py
 
 from datetime import datetime, timedelta
 from typing import Any
@@ -8,6 +8,22 @@ from core.event_bus import EventBus
 from core.logger import get_logger
 from core.repository import Repository
 from core.signals import app_signals
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
+# إشعارات العمليات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 logger = get_logger(__name__)
 
@@ -73,10 +89,10 @@ class AccountingService:
             # فقط نتحقق من حسابات النقدية (لا نحتاج حساب العملاء)
             cash_accounts = self.repo.get_all_accounts()
             cash_count = sum(1 for acc in cash_accounts if acc.type == schemas.AccountType.CASH)
-            print(f"INFO: [AccountingService] ✅ تم العثور على {cash_count} حساب نقدية")
+            safe_print(f"INFO: [AccountingService] ✅ تم العثور على {cash_count} حساب نقدية")
                     
         except Exception as e:
-            print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
+            safe_print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
 
     def _subscribe_to_events(self) -> None:
         """
@@ -117,18 +133,18 @@ class AccountingService:
         Returns:
             True إذا نجحت العملية
         """
-        print("INFO: [AccountingService] 🔄 جاري إعادة حساب جميع الأرصدة من القيود...")
+        safe_print("INFO: [AccountingService] 🔄 جاري إعادة حساب جميع الأرصدة من القيود...")
 
         try:
             # 1. جلب جميع الحسابات
             accounts = self.repo.get_all_accounts()
             if not accounts:
-                print("WARNING: [AccountingService] لا توجد حسابات")
+                safe_print("WARNING: [AccountingService] لا توجد حسابات")
                 return False
 
             # 2. جلب جميع القيود
             journal_entries = self.repo.get_all_journal_entries()
-            print(f"INFO: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
+            safe_print(f"INFO: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
 
             # 3. حساب الحركات لكل حساب
             account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
@@ -179,7 +195,7 @@ class AccountingService:
 
                 # تحديث الرصيد إذا تغير
                 if abs(acc.balance - new_balance) > 0.01:
-                    print(f"INFO: تحديث {acc.code} ({acc.name}): {acc.balance} -> {new_balance}")
+                    safe_print(f"INFO: تحديث {acc.code} ({acc.name}): {acc.balance} -> {new_balance}")
                     account_id = acc._mongo_id or str(acc.id)
                     self.repo.update_account(account_id, acc.model_copy(update={"balance": new_balance}))
                     updated_count += 1
@@ -188,11 +204,11 @@ class AccountingService:
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
 
-            print(f"SUCCESS: [AccountingService] ✅ تم تحديث {updated_count} حساب")
+            safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث {updated_count} حساب")
             return True
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -209,16 +225,16 @@ class AccountingService:
         # ⚡ استخدام الـ cache إذا كان صالحاً
         current_time = time.time()
         if not force_refresh and AccountingService._hierarchy_cache and (current_time - AccountingService._hierarchy_cache_time) < AccountingService._HIERARCHY_CACHE_TTL:
-            print("INFO: [AccountingService] استخدام cache الشجرة المحاسبية")
+            safe_print("INFO: [AccountingService] استخدام cache الشجرة المحاسبية")
             return AccountingService._hierarchy_cache
 
-        print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
+        safe_print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
 
         try:
             accounts = self.repo.get_all_accounts()
 
             if not accounts:
-                print("WARNING: [AccountingService] لا توجد حسابات")
+                safe_print("WARNING: [AccountingService] لا توجد حسابات")
                 return {}
 
             # 1. حساب الأرصدة من القيود المحاسبية
@@ -240,7 +256,7 @@ class AccountingService:
             try:
                 # جلب القيود بالطريقة العادية (أكثر موثوقية)
                 journal_entries = self.repo.get_all_journal_entries()
-                print(f"DEBUG: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
+                safe_print(f"DEBUG: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
 
                 for entry in journal_entries:
                     for line in entry.lines:
@@ -260,12 +276,12 @@ class AccountingService:
                         account_movements[code]['debit'] += getattr(line, 'debit', 0) or 0.0
                         account_movements[code]['credit'] += getattr(line, 'credit', 0) or 0.0
 
-                print(f"DEBUG: [AccountingService] تم حساب حركات {len(account_movements)} حساب")
+                safe_print(f"DEBUG: [AccountingService] تم حساب حركات {len(account_movements)} حساب")
                 for code, mov in list(account_movements.items())[:5]:
-                    print(f"  - {code}: مدين={mov['debit']}, دائن={mov['credit']}")
+                    safe_print(f"  - {code}: مدين={mov['debit']}, دائن={mov['credit']}")
 
             except Exception as e:
-                print(f"ERROR: [AccountingService] فشل جلب القيود: {e}")
+                safe_print(f"ERROR: [AccountingService] فشل جلب القيود: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -345,7 +361,7 @@ class AccountingService:
 
                 # طباعة للتأكد (للحسابات التي لها حركات)
                 if debit_total > 0 or credit_total > 0:
-                    print(f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}")
+                    safe_print(f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}")
 
             # ربط الحسابات بالآباء تلقائياً بناءً على الكود
             for acc in accounts:
@@ -366,7 +382,7 @@ class AccountingService:
                 # التحقق من وجود الأب في الشجرة
                 if parent_code and parent_code in tree_map and parent_code != acc.code:
                     tree_map[parent_code]['children'].append(tree_map[acc.code])
-                    print(f"DEBUG: ربط {acc.code} -> {parent_code}")
+                    safe_print(f"DEBUG: ربط {acc.code} -> {parent_code}")
 
             # طباعة الأبناء لكل حساب رئيسي (يدعم نظام 4 و 6 أرقام)
             root_codes = ['100000', '200000', '300000', '400000', '500000', '600000',  # 6 أرقام
@@ -375,7 +391,7 @@ class AccountingService:
                 if code in tree_map:
                     children = [c['obj'].code for c in tree_map[code]['children']]
                     if children:
-                        print(f"DEBUG: {code} أبناؤه: {children}")
+                        safe_print(f"DEBUG: {code} أبناؤه: {children}")
 
             # 4. حساب الأرصدة التراكمية للمجموعات (من الأوراق للجذور)
             def calculate_total(node: dict) -> float:
@@ -399,7 +415,7 @@ class AccountingService:
                     calculate_total(tree_map[code])
 
             # طباعة ملخص للتأكد
-            print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")
+            safe_print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")
 
             # ⚡ حفظ في الـ cache
             AccountingService._hierarchy_cache = tree_map
@@ -408,7 +424,7 @@ class AccountingService:
             return tree_map
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حساب الأرصدة التراكمية: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حساب الأرصدة التراكمية: {e}")
             import traceback
             traceback.print_exc()
             return {}
@@ -464,7 +480,7 @@ class AccountingService:
             }
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب الملخص المالي: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب الملخص المالي: {e}")
             return {
                 'assets': 0.0,
                 'liabilities': 0.0,
@@ -486,7 +502,7 @@ class AccountingService:
         - دائن: حساب الإيرادات (4110) - يزيد الإيرادات
         """
         invoice: schemas.Invoice = data["invoice"]
-        print(f"INFO: [AccountingService] تم استقبال حدث فاتورة جديدة: {invoice.invoice_number}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث فاتورة جديدة: {invoice.invoice_number}")
 
         try:
             # إنشاء معرف الفاتورة
@@ -504,12 +520,12 @@ class AccountingService:
             )
 
             if success:
-                print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للفاتورة {invoice.invoice_number}")
+                safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للفاتورة {invoice.invoice_number}")
             else:
-                print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للفاتورة {invoice.invoice_number}")
+                safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للفاتورة {invoice.invoice_number}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل معالجة الفاتورة {invoice.invoice_number}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل معالجة الفاتورة {invoice.invoice_number}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -523,12 +539,12 @@ class AccountingService:
         - دائن: حساب الإيرادات (4100) - يزيد الإيرادات
         """
         project: schemas.Project = data["project"]
-        print(f"INFO: [AccountingService] تم استقبال حدث مشروع جديد: {project.name}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث مشروع جديد: {project.name}")
 
         try:
             # تجاهل المشاريع بدون قيمة
             if not project.total_amount or project.total_amount <= 0:
-                print(f"INFO: [AccountingService] المشروع {project.name} بدون قيمة - لن يتم إنشاء قيد")
+                safe_print(f"INFO: [AccountingService] المشروع {project.name} بدون قيمة - لن يتم إنشاء قيد")
                 return
 
             # إنشاء معرف المشروع
@@ -546,12 +562,12 @@ class AccountingService:
             )
 
             if success:
-                print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}")
+                safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}")
             else:
-                print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمشروع {project.name}")
+                safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمشروع {project.name}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل معالجة المشروع {project.name}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل معالجة المشروع {project.name}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -564,7 +580,7 @@ class AccountingService:
         2. تحديث القيد بالقيمة الجديدة
         """
         project: schemas.Project = data["project"]
-        print(f"INFO: [AccountingService] تم استقبال حدث تعديل مشروع: {project.name}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل مشروع: {project.name}")
 
         try:
             project_id = getattr(project, '_mongo_id', None) or str(getattr(project, 'id', '')) or project.name
@@ -575,7 +591,7 @@ class AccountingService:
             if not original_entry:
                 # لا يوجد قيد أصلي - إنشاء قيد جديد إذا كان المشروع له قيمة
                 if project.total_amount and project.total_amount > 0:
-                    print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمشروع {project.name} - إنشاء قيد جديد")
+                    safe_print(f"INFO: [AccountingService] لا يوجد قيد أصلي للمشروع {project.name} - إنشاء قيد جديد")
                     self.handle_new_project(data)
                 return
 
@@ -584,7 +600,7 @@ class AccountingService:
             rev_account = self.repo.get_account_by_code(self.SERVICE_REVENUE_CODE)
 
             if not ar_account or not rev_account:
-                print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                safe_print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
                 return
 
             new_lines = [
@@ -613,12 +629,12 @@ class AccountingService:
             )
 
             if success:
-                print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمشروع {project.name}")
+                safe_print(f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمشروع {project.name}")
             else:
-                print(f"WARNING: [AccountingService] فشل تحديث القيد للمشروع {project.name}")
+                safe_print(f"WARNING: [AccountingService] فشل تحديث القيد للمشروع {project.name}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل قيد المشروع {project.name}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل قيد المشروع {project.name}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -638,8 +654,8 @@ class AccountingService:
         else:
             expense = data
 
-        print(f"INFO: [AccountingService] تم استقبال حدث مصروف جديد: {expense.category} - {expense.amount} جنيه")
-        print(f"INFO: [AccountingService] حساب المصروف: {expense.account_id}, حساب الدفع: {expense.payment_account_id}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث مصروف جديد: {expense.category} - {expense.amount} جنيه")
+        safe_print(f"INFO: [AccountingService] حساب المصروف: {expense.account_id}, حساب الدفع: {expense.payment_account_id}")
 
         try:
             # التحقق من وجود الحسابات المطلوبة
@@ -647,11 +663,11 @@ class AccountingService:
             payment_account_code = getattr(expense, 'payment_account_id', None)
 
             if not expense_account_code:
-                print("WARNING: [AccountingService] لم يتم تحديد حساب المصروف، سيتم استخدام الحساب الافتراضي 5900")
+                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب المصروف، سيتم استخدام الحساب الافتراضي 5900")
                 expense_account_code = "5900"  # مصروفات متنوعة
 
             if not payment_account_code:
-                print("WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111")
+                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111")
                 payment_account_code = self.CASH_ACCOUNT_CODE  # الخزنة الرئيسية
 
             # إنشاء معرف المصروف
@@ -669,12 +685,12 @@ class AccountingService:
             )
 
             if success:
-                print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمصروف {expense.category}")
+                safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمصروف {expense.category}")
             else:
-                print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمصروف {expense.category}")
+                safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمصروف {expense.category}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل معالجة المصروف: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف: {e}")
             import traceback
             traceback.print_exc()
 
@@ -690,7 +706,7 @@ class AccountingService:
             else:
                 expense = data
 
-            print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
+            safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
 
             expense_id = getattr(expense, '_mongo_id', None) or str(getattr(expense, 'id', ''))
 
@@ -698,7 +714,7 @@ class AccountingService:
             original_entry = self.repo.get_journal_entry_by_doc_id(expense_id)
 
             if not original_entry:
-                print("INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
+                safe_print("INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
                 self.handle_new_expense(data)
                 return
 
@@ -710,7 +726,7 @@ class AccountingService:
             payment_account = self.repo.get_account_by_code(payment_account_code)
 
             if not expense_account or not payment_account:
-                print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
+                safe_print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
                 return
 
             new_lines = [
@@ -739,12 +755,12 @@ class AccountingService:
             )
 
             if success:
-                print("SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
+                safe_print("SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
             else:
-                print("WARNING: [AccountingService] فشل تحديث القيد للمصروف")
+                safe_print("WARNING: [AccountingService] فشل تحديث القيد للمصروف")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل قيد المصروف: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل قيد المصروف: {e}")
             import traceback
             traceback.print_exc()
 
@@ -755,16 +771,16 @@ class AccountingService:
         try:
             expense_id = data.get('id')
             if not expense_id:
-                print("WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
+                safe_print("WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
                 return
 
-            print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
+            safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
 
             # البحث عن القيد الأصلي
             original_entry = self.repo.get_journal_entry_by_doc_id(str(expense_id))
 
             if not original_entry:
-                print("INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
+                safe_print("INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
                 return
 
             # إنشاء قيد عكسي
@@ -789,10 +805,10 @@ class AccountingService:
             )
 
             self.repo.create_journal_entry(journal_entry_data)
-            print("SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
+            safe_print("SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للمصروف: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للمصروف: {e}")
             import traceback
             traceback.print_exc()
 
@@ -803,41 +819,41 @@ class AccountingService:
         عند استلام دفعة:
         - يزيد رصيد حساب الاستلام (النقدية/البنك) بمبلغ الدفعة
         """
-        print("=" * 60)
-        print("INFO: [AccountingService] ⚡ تم استدعاء handle_new_payment!")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] ⚡ تم استدعاء handle_new_payment!")
+        safe_print("=" * 60)
         
         try:
             payment: schemas.Payment = data["payment"]
         except (KeyError, TypeError) as e:
-            print(f"ERROR: [AccountingService] فشل استخراج بيانات الدفعة: {e}")
-            print(f"DEBUG: [AccountingService] البيانات المستلمة: {data}")
+            safe_print(f"ERROR: [AccountingService] فشل استخراج بيانات الدفعة: {e}")
+            safe_print(f"DEBUG: [AccountingService] البيانات المستلمة: {data}")
             return
             
         project = data.get("project")
 
-        print(f"INFO: [AccountingService] تم استقبال حدث دفعة جديدة: {payment.amount} جنيه")
-        print(f"DEBUG: [AccountingService] payment.account_id: {payment.account_id}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث دفعة جديدة: {payment.amount} جنيه")
+        safe_print(f"DEBUG: [AccountingService] payment.account_id: {payment.account_id}")
 
         try:
             # تحديد حساب الاستلام (الخزينة أو البنك)
             receiving_account_code = getattr(payment, 'account_id', None) or self.CASH_ACCOUNT_CODE
-            print(f"DEBUG: [AccountingService] حساب الاستلام: {receiving_account_code}")
+            safe_print(f"DEBUG: [AccountingService] حساب الاستلام: {receiving_account_code}")
 
             # ⚡ التحقق من وجود حساب الاستلام
             receiving_account = self.repo.get_account_by_code(receiving_account_code)
             if not receiving_account:
-                print(f"ERROR: [AccountingService] ❌ حساب الاستلام {receiving_account_code} غير موجود!")
+                safe_print(f"ERROR: [AccountingService] ❌ حساب الاستلام {receiving_account_code} غير موجود!")
                 return
 
             # ⚡ تحديث رصيد حساب الاستلام مباشرة (زيادة)
             old_balance = receiving_account.balance or 0.0
             new_balance = old_balance + payment.amount
             
-            print(f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name}:")
-            print(f"  - الرصيد القديم: {old_balance}")
-            print(f"  - مبلغ الدفعة: +{payment.amount}")
-            print(f"  - الرصيد الجديد: {new_balance}")
+            safe_print(f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name}:")
+            safe_print(f"  - الرصيد القديم: {old_balance}")
+            safe_print(f"  - مبلغ الدفعة: +{payment.amount}")
+            safe_print(f"  - الرصيد الجديد: {new_balance}")
 
             # تحديث الحساب في قاعدة البيانات
             account_id = receiving_account._mongo_id or str(receiving_account.id)
@@ -850,13 +866,13 @@ class AccountingService:
                 AccountingService._hierarchy_cache_time = 0
                 
                 project_name = getattr(project, 'name', '') if project else ''
-                print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}")
-                print(f"SUCCESS: [AccountingService] ✅ دفعة {payment.amount} جنيه للمشروع {project_name}")
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}")
+                safe_print(f"SUCCESS: [AccountingService] ✅ دفعة {payment.amount} جنيه للمشروع {project_name}")
             else:
-                print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
+                safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
             import traceback
             traceback.print_exc()
 
@@ -868,18 +884,18 @@ class AccountingService:
         """
         try:
             payment: schemas.Payment = data["payment"]
-            print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
+            safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
             
             # ⚡ ببساطة نعيد حساب الرصيد من الدفعات
             # هذا أبسط وأكثر دقة من تتبع الفروقات
-            print("INFO: [AccountingService] تعديل الدفعة - سيتم إعادة حساب الأرصدة عند التحديث")
+            safe_print("INFO: [AccountingService] تعديل الدفعة - سيتم إعادة حساب الأرصدة عند التحديث")
             
             # إبطال الـ cache
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل الدفعة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل الدفعة: {e}")
             import traceback
             traceback.print_exc()
 
@@ -892,31 +908,31 @@ class AccountingService:
             payment = data.get('payment')
 
             if not payment:
-                print("WARNING: [AccountingService] لم يتم تحديد بيانات الدفعة المحذوفة")
+                safe_print("WARNING: [AccountingService] لم يتم تحديد بيانات الدفعة المحذوفة")
                 return
 
-            print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
-            print(f"DEBUG: [AccountingService] مبلغ الدفعة المحذوفة: {payment.amount}")
+            safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
+            safe_print(f"DEBUG: [AccountingService] مبلغ الدفعة المحذوفة: {payment.amount}")
 
             # تحديد حساب الاستلام
             receiving_account_code = getattr(payment, 'account_id', None)
             if not receiving_account_code:
-                print("WARNING: [AccountingService] لم يتم تحديد حساب الاستلام للدفعة المحذوفة")
+                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الاستلام للدفعة المحذوفة")
                 return
 
             receiving_account = self.repo.get_account_by_code(receiving_account_code)
             if not receiving_account:
-                print(f"WARNING: [AccountingService] حساب الاستلام {receiving_account_code} غير موجود")
+                safe_print(f"WARNING: [AccountingService] حساب الاستلام {receiving_account_code} غير موجود")
                 return
 
             # ⚡ تحديث رصيد حساب الاستلام (نقصان)
             old_balance = receiving_account.balance or 0.0
             new_balance = old_balance - payment.amount
             
-            print(f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name} (حذف دفعة):")
-            print(f"  - الرصيد القديم: {old_balance}")
-            print(f"  - مبلغ الدفعة المحذوفة: -{payment.amount}")
-            print(f"  - الرصيد الجديد: {new_balance}")
+            safe_print(f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name} (حذف دفعة):")
+            safe_print(f"  - الرصيد القديم: {old_balance}")
+            safe_print(f"  - مبلغ الدفعة المحذوفة: -{payment.amount}")
+            safe_print(f"  - الرصيد الجديد: {new_balance}")
 
             # تحديث الحساب في قاعدة البيانات
             account_id = receiving_account._mongo_id or str(receiving_account.id)
@@ -927,12 +943,12 @@ class AccountingService:
                 # إبطال الـ cache
                 AccountingService._hierarchy_cache = None
                 AccountingService._hierarchy_cache_time = 0
-                print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}")
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}")
             else:
-                print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
+                safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل معالجة حذف الدفعة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل معالجة حذف الدفعة: {e}")
             import traceback
             traceback.print_exc()
 
@@ -950,33 +966,33 @@ class AccountingService:
             else:
                 new_balance = old_balance - amount if is_debit else old_balance + amount
 
-            print(f"DEBUG: [AccountingService] تحديث رصيد {account.name} ({account.code}):")
-            print(f"  - نوع الحساب: {account.type.value}")
-            print(f"  - الرصيد القديم: {old_balance}")
-            print(f"  - المبلغ: {amount} ({'مدين' if is_debit else 'دائن'})")
-            print(f"  - الرصيد الجديد: {new_balance}")
+            safe_print(f"DEBUG: [AccountingService] تحديث رصيد {account.name} ({account.code}):")
+            safe_print(f"  - نوع الحساب: {account.type.value}")
+            safe_print(f"  - الرصيد القديم: {old_balance}")
+            safe_print(f"  - المبلغ: {amount} ({'مدين' if is_debit else 'دائن'})")
+            safe_print(f"  - الرصيد الجديد: {new_balance}")
 
             account_id = account._mongo_id or str(account.id)
             updated_account = account.model_copy(update={"balance": new_balance})
             result = self.repo.update_account(account_id, updated_account)
 
             if result:
-                print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {account.name}: {old_balance} -> {new_balance}")
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {account.name}: {old_balance} -> {new_balance}")
             else:
-                print(f"WARNING: [AccountingService] ⚠️ فشل تحديث رصيد {account.name}")
+                safe_print(f"WARNING: [AccountingService] ⚠️ فشل تحديث رصيد {account.name}")
 
             # إبطال الـ cache لإعادة حساب الأرصدة
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد الحساب {account.name}: {e}")
+            safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد الحساب {account.name}: {e}")
             import traceback
             traceback.print_exc()
 
     def get_profit_and_loss(self, start_date: datetime, end_date: datetime) -> dict:
         """حساب تقرير الأرباح والخسائر لفترة محددة مع التفاصيل"""
-        print(f"INFO: [AccountingService] جاري حساب P&L من {start_date} إلى {end_date}")
+        safe_print(f"INFO: [AccountingService] جاري حساب P&L من {start_date} إلى {end_date}")
         try:
             total_revenue = 0.0
             total_expenses = 0.0
@@ -1034,7 +1050,7 @@ class AccountingService:
             }
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حساب P&L: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حساب P&L: {e}")
             return {
                 "total_revenue": 0.0,
                 "total_expenses": 0.0,
@@ -1047,14 +1063,14 @@ class AccountingService:
         """
         (جديدة) المعالج الذي يتم استدعاؤه أوتوماتيكياً عند إلغاء فاتورة.
         """
-        print(f"INFO: [AccountingService] تم استقبال حدث إلغاء فاتورة: {invoice.invoice_number}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث إلغاء فاتورة: {invoice.invoice_number}")
 
         try:
             doc_id = invoice._mongo_id or str(invoice.id)
             original_entry = self.repo.get_journal_entry_by_doc_id(doc_id)
 
             if not original_entry:
-                print(f"WARNING: [AccountingService] لم يتم العثور على قيد أصلي للفاتورة {invoice.invoice_number} لعكسه.")
+                safe_print(f"WARNING: [AccountingService] لم يتم العثور على قيد أصلي للفاتورة {invoice.invoice_number} لعكسه.")
                 return
 
             reversed_lines = []
@@ -1076,17 +1092,17 @@ class AccountingService:
             )
 
             self.repo.create_journal_entry(journal_entry_data)
-            print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للفاتورة {invoice.invoice_number}.")
+            safe_print(f"SUCCESS: [AccountingService] تم إنشاء القيد العكسي للفاتورة {invoice.invoice_number}.")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للفاتورة {invoice.invoice_number}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للفاتورة {invoice.invoice_number}: {e}")
 
     def handle_edited_invoice(self, data: dict):
         """
         (معدلة) تعديل القيد الأصلي للفاتورة (باللوجيك الرباعي).
         """
         invoice: schemas.Invoice = data["invoice"]
-        print(f"INFO: [AccountingService] تم استقبال حدث تعديل فاتورة: {invoice.invoice_number}")
+        safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل فاتورة: {invoice.invoice_number}")
 
         try:
             ar_account = self.repo.get_account_by_code(self.ACC_RECEIVABLE_CODE)
@@ -1095,7 +1111,7 @@ class AccountingService:
             vat_account = self.repo.get_account_by_code(self.VAT_PAYABLE_CODE)
 
             if ar_account is None or rev_account is None or discount_account is None or vat_account is None:
-                print("CRITICAL_ERROR: [AccountingService] لا يمكن إيجاد كل الحسابات المحاسبية (للتعديل).")
+                safe_print("CRITICAL_ERROR: [AccountingService] لا يمكن إيجاد كل الحسابات المحاسبية (للتعديل).")
                 return
 
             new_lines = []
@@ -1146,22 +1162,22 @@ class AccountingService:
             )
 
             if success:
-                print(f"SUCCESS: [AccountingService] تم تعديل القيد المحاسبي للفاتورة {invoice.invoice_number}.")
+                safe_print(f"SUCCESS: [AccountingService] تم تعديل القيد المحاسبي للفاتورة {invoice.invoice_number}.")
             else:
-                print(f"ERROR: [AccountingService] فشل في تحديث القيد المحاسبي للفاتورة {invoice.invoice_number}.")
+                safe_print(f"ERROR: [AccountingService] فشل في تحديث القيد المحاسبي للفاتورة {invoice.invoice_number}.")
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل القيد للفاتورة {invoice.invoice_number}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل القيد للفاتورة {invoice.invoice_number}: {e}")
 
     def get_dashboard_kpis(self) -> dict:
         """
         (جديدة) تطلب أرقام الداشبورد الرئيسية من المخزن.
         """
-        print("INFO: [AccountingService] جاري طلب أرقام الداشبورد...")
+        safe_print("INFO: [AccountingService] جاري طلب أرقام الداشبورد...")
         try:
             return self.repo.get_dashboard_kpis()
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب أرقام الداشبورد: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب أرقام الداشبورد: {e}")
             return {
                 "total_collected": 0,
                 "total_outstanding": 0,
@@ -1176,7 +1192,7 @@ class AccountingService:
         Returns:
             dict مع: total_sales, cash_collected, receivables, expenses, net_profit
         """
-        print("INFO: [AccountingService] جاري حساب إحصائيات الداشبورد الموحدة...")
+        safe_print("INFO: [AccountingService] جاري حساب إحصائيات الداشبورد الموحدة...")
         try:
             # جلب الملخص المالي من الحسابات
             summary = self.get_financial_summary()
@@ -1199,7 +1215,7 @@ class AccountingService:
                 "net_profit": net_profit
             }
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حساب إحصائيات الداشبورد: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حساب إحصائيات الداشبورد: {e}")
             return {
                 "total_sales": 0,
                 "cash_collected": 0,
@@ -1239,12 +1255,12 @@ class AccountingService:
 
             return results
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب آخر القيود: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب آخر القيود: {e}")
             return []
 
     def create_account(self, account_data: dict) -> schemas.Account:
         """ إضافة حساب جديد مع التحقق من parent_code """
-        print(f"INFO: [AccountingService] استلام طلب إضافة حساب: {account_data.get('name')}")
+        safe_print(f"INFO: [AccountingService] استلام طلب إضافة حساب: {account_data.get('name')}")
         try:
             # التحقق من صحة parent_code إذا كان موجوداً
             if account_data.get('parent_code'):
@@ -1262,16 +1278,19 @@ class AccountingService:
 
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed('accounts')
+            
+            # 🔔 إشعار
+            notify_operation('created', 'account', f"{created_account.code} - {created_account.name}")
 
-            print(f"SUCCESS: [AccountingService] تم إنشاء الحساب '{created_account.name}' بالكود '{created_account.code}'")
+            safe_print(f"SUCCESS: [AccountingService] تم إنشاء الحساب '{created_account.name}' بالكود '{created_account.code}'")
             return created_account
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إضافة الحساب: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إضافة الحساب: {e}")
             raise
 
     def update_account(self, account_id: str, new_data: dict) -> schemas.Account | None:
         """ تعديل بيانات حساب مع التحقق من parent_code """
-        print(f"INFO: [AccountingService] استلام طلب تعديل الحساب ID: {account_id}")
+        safe_print(f"INFO: [AccountingService] استلام طلب تعديل الحساب ID: {account_id}")
         try:
             # محاولة جلب الحساب بطرق مختلفة
             existing_account = self.repo.get_account_by_id(account_id)
@@ -1281,7 +1300,7 @@ class AccountingService:
                 existing_account = self.repo.get_account_by_code(account_id)
             
             if not existing_account:
-                print(f"ERROR: [AccountingService] الحساب {account_id} غير موجود")
+                safe_print(f"ERROR: [AccountingService] الحساب {account_id} غير موجود")
                 raise Exception(f"الحساب {account_id} غير موجود للتعديل.")
 
             # التحقق من صحة parent_code الجديد إذا كان موجوداً
@@ -1305,7 +1324,7 @@ class AccountingService:
             # ⚠️ حماية الرصيد: لا نسمح بتعديل الرصيد يدوياً عند التحديث
             # الرصيد يُحسب فقط من القيود المحاسبية
             if 'balance' in new_data:
-                print("WARNING: [AccountingService] Removing 'balance' from update data to preserve calculated balance")
+                safe_print("WARNING: [AccountingService] Removing 'balance' from update data to preserve calculated balance")
                 new_data = {k: v for k, v in new_data.items() if k != 'balance'}
 
             # حفظ الأرصدة الحالية قبل التحديث
@@ -1327,17 +1346,19 @@ class AccountingService:
                 self.repo.update_is_group_flags()
 
             if saved_account is not None:
-                print(f"SUCCESS: [AccountingService] تم تعديل الحساب {saved_account.name} بنجاح.")
+                # 🔔 إشعار
+                notify_operation('updated', 'account', f"{saved_account.code} - {saved_account.name}")
+                safe_print(f"SUCCESS: [AccountingService] تم تعديل الحساب {saved_account.name} بنجاح.")
             return saved_account
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل الحساب: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل الحساب: {e}")
             import traceback
             traceback.print_exc()
             raise
 
     def update_account_by_code(self, account_code: str, new_data: dict) -> schemas.Account | None:
         """ تعديل بيانات حساب باستخدام الكود """
-        print(f"INFO: [AccountingService] تعديل الحساب بالكود: {account_code}")
+        safe_print(f"INFO: [AccountingService] تعديل الحساب بالكود: {account_code}")
         try:
             existing_account = self.repo.get_account_by_code(account_code)
             if not existing_account:
@@ -1345,21 +1366,31 @@ class AccountingService:
 
             # الحصول على الـ id من الحساب الموجود
             account_id = existing_account._mongo_id or str(existing_account.id)
-            print(f"DEBUG: [AccountingService] Found account ID: {account_id}")
+            safe_print(f"DEBUG: [AccountingService] Found account ID: {account_id}")
 
             # استدعاء دالة التحديث العادية
             return self.update_account(account_id, new_data)
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل تعديل الحساب بالكود: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل الحساب بالكود: {e}")
             raise
 
     def delete_account(self, account_id: str) -> bool:
         """ حذف حساب نهائياً من قاعدة البيانات """
-        print(f"INFO: [AccountingService] استلام طلب حذف الحساب ID: {account_id}")
+        safe_print(f"INFO: [AccountingService] استلام طلب حذف الحساب ID: {account_id}")
         try:
-            return self.repo.delete_account_permanently(account_id)
+            # جلب اسم الحساب قبل الحذف
+            account = self.repo.get_account_by_id(account_id)
+            if not account:
+                account = self.repo.get_account_by_code(account_id)
+            account_name = f"{account.code} - {account.name}" if account else f"حساب #{account_id}"
+            
+            result = self.repo.delete_account_permanently(account_id)
+            if result:
+                # 🔔 إشعار
+                notify_operation('deleted', 'account', account_name)
+            return result
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حذف الحساب: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حذف الحساب: {e}")
             raise
 
     def post_transaction(
@@ -1397,8 +1428,8 @@ class AccountingService:
         Returns:
             True if successful
         """
-        print(f"INFO: [AccountingService] Smart Transaction: {description}")
-        print(f"  Amount: {amount} {currency} @ {exchange_rate} = {amount * exchange_rate} EGP")
+        safe_print(f"INFO: [AccountingService] Smart Transaction: {description}")
+        safe_print(f"  Amount: {amount} {currency} @ {exchange_rate} = {amount * exchange_rate} EGP")
 
         try:
             # 1. Convert to base currency (EGP)
@@ -1409,11 +1440,11 @@ class AccountingService:
             credit_account = self.repo.get_account_by_code(credit_account_code)
 
             if not debit_account:
-                print(f"ERROR: Debit account {debit_account_code} not found!")
+                safe_print(f"ERROR: Debit account {debit_account_code} not found!")
                 return False
 
             if not credit_account:
-                print(f"ERROR: Credit account {credit_account_code} not found!")
+                safe_print(f"ERROR: Credit account {credit_account_code} not found!")
                 return False
 
             # 3. Create journal entry with currency info
@@ -1448,11 +1479,11 @@ class AccountingService:
             self._update_account_balance_recursive(debit_account, amount_egp, is_debit=True)
             self._update_account_balance_recursive(credit_account, amount_egp, is_debit=False)
 
-            print("SUCCESS: Smart transaction posted successfully!")
+            safe_print("SUCCESS: Smart transaction posted successfully!")
             return True
 
         except Exception as e:
-            print(f"ERROR: Failed to post transaction: {e}")
+            safe_print(f"ERROR: Failed to post transaction: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1474,7 +1505,7 @@ class AccountingService:
                     self._update_account_balance_recursive(parent_account, amount, is_debit)
 
         except Exception as e:
-            print(f"WARNING: Failed to update balance recursively: {e}")
+            safe_print(f"WARNING: Failed to update balance recursively: {e}")
 
     def post_journal_entry(
         self,
@@ -1506,8 +1537,8 @@ class AccountingService:
         Returns:
             True إذا نجحت العملية
         """
-        print(f"INFO: [AccountingService] post_journal_entry: {description} - {amount} جنيه")
-        print(f"INFO: [AccountingService] مدين: {debit_account_code} | دائن: {credit_account_code}")
+        safe_print(f"INFO: [AccountingService] post_journal_entry: {description} - {amount} جنيه")
+        safe_print(f"INFO: [AccountingService] مدين: {debit_account_code} | دائن: {credit_account_code}")
 
         try:
             # 1. التحقق من وجود الحسابات
@@ -1515,14 +1546,14 @@ class AccountingService:
             credit_account = self.repo.get_account_by_code(credit_account_code)
 
             if not debit_account:
-                print(f"ERROR: [AccountingService] الحساب المدين {debit_account_code} غير موجود!")
+                safe_print(f"ERROR: [AccountingService] الحساب المدين {debit_account_code} غير موجود!")
                 return False
 
             if not credit_account:
-                print(f"ERROR: [AccountingService] الحساب الدائن {credit_account_code} غير موجود!")
+                safe_print(f"ERROR: [AccountingService] الحساب الدائن {credit_account_code} غير موجود!")
                 return False
 
-            print(f"INFO: [AccountingService] الحسابات موجودة: {debit_account.name} (رصيد: {debit_account.balance}) | {credit_account.name} (رصيد: {credit_account.balance})")
+            safe_print(f"INFO: [AccountingService] الحسابات موجودة: {debit_account.name} (رصيد: {debit_account.balance}) | {credit_account.name} (رصيد: {credit_account.balance})")
 
             # 2. إنشاء قيد اليومية
             journal_entry = schemas.JournalEntry(
@@ -1551,13 +1582,13 @@ class AccountingService:
 
             # 3. حفظ القيد في قاعدة البيانات
             created_entry = self.repo.create_journal_entry(journal_entry)
-            print(f"SUCCESS: [AccountingService] تم حفظ القيد في قاعدة البيانات (ID: {getattr(created_entry, 'id', 'N/A')})")
+            safe_print(f"SUCCESS: [AccountingService] تم حفظ القيد في قاعدة البيانات (ID: {getattr(created_entry, 'id', 'N/A')})")
 
             # 4. تحديث أرصدة الحسابات فوراً
-            print(f"DEBUG: [AccountingService] تحديث رصيد الحساب المدين: {debit_account.name}")
+            safe_print(f"DEBUG: [AccountingService] تحديث رصيد الحساب المدين: {debit_account.name}")
             self._update_account_balance(debit_account, amount, is_debit=True)
             
-            print(f"DEBUG: [AccountingService] تحديث رصيد الحساب الدائن: {credit_account.name}")
+            safe_print(f"DEBUG: [AccountingService] تحديث رصيد الحساب الدائن: {credit_account.name}")
             self._update_account_balance(credit_account, amount, is_debit=False)
 
             # 5. إبطال الـ cache لإعادة حساب الأرصدة
@@ -1567,15 +1598,15 @@ class AccountingService:
             # ⚡ التحقق من تحديث الأرصدة
             updated_debit = self.repo.get_account_by_code(debit_account_code)
             updated_credit = self.repo.get_account_by_code(credit_account_code)
-            print(f"SUCCESS: [AccountingService] ✅ الأرصدة بعد التحديث:")
-            print(f"  - {debit_account.name}: {updated_debit.balance if updated_debit else 'N/A'}")
-            print(f"  - {credit_account.name}: {updated_credit.balance if updated_credit else 'N/A'}")
+            safe_print(f"SUCCESS: [AccountingService] ✅ الأرصدة بعد التحديث:")
+            safe_print(f"  - {debit_account.name}: {updated_debit.balance if updated_debit else 'N/A'}")
+            safe_print(f"  - {credit_account.name}: {updated_credit.balance if updated_credit else 'N/A'}")
 
-            print("SUCCESS: [AccountingService] ✅ تم إنشاء القيد وتحديث الأرصدة بنجاح")
+            safe_print("SUCCESS: [AccountingService] ✅ تم إنشاء القيد وتحديث الأرصدة بنجاح")
             return True
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إنشاء القيد: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إنشاء القيد: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1605,7 +1636,7 @@ class AccountingService:
         Returns:
             True إذا نجحت العملية
         """
-        print(f"INFO: [AccountingService] إنشاء معاملة: {description} - {amount} جنيه")
+        safe_print(f"INFO: [AccountingService] إنشاء معاملة: {description} - {amount} جنيه")
 
         try:
             # 1. التحقق من وجود الحسابات
@@ -1646,11 +1677,11 @@ class AccountingService:
             self._update_account_balance(debit_account, amount, is_debit=True)
             self._update_account_balance(credit_account, amount, is_debit=False)
 
-            print(f"SUCCESS: [AccountingService] تم إنشاء المعاملة بنجاح - القيد #{created_entry.id if hasattr(created_entry, 'id') else 'N/A'}")
+            safe_print(f"SUCCESS: [AccountingService] تم إنشاء المعاملة بنجاح - القيد #{created_entry.id if hasattr(created_entry, 'id') else 'N/A'}")
             return True
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل إنشاء المعاملة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل إنشاء المعاملة: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1667,7 +1698,7 @@ class AccountingService:
         Returns:
             قائمة بالمعاملات مع الرصيد الجاري
         """
-        print(f"INFO: [AccountingService] جلب كشف حساب {account_id} من {start_date} إلى {end_date}")
+        safe_print(f"INFO: [AccountingService] جلب كشف حساب {account_id} من {start_date} إلى {end_date}")
 
         try:
             # جلب الحساب
@@ -1676,7 +1707,7 @@ class AccountingService:
                 account = self.repo.get_account_by_code(account_id)
 
             if not account:
-                print(f"ERROR: الحساب {account_id} غير موجود")
+                safe_print(f"ERROR: الحساب {account_id} غير موجود")
                 return []
 
             # جلب جميع قيود اليومية في الفترة المحددة
@@ -1712,11 +1743,11 @@ class AccountingService:
             # ترتيب حسب التاريخ
             ledger_transactions.sort(key=lambda x: str(x.get('date', '')))
 
-            print(f"INFO: تم جلب {len(ledger_transactions)} معاملة للحساب {account.name}")
+            safe_print(f"INFO: تم جلب {len(ledger_transactions)} معاملة للحساب {account.name}")
             return ledger_transactions
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب كشف الحساب: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب كشف الحساب: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -1725,9 +1756,9 @@ class AccountingService:
         """
         إنشاء معاملات اختبارية لتجربة كشف الحساب
         """
-        print("=" * 60)
-        print("INFO: [AccountingService] بدء إنشاء معاملات اختبارية...")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] بدء إنشاء معاملات اختبارية...")
+        safe_print("=" * 60)
 
         created_count = 0
         errors = []
@@ -1746,7 +1777,7 @@ class AccountingService:
             for code, name in accounts_needed.items():
                 account = self.repo.get_account_by_code(code)
                 if not account:
-                    print(f"WARNING: الحساب {code} - {name} غير موجود")
+                    safe_print(f"WARNING: الحساب {code} - {name} غير موجود")
 
             # معاملة 1: إيداع نقدي في البنك (10000 جنيه)
             try:
@@ -1774,11 +1805,11 @@ class AccountingService:
                         related_document_id="DEP-001"
                     )
                     self.repo.create_journal_entry(entry1)
-                    print("✅ تم إنشاء معاملة: إيداع في البنك (10000 جنيه)")
+                    safe_print("✅ تم إنشاء معاملة: إيداع في البنك (10000 جنيه)")
                     created_count += 1
             except Exception as e:
                 error_msg = f"فشل إنشاء معاملة الإيداع: {e}"
-                print(f"❌ {error_msg}")
+                safe_print(f"❌ {error_msg}")
                 errors.append(error_msg)
 
             # معاملة 2: بيع خدمة (1500 جنيه)
@@ -1807,11 +1838,11 @@ class AccountingService:
                         related_document_id="INV-001"
                     )
                     self.repo.create_journal_entry(entry2)
-                    print("✅ تم إنشاء معاملة: بيع خدمة (1500 جنيه)")
+                    safe_print("✅ تم إنشاء معاملة: بيع خدمة (1500 جنيه)")
                     created_count += 1
             except Exception as e:
                 error_msg = f"فشل إنشاء معاملة بيع الخدمة: {e}"
-                print(f"❌ {error_msg}")
+                safe_print(f"❌ {error_msg}")
                 errors.append(error_msg)
 
             # معاملة 3: دفع راتب (2000 جنيه)
@@ -1840,11 +1871,11 @@ class AccountingService:
                         related_document_id="SAL-001"
                     )
                     self.repo.create_journal_entry(entry3)
-                    print("✅ تم إنشاء معاملة: دفع راتب (2000 جنيه)")
+                    safe_print("✅ تم إنشاء معاملة: دفع راتب (2000 جنيه)")
                     created_count += 1
             except Exception as e:
                 error_msg = f"فشل إنشاء معاملة دفع الراتب: {e}"
-                print(f"❌ {error_msg}")
+                safe_print(f"❌ {error_msg}")
                 errors.append(error_msg)
 
             # معاملة 4: تحصيل من العميل (1500 جنيه)
@@ -1873,18 +1904,18 @@ class AccountingService:
                         related_document_id="REC-001"
                     )
                     self.repo.create_journal_entry(entry4)
-                    print("✅ تم إنشاء معاملة: تحصيل من العميل (1500 جنيه)")
+                    safe_print("✅ تم إنشاء معاملة: تحصيل من العميل (1500 جنيه)")
                     created_count += 1
             except Exception as e:
                 error_msg = f"فشل إنشاء معاملة التحصيل: {e}"
-                print(f"❌ {error_msg}")
+                safe_print(f"❌ {error_msg}")
                 errors.append(error_msg)
 
-            print("\n" + "=" * 60)
-            print(f"✅ تم إنشاء {created_count} معاملة اختبارية")
+            safe_print("\n" + "=" * 60)
+            safe_print(f"✅ تم إنشاء {created_count} معاملة اختبارية")
             if errors:
-                print(f"❌ فشل إنشاء {len(errors)} معاملة")
-            print("=" * 60)
+                safe_print(f"❌ فشل إنشاء {len(errors)} معاملة")
+            safe_print("=" * 60)
 
             return {
                 "success": True,
@@ -1895,7 +1926,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل إنشاء المعاملات الاختبارية: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -1912,27 +1943,27 @@ class AccountingService:
         WARNING: This will delete ALL existing accounts and journal entries!
         Use only for initial setup or complete reset.
         """
-        print("=" * 60)
-        print("⚠️  WARNING: RESETTING ALL ACCOUNTING DATA!")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("⚠️  WARNING: RESETTING ALL ACCOUNTING DATA!")
+        safe_print("=" * 60)
 
         try:
             # 1. Delete all existing accounts (if method exists)
             if hasattr(self.repo, 'delete_all_accounts'):
                 self.repo.delete_all_accounts()
-                print("✅ Deleted all existing accounts")
+                safe_print("✅ Deleted all existing accounts")
 
             # 2. Seed new accounts
             result = self.seed_default_accounts()
 
-            print("=" * 60)
-            print("✅ RESET COMPLETE - Fresh Agency Accounts Created!")
-            print("=" * 60)
+            safe_print("=" * 60)
+            safe_print("✅ RESET COMPLETE - Fresh Agency Accounts Created!")
+            safe_print("=" * 60)
 
             return result
 
         except Exception as e:
-            print(f"ERROR: Failed to reset accounts: {e}")
+            safe_print(f"ERROR: Failed to reset accounts: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -1950,9 +1981,9 @@ class AccountingService:
         ✅ فصل COGS (5xxxxx) عن OPEX (6xxxxx) لتحليل الربحية
         ✅ دفعات مقدمة من العملاء (Unearned Revenue)
         """
-        print("=" * 60)
-        print("INFO: [AccountingService] 🏢 إنشاء شجرة حسابات Enterprise Level...")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] 🏢 إنشاء شجرة حسابات Enterprise Level...")
+        safe_print("=" * 60)
 
         # ==================== شجرة الحسابات الاحترافية (6 أرقام) ====================
         ENTERPRISE_ACCOUNTS: list[dict[str, Any]] = [
@@ -2065,7 +2096,7 @@ class AccountingService:
             existing_accounts = self.repo.get_all_accounts()
             existing_codes = {acc.code for acc in existing_accounts}
 
-            print(f"INFO: عدد الحسابات الموجودة حالياً: {len(existing_codes)}")
+            safe_print(f"INFO: عدد الحسابات الموجودة حالياً: {len(existing_codes)}")
 
             # إنشاء الحسابات بالترتيب (الآباء أولاً)
             for account_template in DEFAULT_ACCOUNTS:
@@ -2073,7 +2104,7 @@ class AccountingService:
 
                 # التحقق من عدم التكرار
                 if code in existing_codes:
-                    print(f"⏭️  تخطي: {code} - {account_template['name']} (موجود مسبقاً)")
+                    safe_print(f"⏭️  تخطي: {code} - {account_template['name']} (موجود مسبقاً)")
                     skipped_count += 1
                     continue
 
@@ -2099,21 +2130,21 @@ class AccountingService:
 
                     group_indicator = "📁" if account_template["is_group"] else "📄"
                     parent_info = f" (تحت {account_template['parent']})" if account_template['parent'] else ""
-                    print(f"✅ {group_indicator} {code} - {account_template['name']}{parent_info}")
+                    safe_print(f"✅ {group_indicator} {code} - {account_template['name']}{parent_info}")
 
                     created_count += 1
 
                 except Exception as e:
                     error_msg = f"❌ فشل إنشاء {code} - {account_template['name']}: {e}"
-                    print(error_msg)
+                    safe_print(error_msg)
                     errors.append(error_msg)
 
-            print("\n" + "=" * 60)
-            print(f"✅ تم إنشاء {created_count} حساب جديد")
-            print(f"⏭️  تم تخطي {skipped_count} حساب (موجود مسبقاً)")
+            safe_print("\n" + "=" * 60)
+            safe_print(f"✅ تم إنشاء {created_count} حساب جديد")
+            safe_print(f"⏭️  تم تخطي {skipped_count} حساب (موجود مسبقاً)")
             if errors:
-                print(f"❌ فشل إنشاء {len(errors)} حساب")
-            print("=" * 60)
+                safe_print(f"❌ فشل إنشاء {len(errors)} حساب")
+            safe_print("=" * 60)
 
             return {
                 "success": True,
@@ -2125,7 +2156,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل إنشاء الحسابات الافتراضية: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -2149,9 +2180,9 @@ class AccountingService:
         - لا يتم إنشاء حسابات فرعية لكل عميل
         - تتبع العملاء يتم عبر جدول العملاء وليس شجرة الحسابات
         """
-        print("=" * 60)
-        print("INFO: [AccountingService] بدء تنظيف الحسابات الفرعية للعملاء...")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] بدء تنظيف الحسابات الفرعية للعملاء...")
+        safe_print("=" * 60)
 
         deleted_count = 0
         errors = []
@@ -2176,7 +2207,7 @@ class AccountingService:
                 elif acc.parent_code == self.ACC_RECEIVABLE_CODE:
                     sub_accounts_to_delete.append(acc)
 
-            print(f"INFO: تم العثور على {len(sub_accounts_to_delete)} حساب فرعي للحذف")
+            safe_print(f"INFO: تم العثور على {len(sub_accounts_to_delete)} حساب فرعي للحذف")
 
             # حذف الحسابات الفرعية
             for acc in sub_accounts_to_delete:
@@ -2185,13 +2216,13 @@ class AccountingService:
                     # أرشفة الحساب بدلاً من الحذف الكامل
                     success = self.repo.archive_account_by_id(account_id)
                     if success:
-                        print(f"✅ تم أرشفة: {acc.code} - {acc.name}")
+                        safe_print(f"✅ تم أرشفة: {acc.code} - {acc.name}")
                         deleted_count += 1
                     else:
-                        print(f"⚠️ فشل أرشفة: {acc.code} - {acc.name}")
+                        safe_print(f"⚠️ فشل أرشفة: {acc.code} - {acc.name}")
                 except Exception as e:
                     error_msg = f"فشل أرشفة {acc.code}: {e}"
-                    print(f"❌ {error_msg}")
+                    safe_print(f"❌ {error_msg}")
                     errors.append(error_msg)
 
             # التأكد من أن حساب 1140 هو حساب معاملات (ليس مجموعة)
@@ -2201,21 +2232,21 @@ class AccountingService:
                         account_id = main_account._mongo_id or str(main_account.id)
                         updated_data = {"is_group": False}
                         self.repo.update_account(account_id, main_account.model_copy(update=updated_data))
-                        print("✅ تم تحديث حساب العملاء (1140) ليكون حساب معاملات")
+                        safe_print("✅ تم تحديث حساب العملاء (1140) ليكون حساب معاملات")
                     except Exception as e:
                         error_msg = f"فشل تحديث حساب 1140: {e}"
-                        print(f"❌ {error_msg}")
+                        safe_print(f"❌ {error_msg}")
                         errors.append(error_msg)
                 else:
-                    print("✅ حساب العملاء (1140) هو بالفعل حساب معاملات")
+                    safe_print("✅ حساب العملاء (1140) هو بالفعل حساب معاملات")
             else:
-                print("⚠️ حساب العملاء (1140) غير موجود!")
+                safe_print("⚠️ حساب العملاء (1140) غير موجود!")
 
-            print("\n" + "=" * 60)
-            print(f"✅ تم أرشفة {deleted_count} حساب فرعي")
+            safe_print("\n" + "=" * 60)
+            safe_print(f"✅ تم أرشفة {deleted_count} حساب فرعي")
             if errors:
-                print(f"❌ فشل {len(errors)} عملية")
-            print("=" * 60)
+                safe_print(f"❌ فشل {len(errors)} عملية")
+            safe_print("=" * 60)
 
             return {
                 "success": len(errors) == 0,
@@ -2226,7 +2257,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل تنظيف الحسابات الفرعية: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -2268,7 +2299,7 @@ class AccountingService:
             return float(balance)
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حساب رصيد العميل {client_id}: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حساب رصيد العميل {client_id}: {e}")
             return 0.0
 
     def get_all_clients_balances(self) -> list[dict]:
@@ -2297,7 +2328,7 @@ class AccountingService:
             return balances
 
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب أرصدة العملاء: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب أرصدة العملاء: {e}")
             return []
 
     def fix_accounts_parent_codes(self) -> dict:
@@ -2310,9 +2341,9 @@ class AccountingService:
         Returns:
             dict مع نتائج الإصلاح
         """
-        print("=" * 60)
-        print("INFO: [AccountingService] إصلاح ربط الحسابات بالآباء (Enterprise)...")
-        print("=" * 60)
+        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] إصلاح ربط الحسابات بالآباء (Enterprise)...")
+        safe_print("=" * 60)
 
         # خريطة الحسابات والآباء الصحيحين (Enterprise 6-Digit System)
         CORRECT_PARENT_MAP = {
@@ -2391,7 +2422,7 @@ class AccountingService:
         try:
             # جلب جميع الحسابات
             all_accounts = self.repo.get_all_accounts()
-            print(f"INFO: عدد الحسابات: {len(all_accounts)}")
+            safe_print(f"INFO: عدد الحسابات: {len(all_accounts)}")
 
             for acc in all_accounts:
                 if not acc.code:
@@ -2426,22 +2457,22 @@ class AccountingService:
                         updated_data = acc.model_copy(update={"parent_id": correct_parent, "parent_code": correct_parent})
                         self.repo.update_account(account_id, updated_data)
 
-                        print(f"✅ تحديث {acc.code} ({acc.name}): {current_parent} -> {correct_parent}")
+                        safe_print(f"✅ تحديث {acc.code} ({acc.name}): {current_parent} -> {correct_parent}")
                         updated_count += 1
 
                     except Exception as e:
                         error_msg = f"فشل تحديث {acc.code}: {e}"
-                        print(f"❌ {error_msg}")
+                        safe_print(f"❌ {error_msg}")
                         errors.append(error_msg)
                 else:
                     skipped_count += 1
 
-            print("\n" + "=" * 60)
-            print(f"✅ تم تحديث {updated_count} حساب")
-            print(f"⏭️  تم تخطي {skipped_count} حساب (صحيح بالفعل)")
+            safe_print("\n" + "=" * 60)
+            safe_print(f"✅ تم تحديث {updated_count} حساب")
+            safe_print(f"⏭️  تم تخطي {skipped_count} حساب (صحيح بالفعل)")
             if errors:
-                print(f"❌ فشل {len(errors)} عملية")
-            print("=" * 60)
+                safe_print(f"❌ فشل {len(errors)} عملية")
+            safe_print("=" * 60)
 
             # إرسال إشارة التحديث
             app_signals.emit_data_changed('accounts')
@@ -2456,7 +2487,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل إصلاح الحسابات: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -2481,24 +2512,24 @@ class AccountingService:
         Returns:
             dict مع نتائج التنظيف الشامل
         """
-        print("=" * 70)
-        print("INFO: [AccountingService] ========== بدء التنظيف الشامل ==========")
-        print("=" * 70)
+        safe_print("=" * 70)
+        safe_print("INFO: [AccountingService] ========== بدء التنظيف الشامل ==========")
+        safe_print("=" * 70)
 
         results = {}
 
         try:
             # 1. تنظيف التكرارات من Repository
             if hasattr(self.repo, 'cleanup_all_duplicates'):
-                print("\n📋 الخطوة 1: تنظيف التكرارات...")
+                safe_print("\n📋 الخطوة 1: تنظيف التكرارات...")
                 results['duplicates'] = self.repo.cleanup_all_duplicates()
 
             # 2. إصلاح ربط الحسابات
-            print("\n📋 الخطوة 2: إصلاح ربط الحسابات...")
+            safe_print("\n📋 الخطوة 2: إصلاح ربط الحسابات...")
             results['accounts_fix'] = self.fix_accounts_parent_codes()
 
             # 3. تنظيف الحسابات الفرعية للعملاء
-            print("\n📋 الخطوة 3: تنظيف الحسابات الفرعية للعملاء...")
+            safe_print("\n📋 الخطوة 3: تنظيف الحسابات الفرعية للعملاء...")
             results['client_accounts'] = self.cleanup_client_sub_accounts()
 
             # إرسال إشارات التحديث
@@ -2507,9 +2538,9 @@ class AccountingService:
             app_signals.emit_data_changed('payments')
             app_signals.emit_data_changed('accounts')
 
-            print("\n" + "=" * 70)
-            print("INFO: [AccountingService] ========== انتهى التنظيف الشامل ==========")
-            print("=" * 70)
+            safe_print("\n" + "=" * 70)
+            safe_print("INFO: [AccountingService] ========== انتهى التنظيف الشامل ==========")
+            safe_print("=" * 70)
 
             return {
                 "success": True,
@@ -2519,7 +2550,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل التنظيف الشامل: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -2538,9 +2569,9 @@ class AccountingService:
 
         ⚠️ تحذير: هذه العملية ستحذف جميع الحسابات القديمة!
         """
-        print("=" * 70)
-        print("🔄 [AccountingService] إعادة تعيين شجرة الحسابات إلى Enterprise Level...")
-        print("=" * 70)
+        safe_print("=" * 70)
+        safe_print("🔄 [AccountingService] إعادة تعيين شجرة الحسابات إلى Enterprise Level...")
+        safe_print("=" * 70)
 
         deleted_count = 0
         errors = []
@@ -2548,7 +2579,7 @@ class AccountingService:
         try:
             # 1. جلب جميع الحسابات الموجودة
             all_accounts = self.repo.get_all_accounts()
-            print(f"INFO: عدد الحسابات الموجودة: {len(all_accounts)}")
+            safe_print(f"INFO: عدد الحسابات الموجودة: {len(all_accounts)}")
 
             # 2. تحديد الحسابات القديمة (4 أرقام أو أقل)
             old_accounts = []
@@ -2556,7 +2587,7 @@ class AccountingService:
                 if acc.code and len(acc.code) <= 4:
                     old_accounts.append(acc)
 
-            print(f"INFO: عدد الحسابات القديمة (4 أرقام): {len(old_accounts)}")
+            safe_print(f"INFO: عدد الحسابات القديمة (4 أرقام): {len(old_accounts)}")
 
             # 3. حذف الحسابات القديمة (من الأوراق للجذور)
             # ترتيب الحسابات بحيث نحذف الأبناء أولاً
@@ -2567,19 +2598,19 @@ class AccountingService:
                     account_id = acc._mongo_id or str(acc.id) or acc.code
                     success = self.repo.delete_account_permanently(account_id)
                     if success:
-                        print(f"✅ تم حذف: {acc.code} - {acc.name}")
+                        safe_print(f"✅ تم حذف: {acc.code} - {acc.name}")
                         deleted_count += 1
                     else:
-                        print(f"⚠️ فشل حذف: {acc.code} - {acc.name}")
+                        safe_print(f"⚠️ فشل حذف: {acc.code} - {acc.name}")
                 except Exception as e:
                     error_msg = f"فشل حذف {acc.code}: {e}"
-                    print(f"❌ {error_msg}")
+                    safe_print(f"❌ {error_msg}")
                     errors.append(error_msg)
 
-            print(f"\n✅ تم حذف {deleted_count} حساب قديم")
+            safe_print(f"\n✅ تم حذف {deleted_count} حساب قديم")
 
             # 4. إنشاء الحسابات الجديدة (Enterprise Level)
-            print("\n📊 جاري إنشاء شجرة الحسابات الجديدة (Enterprise Level)...")
+            safe_print("\n📊 جاري إنشاء شجرة الحسابات الجديدة (Enterprise Level)...")
             seed_result = self.seed_default_accounts()
 
             # 5. إبطال الـ cache
@@ -2589,9 +2620,9 @@ class AccountingService:
             # 6. إرسال إشارات التحديث
             app_signals.emit_data_changed('accounts')
 
-            print("\n" + "=" * 70)
-            print("✅ [AccountingService] تم إعادة تعيين شجرة الحسابات بنجاح!")
-            print("=" * 70)
+            safe_print("\n" + "=" * 70)
+            safe_print("✅ [AccountingService] تم إعادة تعيين شجرة الحسابات بنجاح!")
+            safe_print("=" * 70)
 
             return {
                 "success": True,
@@ -2604,7 +2635,7 @@ class AccountingService:
 
         except Exception as e:
             error_msg = f"فشل إعادة تعيين شجرة الحسابات: {e}"
-            print(f"ERROR: [AccountingService] {error_msg}")
+            safe_print(f"ERROR: [AccountingService] {error_msg}")
             import traceback
             traceback.print_exc()
             return {
@@ -2647,7 +2678,7 @@ class AccountingService:
             
         Requirements: 1.2, 1.4
         """
-        print(f"INFO: [AccountingService] جلب KPIs مع الاتجاهات من {start_date} إلى {end_date}")
+        safe_print(f"INFO: [AccountingService] جلب KPIs مع الاتجاهات من {start_date} إلى {end_date}")
         
         try:
             # حساب طول الفترة لتحديد الفترة السابقة المماثلة
@@ -2685,7 +2716,7 @@ class AccountingService:
             }
             
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب KPIs مع الاتجاهات: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب KPIs مع الاتجاهات: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -2773,7 +2804,7 @@ class AccountingService:
             }
             
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل حساب KPIs للفترة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حساب KPIs للفترة: {e}")
             return {
                 "total_revenue": 0.0,
                 "total_expenses": 0.0,
@@ -2806,7 +2837,7 @@ class AccountingService:
             
         Requirements: 2.1, 2.2
         """
-        print(f"INFO: [AccountingService] جلب بيانات التدفق النقدي ({period}) من {start_date} إلى {end_date}")
+        safe_print(f"INFO: [AccountingService] جلب بيانات التدفق النقدي ({period}) من {start_date} إلى {end_date}")
         
         try:
             # جمع البيانات الخام
@@ -2851,7 +2882,7 @@ class AccountingService:
             }
             
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل جلب بيانات التدفق النقدي: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل جلب بيانات التدفق النقدي: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -2916,7 +2947,7 @@ class AccountingService:
             
         Requirements: 4.2
         """
-        print(f"INFO: [AccountingService] فلترة البيانات ({data_type}) من {start_date} إلى {end_date}")
+        safe_print(f"INFO: [AccountingService] فلترة البيانات ({data_type}) من {start_date} إلى {end_date}")
         
         result = {
             "payments": [],
@@ -2959,14 +2990,14 @@ class AccountingService:
                     if e.date and start_date <= e.date <= end_date
                 ]
             
-            print(f"INFO: [AccountingService] تم فلترة: {len(result['payments'])} دفعة، "
+            safe_print(f"INFO: [AccountingService] تم فلترة: {len(result['payments'])} دفعة، "
                   f"{len(result['expenses'])} مصروف، {len(result['projects'])} مشروع، "
                   f"{len(result['journal_entries'])} قيد")
             
             return result
             
         except Exception as e:
-            print(f"ERROR: [AccountingService] فشل فلترة البيانات: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل فلترة البيانات: {e}")
             import traceback
             traceback.print_exc()
             return result

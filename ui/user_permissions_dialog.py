@@ -1,4 +1,4 @@
-# الملف: ui/user_permissions_dialog.py
+﻿# الملف: ui/user_permissions_dialog.py
 """
 نافذة تحرير صلاحيات المستخدم المخصصة
 """
@@ -19,6 +19,16 @@ from PyQt6.QtWidgets import (
 
 from core.auth_models import PermissionManager, UserRole
 from ui.styles import BUTTON_STYLES, COLORS, get_cairo_font
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class UserPermissionsDialog(QDialog):
@@ -47,6 +57,10 @@ class UserPermissionsDialog(QDialog):
 
         self.init_ui()
         self.load_current_permissions()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
@@ -156,7 +170,6 @@ class UserPermissionsDialog(QDialog):
         tab_names = {
             'dashboard': '🏠 الصفحة الرئيسية',
             'projects': '🚀 المشاريع',
-            'quotes': '📝 عروض الأسعار',
             'expenses': '💳 المصروفات',
             'payments': '💰 الدفعات',
             'clients': '👤 العملاء',
@@ -305,7 +318,7 @@ class UserPermissionsDialog(QDialog):
             }
 
             # حفظ في قاعدة البيانات باستخدام username (أكثر أماناً)
-            print(f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}")
+            safe_print(f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}")
             success = self.repository.update_user_by_username(self.user.username, {
                 'custom_permissions': custom_permissions
             })

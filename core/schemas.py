@@ -391,13 +391,6 @@ class Payment(BaseSchema):
     account_id: str   # كود الحساب اللي استلم الفلوس (مثلاً: 1110 البنك)
     method: str | None = "Bank Transfer" # (طريقة الدفع: تحويل، كاش، ...)
 
-class QuotationStatus(str, Enum):
-    """ حالات عرض السعر """
-    DRAFT = "مسودة"
-    SENT = "مُرسل"
-    ACCEPTED = "مقبول"
-    REJECTED = "مرفوض"
-
 class SyncOperation(str, Enum):
     """ أنواع عمليات المزامنة """
     CREATE = "create"
@@ -417,34 +410,6 @@ class SyncStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
-
-class QuotationItem(BaseModel):
-    """ نموذج البند الواحد جوه عرض السعر. """
-    service_id: str
-    description: str
-    quantity: float
-    unit_price: float
-    discount_rate: float = 0.0  # نسبة الخصم على البند (%)
-    discount_amount: float = 0.0  # مبلغ الخصم على البند
-    total: float  # الإجمالي بعد الخصم
-
-class Quotation(BaseSchema):
-    """ نموذج عرض السعر. """
-    quote_number: str  # يجب أن يكون فريداً
-    client_id: str
-    project_id: str | None = None
-    issue_date: datetime
-    expiry_date: datetime
-    items: list[QuotationItem]
-    subtotal: float
-    discount_rate: float = 0.0
-    discount_amount: float = 0.0
-    tax_rate: float = 0.0
-    tax_amount: float = 0.0
-    total_amount: float
-    status: QuotationStatus = QuotationStatus.DRAFT
-    currency: CurrencyCode = CurrencyCode.EGP
-    notes: str | None = None
 
 class SyncQueueItem(BaseSchema):
     """
@@ -472,7 +437,6 @@ class NotificationType(str, Enum):
     SUCCESS = "نجاح"
     PROJECT_DUE = "موعد_استحقاق_مشروع"
     PAYMENT_RECEIVED = "دفعة_مستلمة"
-    QUOTATION_EXPIRED = "عرض_سعر_منتهي"
     SYNC_FAILED = "فشل_المزامنة"
 
 class NotificationPriority(str, Enum):

@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\logger.py
-# hypothesis_version: 6.148.3
-
-[1000, '%s', '...', 'Command failed', 'Command started', 'Command succeeded', 'Connection closed', 'Connection created', 'Connection ready', '_kwargs', '_redacted', 'authenticate', 'code', 'codeName', 'command', 'commandName', 'copydb', 'copydbgetnonce', 'copydbsaslstart', 'createUser', 'durationMS', 'errorLabels', 'failure', 'getnonce', 'hello', 'ignore', 'isMaster', 'isServerSideError', 'ismaster', 'pymongo.client', 'pymongo.command', 'pymongo.connection', 'pymongo.topology', 'reply', 'saslContinue', 'saslStart', 'serviceId', 'total_seconds', 'unicode-escape', 'updateUser']

@@ -1,4 +1,4 @@
-# الملف: ui/currency_editor_dialog.py
+﻿# الملف: ui/currency_editor_dialog.py
 """
 نافذة تعديل العملة مع جلب أسعار الصرف الحقيقية من الإنترنت
 """
@@ -23,6 +23,16 @@ from PyQt6.QtWidgets import (
 
 from ui.custom_spinbox import CustomSpinBox
 from ui.styles import BUTTON_STYLES, COLORS
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ExchangeRateFetcher(QThread):
@@ -57,7 +67,7 @@ class ExchangeRateFetcher(QThread):
                             rate = egp_rate / currency_rate
                             source = 'Open Exchange Rates API'
             except Exception as e:
-                print(f"API 1 failed: {e}")
+                safe_print(f"API 1 failed: {e}")
 
             # محاولة 2: ExchangeRate-API
             if rate is None:
@@ -72,7 +82,7 @@ class ExchangeRateFetcher(QThread):
                                 rate = egp_rate
                                 source = 'ExchangeRate-API'
                 except Exception as e:
-                    print(f"API 2 failed: {e}")
+                    safe_print(f"API 2 failed: {e}")
 
             # محاولة 3: Fixer.io style API
             if rate is None:
@@ -85,7 +95,7 @@ class ExchangeRateFetcher(QThread):
                             rate = data['egp']
                             source = 'Currency API (GitHub)'
                 except Exception as e:
-                    print(f"API 3 failed: {e}")
+                    safe_print(f"API 3 failed: {e}")
 
             # إذا نجح أي API
             if rate and rate > 0:
@@ -161,6 +171,10 @@ class CurrencyEditorDialog(QDialog):
 
         if self.is_editing:
             self.load_currency_data()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def init_ui(self):
         from PyQt6.QtWidgets import QScrollArea, QSizePolicy, QWidget

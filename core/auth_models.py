@@ -1,4 +1,4 @@
-# الملف: core/auth_models.py
+﻿# الملف: core/auth_models.py
 """
 نماذج المصادقة والمستخدمين
 """
@@ -9,6 +9,16 @@ from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class UserRole(Enum):
@@ -69,7 +79,7 @@ class AuthService:
 
             if users_count == 0:
                 # إنشاء مستخدم مدير افتراضي
-                print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
+                safe_print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
                 success = self.create_user(
                     username="admin",
                     password="admin123",
@@ -77,15 +87,15 @@ class AuthService:
                     full_name="مدير النظام"
                 )
                 if success:
-                    print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي (admin / admin123)")
-                    print("WARNING: [AuthService] ⚠️ يرجى تغيير كلمة المرور الافتراضية فوراً!")
+                    safe_print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي (admin / admin123)")
+                    safe_print("WARNING: [AuthService] ⚠️ يرجى تغيير كلمة المرور الافتراضية فوراً!")
                 else:
-                    print("ERROR: [AuthService] فشل إنشاء المستخدم الافتراضي")
+                    safe_print("ERROR: [AuthService] فشل إنشاء المستخدم الافتراضي")
             else:
-                print(f"INFO: [AuthService] يوجد {users_count} مستخدم في النظام")
+                safe_print(f"INFO: [AuthService] يوجد {users_count} مستخدم في النظام")
 
         except Exception as e:
-            print(f"WARNING: [AuthService] فشل فحص المستخدمين: {e}")
+            safe_print(f"WARNING: [AuthService] فشل فحص المستخدمين: {e}")
 
     @staticmethod
     def hash_password(password: str) -> str:
@@ -120,12 +130,12 @@ class AuthService:
                 user.last_login = datetime.now().isoformat()
                 self.repo.update_user(user.id or user._mongo_id, {"last_login": user.last_login})
                 role_display = user.role.value if hasattr(user.role, 'value') else str(user.role)
-                print(f"INFO: [AuthService] تم تسجيل دخول المستخدم: {username} ({role_display})")
+                safe_print(f"INFO: [AuthService] تم تسجيل دخول المستخدم: {username} ({role_display})")
                 result: User | None = user
                 return result
             return None
         except Exception as e:
-            print(f"ERROR: [AuthService] فشل المصادقة: {e}")
+            safe_print(f"ERROR: [AuthService] فشل المصادقة: {e}")
             return None
 
     def create_user(self, username: str, password: str, role: UserRole, full_name: str | None = None) -> bool:
@@ -144,10 +154,10 @@ class AuthService:
             )
 
             self.repo.create_user(user)
-            print(f"INFO: [AuthService] تم إنشاء مستخدم جديد: {username}")
+            safe_print(f"INFO: [AuthService] تم إنشاء مستخدم جديد: {username}")
             return True
         except Exception as e:
-            print(f"ERROR: [AuthService] فشل إنشاء المستخدم: {e}")
+            safe_print(f"ERROR: [AuthService] فشل إنشاء المستخدم: {e}")
             return False
 
 

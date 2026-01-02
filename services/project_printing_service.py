@@ -1,4 +1,4 @@
-# الملف: services/project_printing_service.py
+﻿# الملف: services/project_printing_service.py
 """
 خدمة طباعة المشاريع مع خلفية مخصصة
 يدعم النصوص العربية والتصميم الاحترافي مع خلفية الفاتورة
@@ -25,11 +25,21 @@ try:
 
     PDF_AVAILABLE = True
 except ImportError as e:
-    print(f"WARNING: [ProjectPrintingService] PDF libraries not available: {e}")
+    safe_print(f"WARNING: [ProjectPrintingService] PDF libraries not available: {e}")
     PDF_AVAILABLE = False
 
 from core import schemas
 from core.resource_utils import get_resource_path
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ProjectInvoiceGenerator:
@@ -71,7 +81,7 @@ class ProjectInvoiceGenerator:
             reshaped_text = arabic_reshaper.reshape(str(text))
             return str(get_display(reshaped_text))
         except Exception as e:
-            print(f"WARNING: [ProjectInvoiceGenerator] Arabic text fix failed: {e}")
+            safe_print(f"WARNING: [ProjectInvoiceGenerator] Arabic text fix failed: {e}")
             return str(text)
 
     def generate_project_number(self, project_id: str) -> str:
@@ -133,7 +143,7 @@ class ProjectInvoiceGenerator:
         # حفظ المستند
         c.save()
 
-        print(f"INFO: [ProjectInvoiceGenerator] Project invoice PDF created: {output_path}")
+        safe_print(f"INFO: [ProjectInvoiceGenerator] Project invoice PDF created: {output_path}")
         return output_path
 
     def _add_background_image(self, canvas_obj, image_path: str, width: float, height: float):
@@ -157,14 +167,14 @@ class ProjectInvoiceGenerator:
 
                 # إضافة للـ PDF
                 canvas_obj.drawImage(ImageReader(img_buffer), 0, 0, width, height)
-                print("✅ تم إضافة صورة الخلفية بنجاح")
+                safe_print("✅ تم إضافة صورة الخلفية بنجاح")
             else:
-                print(f"⚠️ لم يتم العثور على صورة الخلفية: {image_path}")
+                safe_print(f"⚠️ لم يتم العثور على صورة الخلفية: {image_path}")
                 # إضافة خلفية بيضاء بسيطة
                 canvas_obj.setFillColor(colors.white)
                 canvas_obj.rect(0, 0, width, height, fill=1)
         except Exception as e:
-            print(f"ERROR: فشل في إضافة صورة الخلفية: {e}")
+            safe_print(f"ERROR: فشل في إضافة صورة الخلفية: {e}")
             # إضافة خلفية بيضاء في حالة الفشل
             canvas_obj.setFillColor(colors.white)
             canvas_obj.rect(0, 0, width, height, fill=1)
@@ -399,10 +409,10 @@ class ProjectPrintingService:
 
         if PDF_AVAILABLE:
             self.invoice_generator = ProjectInvoiceGenerator(settings_service)
-            print("INFO: [ProjectPrintingService] Project printing service initialized")
+            safe_print("INFO: [ProjectPrintingService] Project printing service initialized")
         else:
             self.invoice_generator = None
-            print("WARNING: [ProjectPrintingService] PDF libraries not available")
+            safe_print("WARNING: [ProjectPrintingService] PDF libraries not available")
 
     def is_available(self) -> bool:
         """التحقق من توفر خدمة الطباعة"""
@@ -418,7 +428,7 @@ class ProjectPrintingService:
     ) -> str | None:
         """طباعة فاتورة مشروع مع خلفية مخصصة"""
         if not self.is_available():
-            print("ERROR: [ProjectPrintingService] PDF libraries not installed")
+            safe_print("ERROR: [ProjectPrintingService] PDF libraries not installed")
             return None
 
         try:
@@ -431,7 +441,7 @@ class ProjectPrintingService:
 
             return str(pdf_path) if pdf_path else None
         except Exception as e:
-            print(f"ERROR: [ProjectPrintingService] Failed to print project invoice: {e}")
+            safe_print(f"ERROR: [ProjectPrintingService] Failed to print project invoice: {e}")
             return None
 
     @staticmethod
@@ -448,9 +458,9 @@ class ProjectPrintingService:
             else:  # Linux
                 subprocess.run(['xdg-open', file_path])
 
-            print(f"INFO: [ProjectPrintingService] Opened PDF: {file_path}")
+            safe_print(f"INFO: [ProjectPrintingService] Opened PDF: {file_path}")
         except Exception as e:
-            print(f"ERROR: [ProjectPrintingService] Failed to open PDF: {e}")
+            safe_print(f"ERROR: [ProjectPrintingService] Failed to open PDF: {e}")
 
 
 # الكلاس القديم للتوافق مع الكود الموجود
@@ -476,9 +486,9 @@ class ProjectPrinter:
             from reportlab.pdfbase.ttfonts import TTFont
             pdfmetrics.registerFont(TTFont('CairoFont', font_path))
             self.font_name = 'CairoFont'
-            print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {font_path}")
+            safe_print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {font_path}")
         except (FileNotFoundError, OSError, RuntimeError) as e:
-            print(f"⚠️ لم يتم العثور على خط Cairo: {e}")
+            safe_print(f"⚠️ لم يتم العثور على خط Cairo: {e}")
             self.font_name = 'Helvetica'
 
     def fix_text(self, text):
@@ -503,7 +513,7 @@ class ProjectPrinter:
         if os.path.exists(background_image_path):
             c.drawImage(background_image_path, 0, 0, width=self.width, height=self.height)
         else:
-            print("❌ صورة الخلفية غير موجودة!")
+            safe_print("❌ صورة الخلفية غير موجودة!")
 
         # إعدادات الخط
         c.setFont(self.font_name, 14)
@@ -537,7 +547,7 @@ class ProjectPrinter:
         c.drawRightString(200, 150, self.fix_text(f"الإجمالي: {data.get('total_amount', 0):,.2f} ج.م"))
 
         c.save()
-        print(f"✅ تم إنشاء ملف المشروع: {self.output_path}")
+        safe_print(f"✅ تم إنشاء ملف المشروع: {self.output_path}")
 
         # فتح الملف تلقائياً
         try:

@@ -58,73 +58,21 @@ def get_all_projects():
 
 ---
 
-## 4. نظام التحميل الكسول (core/lazy_tab_loader.py)
-
-### الفوائد:
-- تأخير تحميل التابات حتى فتحها
-- تسريع بدء التشغيل بشكل كبير
-- تقليل استهلاك الذاكرة
-
-### الاستخدام:
-```python
-loader = LazyTabLoader(tab_widget)
-loader.register_tab("المشاريع", lambda: ProjectManagerTab(...))
-```
-
----
-
-## 5. محسّن الواجهة (core/ui_optimizer.py)
-
-### المكونات:
-- **DebouncedSignal**: للبحث (تأخير 300ms)
-- **ThrottledSignal**: تحديد معدل الاستدعاء
-- **ProgressiveLoader**: تحميل تدريجي للبيانات الكبيرة
-- **batch_table_update**: تحديث الجداول على دفعات
-
----
-
-## 6. تحسينات الـ Services
+## 4. تحسينات الـ Services
 
 ### الخدمات المحسّنة:
 - **ProjectService**: Cache مع TTL 30 ثانية
 - **ClientService**: Cache مع TTL 30 ثانية
 - **ExpenseService**: Cache مع invalidation تلقائي
-- **QuotationService**: Cache مع TTL 30 ثانية
 
 ---
 
-## 7. أدوات الصيانة
+## 5. نظام تحميل البيانات (core/data_loader.py)
 
-### scripts/cleanup_project.py
-- البحث عن المجلدات الفارغة
-- تنظيف ملفات الـ cache
-- تحسين قاعدة البيانات
-
-### scripts/benchmark.py
-- قياس سرعة الاستيراد
-- قياس أداء قاعدة البيانات
-- قياس أداء الـ Cache
-- قياس استخدام الذاكرة
-
----
-
-## كيفية الاستخدام
-
-### تشغيل أداة التنظيف:
-```bash
-python scripts/cleanup_project.py
-```
-
-### تشغيل أداة قياس الأداء:
-```bash
-python scripts/benchmark.py
-```
-
-### إبطال كل الـ Caches:
-```python
-from core.optimizations import invalidate_all_caches
-invalidate_all_caches()
-```
+### الفوائد:
+- تحميل البيانات في الخلفية
+- تسريع استجابة الواجهة
+- تقليل التجميد أثناء التحميل
 
 ---
 

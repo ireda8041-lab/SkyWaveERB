@@ -1,4 +1,4 @@
-from typing import List, Optional
+﻿from typing import List, Optional
 from datetime import datetime, timedelta
 import os
 from functools import partial
@@ -32,8 +32,27 @@ from services.client_service import ClientService
 from services.project_service import ProjectService
 from services.service_service import ServiceService
 from services.accounting_service import AccountingService
-from ui.styles import BUTTON_STYLES, TABLE_STYLE, GROUPBOX_STYLE, COLORS, TABLE_STYLE_DARK, create_centered_item
+from ui.styles import BUTTON_STYLES, TABLE_STYLE, GROUPBOX_STYLE, COLORS, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 from ui.smart_combobox import SmartFilterComboBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
+# استيراد نظام الإشعارات
+try:
+    from ui.notification_system import notify_success, notify_error, notify_warning, notify_info
+except ImportError:
+    def notify_success(msg, title=None): pass
+    def notify_error(msg, title=None): pass
+    def notify_warning(msg, title=None): pass
+    def notify_info(msg, title=None): pass
 
 
 class ProjectItemDialog(QDialog):
@@ -45,6 +64,11 @@ class ProjectItemDialog(QDialog):
         self.selected_item: Optional[schemas.ProjectItem] = None
         self.setWindowTitle("إضافة بند جديد")
         self.setMinimumWidth(350)
+        self.setMinimumHeight(250)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -156,6 +180,10 @@ class ProjectEditorDialog(QDialog):
         
         self.setMinimumWidth(750)
         self.setMinimumHeight(500)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -394,7 +422,7 @@ class ProjectEditorDialog(QDialog):
             except Exception:
                 pass
         self.total_label = QLabel("0.00 ج.م")
-        self.total_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.total_label.setFont(get_cairo_font(12, bold=True))
         self.total_label.setStyleSheet("color: #0A6CF1;")
         self.discount_rate_input.valueChanged.connect(self.update_totals)
         self.tax_rate_input.valueChanged.connect(self.update_totals)
@@ -607,10 +635,10 @@ class ProjectEditorDialog(QDialog):
                     account_data = self.payment_account_combo.itemData(i)
                     if account_data and account_data.code == default_treasury_code:
                         self.payment_account_combo.setCurrentIndex(i)
-                        print(f"INFO: [ProjectDialog] Auto-selected default treasury: {account_data.name} ({default_treasury_code})")
+                        safe_print(f"INFO: [ProjectDialog] Auto-selected default treasury: {account_data.name} ({default_treasury_code})")
                         break
         except Exception as e:
-            print(f"WARNING: [ProjectDialog] Failed to auto-select default treasury: {e}")
+            safe_print(f"WARNING: [ProjectDialog] Failed to auto-select default treasury: {e}")
 
     def load_project_data(self):
         self.name_input.setText(self.project_to_edit.name)
@@ -703,7 +731,7 @@ class ProjectEditorDialog(QDialog):
             self._rebuild_items_table()
             self.update_totals()
         except Exception as e:
-            print(f"ERROR: [ProjectEditor] فشل حذف البند: {e}")
+            safe_print(f"ERROR: [ProjectEditor] فشل حذف البند: {e}")
 
     def _rebuild_items_table(self):
         # فصل الإشارة مؤقتاً لتجنب التكرار
@@ -789,7 +817,7 @@ class ProjectEditorDialog(QDialog):
             self.project_items[row].quantity = value
             self._recalculate_item_total(row)
         except Exception as e:
-            print(f"ERROR: [ProjectEditor] on_quantity_changed: {e}")
+            safe_print(f"ERROR: [ProjectEditor] on_quantity_changed: {e}")
     
     def on_price_changed(self, row: int, value: float):
         """تحديث السعر وإعادة حساب الإجمالي"""
@@ -797,7 +825,7 @@ class ProjectEditorDialog(QDialog):
             self.project_items[row].unit_price = value
             self._recalculate_item_total(row)
         except Exception as e:
-            print(f"ERROR: [ProjectEditor] on_price_changed: {e}")
+            safe_print(f"ERROR: [ProjectEditor] on_price_changed: {e}")
     
     def on_discount_changed(self, row: int, value: float):
         """تحديث الخصم وإعادة حساب الإجمالي"""
@@ -805,7 +833,7 @@ class ProjectEditorDialog(QDialog):
             self.project_items[row].discount_rate = value
             self._recalculate_item_total(row)
         except Exception as e:
-            print(f"ERROR: [ProjectEditor] on_discount_changed: {e}")
+            safe_print(f"ERROR: [ProjectEditor] on_discount_changed: {e}")
     
     def on_item_changed_simple(self, row: int, column: int):
         """دالة بسيطة للتعامل مع تغيير الخلايا"""
@@ -866,7 +894,7 @@ class ProjectEditorDialog(QDialog):
             self.update_totals()
             
         except Exception as e:
-            print(f"ERROR: خطأ في تحديث البند: {e}")
+            safe_print(f"ERROR: خطأ في تحديث البند: {e}")
     
     def _recalculate_item_total(self, row: int):
         """إعادة حساب إجمالي البند"""
@@ -1177,14 +1205,12 @@ class ProjectEditorDialog(QDialog):
         try:
             if self.is_editing:
                 self.project_service.update_project(self.project_to_edit.name, project_data)
-                QMessageBox.information(self, "تم", "تم حفظ التعديلات بنجاح.")
             else:
                 self.project_service.create_project(project_data, payment_data)
-                QMessageBox.information(self, "تم", "تم إضافة المشروع والدفعة المقدمة (إن وجدت) بنجاح.")
 
             self.accept()
         except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}\n\n(تلميح: قد يكون اسم المشروع مكرر)")
+            notify_error(f"فشل الحفظ: {e}", "خطأ")
 
 
 class ProjectManagerTab(QWidget):
@@ -1278,6 +1304,13 @@ class ProjectManagerTab(QWidget):
         self.print_button.clicked.connect(self.print_invoice)
         self.print_button.setEnabled(False)
 
+        # 🗑️ زرار حذف المشروع
+        self.delete_button = QPushButton("🗑️ حذف")
+        self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
+        self.delete_button.setFixedHeight(28)
+        self.delete_button.clicked.connect(self.delete_selected_project)
+        self.delete_button.setEnabled(False)
+
         # أزرار قوالب الفواتير
         self.preview_template_button = QPushButton("👁️ معاينة الفاتورة")
         self.preview_template_button.setStyleSheet(BUTTON_STYLES["info"])
@@ -1297,6 +1330,7 @@ class ProjectManagerTab(QWidget):
         # إضافة الأزرار للـ toolbar المتجاوب
         self.toolbar.addButton(self.add_button)
         self.toolbar.addButton(self.edit_button)
+        self.toolbar.addButton(self.delete_button)
         self.toolbar.addButton(self.payment_button)
         self.toolbar.addButton(self.profit_button)
         self.toolbar.addButton(self.print_button)
@@ -1437,9 +1471,13 @@ class ProjectManagerTab(QWidget):
         preview_scroll.setWidget(self.preview_groupbox)
         self.main_splitter.addWidget(preview_scroll)
         
-        # تعيين النسب الافتراضية للـ splitter (70% للجدول، 30% للمعاينة)
-        self.main_splitter.setStretchFactor(0, 7)
-        self.main_splitter.setStretchFactor(1, 3)
+        # تعيين النسب الافتراضية للـ splitter (80% للجدول، 20% للمعاينة)
+        self.main_splitter.setStretchFactor(0, 8)
+        self.main_splitter.setStretchFactor(1, 2)
+        
+        # تعيين الحد الأدنى للعرض
+        preview_scroll.setMinimumWidth(200)
+        preview_scroll.setMaximumWidth(350)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_projects_data() - يتم استدعاؤها من MainWindow
@@ -1486,7 +1524,7 @@ class ProjectManagerTab(QWidget):
                 elif "المتبقي" in obj_name:
                     card.setStyleSheet("QFrame { background-color: #10b981; border-radius: 6px; }")
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل تحديث الكارت: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل تحديث الكارت: {e}")
 
     def _create_preview_section(self, title: str, headers: list, resize_modes: list, show_add_btn: bool = False) -> dict:
         """إنشاء قسم معاينة بسيط مع جدول"""
@@ -1734,6 +1772,7 @@ class ProjectManagerTab(QWidget):
                 return
                 
             self.edit_button.setEnabled(True)
+            self.delete_button.setEnabled(True)
             self.profit_button.setEnabled(True)
             self.payment_button.setEnabled(True)
             self.print_button.setEnabled(True)
@@ -1750,6 +1789,7 @@ class ProjectManagerTab(QWidget):
 
         self.selected_project = None
         self.edit_button.setEnabled(False)
+        self.delete_button.setEnabled(False)
         self.profit_button.setEnabled(False)
         self.payment_button.setEnabled(False)
         self.print_button.setEnabled(False)
@@ -1856,7 +1896,7 @@ class ProjectManagerTab(QWidget):
                             else:
                                 account_name = str(pay.account_id)
                     except Exception as acc_err:
-                        print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
+                        safe_print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
                         account_name = str(pay.account_id)
                     
                     # ترتيب الأعمدة: [الحساب, المبلغ, التاريخ]
@@ -1872,7 +1912,7 @@ class ProjectManagerTab(QWidget):
                 self.preview_payments_table.setSpan(0, 0, 1, 3)
                 
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل ملء جدول الدفعات: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل ملء جدول الدفعات: {e}")
 
     def _populate_expenses_table(self, expenses):
         """⚡ ملء جدول المصروفات"""
@@ -1904,7 +1944,7 @@ class ProjectManagerTab(QWidget):
                 self.preview_expenses_table.setSpan(0, 0, 1, 3)
                 
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
 
     def _populate_tasks_table(self, tasks):
         """⚡ ملء جدول المهام"""
@@ -1951,11 +1991,11 @@ class ProjectManagerTab(QWidget):
                 self.preview_tasks_table.setSpan(0, 0, 1, 4)
                 
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل ملء جدول المهام: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المهام: {e}")
 
     def load_projects_data(self):
         """⚡ تحميل بيانات المشاريع في الخلفية لمنع التجميد"""
-        print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
+        safe_print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
         
         from core.data_loader import get_data_loader
         from PyQt6.QtWidgets import QApplication
@@ -1975,7 +2015,7 @@ class ProjectManagerTab(QWidget):
                 else:
                     return self.project_service.get_all_projects()
             except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل جلب المشاريع: {e}")
+                safe_print(f"ERROR: [ProjectManager] فشل جلب المشاريع: {e}")
                 return []
         
         # دالة تحديث الواجهة (تعمل على main thread)
@@ -2017,10 +2057,10 @@ class ProjectManagerTab(QWidget):
                 QApplication.processEvents()
                 
                 self.on_project_selection_changed()
-                print(f"INFO: [ProjectManager] ✅ تم تحميل {len(projects)} مشروع")
+                safe_print(f"INFO: [ProjectManager] ✅ تم تحميل {len(projects)} مشروع")
                 
             except Exception as e:
-                print(f"ERROR: [ProjectManager] فشل تحديث الجدول: {e}")
+                safe_print(f"ERROR: [ProjectManager] فشل تحديث الجدول: {e}")
                 import traceback
                 traceback.print_exc()
                 # إعادة تفعيل الجدول حتى في حالة الخطأ
@@ -2029,7 +2069,7 @@ class ProjectManagerTab(QWidget):
                 self.projects_table.setSortingEnabled(True)
         
         def on_error(error_msg):
-            print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {error_msg}")
+            safe_print(f"ERROR: [ProjectManager] فشل تحميل المشاريع: {error_msg}")
             self.projects_table.blockSignals(False)
             self.projects_table.setUpdatesEnabled(True)
             self.projects_table.setSortingEnabled(True)
@@ -2046,7 +2086,7 @@ class ProjectManagerTab(QWidget):
 
     def _on_projects_changed(self):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
-        print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
+        safe_print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
         self.load_projects_data()
 
     def _load_project_tasks(self, project_id: str):
@@ -2057,7 +2097,7 @@ class ProjectManagerTab(QWidget):
             tasks = task_service.get_tasks_by_project(str(project_id))
             self._populate_tasks_table(tasks)
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل تحميل المهام: {e}")
             self.preview_tasks_table.setRowCount(0)
             self.preview_tasks_table.insertRow(0)
             no_data_item = QTableWidgetItem("فشل تحميل المهام")
@@ -2096,10 +2136,10 @@ class ProjectManagerTab(QWidget):
                     task_service.add_task(task)
                     # تحديث جدول المهام
                     self._load_project_tasks(str(project_id))
-                    print(f"INFO: [ProjectManager] تم إضافة مهمة للمشروع: {task.title}")
+                    safe_print(f"INFO: [ProjectManager] تم إضافة مهمة للمشروع: {task.title}")
                     
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل إضافة مهمة: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل إضافة مهمة: {e}")
             QMessageBox.warning(self, "خطأ", f"فشل إضافة المهمة: {str(e)}")
 
     def _format_date(self, value) -> str:
@@ -2138,13 +2178,50 @@ class ProjectManagerTab(QWidget):
             return
         self.open_editor(self.selected_project)
 
+    def delete_selected_project(self):
+        """🗑️ حذف المشروع المحدد"""
+        if not self.selected_project:
+            QMessageBox.information(self, "تنبيه", "الرجاء اختيار مشروع أولاً")
+            return
+        
+        project_name = self.selected_project.name
+        
+        # تأكيد الحذف
+        reply = QMessageBox.warning(
+            self,
+            "تأكيد الحذف",
+            f"هل أنت متأكد من حذف المشروع:\n\n{project_name}\n\n⚠️ سيتم حذف جميع البيانات المرتبطة بالمشروع!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # حذف المشروع باستخدام الاسم مباشرة
+            safe_print(f"INFO: [ProjectManager] جاري حذف المشروع: {project_name}")
+            success = self.project_service.delete_project(project_name)
+            
+            if success:
+                self.selected_project = None
+                self.load_projects_data()
+            else:
+                notify_error("فشل حذف المشروع", "خطأ")
+                
+        except Exception as e:
+            safe_print(f"ERROR: [ProjectManager] فشل حذف المشروع: {e}")
+            import traceback
+            traceback.print_exc()
+            notify_error(f"فشل حذف المشروع: {e}", "خطأ")
+
     def open_payment_dialog(self):
         """فتح نافذة تسجيل دفعة جديدة للمشروع المحدد"""
         if not self.selected_project:
             QMessageBox.warning(self, "تنبيه", "يرجى تحديد مشروع أولاً.")
             return
 
-        print(f"INFO: [ProjectManager] فتح شاشة تسجيل دفعة لـ: {self.selected_project.name}")
+        safe_print(f"INFO: [ProjectManager] فتح شاشة تسجيل دفعة لـ: {self.selected_project.name}")
 
         from ui.payment_dialog import PaymentDialog
 
@@ -2174,7 +2251,7 @@ class ProjectManagerTab(QWidget):
         )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            print("INFO: [ProjectManager] تم تسجيل الدفعة بنجاح. جاري تحديث البيانات...")
+            safe_print("INFO: [ProjectManager] تم تسجيل الدفعة بنجاح. جاري تحديث البيانات...")
             self.on_project_selection_changed()  # تحديث لوحة المعاينة
 
     def open_profit_dialog(self):
@@ -2185,7 +2262,7 @@ class ProjectManagerTab(QWidget):
             QMessageBox.warning(self, "خطأ", "يرجى تحديد مشروع أولاً.")
             return
 
-        print(f"INFO: [ProjectManager] فتح تقرير ربحية المشروع: {self.selected_project.name}")
+        safe_print(f"INFO: [ProjectManager] فتح تقرير ربحية المشروع: {self.selected_project.name}")
 
         from ui.project_profit_dialog import ProjectProfitDialog
 
@@ -2213,7 +2290,7 @@ class ProjectManagerTab(QWidget):
             
             # جلب الدفعات
             payments_list = self._get_payments_list(project.name)
-            print(f"INFO: [ProjectManager] الدفعات المرسلة للطباعة: {payments_list}")
+            safe_print(f"INFO: [ProjectManager] الدفعات المرسلة للطباعة: {payments_list}")
             
             # تجهيز معلومات العميل
             client_info = {
@@ -2226,7 +2303,7 @@ class ProjectManagerTab(QWidget):
             
             # ⚡ استخدام template_service
             if self.template_service:
-                print("INFO: [ProjectManager] استخدام template_service للطباعة")
+                safe_print("INFO: [ProjectManager] استخدام template_service للطباعة")
                 
                 success = self.template_service.preview_template(
                     project=project,
@@ -2375,7 +2452,7 @@ class ProjectManagerTab(QWidget):
                 })
             
         except Exception as e:
-            print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
+            safe_print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
         
         return payments_list
 
@@ -2396,7 +2473,7 @@ class ProjectManagerTab(QWidget):
             
             # جلب الدفعات
             payments_list = self._get_payments_list(project.name)
-            print(f"INFO: [ProjectManager] الدفعات المرسلة للقالب: {payments_list}")
+            safe_print(f"INFO: [ProjectManager] الدفعات المرسلة للقالب: {payments_list}")
             
             # تجهيز معلومات العميل
             client_info = {
@@ -2431,5 +2508,3 @@ class ProjectManagerTab(QWidget):
             QMessageBox.critical(self, "خطأ", f"فشل في معاينة الفاتورة:\n{str(e)}")
             import traceback
             traceback.print_exc()
-
-    # WhatsApp function removed - feature disabled

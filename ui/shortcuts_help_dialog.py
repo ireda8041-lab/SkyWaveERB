@@ -26,6 +26,10 @@ class ShortcutsHelpDialog(QDialog):
         super().__init__(parent)
         self.shortcuts_manager = shortcuts_manager
         self._setup_ui()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def _setup_ui(self):
         """إعداد الواجهة"""

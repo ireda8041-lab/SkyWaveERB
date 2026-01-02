@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pytest_html\basereport.py
-# hypothesis_version: 6.148.3
-
-[1000, 3600, 9619, '%H:%M:%S', '%d-%b-%Y', '-', '<td.*?>(.*?)</td>', 'Error', 'XFailed', 'XPassed', '[^\\w.]', '_', 'call', 'col-(\\w+)', 'col=', 'collect', 'content', 'data-column-type=', 'duration_formatter', 'environment', 'extension', 'extras', 'failed', 'finished', 'format_type', 'json', 'log', 'mime_type', 'passed', 'postfix', 'prefix', 'py.', 'rerun', 'resultsTableRow', 'setup', 'skipped', 'sortable', 'started', 'summary', 'teardown', 'text', 'unicode_escape', 'url', 'utf-8', 'value', 'w', 'wasxfail', 'xfailed', 'xpassed', '{} ms', '{}_{}_{}.{}']

@@ -1,4 +1,4 @@
-# الملف: core/data_loader.py
+﻿# الملف: core/data_loader.py
 """
 ⚡ نظام تحميل البيانات في الخلفية (Background Data Loader)
 يمنع تجميد الواجهة أثناء تحميل البيانات من قاعدة البيانات
@@ -9,6 +9,16 @@ from collections.abc import Callable
 from enum import IntEnum
 
 from PyQt6.QtCore import QObject, QRunnable, QThread, QThreadPool, pyqtSignal
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class LoadPriority(IntEnum):
@@ -50,7 +60,7 @@ class DataLoaderWorker(QThread):
         except Exception as e:
             if not self._is_cancelled:
                 self.error.emit(str(e))
-                print(f"ERROR: [DataLoader] فشل التحميل: {e}")
+                safe_print(f"ERROR: [DataLoader] فشل التحميل: {e}")
 
     def cancel(self):
         """إلغاء التحميل"""
@@ -82,7 +92,7 @@ class DataLoaderRunnable(QRunnable):
             self.signals.finished.emit(result)
         except Exception as e:
             self.signals.error.emit(str(e))
-            print(f"ERROR: [DataLoaderRunnable] فشل التحميل: {e}")
+            safe_print(f"ERROR: [DataLoaderRunnable] فشل التحميل: {e}")
 
 
 class BackgroundDataLoader(QObject):
@@ -130,7 +140,7 @@ class BackgroundDataLoader(QObject):
             on_error: callback عند الفشل
             use_thread_pool: استخدام ThreadPool (أسرع) أو QThread (أكثر تحكم)
         """
-        print(f"INFO: [DataLoader] ⚡ بدء تحميل: {operation_name}")
+        safe_print(f"INFO: [DataLoader] ⚡ بدء تحميل: {operation_name}")
         self.loading_started.emit(operation_name)
 
         # إلغاء أي عملية سابقة بنفس الاسم
@@ -141,13 +151,13 @@ class BackgroundDataLoader(QObject):
             runnable = DataLoaderRunnable(load_function, *args, **kwargs)
 
             def handle_success(data):
-                print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
+                safe_print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
                 self.loading_finished.emit(operation_name, data)
                 if on_success:
                     on_success(data)
 
             def handle_error(error_msg):
-                print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
+                safe_print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
                 self.loading_error.emit(operation_name, error_msg)
                 if on_error:
                     on_error(error_msg)
@@ -162,7 +172,7 @@ class BackgroundDataLoader(QObject):
             worker = DataLoaderWorker(load_function, *args, **kwargs)
 
             def handle_success(data):
-                print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
+                safe_print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
                 self.loading_finished.emit(operation_name, data)
                 if on_success:
                     on_success(data)
@@ -171,7 +181,7 @@ class BackgroundDataLoader(QObject):
                     del self._active_workers[operation_name]
 
             def handle_error(error_msg):
-                print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
+                safe_print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
                 self.loading_error.emit(operation_name, error_msg)
                 if on_error:
                     on_error(error_msg)
@@ -193,7 +203,7 @@ class BackgroundDataLoader(QObject):
             worker.quit()
             worker.wait(1000)  # انتظار ثانية كحد أقصى
             del self._active_workers[operation_name]
-            print(f"INFO: [DataLoader] تم إلغاء: {operation_name}")
+            safe_print(f"INFO: [DataLoader] تم إلغاء: {operation_name}")
 
     def cancel_all(self):
         """إلغاء كل العمليات"""

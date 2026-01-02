@@ -55,7 +55,6 @@ class NotificationService:
         self.event_bus.subscribe("PROJECT_CREATED", self._on_project_created)
         self.event_bus.subscribe("INVOICE_CREATED", self._on_invoice_created)
         self.event_bus.subscribe("EXPENSE_CREATED", self._on_expense_created)
-        self.event_bus.subscribe("QUOTATION_CREATED", self._on_quotation_created)
 
         logger.debug("تم الاشتراك في أحداث الإشعارات")
 
@@ -596,22 +595,6 @@ class NotificationService:
                 )
         except Exception as e:
             logger.error(f"فشل إنشاء إشعار المصروف: {e}")
-
-    def _on_quotation_created(self, data: dict):
-        """معالج حدث إنشاء عرض سعر جديد"""
-        try:
-            quotation = data.get('quotation')
-            if quotation:
-                self.create_notification(
-                    title="📋 عرض سعر جديد",
-                    message=f"تم إنشاء عرض السعر: {quotation.quote_number}",
-                    type=NotificationType.INFO,
-                    priority=NotificationPriority.LOW,
-                    related_entity_type="quotation",
-                    related_entity_id=quotation.quote_number
-                )
-        except Exception as e:
-            logger.error(f"فشل إنشاء إشعار عرض السعر: {e}")
 
     def check_project_due_dates(self):
         """

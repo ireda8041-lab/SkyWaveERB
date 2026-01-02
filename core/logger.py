@@ -1,10 +1,20 @@
-# الملف: core/logger.py
+﻿# الملف: core/logger.py
 # نظام التسجيل (Logging) المركزي
 
 import logging
 import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class LoggerSetup:
@@ -73,7 +83,10 @@ class LoggerSetup:
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
 
-            print(f"✅ تم إعداد التسجيل في الملف: {log_file_path}")
+            try:
+                safe_print(f"[OK] تم إعداد التسجيل في الملف: {log_file_path}")
+            except UnicodeEncodeError:
+                pass  # تجاهل خطأ الترميز في الكونسول
 
         # 2. Console Handler (التسجيل في الكونسول)
         if log_to_console:
@@ -82,7 +95,10 @@ class LoggerSetup:
             console_handler.setFormatter(formatter)
             logger.addHandler(console_handler)
 
-            print("✅ تم إعداد التسجيل في الكونسول")
+            try:
+                safe_print("[OK] تم إعداد التسجيل في الكونسول")
+            except UnicodeEncodeError:
+                pass  # تجاهل خطأ الترميز في الكونسول
 
         # تسجيل رسالة البداية
         logger.info("="*80)
@@ -237,7 +253,7 @@ def critical(message: str, context: str | None = None):
 
 # --- اختبار ---
 if __name__ == "__main__":
-    print("--- اختبار نظام التسجيل ---\n")
+    safe_print("--- اختبار نظام التسجيل ---\n")
 
     # إعداد Logger
     logger = LoggerSetup.setup_logger()
@@ -259,17 +275,17 @@ if __name__ == "__main__":
         return x + y
 
     result = test_function(5, 3)
-    print(f"\nنتيجة الدالة: {result}")
+    safe_print(f"\nنتيجة الدالة: {result}")
 
     # اختبار إنشاء session log
     session_file = LoggerSetup.create_session_log()
-    print(f"\nتم إنشاء ملف الجلسة: {session_file}")
+    safe_print(f"\nتم إنشاء ملف الجلسة: {session_file}")
 
     # اختبار تنظيف الملفات القديمة
     LoggerSetup.cleanup_old_logs(days=30)
 
-    print("\n--- انتهى الاختبار ---")
-    print(f"تحقق من مجلد '{LoggerSetup.LOG_DIR}' لرؤية ملفات الـ log")
+    safe_print("\n--- انتهى الاختبار ---")
+    safe_print(f"تحقق من مجلد '{LoggerSetup.LOG_DIR}' لرؤية ملفات الـ log")
 
 
 # دالة مساعدة للحصول على Logger بسهولة

@@ -1,4 +1,4 @@
-# الملف: core/unified_sync.py
+﻿# الملف: core/unified_sync.py
 """
 🔄 نظام المزامنة الموحد - MongoDB First
 MongoDB هو المصدر الرئيسي، SQLite نسخة محلية للـ offline فقط
@@ -14,9 +14,19 @@ import threading
 from datetime import datetime
 from typing import Any
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from core.logger import get_logger
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 logger = get_logger(__name__)
 
@@ -24,6 +34,7 @@ logger = get_logger(__name__)
 class UnifiedSyncManagerV3(QObject):
     """
     مدير المزامنة الموحد - MongoDB First Architecture
+    مع نظام مزامنة تلقائية احترافي
     """
 
     # الإشارات
@@ -31,12 +42,13 @@ class UnifiedSyncManagerV3(QObject):
     sync_progress = pyqtSignal(str, int, int)  # table, current, total
     sync_completed = pyqtSignal(dict)
     sync_error = pyqtSignal(str)
+    connection_changed = pyqtSignal(bool)  # online/offline
 
     # الجداول المدعومة
     TABLES = [
         'accounts', 'clients', 'services', 'projects',
         'invoices', 'payments', 'expenses', 'journal_entries',
-        'quotations', 'currencies', 'notifications', 'tasks'
+        'currencies', 'notifications', 'tasks'
     ]
 
     # الحقول الفريدة لكل جدول
@@ -49,7 +61,6 @@ class UnifiedSyncManagerV3(QObject):
         'payments': 'id',
         'expenses': 'id',
         'journal_entries': 'id',
-        'quotations': 'quote_number',
         'currencies': 'code',
         'users': 'username',
         'notifications': 'id',
@@ -61,20 +72,190 @@ class UnifiedSyncManagerV3(QObject):
         self.repo = repository
         self._lock = threading.RLock()
         self._is_syncing = False
+        self._max_retries = 3
+        self._last_online_status = None
+        
+        # ⚡ إعدادات المزامنة التلقائية
+        self._auto_sync_enabled = True
+        self._auto_sync_interval = 5 * 60 * 1000  # 5 دقائق
+        self._quick_sync_interval = 30 * 1000  # 30 ثانية للتغييرات المحلية
+        self._connection_check_interval = 15 * 1000  # 15 ثانية
+        
+        # ⚡ المؤقتات
+        self._auto_sync_timer = None
+        self._quick_sync_timer = None
+        self._connection_timer = None
+        
+        logger.info("✅ تم تهيئة UnifiedSyncManager - MongoDB First + Auto Sync")
 
-        logger.info("✅ تم تهيئة UnifiedSyncManager - MongoDB First")
+    # ==========================================
+    # نظام المزامنة التلقائية الاحترافي
+    # ==========================================
+    
+    def start_auto_sync(self):
+        """🚀 بدء نظام المزامنة التلقائية"""
+        if not self._auto_sync_enabled:
+            return
+            
+        logger.info("🚀 بدء نظام المزامنة التلقائية...")
+        
+        # 1. مؤقت فحص الاتصال (كل 15 ثانية)
+        self._connection_timer = QTimer(self)
+        self._connection_timer.timeout.connect(self._check_connection)
+        self._connection_timer.start(self._connection_check_interval)
+        
+        # 2. مؤقت المزامنة السريعة للتغييرات المحلية (كل 30 ثانية)
+        self._quick_sync_timer = QTimer(self)
+        self._quick_sync_timer.timeout.connect(self._quick_push_changes)
+        self._quick_sync_timer.start(self._quick_sync_interval)
+        
+        # 3. مؤقت المزامنة الكاملة (كل 5 دقائق)
+        self._auto_sync_timer = QTimer(self)
+        self._auto_sync_timer.timeout.connect(self._auto_full_sync)
+        self._auto_sync_timer.start(self._auto_sync_interval)
+        
+        # 4. مزامنة أولية بعد 3 ثواني
+        QTimer.singleShot(3000, self._initial_sync)
+        
+        logger.info(f"⏰ المزامنة التلقائية: كل {self._auto_sync_interval // 60000} دقيقة")
+        logger.info(f"⏰ رفع التغييرات: كل {self._quick_sync_interval // 1000} ثانية")
+    
+    def stop_auto_sync(self):
+        """⏹️ إيقاف نظام المزامنة التلقائية"""
+        logger.info("⏹️ إيقاف نظام المزامنة التلقائية...")
+        
+        if self._auto_sync_timer:
+            self._auto_sync_timer.stop()
+            self._auto_sync_timer = None
+            
+        if self._quick_sync_timer:
+            self._quick_sync_timer.stop()
+            self._quick_sync_timer = None
+            
+        if self._connection_timer:
+            self._connection_timer.stop()
+            self._connection_timer = None
+    
+    def _check_connection(self):
+        """🔌 فحص حالة الاتصال"""
+        try:
+            current_status = self.is_online
+            
+            # إرسال إشارة عند تغيير الحالة
+            if current_status != self._last_online_status:
+                self._last_online_status = current_status
+                self.connection_changed.emit(current_status)
+                
+                if current_status:
+                    logger.info("🟢 تم استعادة الاتصال - جاري المزامنة...")
+                    # مزامنة فورية عند استعادة الاتصال
+                    self._auto_full_sync()
+                else:
+                    logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
+        except Exception as e:
+            logger.debug(f"خطأ في فحص الاتصال: {e}")
+    
+    def _initial_sync(self):
+        """🚀 المزامنة الأولية عند بدء التشغيل"""
+        if not self.is_online:
+            logger.info("📴 لا يوجد اتصال - العمل بالبيانات المحلية")
+            return
+            
+        logger.info("🚀 بدء المزامنة الأولية...")
+        
+        def sync_thread():
+            try:
+                result = self.full_sync_from_cloud()
+                if result.get('success'):
+                    logger.info(f"✅ المزامنة الأولية: {result.get('total_synced', 0)} سجل")
+            except Exception as e:
+                logger.error(f"❌ فشلت المزامنة الأولية: {e}")
+        
+        thread = threading.Thread(target=sync_thread, daemon=True)
+        thread.start()
+    
+    def _auto_full_sync(self):
+        """🔄 المزامنة الكاملة التلقائية"""
+        if self._is_syncing or not self.is_online:
+            return
+            
+        def sync_thread():
+            try:
+                result = self.full_sync_from_cloud()
+                if result.get('success'):
+                    logger.debug(f"🔄 مزامنة تلقائية: {result.get('total_synced', 0)} سجل")
+            except Exception as e:
+                logger.error(f"❌ فشلت المزامنة التلقائية: {e}")
+        
+        thread = threading.Thread(target=sync_thread, daemon=True)
+        thread.start()
+    
+    def _quick_push_changes(self):
+        """⚡ رفع التغييرات المحلية بسرعة"""
+        if self._is_syncing or not self.is_online:
+            return
+            
+        try:
+            # فحص سريع للتغييرات المعلقة
+            cursor = self.repo.sqlite_cursor
+            has_pending = False
+            
+            for table in self.TABLES:
+                try:
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM {table}
+                        WHERE sync_status != 'synced' OR sync_status IS NULL
+                    """)
+                    count = cursor.fetchone()[0]
+                    if count > 0:
+                        has_pending = True
+                        break
+                except:
+                    pass
+            
+            if has_pending:
+                def push_thread():
+                    try:
+                        with self._lock:
+                            self._push_pending_changes()
+                        logger.debug("⚡ تم رفع التغييرات المحلية")
+                    except Exception as e:
+                        logger.error(f"❌ فشل رفع التغييرات: {e}")
+                
+                thread = threading.Thread(target=push_thread, daemon=True)
+                thread.start()
+                
+        except Exception as e:
+            logger.debug(f"خطأ في فحص التغييرات: {e}")
+    
+    def set_auto_sync_interval(self, minutes: int):
+        """⏰ تغيير فترة المزامنة التلقائية"""
+        self._auto_sync_interval = minutes * 60 * 1000
+        if self._auto_sync_timer:
+            self._auto_sync_timer.setInterval(self._auto_sync_interval)
+        logger.info(f"⏰ تم تغيير فترة المزامنة إلى {minutes} دقيقة")
 
     @property
     def is_online(self) -> bool:
         """التحقق من الاتصال"""
         return self.repo.online if self.repo else False
 
+    def _wait_for_connection(self, timeout: int = 10) -> bool:
+        """⚡ انتظار اتصال MongoDB مع timeout"""
+        import time
+        waited = 0
+        while not self.is_online and waited < timeout:
+            time.sleep(0.5)
+            waited += 0.5
+        return self.is_online
+
     def full_sync_from_cloud(self) -> dict[str, Any]:
         """
         مزامنة كاملة من السحابة - MongoDB هو المصدر الوحيد
         يحذف البيانات المحلية غير الموجودة في السحابة
         """
-        if not self.is_online:
+        # ⚡ انتظار الاتصال أولاً
+        if not self._wait_for_connection(timeout=10):
             logger.warning("غير متصل - لا يمكن المزامنة من السحابة")
             return {'success': False, 'reason': 'offline'}
 
@@ -283,7 +464,7 @@ class UnifiedSyncManagerV3(QObject):
             item['logo_data'] = data['logo_data']
             client_name = data.get('name', 'غير معروف')
             logger.info(f"📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة")
-            print(f"INFO: 📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة")
+            safe_print(f"INFO: 📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة")
 
         # تحويل التواريخ
         date_fields = [

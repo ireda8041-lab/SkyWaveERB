@@ -1,4 +1,4 @@
-# الملف: services/invoice_printing_service.py
+﻿# الملف: services/invoice_printing_service.py
 # خدمة طباعة الفواتير باستخدام القالب الحديث (Modern Blue Design)
 
 import os
@@ -8,6 +8,16 @@ from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class InvoicePrintingService:
@@ -54,13 +64,13 @@ class InvoicePrintingService:
         # ⚡ تحميل القالب مسبقاً (pre-compile)
         try:
             self.invoice_template = self.env.get_template("final_invoice.html")
-            print("✅ [InvoicePrintingService] تم تحميل القالب مسبقاً")
+            safe_print("✅ [InvoicePrintingService] تم تحميل القالب مسبقاً")
         except Exception as e:
-            print(f"WARNING: [InvoicePrintingService] فشل تحميل القالب: {e}")
+            safe_print(f"WARNING: [InvoicePrintingService] فشل تحميل القالب: {e}")
             self.invoice_template = None
 
-        print(f"INFO: [InvoicePrintingService] Templates directory: {self.templates_dir}")
-        print(f"INFO: [InvoicePrintingService] Exports directory: {self.exports_dir}")
+        safe_print(f"INFO: [InvoicePrintingService] Templates directory: {self.templates_dir}")
+        safe_print(f"INFO: [InvoicePrintingService] Exports directory: {self.exports_dir}")
 
     def print_invoice(self, invoice_data: dict[str, Any]) -> str | None:
         """
@@ -73,7 +83,7 @@ class InvoicePrintingService:
             مسار ملف PDF إذا نجح، None إذا فشل
         """
         try:
-            print(f"INFO: [InvoicePrintingService] بدء طباعة الفاتورة: {invoice_data.get('invoice_number', 'N/A')}")
+            safe_print(f"INFO: [InvoicePrintingService] بدء طباعة الفاتورة: {invoice_data.get('invoice_number', 'N/A')}")
 
             # ⚡ تصحيح البيانات قبل الطباعة
             invoice_data = self._fix_invoice_data(invoice_data)
@@ -96,14 +106,14 @@ class InvoicePrintingService:
             if pdf_path and os.path.exists(pdf_path):
                 # Step 5: فتح PDF تلقائياً
                 self._open_file(pdf_path)
-                print(f"✅ [InvoicePrintingService] تم إنشاء الفاتورة بنجاح: {pdf_path}")
+                safe_print(f"✅ [InvoicePrintingService] تم إنشاء الفاتورة بنجاح: {pdf_path}")
                 return pdf_path
             else:
-                print("ERROR: [InvoicePrintingService] فشل إنشاء PDF")
+                safe_print("ERROR: [InvoicePrintingService] فشل إنشاء PDF")
                 return None
 
         except Exception as e:
-            print(f"ERROR: [InvoicePrintingService] خطأ في طباعة الفاتورة: {e}")
+            safe_print(f"ERROR: [InvoicePrintingService] خطأ في طباعة الفاتورة: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -193,7 +203,7 @@ class InvoicePrintingService:
                 context.setdefault('company_phone', settings.get('company_phone', '+20 XXX XXX XXXX'))
                 # لا نستخدم logo_path من الإعدادات، نستخدم default_logo دائماً
             except Exception as e:
-                print(f"WARNING: [InvoicePrintingService] فشل تحميل إعدادات الشركة: {e}")
+                safe_print(f"WARNING: [InvoicePrintingService] فشل تحميل إعدادات الشركة: {e}")
 
         # قيم افتراضية
         context.setdefault('company_name', 'Sky Wave')
@@ -217,7 +227,7 @@ class InvoicePrintingService:
         # تحويل اللوجو إلى base64 للاستخدام في HTML
         logo_base64 = ""
 
-        print(f"INFO: [InvoicePrintingService] محاولة تحميل اللوجو من: {logo_path_for_conversion}")
+        safe_print(f"INFO: [InvoicePrintingService] محاولة تحميل اللوجو من: {logo_path_for_conversion}")
 
         if os.path.exists(logo_path_for_conversion):
             try:
@@ -226,12 +236,12 @@ class InvoicePrintingService:
                     logo_data = f.read()
                     logo_base64 = f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
                 context['logo_path'] = logo_base64
-                print(f"✅ [InvoicePrintingService] تم تحميل اللوجو بنجاح ({len(logo_data)} بايت)")
+                safe_print(f"✅ [InvoicePrintingService] تم تحميل اللوجو بنجاح ({len(logo_data)} بايت)")
             except Exception as e:
-                print(f"WARNING: [InvoicePrintingService] فشل تحميل اللوجو: {e}")
+                safe_print(f"WARNING: [InvoicePrintingService] فشل تحميل اللوجو: {e}")
                 context['logo_path'] = ""
         else:
-            print(f"WARNING: [InvoicePrintingService] ملف اللوجو غير موجود: {logo_path_for_conversion}")
+            safe_print(f"WARNING: [InvoicePrintingService] ملف اللوجو غير موجود: {logo_path_for_conversion}")
             context['logo_path'] = ""
 
         # تحويل مسار الخط إلى مسار مطلق
@@ -292,40 +302,40 @@ class InvoicePrintingService:
         try:
             from weasyprint import CSS, HTML
 
-            print("INFO: [InvoicePrintingService] استخدام WeasyPrint لتوليد PDF...")
+            safe_print("INFO: [InvoicePrintingService] استخدام WeasyPrint لتوليد PDF...")
             HTML(string=html_content, base_url=str(self.templates_dir)).write_pdf(
                 pdf_path,
                 stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
             )
 
-            print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام WeasyPrint")
+            safe_print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام WeasyPrint")
             return pdf_path
 
         except ImportError:
-            print("WARNING: [InvoicePrintingService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
+            safe_print("WARNING: [InvoicePrintingService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
         except Exception as e:
-            print(f"WARNING: [InvoicePrintingService] فشل WeasyPrint: {e}")
+            safe_print(f"WARNING: [InvoicePrintingService] فشل WeasyPrint: {e}")
 
         # محاولة 2: استخدام PyQt6 لتحويل HTML إلى PDF
         try:
-            print("INFO: [InvoicePrintingService] استخدام PyQt6 لتوليد PDF...")
+            safe_print("INFO: [InvoicePrintingService] استخدام PyQt6 لتوليد PDF...")
             return self._generate_pdf_with_qt(html_content, pdf_path)
         except Exception as e:
-            print(f"WARNING: [InvoicePrintingService] فشل PyQt6: {e}")
+            safe_print(f"WARNING: [InvoicePrintingService] فشل PyQt6: {e}")
 
         # محاولة 3: حفظ HTML كـ fallback أخير
         html_path = str(self.exports_dir / f"{filename}.html")
         try:
-            print("INFO: [InvoicePrintingService] حفظ HTML كـ fallback...")
+            safe_print("INFO: [InvoicePrintingService] حفظ HTML كـ fallback...")
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            print(f"⚠️ [InvoicePrintingService] تم حفظ HTML: {html_path}")
-            print("💡 افتح الملف في المتصفح واطبع (Ctrl+P) للحصول على PDF")
+            safe_print(f"⚠️ [InvoicePrintingService] تم حفظ HTML: {html_path}")
+            safe_print("💡 افتح الملف في المتصفح واطبع (Ctrl+P) للحصول على PDF")
             return html_path
 
         except Exception as e:
-            print(f"ERROR: [InvoicePrintingService] فشل حفظ HTML: {e}")
+            safe_print(f"ERROR: [InvoicePrintingService] فشل حفظ HTML: {e}")
             return None
 
     def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> str | None:
@@ -373,9 +383,9 @@ class InvoicePrintingService:
             def on_pdf_done(success):
                 pdf_generated[0] = success
                 if success:
-                    print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام PyQt6")
+                    safe_print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام PyQt6")
                 else:
-                    print("ERROR: [InvoicePrintingService] فشل إنشاء PDF")
+                    safe_print("ERROR: [InvoicePrintingService] فشل إنشاء PDF")
 
             def on_load_finished(ok):
                 if ok:
@@ -383,7 +393,7 @@ class InvoicePrintingService:
                     web_view.page().printToPdf(pdf_path)
                     pdf_generated[0] = True
                 else:
-                    print("ERROR: [InvoicePrintingService] فشل تحميل HTML")
+                    safe_print("ERROR: [InvoicePrintingService] فشل تحميل HTML")
 
             # ربط الإشارة
             web_view.loadFinished.connect(on_load_finished)
@@ -403,10 +413,10 @@ class InvoicePrintingService:
             return None
 
         except ImportError as e:
-            print(f"WARNING: [InvoicePrintingService] PyQt6 WebEngine غير متوفر: {e}")
+            safe_print(f"WARNING: [InvoicePrintingService] PyQt6 WebEngine غير متوفر: {e}")
             return None
         except Exception as e:
-            print(f"ERROR: [InvoicePrintingService] خطأ في PyQt6: {e}")
+            safe_print(f"ERROR: [InvoicePrintingService] خطأ في PyQt6: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -430,11 +440,11 @@ class InvoicePrintingService:
             else:  # Linux
                 subprocess.run(['xdg-open', file_path], check=False)
 
-            print(f"✅ [InvoicePrintingService] تم فتح الملف: {file_path}")
+            safe_print(f"✅ [InvoicePrintingService] تم فتح الملف: {file_path}")
             return True
 
         except Exception as e:
-            print(f"WARNING: [InvoicePrintingService] فشل فتح الملف: {e}")
+            safe_print(f"WARNING: [InvoicePrintingService] فشل فتح الملف: {e}")
             return False
 
     def _sanitize_filename(self, name: str) -> str:

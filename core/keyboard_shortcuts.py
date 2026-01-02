@@ -26,7 +26,6 @@ class KeyboardShortcutManager(QObject):
     new_project = pyqtSignal()
     new_client = pyqtSignal()
     new_expense = pyqtSignal()
-    new_quotation = pyqtSignal()
     new_payment = pyqtSignal()
     search_activated = pyqtSignal()
     refresh_data = pyqtSignal()
@@ -112,43 +111,33 @@ class KeyboardShortcutManager(QObject):
                 'description': 'الانتقال إلى المشاريع',
                 'action': lambda: self._switch_tab(1)
             },
-            'tab_quotations': {
+            'tab_expenses': {
                 'key': 'Ctrl+3',
-                'description': 'الانتقال إلى عروض الأسعار',
+                'description': 'الانتقال إلى المصروفات',
                 'action': lambda: self._switch_tab(2)
             },
-            'tab_expenses': {
+            'tab_clients': {
                 'key': 'Ctrl+4',
-                'description': 'الانتقال إلى المصروفات',
+                'description': 'الانتقال إلى العملاء',
                 'action': lambda: self._switch_tab(3)
             },
-            'tab_clients': {
+            'tab_services': {
                 'key': 'Ctrl+5',
-                'description': 'الانتقال إلى العملاء',
+                'description': 'الانتقال إلى الخدمات',
                 'action': lambda: self._switch_tab(4)
             },
-            'tab_services': {
+            'tab_accounting': {
                 'key': 'Ctrl+6',
-                'description': 'الانتقال إلى الخدمات',
+                'description': 'الانتقال إلى المحاسبة',
                 'action': lambda: self._switch_tab(5)
             },
-            'tab_accounting': {
-                'key': 'Ctrl+7',
-                'description': 'الانتقال إلى المحاسبة',
-                'action': lambda: self._switch_tab(6)
-            },
             'tab_settings': {
-                'key': 'Ctrl+8',
+                'key': 'Ctrl+7',
                 'description': 'الانتقال إلى الإعدادات',
-                'action': lambda: self._switch_tab(7)
+                'action': lambda: self._switch_tab(6)
             },
             
             # اختصارات إضافية
-            'new_quotation': {
-                'key': 'Ctrl+Q',
-                'description': 'عرض سعر جديد',
-                'signal': self.new_quotation
-            },
             'new_payment': {
                 'key': 'Ctrl+P',
                 'description': 'دفعة جديدة',

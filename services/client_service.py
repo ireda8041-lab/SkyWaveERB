@@ -1,4 +1,4 @@
-# الملف: services/client_service.py
+﻿# الملف: services/client_service.py
 """
 خدمة العملاء (Client Service)
 
@@ -31,6 +31,12 @@ try:
     CACHE_ENABLED = True
 except ImportError:
     CACHE_ENABLED = False
+
+# استيراد دالة الإشعارات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 logger = get_logger(__name__)
 
@@ -90,6 +96,8 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
+            # 🔔 إشعار
+            notify_operation('created', 'client', created_client.name)
             logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
             return created_client
         except Exception as e:
@@ -143,6 +151,8 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
+            # 🔔 إشعار
+            notify_operation('updated', 'client', updated_client_schema.name)
 
             logger.info(f"[ClientService] ✅ تم تعديل العميل {updated_client_schema.name}")
             return saved_client
@@ -204,6 +214,8 @@ class ClientService:
                 self.invalidate_cache()  # ⚡ إبطال الـ cache
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('clients')
+                # 🔔 إشعار
+                notify_operation('deleted', 'client', client_id)
                 logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:

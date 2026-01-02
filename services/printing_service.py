@@ -1,4 +1,4 @@
-# الملف: services/printing_service.py
+﻿# الملف: services/printing_service.py
 """
 خدمة الطباعة وإنتاج ملفات PDF احترافية
 يدعم النصوص العربية والتصميم الاحترافي
@@ -34,8 +34,8 @@ try:
 
     PDF_AVAILABLE = True
 except ImportError as e:
-    print(f"WARNING: [PrintingService] PDF libraries not available: {e}")
-    print("INFO: Install with: pip install reportlab arabic-reshaper python-bidi")
+    safe_print(f"WARNING: [PrintingService] PDF libraries not available: {e}")
+    safe_print("INFO: Install with: pip install reportlab arabic-reshaper python-bidi")
     PDF_AVAILABLE = False
     # تعريف قيم افتراضية لتجنب الأخطاء
     TA_CENTER = 1
@@ -50,11 +50,21 @@ try:
     from PyQt6.QtPrintSupport import QPrinter  # noqa: F401
     TEMPLATE_SUPPORT = True
 except ImportError as e:
-    print(f"WARNING: [PrintingService] Template libraries not available: {e}")
-    print("INFO: Install with: pip install Jinja2 PyQt6-WebEngine")
+    safe_print(f"WARNING: [PrintingService] Template libraries not available: {e}")
+    safe_print("INFO: Install with: pip install Jinja2 PyQt6-WebEngine")
     TEMPLATE_SUPPORT = False
 
 from core import schemas
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class PDFGenerator:
@@ -104,7 +114,7 @@ class PDFGenerator:
             reshaped_text = arabic_reshaper.reshape(str(text))
             return str(get_display(reshaped_text))
         except Exception as e:
-            print(f"WARNING: [PDFGenerator] Arabic text fix failed: {e}")
+            safe_print(f"WARNING: [PDFGenerator] Arabic text fix failed: {e}")
             return str(text)
 
     def _register_arabic_fonts(self) -> str:
@@ -124,19 +134,19 @@ class PDFGenerator:
             if os.path.exists(cairo_font_path):
                 try:
                     pdfmetrics.registerFont(TTFont('CairoFont', cairo_font_path))
-                    print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {cairo_font_path}")
+                    safe_print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {cairo_font_path}")
                     return 'CairoFont'
                 except Exception as e:
-                    print(f"WARNING: [PDFGenerator] فشل تحميل خط Cairo: {e}")
+                    safe_print(f"WARNING: [PDFGenerator] فشل تحميل خط Cairo: {e}")
             else:
-                print(f"⚠️ [PDFGenerator] خط Cairo غير موجود: {cairo_font_path}")
+                safe_print(f"⚠️ [PDFGenerator] خط Cairo غير موجود: {cairo_font_path}")
 
             # إذا فشل تحميل الخط، استخدم الخط الافتراضي
-            print("⚠️ [PDFGenerator] سيتم استخدام الخط الافتراضي")
+            safe_print("⚠️ [PDFGenerator] سيتم استخدام الخط الافتراضي")
             return 'Helvetica'
 
         except Exception as e:
-            print(f"ERROR: [PDFGenerator] خطأ في تسجيل الخطوط: {e}")
+            safe_print(f"ERROR: [PDFGenerator] خطأ في تسجيل الخطوط: {e}")
             return 'Helvetica'
 
     def _create_arabic_paragraph_style(self, name: str, font_size: int = 12,
@@ -213,7 +223,7 @@ class PDFGenerator:
         # بناء المستند
         doc.build(story)
 
-        print(f"INFO: [PDFGenerator] Invoice PDF created: {output_path}")
+        safe_print(f"INFO: [PDFGenerator] Invoice PDF created: {output_path}")
         return output_path
 
     def generate_ledger_pdf(
@@ -266,7 +276,7 @@ class PDFGenerator:
         # بناء المستند
         doc.build(story)
 
-        print(f"INFO: [PDFGenerator] Ledger PDF created: {output_path}")
+        safe_print(f"INFO: [PDFGenerator] Ledger PDF created: {output_path}")
         return output_path
 
     def _create_invoice_header(self, project: schemas.Project) -> Table:
@@ -530,9 +540,9 @@ class PDFGenerator:
             else:  # Linux
                 subprocess.run(['xdg-open', file_path])
 
-            print(f"INFO: [PDFGenerator] Opened PDF: {file_path}")
+            safe_print(f"INFO: [PDFGenerator] Opened PDF: {file_path}")
         except Exception as e:
-            print(f"ERROR: [PDFGenerator] Failed to open PDF: {e}")
+            safe_print(f"ERROR: [PDFGenerator] Failed to open PDF: {e}")
 
 
 class PrintingService:
@@ -544,10 +554,10 @@ class PrintingService:
 
         if PDF_AVAILABLE:
             self.pdf_generator = PDFGenerator(settings_service)
-            print("INFO: [PrintingService] PDF printing service initialized")
+            safe_print("INFO: [PrintingService] PDF printing service initialized")
         else:
             self.pdf_generator = None
-            print("WARNING: [PrintingService] PDF libraries not available")
+            safe_print("WARNING: [PrintingService] PDF libraries not available")
 
     def is_available(self) -> bool:
         """التحقق من توفر خدمة الطباعة"""
@@ -584,7 +594,7 @@ class PrintingService:
                 auto_open=auto_open
             )
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to print project invoice: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to print project invoice: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -597,7 +607,7 @@ class PrintingService:
     ) -> str | None:
         """طباعة فاتورة مشروع"""
         if not self.is_available():
-            print("ERROR: [PrintingService] PDF libraries not installed")
+            safe_print("ERROR: [PrintingService] PDF libraries not installed")
             return None
 
         try:
@@ -608,7 +618,7 @@ class PrintingService:
 
             return str(pdf_path) if pdf_path else None
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to print invoice: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to print invoice: {e}")
             return None
 
     def print_ledger(
@@ -620,7 +630,7 @@ class PrintingService:
     ) -> str | None:
         """طباعة كشف حساب"""
         if not self.is_available():
-            print("ERROR: [PrintingService] PDF libraries not installed")
+            safe_print("ERROR: [PrintingService] PDF libraries not installed")
             return None
 
         try:
@@ -631,7 +641,7 @@ class PrintingService:
 
             return str(pdf_path) if pdf_path else None
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to print ledger: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to print ledger: {e}")
             return None
 
     def get_available_templates(self) -> list[str]:
@@ -660,11 +670,11 @@ class PrintingService:
         try:
             # استخدام خدمة القوالب الجديدة إذا كانت متوفرة
             if template_service:
-                print("INFO: [PrintingService] Using template service for invoice generation")
-                print(f"INFO: [PrintingService] عدد الدفعات المستلمة: {len(payments) if payments else 0}")
+                safe_print("INFO: [PrintingService] Using template service for invoice generation")
+                safe_print(f"INFO: [PrintingService] عدد الدفعات المستلمة: {len(payments) if payments else 0}")
                 if payments:
                     for i, p in enumerate(payments):
-                        print(f"  - دفعة {i+1}: {p}")
+                        safe_print(f"  - دفعة {i+1}: {p}")
 
                 # إنتاج HTML باستخدام خدمة القوالب مع الدفعات
                 html_content = template_service.generate_invoice_html(project, client_info, payments=payments)
@@ -679,17 +689,17 @@ class PrintingService:
                         import webbrowser
                         webbrowser.open(f'file://{os.path.abspath(html_path)}')
 
-                    print(f"INFO: [PrintingService] Invoice created using template: {html_path}")
+                    safe_print(f"INFO: [PrintingService] Invoice created using template: {html_path}")
                     return html_path
                 else:
-                    print("ERROR: [PrintingService] Failed to generate HTML from template service")
+                    safe_print("ERROR: [PrintingService] Failed to generate HTML from template service")
 
             # Fallback: استخدام النظام القديم
-            print("INFO: [PrintingService] Falling back to default PDF generation")
+            safe_print("INFO: [PrintingService] Falling back to default PDF generation")
             return self.print_invoice(project, client_info, auto_open)
 
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to print invoice with template: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to print invoice with template: {e}")
             # Fallback to default PDF
             return self.print_invoice(project, client_info, auto_open)
 
@@ -786,7 +796,7 @@ class PrintingService:
                 payments = temp_repo.get_payments_for_project(project.name)
                 amount_paid = sum(payment.amount for payment in payments)
         except Exception as e:
-            print(f"WARNING: [PrintingService] فشل جلب الدفعات: {e}")
+            safe_print(f"WARNING: [PrintingService] فشل جلب الدفعات: {e}")
             # استخدام القيمة من المشروع إذا كانت متوفرة
             amount_paid = getattr(project, 'amount_paid', 0) or 0
 
@@ -867,10 +877,10 @@ class PrintingService:
                 else:
                     pdfkit.from_file(html_path, pdf_path, options=options)
 
-                print(f"INFO: [PrintingService] Invoice PDF created with pdfkit: {pdf_path}")
+                safe_print(f"INFO: [PrintingService] Invoice PDF created with pdfkit: {pdf_path}")
                 # حذف HTML بعد إنشاء PDF
                 os.remove(html_path)
-                print(f"🗑️ Cleaned up temp HTML file: {html_path}")
+                safe_print(f"🗑️ Cleaned up temp HTML file: {html_path}")
 
                 # فتح المجلد
                 self._open_exports_folder()
@@ -878,9 +888,9 @@ class PrintingService:
                 return pdf_path
 
             except ImportError:
-                print("WARNING: [PrintingService] pdfkit not installed")
+                safe_print("WARNING: [PrintingService] pdfkit not installed")
             except Exception as e:
-                print(f"WARNING: [PrintingService] pdfkit failed: {e}")
+                safe_print(f"WARNING: [PrintingService] pdfkit failed: {e}")
 
             # محاولة 2: استخدام Chrome/Edge headless
             try:
@@ -913,9 +923,9 @@ class PrintingService:
                     subprocess.run(cmd, capture_output=True, timeout=30)
 
                     if os.path.exists(pdf_path):
-                        print(f"INFO: [PrintingService] Invoice PDF created with browser: {pdf_path}")
+                        safe_print(f"INFO: [PrintingService] Invoice PDF created with browser: {pdf_path}")
                         os.remove(html_path)
-                        print(f"🗑️ Cleaned up temp HTML file: {html_path}")
+                        safe_print(f"🗑️ Cleaned up temp HTML file: {html_path}")
 
                         # فتح المجلد
                         self._open_exports_folder()
@@ -923,13 +933,13 @@ class PrintingService:
                         return pdf_path
 
             except Exception as e:
-                print(f"WARNING: [PrintingService] Browser PDF failed: {e}")
+                safe_print(f"WARNING: [PrintingService] Browser PDF failed: {e}")
 
             # Fallback: حفظ HTML كبديل
-            print("WARNING: [PrintingService] Failed to create PDF. Saving as HTML instead.")
-            print("INFO: To generate PDF, please install one of the following:")
-            print("   1. wkhtmltopdf: https://wkhtmltopdf.org/downloads.html")
-            print("   2. Google Chrome or Microsoft Edge")
+            safe_print("WARNING: [PrintingService] Failed to create PDF. Saving as HTML instead.")
+            safe_print("INFO: To generate PDF, please install one of the following:")
+            safe_print("   1. wkhtmltopdf: https://wkhtmltopdf.org/downloads.html")
+            safe_print("   2. Google Chrome or Microsoft Edge")
 
             # فتح المجلد
             self._open_exports_folder()
@@ -937,7 +947,7 @@ class PrintingService:
             return html_path
 
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to create PDF: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to create PDF: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -960,11 +970,11 @@ class PrintingService:
                     subprocess.run(['open', exports_dir])
                 else:  # Linux
                     subprocess.run(['xdg-open', exports_dir])
-                print(f"INFO: [PrintingService] Opened exports folder: {exports_dir}")
+                safe_print(f"INFO: [PrintingService] Opened exports folder: {exports_dir}")
             else:
-                print(f"WARNING: [PrintingService] Exports folder not found: {exports_dir}")
+                safe_print(f"WARNING: [PrintingService] Exports folder not found: {exports_dir}")
         except Exception as e:
-            print(f"ERROR: [PrintingService] Failed to open exports folder: {e}")
+            safe_print(f"ERROR: [PrintingService] Failed to open exports folder: {e}")
 
 
 
@@ -1014,18 +1024,18 @@ class TemplateManager:
             template_path = os.path.join(self.templates_dir, f"{template_id}.html")
 
             if not os.path.exists(template_path):
-                print(f"ERROR: [TemplateManager] Template {template_id} not found")
+                safe_print(f"ERROR: [TemplateManager] Template {template_id} not found")
                 return False
 
             if self.settings_service:
                 self.settings_service.update_setting("invoice_template", template_id)
-                print(f"INFO: [TemplateManager] Active template set to: {template_id}")
+                safe_print(f"INFO: [TemplateManager] Active template set to: {template_id}")
                 return True
 
             return False
 
         except Exception as e:
-            print(f"ERROR: [TemplateManager] Failed to set active template: {e}")
+            safe_print(f"ERROR: [TemplateManager] Failed to set active template: {e}")
             return False
 
     def preview_template(self, template_id: str, sample_data: dict[str, Any] | None = None) -> str | None:
@@ -1089,5 +1099,5 @@ class TemplateManager:
             return html_content
 
         except Exception as e:
-            print(f"ERROR: [TemplateManager] Failed to preview template: {e}")
+            safe_print(f"ERROR: [TemplateManager] Failed to preview template: {e}")
             return None

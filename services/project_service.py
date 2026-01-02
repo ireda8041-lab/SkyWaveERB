@@ -1,4 +1,4 @@
-# الملف: services/project_service.py
+﻿# الملف: services/project_service.py
 
 import time
 from datetime import datetime
@@ -8,6 +8,22 @@ from core.event_bus import EventBus
 from core.repository import Repository
 from core.signals import app_signals
 from services.accounting_service import AccountingService
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
+# استيراد دالة الإشعارات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 # ⚡ استيراد محسّن السرعة
 try:
@@ -22,7 +38,7 @@ try:
     PRINTING_AVAILABLE = True
 except ImportError:
     PRINTING_AVAILABLE = False
-    print("WARNING: [ProjectService] Project printing service not available")
+    safe_print("WARNING: [ProjectService] Project printing service not available")
 
 
 class ProjectService:
@@ -52,7 +68,7 @@ class ProjectService:
             self.printing_service = ProjectPrintingService(settings_service)
 
         self.bus.subscribe('CONVERT_TO_INVOICE', self.handle_convert_to_project)
-        print("INFO: 🏢 قسم المشاريع Enterprise (ProjectService) جاهز")
+        safe_print("INFO: 🏢 قسم المشاريع Enterprise (ProjectService) جاهز")
 
     # ==================== Smart Coding Engine ====================
     def generate_smart_project_code(self, client_name: str, service_type: str | None = None) -> str:
@@ -109,11 +125,11 @@ class ProjectService:
             # 5. تجميع الكود
             project_code = f"{year}-{type_code}-{client_code}-{new_seq:03d}"
 
-            print(f"INFO: [ProjectService] 🧠 تم توليد كود المشروع: {project_code}")
+            safe_print(f"INFO: [ProjectService] 🧠 تم توليد كود المشروع: {project_code}")
             return project_code
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل توليد كود المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل توليد كود المشروع: {e}")
             # Fallback: استخدام timestamp
             return f"PRJ-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
@@ -162,7 +178,7 @@ class ProjectService:
             }
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل حساب الربحية: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل حساب الربحية: {e}")
             return {
                 "total_revenue": 0,
                 "total_cost": 0,
@@ -215,7 +231,7 @@ class ProjectService:
             return True
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل تحديث حالة الدفعة: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل تحديث حالة الدفعة: {e}")
             return False
 
     def get_all_projects(self) -> list[schemas.Project]:
@@ -235,7 +251,7 @@ class ProjectService:
 
             return projects
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب المشاريع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب المشاريع: {e}")
             return []
 
     def invalidate_cache(self):
@@ -245,10 +261,10 @@ class ProjectService:
 
     def update_all_projects_status(self):
         """⚡ تحديث حالات كل المشاريع أوتوماتيك (مع احترام التعديل اليدوي)"""
-        print("INFO: [ProjectService] ===== بدء تحديث حالات المشاريع =====")
+        safe_print("INFO: [ProjectService] ===== بدء تحديث حالات المشاريع =====")
         try:
             projects = self.repo.get_all_projects()
-            print(f"INFO: [ProjectService] عدد المشاريع: {len(projects)}")
+            safe_print(f"INFO: [ProjectService] عدد المشاريع: {len(projects)}")
 
             for project in projects:
                 # تجاهل المشاريع المؤرشفة
@@ -258,14 +274,14 @@ class ProjectService:
                 # ⚡ تجاهل المشاريع اللي حالتها معينة يدوياً
                 status_manually_set = getattr(project, 'status_manually_set', False)
                 if status_manually_set:
-                    print(f"DEBUG: {project.name}: حالة يدوية - تم تجاهلها")
+                    safe_print(f"DEBUG: {project.name}: حالة يدوية - تم تجاهلها")
                     continue
 
                 # جلب الدفعات
                 payments = self.repo.get_payments_for_project(project.name)
                 total_paid = sum(p.amount for p in payments) if payments else 0.0
 
-                print(f"DEBUG: {project.name}: total={project.total_amount}, paid={total_paid}, status={project.status.value}")
+                safe_print(f"DEBUG: {project.name}: total={project.total_amount}, paid={total_paid}, status={project.status.value}")
 
                 # تحديد الحالة الجديدة
                 if project.total_amount > 0 and total_paid >= project.total_amount:
@@ -277,15 +293,15 @@ class ProjectService:
 
                 # تحديث إذا تغيرت
                 if project.status != new_status:
-                    print(f"INFO: [ProjectService] تحديث {project.name}: {project.status.value} -> {new_status.value}")
+                    safe_print(f"INFO: [ProjectService] تحديث {project.name}: {project.status.value} -> {new_status.value}")
                     project.status = new_status
                     project.status_manually_set = False  # الحالة أصبحت أوتوماتيك
                     self.repo.update_project(project.name, project)
 
             self.invalidate_cache()
-            print("INFO: [ProjectService] ===== انتهى تحديث حالات المشاريع =====")
+            safe_print("INFO: [ProjectService] ===== انتهى تحديث حالات المشاريع =====")
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل تحديث حالات المشاريع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل تحديث حالات المشاريع: {e}")
             import traceback
             traceback.print_exc()
 
@@ -294,7 +310,7 @@ class ProjectService:
         try:
             return self.repo.get_all_projects(status=schemas.ProjectStatus.ARCHIVED)
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب المشاريع المؤرشفة: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب المشاريع المؤرشفة: {e}")
             return []
 
     def create_project(self, project_data: dict, payment_data: dict) -> schemas.Project:
@@ -302,7 +318,7 @@ class ProjectService:
         🏢 إنشاء مشروع جديد Enterprise Level
         يدعم: التكويد الذكي، تحليل الربحية، الدفعات المرحلية
         """
-        print(f"INFO: [ProjectService] 🏢 إنشاء مشروع: {project_data.get('name')}")
+        safe_print(f"INFO: [ProjectService] 🏢 إنشاء مشروع: {project_data.get('name')}")
         try:
             # --- 1. حساب الإجماليات (مع خصم البند والتكلفة التقديرية) ---
             items_list = project_data.get("items", [])
@@ -398,7 +414,7 @@ class ProjectService:
 
             # --- 4. تسجيل الدفعة المقدمة (لو موجودة) ---
             if payment_data and payment_data.get("amount", 0) > 0:
-                print(f"INFO: [ProjectService] تسجيل دفعة مقدمة بمبلغ {payment_data['amount']}...")
+                safe_print(f"INFO: [ProjectService] تسجيل دفعة مقدمة بمبلغ {payment_data['amount']}...")
                 self.create_payment_for_project(
                     project=created_project,
                     amount=payment_data["amount"],
@@ -409,17 +425,20 @@ class ProjectService:
             # ⚡ إبطال الـ cache وإرسال إشارة التحديث
             self.invalidate_cache()
             app_signals.emit_data_changed('projects')
+            
+            # 🔔 إشعار
+            notify_operation('created', 'project', created_project.name)
 
-            print(f"SUCCESS: [ProjectService] ✅ تم إنشاء المشروع {created_project.name} (كود: {created_project.project_code})")
+            safe_print(f"SUCCESS: [ProjectService] ✅ تم إنشاء المشروع {created_project.name} (كود: {created_project.project_code})")
             return created_project
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل إنشاء المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل إنشاء المشروع: {e}")
             raise
 
     def update_project(self, project_name: str, new_data_dict: dict) -> schemas.Project | None:
         """⚡ تعديل مشروع (مع إبطال الـ cache)"""
-        print(f"INFO: [ProjectService] ⚡ تعديل مشروع: {project_name}")
+        safe_print(f"INFO: [ProjectService] ⚡ تعديل مشروع: {project_name}")
         try:
             # (نفس لوجيك الحسابات - مع خصم البند)
             items_list = new_data_dict.get("items", [])
@@ -465,7 +484,7 @@ class ProjectService:
             if new_status and new_status != old_project.status:
                 # المستخدم غير الحالة يدوياً
                 new_data_dict['status_manually_set'] = True
-                print(f"INFO: [ProjectService] المستخدم غير حالة المشروع يدوياً: {old_project.status.value} -> {new_status.value}")
+                safe_print(f"INFO: [ProjectService] المستخدم غير حالة المشروع يدوياً: {old_project.status.value} -> {new_status.value}")
 
             updated_project_schema = old_project.model_copy(update=new_data_dict)
 
@@ -479,14 +498,52 @@ class ProjectService:
             self.invalidate_cache()
             self.bus.publish('PROJECT_EDITED', {"project": saved_project})
             app_signals.emit_data_changed('projects')
+            
+            # 🔔 إشعار
+            notify_operation('updated', 'project', project_name)
 
-            print(f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع {project_name}")
+            safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع {project_name}")
 
             # إعادة جلب المشروع بعد تحديث الحالة
             return self.repo.get_project_by_number(project_name)
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل تعديل المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل تعديل المشروع: {e}")
             raise
+
+    def delete_project(self, project_id: str) -> bool:
+        """🗑️ حذف مشروع نهائياً"""
+        safe_print(f"INFO: [ProjectService] 🗑️ حذف مشروع: {project_id}")
+        try:
+            # جلب المشروع بالاسم (get_project_by_number تبحث بالاسم)
+            project = self.repo.get_project_by_number(project_id)
+            
+            if not project:
+                safe_print(f"WARNING: [ProjectService] المشروع غير موجود: {project_id}")
+                return False
+            
+            project_name = project.name
+            
+            # حذف المشروع من قاعدة البيانات
+            success = self.repo.delete_project(project_name)
+            
+            if success:
+                # إبطال الـ cache
+                self.invalidate_cache()
+                
+                # إرسال إشارة التحديث
+                self.bus.publish('PROJECT_DELETED', {"project_name": project_name})
+                app_signals.emit_data_changed('projects')
+                
+                # 🔔 إشعار
+                notify_operation('deleted', 'project', project_name)
+                
+                safe_print(f"SUCCESS: [ProjectService] ✅ تم حذف المشروع {project_name}")
+            
+            return success
+            
+        except Exception as e:
+            safe_print(f"ERROR: [ProjectService] فشل حذف المشروع: {e}")
+            return False
 
     # --- (الجديد) دوال الدفعات بقت جوه المشاريع ---
     def create_payment_for_project(self, project: schemas.Project, amount: float, date: datetime, account_id: str) -> schemas.Payment | None:
@@ -505,9 +562,9 @@ class ProjectService:
         Raises:
             Exception: في حالة وجود دفعة مكررة أو خطأ في قاعدة البيانات
         """
-        print(f"INFO: [ProjectService] ⚡ استلام طلب دفعة لـ {project.name} بمبلغ {amount}")
-        print(f"DEBUG: [ProjectService] client_id من المشروع: '{project.client_id}'")
-        print(f"DEBUG: [ProjectService] account_id: '{account_id}'")
+        safe_print(f"INFO: [ProjectService] ⚡ استلام طلب دفعة لـ {project.name} بمبلغ {amount}")
+        safe_print(f"DEBUG: [ProjectService] client_id من المشروع: '{project.client_id}'")
+        safe_print(f"DEBUG: [ProjectService] account_id: '{account_id}'")
 
         # ⚡ التحقق من صحة البيانات
         if amount <= 0:
@@ -526,12 +583,12 @@ class ProjectService:
             # ⚡ التحقق من وجود client_id
             client_id = project.client_id
             if not client_id:
-                print(f"WARNING: [ProjectService] المشروع {project.name} ليس له client_id!")
+                safe_print(f"WARNING: [ProjectService] المشروع {project.name} ليس له client_id!")
                 # محاولة جلب client_id من قاعدة البيانات
                 db_project = self.repo.get_project_by_number(project.name)
                 if db_project and db_project.client_id:
                     client_id = db_project.client_id
-                    print(f"INFO: [ProjectService] تم جلب client_id من قاعدة البيانات: {client_id}")
+                    safe_print(f"INFO: [ProjectService] تم جلب client_id من قاعدة البيانات: {client_id}")
 
             payment_data = schemas.Payment(
                 project_id=project.name,
@@ -542,22 +599,22 @@ class ProjectService:
                 method=payment_method,
             )
             
-            print(f"DEBUG: [ProjectService] بيانات الدفعة: project_id={payment_data.project_id}, client_id={payment_data.client_id}")
+            safe_print(f"DEBUG: [ProjectService] بيانات الدفعة: project_id={payment_data.project_id}, client_id={payment_data.client_id}")
 
             # ⚡ إنشاء الدفعة في قاعدة البيانات (مع فحص التكرار)
             created_payment = self.repo.create_payment(payment_data)
-            print(f"DEBUG: [ProjectService] تم إنشاء الدفعة في قاعدة البيانات: ID={created_payment.id}")
+            safe_print(f"DEBUG: [ProjectService] تم إنشاء الدفعة في قاعدة البيانات: ID={created_payment.id}")
 
             # ⚡ إبلاغ الروبوت المحاسبي (ينشئ القيد تلقائياً)
-            print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECEIVED...")
+            safe_print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECEIVED...")
             subscribers = self.bus.get_subscriber_count('PAYMENT_RECEIVED')
-            print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECEIVED: {subscribers}")
+            safe_print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECEIVED: {subscribers}")
             
             result = self.bus.publish('PAYMENT_RECEIVED', {
                 "payment": created_payment,
                 "project": project
             })
-            print(f"DEBUG: [ProjectService] تم نشر الحدث - عدد المستمعين الذين تم إخطارهم: {result}")
+            safe_print(f"DEBUG: [ProjectService] تم نشر الحدث - عدد المستمعين الذين تم إخطارهم: {result}")
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
             self._auto_update_project_status(project.name, force_update=True)
@@ -565,12 +622,15 @@ class ProjectService:
             # ⚡ إرسال إشارات التحديث للـ UI
             app_signals.emit_data_changed('projects')
             app_signals.emit_data_changed('payments')
+            
+            # 🔔 إشعار
+            notify_operation('paid', 'payment', f"{amount:,.0f} ج.م - {project.name}")
 
-            print(f"SUCCESS: [ProjectService] ✅ تم تسجيل الدفعة بمبلغ {amount} للمشروع {project.name}")
+            safe_print(f"SUCCESS: [ProjectService] ✅ تم تسجيل الدفعة بمبلغ {amount} للمشروع {project.name}")
             return created_payment
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل إنشاء الدفعة: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل إنشاء الدفعة: {e}")
             raise
 
     def _get_payment_method_from_account(self, account_code: str) -> str:
@@ -611,7 +671,7 @@ class ProjectService:
                 return "Bank Transfer"
                 
         except Exception as e:
-            print(f"WARNING: [ProjectService] فشل تحديد طريقة الدفع: {e}")
+            safe_print(f"WARNING: [ProjectService] فشل تحديد طريقة الدفع: {e}")
 
         return "Other"
 
@@ -632,7 +692,7 @@ class ProjectService:
 
             # ⚡ التحقق من صحة البيانات
             if payment_data.amount <= 0:
-                print("ERROR: [ProjectService] مبلغ الدفعة يجب أن يكون أكبر من صفر")
+                safe_print("ERROR: [ProjectService] مبلغ الدفعة يجب أن يكون أكبر من صفر")
                 return False
 
             # تحديث طريقة الدفع من الحساب
@@ -653,11 +713,11 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
-                print(f"SUCCESS: [ProjectService] ✅ تم تعديل الدفعة وتحديث حالة المشروع {project_name}")
+                safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل تعديل الدفعة: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل تعديل الدفعة: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -678,7 +738,7 @@ class ProjectService:
             payment = self.repo.get_payment_by_id(payment_id)
 
             if not payment:
-                print(f"WARNING: [ProjectService] لم يتم العثور على الدفعة: {payment_id}")
+                safe_print(f"WARNING: [ProjectService] لم يتم العثور على الدفعة: {payment_id}")
                 return False
 
             result = self.repo.delete_payment(payment_id)
@@ -696,11 +756,11 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
-                print(f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}")
+                safe_print(f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل حذف الدفعة: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل حذف الدفعة: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -710,32 +770,32 @@ class ProjectService:
         """
         (جديدة) يستقبل أمر تحويل عرض سعر وينشئ المشروع.
         """
-        print("INFO: [ProjectService] استلام حدث 'CONVERT_TO_INVOICE' (تحويل لمشروع)...")
+        safe_print("INFO: [ProjectService] استلام حدث 'CONVERT_TO_INVOICE' (تحويل لمشروع)...")
         try:
             # (بنستدعي الدالة اللي بتنشئ المشروع وبتشغل الروبوت)
             # (مفيش دفعة مقدمة في التحويل)
             self.create_project(quote_data_dict, payment_data={})
-            print("INFO: [ProjectService] تم إنشاء المشروع من عرض السعر بنجاح.")
+            safe_print("INFO: [ProjectService] تم إنشاء المشروع من عرض السعر بنجاح.")
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل إنشاء المشروع من عرض السعر: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل إنشاء المشروع من عرض السعر: {e}")
 
     def _auto_update_project_status(self, project_name: str, force_update: bool = False):
         """⚡ تحديث حالة المشروع أوتوماتيك بناءً على الدفعات (مع احترام التعديل اليدوي)"""
         try:
             project = self.repo.get_project_by_number(project_name)
             if not project:
-                print(f"WARNING: [ProjectService] لم يتم العثور على المشروع: {project_name}")
+                safe_print(f"WARNING: [ProjectService] لم يتم العثور على المشروع: {project_name}")
                 return
 
             # تجاهل المشاريع المؤرشفة
             if project.status == schemas.ProjectStatus.ARCHIVED:
-                print(f"INFO: [ProjectService] المشروع {project_name} مؤرشف - لن يتم تحديث حالته")
+                safe_print(f"INFO: [ProjectService] المشروع {project_name} مؤرشف - لن يتم تحديث حالته")
                 return
 
             # ⚡ تجاهل المشاريع اللي حالتها تم تعيينها يدوياً (إلا لو force_update)
             status_manually_set = getattr(project, 'status_manually_set', False)
             if status_manually_set and not force_update:
-                print(f"INFO: [ProjectService] المشروع {project_name} حالته معينة يدوياً - لن يتم تحديثها أوتوماتيك")
+                safe_print(f"INFO: [ProjectService] المشروع {project_name} حالته معينة يدوياً - لن يتم تحديثها أوتوماتيك")
                 return
 
             # جلب الدفعات من قاعدة البيانات (Online أو Offline)
@@ -744,7 +804,7 @@ class ProjectService:
                 payments = self.repo.get_payments_for_project(project_name)
                 total_paid = sum(p.amount for p in payments) if payments else 0.0
             except Exception as e:
-                print(f"WARNING: [ProjectService] فشل جلب الدفعات: {e}")
+                safe_print(f"WARNING: [ProjectService] فشل جلب الدفعات: {e}")
                 # محاولة من SQLite مباشرة - cursor منفصل
                 try:
                     cursor = self.repo.get_cursor()
@@ -771,7 +831,7 @@ class ProjectService:
 
             # تحديث الحالة إذا تغيرت
             if new_status and project.status != new_status:
-                print(f"INFO: [ProjectService] ⚡ تحديث حالة {project_name}: {project.status.value} -> {new_status.value} (paid: {total_paid:,.2f} / total: {project.total_amount:,.2f})")
+                safe_print(f"INFO: [ProjectService] ⚡ تحديث حالة {project_name}: {project.status.value} -> {new_status.value} (paid: {total_paid:,.2f} / total: {project.total_amount:,.2f})")
                 project.status = new_status
                 project.status_manually_set = False  # الحالة أصبحت أوتوماتيك
                 self.repo.update_project(project_name, project)
@@ -779,7 +839,7 @@ class ProjectService:
                 app_signals.emit_data_changed('projects')
 
         except Exception as e:
-            print(f"WARNING: [ProjectService] فشل تحديث حالة المشروع {project_name}: {e}")
+            safe_print(f"WARNING: [ProjectService] فشل تحديث حالة المشروع {project_name}: {e}")
 
     def reset_project_status_to_auto(self, project_name: str) -> bool:
         """⚡ إعادة حالة المشروع للتحديث الأوتوماتيك"""
@@ -795,10 +855,10 @@ class ProjectService:
             # تحديث الحالة أوتوماتيك
             self._auto_update_project_status(project_name, force_update=False)
 
-            print(f"INFO: [ProjectService] ✅ تم إعادة حالة المشروع {project_name} للتحديث الأوتوماتيك")
+            safe_print(f"INFO: [ProjectService] ✅ تم إعادة حالة المشروع {project_name} للتحديث الأوتوماتيك")
             return True
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل إعادة حالة المشروع للأوتوماتيك: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل إعادة حالة المشروع للأوتوماتيك: {e}")
             return False
 
     # --- دوال الربحية (معدلة عشان تستخدم الداتا الصح) ---
@@ -828,7 +888,7 @@ class ProjectService:
                         {"amount": 1}
                     ))
                     total_expenses = sum([e.get("amount", 0) for e in expenses])
-                    print(f"INFO: [Repo] جلب مصروفات مشروع: {project_name}")
+                    safe_print(f"INFO: [Repo] جلب مصروفات مشروع: {project_name}")
 
                     # جلب الدفعات من MongoDB
                     payments = list(self.repo.mongo_db.payments.find(
@@ -838,7 +898,7 @@ class ProjectService:
                     total_paid = sum([p.get("amount", 0) for p in payments])
 
                 except Exception as e:
-                    print(f"WARNING: [ProjectService] فشل جلب البيانات من MongoDB: {e}")
+                    safe_print(f"WARNING: [ProjectService] فشل جلب البيانات من MongoDB: {e}")
                     # fallback to SQLite
                     total_expenses = 0
                     total_paid = 0
@@ -880,7 +940,7 @@ class ProjectService:
                 "balance_due": balance_due
             }
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل حساب الربحية: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل حساب الربحية: {e}")
             return {
                 "total_revenue": 0,
                 "total_expenses": 0,
@@ -894,7 +954,7 @@ class ProjectService:
         try:
             return self.repo.get_payments_for_project(project_name)  # (هنضيف دي للمخزن)
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب دفعات المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب دفعات المشروع: {e}")
             return []
 
     def get_project_by_id(self, project_id: str) -> schemas.Project | None:
@@ -913,7 +973,7 @@ class ProjectService:
 
             return None
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب المشروع: {e}")
             return None
 
     def get_project_payments(self, project_id) -> list[schemas.Payment]:
@@ -925,28 +985,28 @@ class ProjectService:
                 return self.get_payments_for_project(project.name)
             return []
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب دفعات المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب دفعات المشروع: {e}")
             return []
 
     def get_expenses_for_project(self, project_name: str) -> list[schemas.Expense]:
         try:
             return self.repo.get_expenses_for_project(project_name)
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل جلب مصروفات المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل جلب مصروفات المشروع: {e}")
             return []
 
     # --- وظائف الطباعة الجديدة ---
     def print_project_invoice(self, project_name: str, background_image_path: str | None = None, auto_open: bool = True) -> str | None:
         """طباعة فاتورة المشروع مع خلفية مخصصة"""
         if not self.printing_service:
-            print("ERROR: [ProjectService] خدمة الطباعة غير متوفرة")
+            safe_print("ERROR: [ProjectService] خدمة الطباعة غير متوفرة")
             return None
 
         try:
             # جلب بيانات المشروع
             project = self.repo.get_project_by_number(project_name)
             if not project:
-                print(f"ERROR: [ProjectService] المشروع {project_name} غير موجود")
+                safe_print(f"ERROR: [ProjectService] المشروع {project_name} غير موجود")
                 return None
 
             # جلب بيانات العميل
@@ -977,7 +1037,7 @@ class ProjectService:
             )
 
         except Exception as e:
-            print(f"ERROR: [ProjectService] فشل طباعة فاتورة المشروع: {e}")
+            safe_print(f"ERROR: [ProjectService] فشل طباعة فاتورة المشروع: {e}")
             return None
 
     def generate_project_number(self, project_id: str) -> str:

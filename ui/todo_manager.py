@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 نظام إدارة المهام الاحترافي - Sky Wave ERP
 Professional TODO Management System
@@ -44,6 +44,16 @@ from PyQt6.QtWidgets import (
 
 from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item, get_arrow_url
 from ui.smart_combobox import SmartFilterComboBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 # مسار ملف إعدادات المهام
 TASK_SETTINGS_FILE = "task_settings.json"
@@ -133,7 +143,7 @@ class TaskSettings:
                     data = json.load(f)
                     return cls.from_dict(data)
         except Exception as e:
-            print(f"WARNING: [TaskSettings] فشل تحميل الإعدادات: {e}")
+            safe_print(f"WARNING: [TaskSettings] فشل تحميل الإعدادات: {e}")
         return cls()
 
     def save(self):
@@ -141,9 +151,9 @@ class TaskSettings:
         try:
             with open(TASK_SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
-            print("INFO: [TaskSettings] تم حفظ الإعدادات")
+            safe_print("INFO: [TaskSettings] تم حفظ الإعدادات")
         except Exception as e:
-            print(f"ERROR: [TaskSettings] فشل حفظ الإعدادات: {e}")
+            safe_print(f"ERROR: [TaskSettings] فشل حفظ الإعدادات: {e}")
 
 
 @dataclass
@@ -257,7 +267,7 @@ class TaskService:
         self._reminder_shown: set[str] = set()
 
         if not self._repository:
-            print("WARNING: [TaskService] لم يتم تعيين Repository")
+            safe_print("WARNING: [TaskService] لم يتم تعيين Repository")
 
         if self._repository:
             self.load_tasks()
@@ -272,7 +282,7 @@ class TaskService:
             try:
                 cls._instance.load_tasks()
             except Exception as e:
-                print(f"WARNING: [TaskService] فشل تحميل المهام: {e}")
+                safe_print(f"WARNING: [TaskService] فشل تحميل المهام: {e}")
 
     def load_tasks(self):
         """تحميل المهام من قاعدة البيانات"""
@@ -280,11 +290,11 @@ class TaskService:
             if self._repository:
                 tasks_data = self._repository.get_all_tasks()
                 self.tasks = [self._dict_to_task(t) for t in tasks_data]
-                print(f"INFO: [TaskService] تم تحميل {len(self.tasks)} مهمة")
+                safe_print(f"INFO: [TaskService] تم تحميل {len(self.tasks)} مهمة")
             else:
                 self._load_from_file()
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل تحميل المهام: {e}")
+            safe_print(f"ERROR: [TaskService] فشل تحميل المهام: {e}")
             self.tasks = []
 
     def _load_from_file(self):
@@ -296,7 +306,7 @@ class TaskService:
                     data = json.load(f)
                     self.tasks = [Task.from_dict(t) for t in data]
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل تحميل المهام من الملف: {e}")
+            safe_print(f"ERROR: [TaskService] فشل تحميل المهام من الملف: {e}")
             self.tasks = []
 
     def _dict_to_task(self, data: dict) -> Task:
@@ -342,7 +352,7 @@ class TaskService:
                 is_archived=data.get('is_archived', False),
             )
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل تحويل المهمة: {e}")
+            safe_print(f"ERROR: [TaskService] فشل تحويل المهمة: {e}")
             return Task(id=str(data.get('id', '')), title=data.get('title', 'مهمة'))
 
     def _task_to_dict(self, task: Task) -> dict:
@@ -377,13 +387,13 @@ class TaskService:
                 task_dict = self._task_to_dict(task)
                 result = self._repository.create_task(task_dict)
                 task.id = str(result.get('id', task.id))
-                print(f"INFO: [TaskService] تم حفظ المهمة: {task.title}")
+                safe_print(f"INFO: [TaskService] تم حفظ المهمة: {task.title}")
 
             self.tasks.append(task)
             self._emit_change_signal()
             return task
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل إضافة المهمة: {e}")
+            safe_print(f"ERROR: [TaskService] فشل إضافة المهمة: {e}")
             import traceback
             traceback.print_exc()
             return task
@@ -401,9 +411,9 @@ class TaskService:
                     break
 
             self._emit_change_signal()
-            print(f"INFO: [TaskService] تم تحديث مهمة: {task.title}")
+            safe_print(f"INFO: [TaskService] تم تحديث مهمة: {task.title}")
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل تحديث المهمة: {e}")
+            safe_print(f"ERROR: [TaskService] فشل تحديث المهمة: {e}")
 
     def delete_task(self, task_id: str):
         """حذف مهمة"""
@@ -413,9 +423,9 @@ class TaskService:
 
             self.tasks = [t for t in self.tasks if t.id != task_id]
             self._emit_change_signal()
-            print(f"INFO: [TaskService] تم حذف مهمة (ID: {task_id})")
+            safe_print(f"INFO: [TaskService] تم حذف مهمة (ID: {task_id})")
         except Exception as e:
-            print(f"ERROR: [TaskService] فشل حذف المهمة: {e}")
+            safe_print(f"ERROR: [TaskService] فشل حذف المهمة: {e}")
 
     def _emit_change_signal(self):
         """إرسال إشارة تغيير البيانات"""
@@ -551,7 +561,7 @@ class TaskService:
             self.delete_task(task_id)
 
         if tasks_to_update or tasks_to_delete:
-            print(f"INFO: [TaskService] معالجة {len(tasks_to_update)} مهمة، حذف {len(tasks_to_delete)} مهمة")
+            safe_print(f"INFO: [TaskService] معالجة {len(tasks_to_update)} مهمة، حذف {len(tasks_to_delete)} مهمة")
 
     def archive_old_completed_tasks(self):
         """أرشفة المهام المكتملة القديمة"""
@@ -932,14 +942,14 @@ class TaskEditorDialog(QDialog):
                 projects = self.project_service.get_all_projects()
                 self.projects_list = [(str(p.id), p.name) for p in projects if hasattr(p, 'id') and hasattr(p, 'name')]
         except Exception as e:
-            print(f"WARNING: [TaskEditor] فشل تحميل المشاريع: {e}")
+            safe_print(f"WARNING: [TaskEditor] فشل تحميل المشاريع: {e}")
 
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
                 self.clients_list = [(str(c.id), c.name) for c in clients if hasattr(c, 'id') and hasattr(c, 'name')]
         except Exception as e:
-            print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
+            safe_print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
 
     def init_ui(self):
         """تهيئة الواجهة - تصميم متوافق مع باقي البرنامج"""
@@ -1399,7 +1409,7 @@ class TodoManagerWidget(QWidget):
             from core.signals import app_signals
             app_signals.tasks_changed.connect(self._on_tasks_changed)
         except Exception as e:
-            print(f"WARNING: [TodoManager] فشل ربط الإشارات: {e}")
+            safe_print(f"WARNING: [TodoManager] فشل ربط الإشارات: {e}")
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._periodic_update)
@@ -1419,13 +1429,13 @@ class TodoManagerWidget(QWidget):
                 projects = self.project_service.get_all_projects()
                 self._projects_cache = {str(p.id): p.name for p in projects if hasattr(p, 'id') and hasattr(p, 'name')}
         except Exception as e:
-            print(f"WARNING: [TodoManager] فشل تحميل المشاريع: {e}")
+            safe_print(f"WARNING: [TodoManager] فشل تحميل المشاريع: {e}")
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
                 self._clients_cache = {str(c.id): c.name for c in clients if hasattr(c, 'id') and hasattr(c, 'name')}
         except Exception as e:
-            print(f"WARNING: [TodoManager] فشل تحميل العملاء: {e}")
+            safe_print(f"WARNING: [TodoManager] فشل تحميل العملاء: {e}")
         self._cache_loaded = True
 
     def _on_tasks_changed(self):
@@ -2014,10 +2024,10 @@ class TodoManagerWidget(QWidget):
             self.tasks_table.setSortingEnabled(True)
 
             self.update_statistics()
-            print(f"INFO: [TodoManager] ✅ تم تحميل {len(tasks)} مهمة")
+            safe_print(f"INFO: [TodoManager] ✅ تم تحميل {len(tasks)} مهمة")
 
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تحميل المهام: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {e}")
             import traceback
             traceback.print_exc()
         finally:
@@ -2133,7 +2143,7 @@ class TodoManagerWidget(QWidget):
                     self.load_tasks()
                     QMessageBox.information(self, "تم", f"تم إضافة المهمة: {task.title} ✅")
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل إضافة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل إضافة المهمة: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل إضافة المهمة: {e}")
 
     def edit_selected_task(self):
@@ -2156,7 +2166,7 @@ class TodoManagerWidget(QWidget):
                     self.task_service.update_task(updated_task)
                     self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تعديل المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تعديل المهمة: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل تعديل المهمة: {e}")
 
     def complete_selected_task(self):
@@ -2170,7 +2180,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(self.selected_task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل إكمال المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل إكمال المهمة: {e}")
 
     def _set_in_progress(self):
         """تعيين المهمة كقيد التنفيذ"""
@@ -2183,7 +2193,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(self.selected_task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تغيير حالة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تغيير حالة المهمة: {e}")
 
     def _archive_selected_task(self):
         """أرشفة المهمة المحددة"""
@@ -2195,7 +2205,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(self.selected_task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل أرشفة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل أرشفة المهمة: {e}")
 
     def _restore_selected_task(self):
         """استعادة المهمة المحددة من الأرشيف"""
@@ -2207,7 +2217,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(self.selected_task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل استعادة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل استعادة المهمة: {e}")
 
     def delete_selected_task(self):
         """حذف المهمة المحددة"""
@@ -2226,7 +2236,7 @@ class TodoManagerWidget(QWidget):
                 self.task_service.delete_task(self.selected_task.id)
                 self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل حذف المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل حذف المهمة: {e}")
 
     def refresh_tasks(self):
         """تحديث قائمة المهام"""
@@ -2237,7 +2247,7 @@ class TodoManagerWidget(QWidget):
             self.load_tasks()
             QMessageBox.information(self, "تم", "تم تحديث قائمة المهام ✅")
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تحديث المهام: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تحديث المهام: {e}")
 
     def open_settings(self):
         """فتح نافذة الإعدادات"""
@@ -2249,7 +2259,7 @@ class TodoManagerWidget(QWidget):
                     self.task_service.settings = new_settings
                     QMessageBox.information(self, "تم", "تم حفظ الإعدادات بنجاح ✅")
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل فتح الإعدادات: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل فتح الإعدادات: {e}")
 
     def check_reminders(self):
         """فحص التذكيرات"""
@@ -2263,7 +2273,7 @@ class TodoManagerWidget(QWidget):
                 task.reminder = False
                 self.task_service.update_task(task)
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل فحص التذكيرات: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل فحص التذكيرات: {e}")
 
 
     def _on_item_double_clicked(self, item):
@@ -2391,7 +2401,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تغيير حالة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تغيير حالة المهمة: {e}")
 
     def _change_task_priority(self, task: Task, new_priority: TaskPriority):
         """تغيير أولوية المهمة"""
@@ -2400,7 +2410,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل تغيير أولوية المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل تغيير أولوية المهمة: {e}")
 
     def _archive_task(self, task: Task):
         """أرشفة مهمة"""
@@ -2409,7 +2419,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل أرشفة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل أرشفة المهمة: {e}")
 
     def _restore_task(self, task: Task):
         """استعادة مهمة"""
@@ -2418,7 +2428,7 @@ class TodoManagerWidget(QWidget):
             self.task_service.update_task(task)
             self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل استعادة المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل استعادة المهمة: {e}")
 
     def _delete_task(self, task: Task):
         """حذف مهمة"""
@@ -2433,7 +2443,7 @@ class TodoManagerWidget(QWidget):
                 self.task_service.delete_task(task.id)
                 self.load_tasks()
         except Exception as e:
-            print(f"ERROR: [TodoManager] فشل حذف المهمة: {e}")
+            safe_print(f"ERROR: [TodoManager] فشل حذف المهمة: {e}")
 
 
 # للاختبار المستقل

@@ -1,4 +1,4 @@
-# الملف: core/event_bus.py
+﻿# الملف: core/event_bus.py
 """
 نظام ناقل الأحداث (Event Bus)
 يوفر نمط Publish-Subscribe للتواصل بين مكونات التطبيق
@@ -10,6 +10,16 @@ from threading import Lock
 from typing import Any
 
 from core.logger import get_logger
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 logger = get_logger(__name__)
 
@@ -49,7 +59,6 @@ class EventBus:
         "INVOICE_CREATED", "INVOICE_UPDATED", "INVOICE_VOIDED",
         "EXPENSE_CREATED", "EXPENSE_UPDATED", "EXPENSE_DELETED",
         "PAYMENT_RECORDED", "PAYMENT_DELETED",
-        "QUOTATION_CREATED", "QUOTATION_UPDATED",
         "SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED",
         "NOTIFICATION_CREATED",
     }
@@ -79,7 +88,7 @@ class EventBus:
 
         Example:
             >>> def on_invoice_created(data):
-            ...     print(f"فاتورة جديدة: {data['invoice_number']}")
+            ...     safe_print(f"فاتورة جديدة: {data['invoice_number']}")
             >>> bus.subscribe('INVOICE_CREATED', on_invoice_created)
         """
         with self._lock:
@@ -219,11 +228,11 @@ if __name__ == "__main__":
 
     # 1. تعريف "مستمعين" (وظايف عادية)
     def accountant_listener(invoice_data):
-        print(f"  >> المحاسب سمع: تم إنشاء فاتورة جديدة برقم {invoice_data['number']}")
+        safe_print(f"  >> المحاسب سمع: تم إنشاء فاتورة جديدة برقم {invoice_data['number']}")
         # (هنا هيتحط كود إنشاء قيد اليومية)
 
     def notification_listener(invoice_data):
-        print(f"  >> قسم الإشعارات سمع: جاري إرسال إيميل للعميل ببيانات الفاتورة {invoice_data['number']}")
+        safe_print(f"  >> قسم الإشعارات سمع: جاري إرسال إيميل للعميل ببيانات الفاتورة {invoice_data['number']}")
 
     # 2. تشغيل الإذاعة
     bus = EventBus()
@@ -233,12 +242,12 @@ if __name__ == "__main__":
     bus.subscribe('INVOICE_CREATED', notification_listener)
     bus.subscribe('EXPENSE_CREATED', accountant_listener) # المحاسب بيسمع الفواتير والمصروفات
 
-    print("\n--- الاختبار: نشر فاتورة جديدة ---")
+    safe_print("\n--- الاختبار: نشر فاتورة جديدة ---")
     # 4. قسم الفواتير بينشر "حدث"
     new_invoice = {"number": "INV-001", "total": 5000}
     bus.publish('INVOICE_CREATED', new_invoice)
 
-    print("\n--- الاختبار: نشر مصروف جديد ---")
+    safe_print("\n--- الاختبار: نشر مصروف جديد ---")
     # 5. قسم المصروفات بينشر "حدث"
     new_expense = {"category": "إعلانات", "amount": 1000}
     # (قسم الإشعارات مش هيسمع ده، لأنه مشترك في الفواتير بس)

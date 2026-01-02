@@ -4,13 +4,6 @@
 تحتوي على المكونات الأساسية للنظام
 """
 
-# نظام حل التعارضات الذكي
-from .conflict_resolver import (
-    ConflictResolution,
-    ConflictResolver,
-    ConflictResult,
-    ConflictSeverity,
-)
 from .error_handler import ErrorHandler
 from .event_bus import EventBus
 from .logger import LoggerSetup
@@ -31,12 +24,6 @@ __all__ = [
 
     # Repository
     'Repository',
-
-    # Conflict Resolution
-    'ConflictResolver',
-    'ConflictResult',
-    'ConflictResolution',
-    'ConflictSeverity',
 
     # 🔥 نظام المزامنة الجديد - الإصدار الثالث
     'SyncManagerV3',

@@ -23,19 +23,23 @@ class AppSignals(QObject):
     clients_changed = pyqtSignal()
     services_changed = pyqtSignal()
     payments_changed = pyqtSignal()
-    quotations_changed = pyqtSignal()  # ⚡ إشارة تحديث عروض الأسعار
-    tasks_changed = pyqtSignal()  # ⚡ إشارة تحديث المهام
-    journal_entry_created = pyqtSignal(str)  # إشارة إنشاء قيد محاسبي
+    tasks_changed = pyqtSignal()
+    journal_entry_created = pyqtSignal(str)
 
     # ⚡ إشارات المزامنة
-    sync_completed = pyqtSignal(dict)  # نتائج المزامنة
-    sync_failed = pyqtSignal(str)  # رسالة الخطأ
+    sync_completed = pyqtSignal(dict)
+    sync_failed = pyqtSignal(str)
+    
+    # 🔔 إشارات الإشعارات التفصيلية (action, entity_type, entity_name)
+    # action: created, updated, deleted, paid, etc.
+    # entity_type: project, client, expense, payment, account, service, task
+    # entity_name: اسم العنصر
+    operation_completed = pyqtSignal(str, str, str)
 
     def emit_data_changed(self, data_type: str):
         """إرسال إشارة تحديث البيانات"""
         self.data_changed.emit(data_type)
 
-        # إرسال الإشارة المحددة أيضاً
         if data_type == 'accounts':
             self.accounts_changed.emit()
         elif data_type == 'projects':
@@ -48,14 +52,21 @@ class AppSignals(QObject):
             self.services_changed.emit()
         elif data_type == 'payments':
             self.payments_changed.emit()
-        elif data_type == 'quotations':
-            self.quotations_changed.emit()
         elif data_type == 'tasks':
             self.tasks_changed.emit()
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""
         self.journal_entry_created.emit(entry_id)
+    
+    def emit_operation(self, action: str, entity_type: str, entity_name: str):
+        """
+        إرسال إشارة عملية مكتملة
+        action: created, updated, deleted, paid, synced
+        entity_type: project, client, expense, payment, account, service, task
+        entity_name: اسم العنصر
+        """
+        self.operation_completed.emit(action, entity_type, entity_name)
 
 
 # إنشاء نسخة واحدة من الإشارات (Singleton)

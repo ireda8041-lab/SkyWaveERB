@@ -1,4 +1,4 @@
-# الملف: ui/service_editor_dialog.py
+﻿# الملف: ui/service_editor_dialog.py
 """
 نافذة تحرير الخدمات - تصميم محسن ومتجاوب
 """
@@ -27,6 +27,16 @@ from services.service_service import ServiceService
 from ui.custom_spinbox import CustomSpinBox
 from ui.smart_combobox import SmartFilterComboBox
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 
 class ServiceEditorDialog(QDialog):
     """نافذة منبثقة لإضافة أو تعديل خدمة - تصميم متجاوب."""
@@ -51,7 +61,8 @@ class ServiceEditorDialog(QDialog):
         # 📱 Responsive
         self.setMinimumWidth(420)
         self.setMinimumHeight(400)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(550)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
@@ -93,16 +104,17 @@ class ServiceEditorDialog(QDialog):
         layout.setSpacing(8)
         layout.setContentsMargins(14, 14, 14, 14)
 
-        # ستايل الحقول
+        # ستايل الحقول - مع توسيط عمودي محسن
         field_style = f"""
             QLineEdit {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 5px;
-                padding: 7px 10px;
+                padding: 0px 8px;
                 font-size: 11px;
-                min-height: 16px;
+                font-weight: normal;
+                min-height: 26px;
             }}
             QLineEdit:hover {{
                 border-color: {COLORS['primary']};
@@ -115,15 +127,16 @@ class ServiceEditorDialog(QDialog):
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 5px;
-                padding: 6px;
+                padding: 5px;
                 font-size: 11px;
+                font-weight: normal;
             }}
             QTextEdit:hover {{
                 border-color: {COLORS['primary']};
             }}
         """
 
-        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
+        label_style = f"color: {COLORS['text_secondary']}; font-size: 10px; font-weight: normal;"
 
         # === اسم الخدمة ===
         name_label = QLabel("📦 اسم الخدمة *")
@@ -135,23 +148,11 @@ class ServiceEditorDialog(QDialog):
         self.name_input.setPlaceholderText("أدخل اسم الخدمة...")
         layout.addWidget(self.name_input)
 
-        # === صف السعر والفئة ===
+        # === صف الفئة والسعر ===
         row1 = QHBoxLayout()
         row1.setSpacing(8)
 
-        # السعر
-        price_cont = QVBoxLayout()
-        price_cont.setSpacing(2)
-        price_label = QLabel("💰 السعر الافتراضي *")
-        price_label.setStyleSheet(label_style)
-        price_cont.addWidget(price_label)
-        self.price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999_999)
-        self.price_input.setDecimals(2)
-        self.price_input.setSuffix(" ج.م")
-        price_cont.addWidget(self.price_input)
-        row1.addLayout(price_cont, 1)
-
-        # الفئة (ComboBox قابل للتعديل)
+        # الفئة (يظهر على اليمين في RTL)
         cat_cont = QVBoxLayout()
         cat_cont.setSpacing(2)
         cat_label = QLabel("📂 الفئة")
@@ -160,15 +161,21 @@ class ServiceEditorDialog(QDialog):
         
         # SmartFilterComboBox مع فلترة ذكية
         self.category_input = SmartFilterComboBox()
+        self.category_input.setMinimumWidth(150)
         self.category_input.setStyleSheet(f"""
             QComboBox {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 5px;
-                padding: 7px 10px 7px 25px;
+                padding-top: 0px;
+                padding-bottom: 0px;
+                padding-right: 8px;
+                padding-left: 22px;
                 font-size: 11px;
-                min-height: 16px;
+                font-weight: normal;
+                min-height: 26px;
+                min-width: 130px;
             }}
             QComboBox:hover {{
                 border-color: {COLORS['primary']};
@@ -176,7 +183,7 @@ class ServiceEditorDialog(QDialog):
             QComboBox::drop-down {{
                 subcontrol-origin: border;
                 subcontrol-position: center left;
-                width: 22px;
+                width: 20px;
                 border: none;
             }}
             QComboBox::down-arrow {{
@@ -190,6 +197,10 @@ class ServiceEditorDialog(QDialog):
                 border: 1px solid {COLORS['border']};
                 selection-background-color: {COLORS['primary']};
             }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 24px;
+                padding: 3px 6px;
+            }}
         """)
         
         # ⚡ تحميل الفئات الموجودة
@@ -199,6 +210,18 @@ class ServiceEditorDialog(QDialog):
         
         cat_cont.addWidget(self.category_input)
         row1.addLayout(cat_cont, 1)
+
+        # السعر (يظهر على اليسار في RTL)
+        price_cont = QVBoxLayout()
+        price_cont.setSpacing(2)
+        price_label = QLabel("💰 السعر الافتراضي *")
+        price_label.setStyleSheet(label_style)
+        price_cont.addWidget(price_label)
+        self.price_input = CustomSpinBox(decimals=2, minimum=0, maximum=999_999)
+        self.price_input.setDecimals(2)
+        self.price_input.setSuffix(" ج.م")
+        price_cont.addWidget(self.price_input)
+        row1.addLayout(price_cont, 1)
 
         layout.addLayout(row1)
 
@@ -272,6 +295,10 @@ class ServiceEditorDialog(QDialog):
         if self.is_editing:
             self.load_service_data()
             self.save_button.setText("💾 حفظ")
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def _load_existing_categories(self):
         """⚡ تحميل الفئات الموجودة من الخدمات الحالية"""
@@ -290,7 +317,7 @@ class ServiceEditorDialog(QDialog):
                 self.category_input.addItem(cat)
                 
         except Exception as e:
-            print(f"WARNING: [ServiceEditorDialog] فشل تحميل الفئات: {e}")
+            safe_print(f"WARNING: [ServiceEditorDialog] فشل تحميل الفئات: {e}")
 
     def load_service_data(self):
         self.name_input.setText(self.service_to_edit.name)
@@ -343,5 +370,5 @@ class ServiceEditorDialog(QDialog):
 
             self.accept()
         except Exception as e:
-            print(f"ERROR: [ServiceEditorDialog] فشل حفظ الخدمة: {e}")
+            safe_print(f"ERROR: [ServiceEditorDialog] فشل حفظ الخدمة: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")

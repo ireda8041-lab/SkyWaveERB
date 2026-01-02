@@ -1,4 +1,4 @@
-# الملف: services/template_service.py
+﻿# الملف: services/template_service.py
 """
 خدمة قوالب الفواتير - إدارة وإنتاج قوالب HTML للفواتير
 """
@@ -12,6 +12,16 @@ from jinja2 import Environment, FileSystemLoader
 
 from core import schemas
 from core.base_service import BaseService
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 def get_base_path():
@@ -50,14 +60,14 @@ class TemplateService(BaseService):
         for path in possible_paths:
             if os.path.exists(path):
                 self.templates_dir = path
-                print(f"INFO: [TemplateService] Found templates at: {path}")
+                safe_print(f"INFO: [TemplateService] Found templates at: {path}")
                 break
 
         if not self.templates_dir:
             # إنشاء المجلد الافتراضي
             self.templates_dir = os.path.join("assets", "templates", "invoices")
             os.makedirs(self.templates_dir, exist_ok=True)
-            print(f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}")
+            safe_print(f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}")
 
         # إعداد Jinja2
         self.jinja_env = Environment(
@@ -68,7 +78,7 @@ class TemplateService(BaseService):
         # إضافة فلاتر مخصصة
         self.jinja_env.filters['format_currency'] = self._format_currency
 
-        print(f"INFO: [TemplateService] Templates directory: {self.templates_dir}")
+        safe_print(f"INFO: [TemplateService] Templates directory: {self.templates_dir}")
 
         # إنشاء جدول القوالب
         self._create_templates_table()
@@ -99,7 +109,7 @@ class TemplateService(BaseService):
             self._add_default_template()
 
         except Exception as e:
-            print(f"ERROR: خطأ في إنشاء جدول القوالب: {e}")
+            safe_print(f"ERROR: خطأ في إنشاء جدول القوالب: {e}")
 
     @staticmethod
     def _format_currency(value):
@@ -145,10 +155,10 @@ class TemplateService(BaseService):
                     1
                 ))
                 self.repo.sqlite_conn.commit()
-                print(f"INFO: تم إضافة القالب الافتراضي: {template_file}")
+                safe_print(f"INFO: تم إضافة القالب الافتراضي: {template_file}")
 
         except Exception as e:
-            print(f"ERROR: خطأ في إضافة القالب الافتراضي: {e}")
+            safe_print(f"ERROR: خطأ في إضافة القالب الافتراضي: {e}")
         finally:
             if cursor:
                 cursor.close()
@@ -181,7 +191,7 @@ class TemplateService(BaseService):
             return templates
 
         except Exception as e:
-            print(f"ERROR: خطأ في جلب القوالب: {e}")
+            safe_print(f"ERROR: خطأ في جلب القوالب: {e}")
             return []
         finally:
             if cursor:
@@ -214,7 +224,7 @@ class TemplateService(BaseService):
             return None
 
         except Exception as e:
-            print(f"ERROR: خطأ في جلب القالب: {e}")
+            safe_print(f"ERROR: خطأ في جلب القالب: {e}")
             return None
         finally:
             if cursor:
@@ -240,12 +250,12 @@ class TemplateService(BaseService):
                 # التحقق من وجود الملف فعلياً
                 template_path = os.path.join(self.templates_dir, template_file)
                 if not os.path.exists(template_path):
-                    print(f"WARNING: [TemplateService] Template file not found: {template_file}")
+                    safe_print(f"WARNING: [TemplateService] Template file not found: {template_file}")
                     # البحث عن قالب بديل
                     for alt_template in ["skywave_ads_invoice_template.html"]:
                         alt_path = os.path.join(self.templates_dir, alt_template)
                         if os.path.exists(alt_path):
-                            print(f"INFO: [TemplateService] Using alternative template: {alt_template}")
+                            safe_print(f"INFO: [TemplateService] Using alternative template: {alt_template}")
                             template_file = alt_template
                             # تحديث قاعدة البيانات
                             update_sql = "UPDATE invoice_templates SET template_file = ? WHERE id = ?"
@@ -267,7 +277,7 @@ class TemplateService(BaseService):
             return templates[0] if templates else None
 
         except Exception as e:
-            print(f"ERROR: خطأ في جلب القالب الافتراضي: {e}")
+            safe_print(f"ERROR: خطأ في جلب القالب الافتراضي: {e}")
             return None
         finally:
             if cursor:
@@ -293,28 +303,28 @@ class TemplateService(BaseService):
 
             # تحميل القالب
             template_file = template_info['template_file']
-            print(f"INFO: [TemplateService] Loading template: {template_file}")
+            safe_print(f"INFO: [TemplateService] Loading template: {template_file}")
             template = self.jinja_env.get_template(template_file)
-            print(f"INFO: [TemplateService] Template loaded successfully: {template_file}")
+            safe_print(f"INFO: [TemplateService] Template loaded successfully: {template_file}")
 
             # تحضير البيانات
             template_data = self._prepare_template_data(project, client_info, payments)
 
             # إنتاج HTML
-            print(f"INFO: [TemplateService] Rendering template with data keys: {list(template_data.keys())}")
+            safe_print(f"INFO: [TemplateService] Rendering template with data keys: {list(template_data.keys())}")
             html_content = template.render(**template_data)
-            print(f"INFO: [TemplateService] Template rendered successfully, HTML size: {len(html_content)} chars")
+            safe_print(f"INFO: [TemplateService] Template rendered successfully, HTML size: {len(html_content)} chars")
 
             # التحقق من وجود العلامة المميزة
             if "SKYWAVE_CUSTOM_TEMPLATE_2025" in html_content:
-                print("✅ [TemplateService] Custom template is being used correctly!")
+                safe_print("✅ [TemplateService] Custom template is being used correctly!")
             else:
-                print("❌ [TemplateService] WARNING: Custom template marker not found!")
+                safe_print("❌ [TemplateService] WARNING: Custom template marker not found!")
 
             return str(html_content)
 
         except Exception as e:
-            print(f"ERROR: خطأ في إنتاج HTML للفاتورة: {e}")
+            safe_print(f"ERROR: خطأ في إنتاج HTML للفاتورة: {e}")
             import traceback
             traceback.print_exc()
             return f"<html><body><h1>خطأ في إنتاج الفاتورة: {e}</h1></body></html>"
@@ -324,7 +334,7 @@ class TemplateService(BaseService):
         try:
             # التأكد من أن project هو كائن صحيح وليس dict
             if isinstance(project, dict):
-                print("WARNING: [TemplateService] project is a dict, converting to object-like access")
+                safe_print("WARNING: [TemplateService] project is a dict, converting to object-like access")
                 # تحويل dict إلى object للوصول للخصائص
                 class DictToObj:
                     def __init__(self, d):
@@ -334,7 +344,7 @@ class TemplateService(BaseService):
 
             # التحقق من وجود الخصائص الأساسية وإضافتها إذا لزم الأمر
             if not hasattr(project, 'name'):
-                print("WARNING: [TemplateService] Project object missing 'name' attribute, adding default")
+                safe_print("WARNING: [TemplateService] Project object missing 'name' attribute, adding default")
                 # إضافة قيمة افتراضية بدلاً من رفع خطأ
                 project.name = 'مشروع'
 
@@ -396,22 +406,22 @@ class TemplateService(BaseService):
                 if gross_total == 0:
                     gross_total = grand_total + discount_amount
 
-            print("INFO: [TemplateService] ====== حسابات الفاتورة ======")
-            print(f"INFO: [TemplateService] مجموع البنود (قبل خصم البند): {gross_total}")
-            print(f"INFO: [TemplateService] مجموع البنود (بعد خصم البند): {items_total_after_discount}")
-            print(f"INFO: [TemplateService] خصم البنود: {items_discount}")
-            print(f"INFO: [TemplateService] نسبة خصم المشروع: {project_discount_rate}%")
-            print(f"INFO: [TemplateService] مبلغ خصم المشروع: {project_discount}")
-            print(f"INFO: [TemplateService] إجمالي الخصم: {discount_amount}")
-            print(f"INFO: [TemplateService] الإجمالي النهائي: {grand_total}")
-            print("INFO: [TemplateService] ==============================")
+            safe_print("INFO: [TemplateService] ====== حسابات الفاتورة ======")
+            safe_print(f"INFO: [TemplateService] مجموع البنود (قبل خصم البند): {gross_total}")
+            safe_print(f"INFO: [TemplateService] مجموع البنود (بعد خصم البند): {items_total_after_discount}")
+            safe_print(f"INFO: [TemplateService] خصم البنود: {items_discount}")
+            safe_print(f"INFO: [TemplateService] نسبة خصم المشروع: {project_discount_rate}%")
+            safe_print(f"INFO: [TemplateService] مبلغ خصم المشروع: {project_discount}")
+            safe_print(f"INFO: [TemplateService] إجمالي الخصم: {discount_amount}")
+            safe_print(f"INFO: [TemplateService] الإجمالي النهائي: {grand_total}")
+            safe_print("INFO: [TemplateService] ==============================")
 
             # إذا لا يزال صفر، استخدم مجموع الدفعات
             if grand_total == 0 and payments:
                 total_paid_temp = sum(float(p.get('amount', 0)) for p in payments)
                 if total_paid_temp > 0:
                     grand_total = total_paid_temp
-                    print(f"WARNING: [TemplateService] المشروع بدون إجمالي، تم استخدام مجموع الدفعات: {grand_total}")
+                    safe_print(f"WARNING: [TemplateService] المشروع بدون إجمالي، تم استخدام مجموع الدفعات: {grand_total}")
 
             # تحضير بنود الخدمات
             items = []
@@ -455,7 +465,7 @@ class TemplateService(BaseService):
                 if existing_invoice_number:
                     # استخدم الرقم المحفوظ
                     invoice_id = existing_invoice_number
-                    print(f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}")
+                    safe_print(f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}")
                 else:
                     # ولّد رقم جديد وحاول حفظه
                     local_id = getattr(project, 'id', None)
@@ -476,19 +486,19 @@ class TemplateService(BaseService):
                                         (invoice_id, local_id)
                                     )
                                     self.repo.sqlite_conn.commit()
-                                    print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
+                                    safe_print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
                                 finally:
                                     cursor.close()
                         except Exception as save_error:
-                            print(f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}")
+                            safe_print(f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}")
                     else:
                         # لا يوجد ID - استخدم رقم افتراضي
                         invoice_id = "SW-97162"
-                        print(f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}")
+                        safe_print(f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}")
             except (AttributeError, KeyError, TypeError) as e:
                 # في حالة الخطأ، استخدم رقم افتراضي
                 invoice_id = "SW-97162"
-                print(f"ERROR: [TemplateService] خطأ في توليد رقم الفاتورة: {e}")
+                safe_print(f"ERROR: [TemplateService] خطأ في توليد رقم الفاتورة: {e}")
 
             # تاريخ الفاتورة = تاريخ بداية المشروع
             project_start_date = getattr(project, 'start_date', None)
@@ -506,7 +516,7 @@ class TemplateService(BaseService):
             payments_list = []
             total_paid = 0.0
 
-            print(f"INFO: [TemplateService] معالجة الدفعات - عدد الدفعات: {len(payments) if payments else 0}")
+            safe_print(f"INFO: [TemplateService] معالجة الدفعات - عدد الدفعات: {len(payments) if payments else 0}")
 
             if payments:
                 for payment in payments:
@@ -546,14 +556,14 @@ class TemplateService(BaseService):
                         'account_name': account_name
                     }
                     payments_list.append(payment_entry)
-                    print(f"  - دفعة: {payment_entry}")
+                    safe_print(f"  - دفعة: {payment_entry}")
 
             # حساب المتبقي - إصلاح المشكلة المحاسبية
             remaining = max(0, grand_total - total_paid)  # ⚡ لا يمكن أن يكون سالب
 
-            print(f"  - الإجمالي الكلي: {grand_total}")
-            print(f"  - المدفوع: {total_paid}")
-            print(f"  - المتبقي: {remaining}")
+            safe_print(f"  - الإجمالي الكلي: {grand_total}")
+            safe_print(f"  - المدفوع: {total_paid}")
+            safe_print(f"  - المتبقي: {remaining}")
 
             # إضافة معلومات الشركة من الإعدادات
             import base64
@@ -580,9 +590,9 @@ class TemplateService(BaseService):
                     with open(site_logo_path, 'rb') as f:
                         logo_data = f.read()
                         logo_base64 = f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
-                    print(f"INFO: [TemplateService] تم تحميل اللوجو تلقائياً من: {site_logo_path}")
+                    safe_print(f"INFO: [TemplateService] تم تحميل اللوجو تلقائياً من: {site_logo_path}")
                 except Exception as e:
-                    print(f"WARNING: [TemplateService] فشل تحميل اللوجو: {e}")
+                    safe_print(f"WARNING: [TemplateService] فشل تحميل اللوجو: {e}")
 
             company_data = {}
             if self.settings_service:
@@ -633,14 +643,14 @@ class TemplateService(BaseService):
                     with open(watermark_path, 'rb') as f:
                         watermark_data = f.read()
                         watermark_base64 = f"data:image/png;base64,{base64.b64encode(watermark_data).decode()}"
-                    print(f"INFO: [TemplateService] تم تحميل العلامة المائية من: {watermark_path}")
+                    safe_print(f"INFO: [TemplateService] تم تحميل العلامة المائية من: {watermark_path}")
                 except Exception as e:
-                    print(f"WARNING: [TemplateService] فشل تحميل العلامة المائية: {e}")
+                    safe_print(f"WARNING: [TemplateService] فشل تحميل العلامة المائية: {e}")
 
             # ⚡ جلب ملاحظات المشروع
             project_notes = getattr(project, 'project_notes', None) or (project.get('project_notes', '') if isinstance(project, dict) else '')
-            print(f"INFO: [TemplateService] ملاحظات المشروع: '{project_notes}'")
-            print(f"INFO: [TemplateService] discount_amount_raw: {discount_amount}")
+            safe_print(f"INFO: [TemplateService] ملاحظات المشروع: '{project_notes}'")
+            safe_print(f"INFO: [TemplateService] discount_amount_raw: {discount_amount}")
 
             # ⚡ نسبة الخصم (تم حسابها مسبقاً في project_discount_rate)
             discount_rate = project_discount_rate
@@ -698,7 +708,7 @@ class TemplateService(BaseService):
             }
 
         except Exception as e:
-            print(f"ERROR: خطأ في تحضير بيانات القالب: {e}")
+            safe_print(f"ERROR: خطأ في تحضير بيانات القالب: {e}")
             return {}
 
     def preview_template(
@@ -752,11 +762,11 @@ class TemplateService(BaseService):
 
                 if pdf_path and os.path.exists(pdf_path):
                     self._open_file(pdf_path)
-                    print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
+                    safe_print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
                     return True
                 else:
                     # Fallback: فتح HTML
-                    print("WARNING: [TemplateService] فشل PDF، جاري فتح HTML...")
+                    safe_print("WARNING: [TemplateService] فشل PDF، جاري فتح HTML...")
                     html_path = os.path.join(str(exports_dir), f"{filename}.html")
                     with open(html_path, 'w', encoding='utf-8') as f:
                         f.write(html_content)
@@ -768,11 +778,11 @@ class TemplateService(BaseService):
                 with open(html_path, 'w', encoding='utf-8') as f:
                     f.write(html_content)
                 self._open_file(html_path)
-                print(f"✅ [TemplateService] تم فتح HTML: {html_path}")
+                safe_print(f"✅ [TemplateService] تم فتح HTML: {html_path}")
                 return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في معاينة القالب: {e}")
+            safe_print(f"ERROR: خطأ في معاينة القالب: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -784,23 +794,23 @@ class TemplateService(BaseService):
         # ⚡ محاولة 1: WeasyPrint (الأسرع)
         try:
             from weasyprint import CSS, HTML
-            print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
+            safe_print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
             HTML(string=html_content, base_url=self.templates_dir).write_pdf(
                 pdf_path,
                 stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
             )
             if os.path.exists(pdf_path):
-                print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
+                safe_print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
                 return pdf_path
         except ImportError:
-            print("INFO: [TemplateService] WeasyPrint غير متوفر")
+            safe_print("INFO: [TemplateService] WeasyPrint غير متوفر")
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
         
         # ⚡ محاولة 2: pdfkit (wkhtmltopdf)
         try:
             import pdfkit
-            print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
+            safe_print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
             options = {
                 'page-size': 'A4',
                 'margin-top': '0mm',
@@ -813,18 +823,18 @@ class TemplateService(BaseService):
             }
             pdfkit.from_string(html_content, pdf_path, options=options)
             if os.path.exists(pdf_path):
-                print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
+                safe_print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
                 return pdf_path
         except ImportError:
-            print("INFO: [TemplateService] pdfkit غير متوفر")
+            safe_print("INFO: [TemplateService] pdfkit غير متوفر")
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
         
         # ⚡ محاولة 3: PyQt6 WebEngine (أبطأ لكن موجود)
         try:
             return self._generate_pdf_with_qt(html_content, pdf_path)
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
         
         return None
 
@@ -841,35 +851,35 @@ class TemplateService(BaseService):
         # محاولة 1: استخدام WeasyPrint
         try:
             from weasyprint import CSS, HTML
-            print("INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
+            safe_print("INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
             HTML(string=html_content, base_url=self.templates_dir).write_pdf(
                 pdf_path,
                 stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
             )
-            print("✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
+            safe_print("✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
             return pdf_path
         except ImportError:
-            print("WARNING: [TemplateService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
+            safe_print("WARNING: [TemplateService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
 
         # محاولة 2: استخدام PyQt6
         try:
-            print("INFO: [TemplateService] استخدام PyQt6 لتوليد PDF...")
+            safe_print("INFO: [TemplateService] استخدام PyQt6 لتوليد PDF...")
             return self._generate_pdf_with_qt(html_content, pdf_path)
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
 
         # محاولة 3: حفظ HTML كـ fallback
         html_path = os.path.join(exports_dir, f"{filename}.html")
         try:
-            print("INFO: [TemplateService] حفظ HTML كـ fallback...")
+            safe_print("INFO: [TemplateService] حفظ HTML كـ fallback...")
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            print(f"⚠️ [TemplateService] تم حفظ HTML: {html_path}")
+            safe_print(f"⚠️ [TemplateService] تم حفظ HTML: {html_path}")
             return html_path
         except Exception as e:
-            print(f"ERROR: [TemplateService] فشل حفظ HTML: {e}")
+            safe_print(f"ERROR: [TemplateService] فشل حفظ HTML: {e}")
             return None
 
     def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> str | None:
@@ -898,7 +908,7 @@ class TemplateService(BaseService):
                     web_view.page().pdfPrintingFinished.connect(on_pdf_saved)
                     web_view.page().printToPdf(pdf_path)
                 else:
-                    print("ERROR: [TemplateService] فشل تحميل HTML")
+                    safe_print("ERROR: [TemplateService] فشل تحميل HTML")
                     loop.quit()
 
             web_view.loadFinished.connect(on_load_finished)
@@ -912,15 +922,15 @@ class TemplateService(BaseService):
             web_view.deleteLater()
 
             if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0:
-                print("✅ [TemplateService] تم إنشاء PDF باستخدام PyQt6")
+                safe_print("✅ [TemplateService] تم إنشاء PDF باستخدام PyQt6")
                 return pdf_path
 
             return None
         except ImportError as e:
-            print(f"WARNING: [TemplateService] PyQt6 WebEngine غير متوفر: {e}")
+            safe_print(f"WARNING: [TemplateService] PyQt6 WebEngine غير متوفر: {e}")
             return None
         except Exception as e:
-            print(f"ERROR: [TemplateService] خطأ في PyQt6: {e}")
+            safe_print(f"ERROR: [TemplateService] خطأ في PyQt6: {e}")
             return None
 
     def _open_file(self, file_path: str) -> bool:
@@ -936,7 +946,7 @@ class TemplateService(BaseService):
                 subprocess.run(['xdg-open', file_path], check=False)
             return True
         except Exception as e:
-            print(f"WARNING: [TemplateService] فشل فتح الملف: {e}")
+            safe_print(f"WARNING: [TemplateService] فشل فتح الملف: {e}")
             return False
 
     def save_invoice_html(
@@ -956,11 +966,11 @@ class TemplateService(BaseService):
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            print(f"INFO: تم حفظ فاتورة HTML: {output_path}")
+            safe_print(f"INFO: تم حفظ فاتورة HTML: {output_path}")
             return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في حفظ فاتورة HTML: {e}")
+            safe_print(f"ERROR: خطأ في حفظ فاتورة HTML: {e}")
             return False
 
     def add_template(self, name: str, description: str, template_content: str) -> bool:
@@ -984,11 +994,11 @@ class TemplateService(BaseService):
             cursor.execute(insert_sql, (name, description, template_filename))
             self.repo.sqlite_conn.commit()
 
-            print(f"INFO: تم إضافة قالب جديد: {name}")
+            safe_print(f"INFO: تم إضافة قالب جديد: {name}")
             return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في إضافة القالب: {e}")
+            safe_print(f"ERROR: خطأ في إضافة القالب: {e}")
             return False
         finally:
             if cursor:
@@ -1001,7 +1011,7 @@ class TemplateService(BaseService):
             # جلب معلومات القالب الحالي
             template = self.get_template_by_id(template_id)
             if not template:
-                print(f"ERROR: القالب {template_id} غير موجود")
+                safe_print(f"ERROR: القالب {template_id} غير موجود")
                 return False
 
             # تحديث ملف القالب
@@ -1030,11 +1040,11 @@ class TemplateService(BaseService):
             cursor.execute(update_sql, (name, description, new_filename, template_id))
             self.repo.sqlite_conn.commit()
 
-            print(f"INFO: تم تحديث القالب: {name}")
+            safe_print(f"INFO: تم تحديث القالب: {name}")
             return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في تحديث القالب: {e}")
+            safe_print(f"ERROR: خطأ في تحديث القالب: {e}")
             return False
         finally:
             if cursor:
@@ -1055,11 +1065,11 @@ class TemplateService(BaseService):
 
             self.repo.sqlite_conn.commit()
 
-            print(f"INFO: تم تعيين القالب {template_id} كافتراضي")
+            safe_print(f"INFO: تم تعيين القالب {template_id} كافتراضي")
             return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في تعيين القالب الافتراضي: {e}")
+            safe_print(f"ERROR: خطأ في تعيين القالب الافتراضي: {e}")
             return False
         finally:
             if cursor:
@@ -1077,7 +1087,7 @@ class TemplateService(BaseService):
             # منع حذف القالب الافتراضي إذا كان الوحيد
             templates = self.get_all_templates()
             if template_info['is_default'] and len(templates) == 1:
-                print("ERROR: لا يمكن حذف القالب الافتراضي الوحيد")
+                safe_print("ERROR: لا يمكن حذف القالب الافتراضي الوحيد")
                 return False
 
             # حذف ملف القالب
@@ -1097,11 +1107,11 @@ class TemplateService(BaseService):
                 if remaining_templates:
                     self.set_default_template(remaining_templates[0]['id'])
 
-            print(f"INFO: تم حذف القالب: {template_info['name']}")
+            safe_print(f"INFO: تم حذف القالب: {template_info['name']}")
             return True
 
         except Exception as e:
-            print(f"ERROR: خطأ في حذف القالب: {e}")
+            safe_print(f"ERROR: خطأ في حذف القالب: {e}")
             return False
         finally:
             if cursor:

@@ -1,4 +1,4 @@
-"""
+﻿"""
 نافذة تسجيل دفعة لمشروع - مع عرض المبلغ المتبقي
 ⚡ محسّن: دقة مالية، تحقق من البيانات، تكامل محاسبي
 📱 تصميم متجاوب (Responsive)
@@ -27,6 +27,16 @@ from PyQt6.QtWidgets import (
 from core import schemas
 from ui.custom_spinbox import CustomSpinBox
 from ui.smart_combobox import SmartFilterComboBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 def to_decimal(value) -> Decimal:
@@ -65,12 +75,13 @@ class PaymentDialog(QDialog):
                 self.total_paid = to_decimal(profit_data.get("total_paid", 0))
                 self.remaining_amount = to_decimal(profit_data.get("balance_due", float(self.total_amount)))
             except Exception as e:
-                print(f"WARNING: [PaymentDialog] فشل جلب بيانات الربحية: {e}")
+                safe_print(f"WARNING: [PaymentDialog] فشل جلب بيانات الربحية: {e}")
 
         self.setWindowTitle(f"تسجيل دفعة - {project.name}")
         self.setMinimumWidth(450)
         self.setMinimumHeight(480)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(650)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)

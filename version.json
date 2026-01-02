@@ -1,16 +1,20 @@
 {
-  "version": "1.2.0",
-  "version_name": "Logo Sync Fix - Sky Wave ERP",
-  "release_date": "2025-12-29",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.2.0/SkyWaveERP-Setup-1.2.0.exe",
+  "version": "1.3.0",
+  "version_name": "Project Cleanup & Optimization - Sky Wave ERP",
+  "release_date": "2026-01-02",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.0/SkyWaveERP-Setup-1.3.0.exe",
   "changelog": [
-    "إصلاح مشكلة حذف صور العملاء من السحابة",
-    "حذف الصورة يتزامن تلقائياً مع كل الأجهزة",
-    "تحسين آلية المزامنة للصور"
+    "تنظيف شامل للمشروع وحذف الملفات غير المستخدمة",
+    "نظام إشعارات عالمي جديد مع مزامنة بين الأجهزة",
+    "تحسين تصميم لوحة الملخص المالي في المحاسبة",
+    "إصلاح مشكلة حذف المشاريع",
+    "تحسين الأداء العام وتقليل استهلاك الذاكرة",
+    "إصلاح أخطاء الطباعة Unicode/Emoji",
+    "تحسين التصميم المتجاوب للنوافذ"
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "إصلاح مزامنة حذف صور العملاء",
-  "notes_en": "Fix client logo deletion cloud sync"
+  "notes_ar": "تنظيف شامل وتحسينات في الأداء ونظام إشعارات جديد",
+  "notes_en": "Complete cleanup, performance improvements and new notification system"
 }
  

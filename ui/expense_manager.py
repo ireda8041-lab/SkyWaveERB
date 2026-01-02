@@ -1,4 +1,4 @@
-# الملف: ui/expense_manager.py
+﻿# الملف: ui/expense_manager.py
 """
 تاب إدارة المصروفات - يستخدم dialog للإضافة والتعديل
 """
@@ -25,6 +25,16 @@ from services.expense_service import ExpenseService
 from services.project_service import ProjectService
 from ui.expense_editor_dialog import ExpenseEditorDialog
 from ui.styles import BUTTON_STYLES, get_cairo_font, create_centered_item
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ExpenseManagerTab(QWidget):
@@ -57,6 +67,10 @@ class ExpenseManagerTab(QWidget):
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
+        
+        # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
+        from ui.styles import apply_rtl_alignment_to_all_fields
+        apply_rtl_alignment_to_all_fields(self)
 
     def setup_ui(self):
         """إعداد الواجهة - متجاوب"""
@@ -159,7 +173,7 @@ class ExpenseManagerTab(QWidget):
 
     def load_expenses_data(self):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
-        print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
+        safe_print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
 
         from PyQt6.QtWidgets import QApplication
 
@@ -176,7 +190,7 @@ class ExpenseManagerTab(QWidget):
             try:
                 return self.expense_service.get_all_expenses()
             except Exception as e:
-                print(f"ERROR: [ExpenseManager] فشل جلب المصروفات: {e}")
+                safe_print(f"ERROR: [ExpenseManager] فشل جلب المصروفات: {e}")
                 return []
 
         # دالة تحديث الواجهة
@@ -209,17 +223,17 @@ class ExpenseManagerTab(QWidget):
                         QApplication.processEvents()
 
                 self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
-                print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
+                safe_print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
 
             except Exception as e:
-                print(f"ERROR: [ExpenseManager] فشل تحديث الجدول: {e}")
+                safe_print(f"ERROR: [ExpenseManager] فشل تحديث الجدول: {e}")
             finally:
                 self.expenses_table.blockSignals(False)
                 self.expenses_table.setUpdatesEnabled(True)
                 QApplication.processEvents()
 
         def on_error(error_msg):
-            print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")
+            safe_print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")
             self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
 
@@ -235,7 +249,7 @@ class ExpenseManagerTab(QWidget):
 
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
-        print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
+        safe_print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
         self.load_expenses_data()
 
     def get_selected_expense(self) -> schemas.Expense | None:

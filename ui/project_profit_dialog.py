@@ -1,4 +1,4 @@
-# الملف: ui/project_profit_dialog.py
+﻿# الملف: ui/project_profit_dialog.py
 """
 تقرير ربحية مشروع - تصميم محسن واحترافي
 """
@@ -6,7 +6,7 @@
 from datetime import datetime
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -27,6 +27,17 @@ from PyQt6.QtWidgets import (
 
 from core import schemas
 from services.project_service import ProjectService
+from ui.styles import get_cairo_font
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ProjectProfitDialog(QDialog):
@@ -47,6 +58,10 @@ class ProjectProfitDialog(QDialog):
 
         self._init_ui()
         self.load_profit_data()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def _init_ui(self):
         from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, create_centered_item
@@ -378,7 +393,7 @@ class ProjectProfitDialog(QDialog):
 
                 amount_item = create_centered_item(f"{pay.amount:,.2f}")
                 amount_item.setForeground(QColor("#10b981"))
-                amount_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                amount_item.setFont(get_cairo_font(10, bold=True))
                 self.payments_table.setItem(i, 1, amount_item)
 
                 account_name = self._get_account_name(pay)
@@ -397,11 +412,11 @@ class ProjectProfitDialog(QDialog):
 
                 amount_item = create_centered_item(f"{exp.amount:,.2f}")
                 amount_item.setForeground(QColor("#ef4444"))
-                amount_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+                amount_item.setFont(get_cairo_font(10, bold=True))
                 self.expenses_table.setItem(i, 3, amount_item)
 
         except Exception as e:
-            print(f"ERROR: [ProjectProfitDialog] {e}")
+            safe_print(f"ERROR: [ProjectProfitDialog] {e}")
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {e}")
 
     def _get_account_name(self, payment) -> str:

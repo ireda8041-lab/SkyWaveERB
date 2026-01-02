@@ -1,4 +1,4 @@
-# الملف: ui/payments_manager.py
+﻿# الملف: ui/payments_manager.py
 """
 تاب إدارة الدفعات - عرض وتعديل جميع الدفعات (تحصيلات العملاء)
 ⚡ محسّن: إضافة دفعة جديدة، تصفية، تصدير، تكامل محاسبي كامل
@@ -36,6 +36,16 @@ from ui.custom_spinbox import CustomSpinBox
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
 from ui.smart_combobox import SmartFilterComboBox
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 
 def to_decimal(value) -> Decimal:
     """تحويل آمن للقيم المالية إلى Decimal"""
@@ -70,6 +80,10 @@ class NewPaymentDialog(QDialog):
         self.setWindowTitle("💰 إضافة دفعة جديدة")
         self.setMinimumWidth(550)
         self.setMinimumHeight(500)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -307,7 +321,7 @@ class NewPaymentDialog(QDialog):
                 self.project_combo.addItem(display, userData=proj)
             self.project_combo.lineEdit().setPlaceholderText("اكتب للبحث عن المشروع...")
         except Exception as e:
-            print(f"ERROR: [NewPaymentDialog] فشل تحميل المشاريع: {e}")
+            safe_print(f"ERROR: [NewPaymentDialog] فشل تحميل المشاريع: {e}")
 
         # تحميل الحسابات
         try:
@@ -317,7 +331,7 @@ class NewPaymentDialog(QDialog):
                 self.account_combo.addItem(display, userData=acc)
             self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث عن الحساب...")
         except Exception as e:
-            print(f"ERROR: [NewPaymentDialog] فشل تحميل الحسابات: {e}")
+            safe_print(f"ERROR: [NewPaymentDialog] فشل تحميل الحسابات: {e}")
 
     def _get_cash_accounts(self) -> list[schemas.Account]:
         """جلب حسابات النقدية والبنوك"""
@@ -363,7 +377,7 @@ class NewPaymentDialog(QDialog):
 
             self.project_info_frame.setVisible(True)
         except Exception as e:
-            print(f"ERROR: [NewPaymentDialog] فشل جلب بيانات المشروع: {e}")
+            safe_print(f"ERROR: [NewPaymentDialog] فشل جلب بيانات المشروع: {e}")
             self.project_info_frame.setVisible(False)
 
         self._validate_payment()
@@ -500,6 +514,10 @@ class PaymentEditorDialog(QDialog):
         self.setWindowTitle(f"تعديل دفعة - {payment.project_id}")
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -792,7 +810,7 @@ class PaymentsManagerTab(QWidget):
 
     def load_payments_data(self):
         """⚡ تحميل الدفعات في الخلفية لمنع التجميد"""
-        print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
+        safe_print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
 
         from PyQt6.QtWidgets import QApplication
 
@@ -829,7 +847,7 @@ class PaymentsManagerTab(QWidget):
                     if c.name:
                         clients_cache[c.name.strip()] = c
 
-                print(f"DEBUG: [PaymentsManager] تم تحميل {len(clients)} عميل في الـ cache")
+                safe_print(f"DEBUG: [PaymentsManager] تم تحميل {len(clients)} عميل في الـ cache")
                 
                 return {
                     'payments': payments,
@@ -838,7 +856,7 @@ class PaymentsManagerTab(QWidget):
                     'clients_cache': clients_cache
                 }
             except Exception as e:
-                print(f"ERROR: [PaymentsManager] فشل جلب الدفعات: {e}")
+                safe_print(f"ERROR: [PaymentsManager] فشل جلب الدفعات: {e}")
                 import traceback
                 traceback.print_exc()
                 return {'payments': [], 'accounts_cache': {}, 'projects_cache': {}, 'clients_cache': {}}
@@ -917,10 +935,10 @@ class PaymentsManagerTab(QWidget):
                         QApplication.processEvents()
 
                 self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
-                print(f"INFO: [PaymentsManager] ✅ تم تحميل {len(self.payments_list)} دفعة.")
+                safe_print(f"INFO: [PaymentsManager] ✅ تم تحميل {len(self.payments_list)} دفعة.")
 
             except Exception as e:
-                print(f"ERROR: [PaymentsManager] فشل تحديث الجدول: {e}")
+                safe_print(f"ERROR: [PaymentsManager] فشل تحديث الجدول: {e}")
                 import traceback
                 traceback.print_exc()
             finally:
@@ -929,7 +947,7 @@ class PaymentsManagerTab(QWidget):
                 QApplication.processEvents()
 
         def on_error(error_msg):
-            print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")
+            safe_print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")
             self.payments_table.blockSignals(False)
             self.payments_table.setUpdatesEnabled(True)
 
@@ -945,7 +963,7 @@ class PaymentsManagerTab(QWidget):
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""
-        print("INFO: [PaymentsManager] ⚡ استلام إشارة تحديث الدفعات - جاري التحديث...")
+        safe_print("INFO: [PaymentsManager] ⚡ استلام إشارة تحديث الدفعات - جاري التحديث...")
         self.load_payments_data()
 
     def get_selected_payment(self) -> schemas.Payment | None:
@@ -1008,7 +1026,7 @@ class PaymentsManagerTab(QWidget):
             ]
             return cash_accounts
         except Exception as e:
-            print(f"ERROR: [PaymentsManager] فشل جلب حسابات النقدية: {e}")
+            safe_print(f"ERROR: [PaymentsManager] فشل جلب حسابات النقدية: {e}")
             return []
 
     def _get_payment_method_from_account(self, account_code: str, accounts_cache: dict) -> str:
@@ -1057,7 +1075,7 @@ class PaymentsManagerTab(QWidget):
 
     def _on_payment_created(self, payment):
         """⚡ استجابة لإنشاء دفعة جديدة"""
-        print(f"INFO: [PaymentsManager] تم إنشاء دفعة جديدة: {payment.amount}")
+        safe_print(f"INFO: [PaymentsManager] تم إنشاء دفعة جديدة: {payment.amount}")
         self.load_payments_data()
 
     def apply_permissions(self):
@@ -1131,4 +1149,4 @@ class PaymentsManagerTab(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل حذف الدفعة: {e}")
-            print(f"ERROR: [PaymentsManager] فشل حذف الدفعة: {e}")
+            safe_print(f"ERROR: [PaymentsManager] فشل حذف الدفعة: {e}")

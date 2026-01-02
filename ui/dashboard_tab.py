@@ -1,4 +1,4 @@
-# الملف: ui/dashboard_tab.py
+﻿# الملف: ui/dashboard_tab.py
 """
 لوحة التحكم الاحترافية - الحل النهائي
 مصدر بيانات موحد + دعم كامل للعربية
@@ -29,6 +29,16 @@ from bidi.algorithm import get_display
 
 from services.accounting_service import AccountingService
 from core.schemas import KPIData, DashboardSettings
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 def fix_text(text: str) -> str:
@@ -752,7 +762,7 @@ class PeriodSelector(QFrame):
                 json.dump(settings, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
-            print(f"WARNING: [PeriodSelector] فشل حفظ الإعدادات: {e}")
+            safe_print(f"WARNING: [PeriodSelector] فشل حفظ الإعدادات: {e}")
 
     def load_selection(self) -> None:
         """تحميل الاختيار المحفوظ"""
@@ -799,7 +809,7 @@ class PeriodSelector(QFrame):
                             pass
                             
         except Exception as e:
-            print(f"WARNING: [PeriodSelector] فشل تحميل الإعدادات: {e}")
+            safe_print(f"WARNING: [PeriodSelector] فشل تحميل الإعدادات: {e}")
 
     def get_settings(self) -> DashboardSettings:
         """
@@ -1044,7 +1054,7 @@ class DashboardTab(QWidget):
 
     def refresh_data(self):
         """تحديث البيانات من المصدر الموحد"""
-        print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
+        safe_print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
 
         from PyQt6.QtWidgets import QApplication
         from core.data_loader import get_data_loader
@@ -1058,7 +1068,7 @@ class DashboardTab(QWidget):
                 recent = self.accounting_service.get_recent_journal_entries(8)
                 return {'stats': stats, 'recent': recent}
             except Exception as e:
-                print(f"ERROR: [Dashboard] فشل جلب البيانات: {e}")
+                safe_print(f"ERROR: [Dashboard] فشل جلب البيانات: {e}")
                 return {}
 
         def on_data_loaded(data):
@@ -1099,14 +1109,14 @@ class DashboardTab(QWidget):
                     self.recent_table.setItem(i, 1, create_centered_item(desc_val))
                     self.recent_table.setItem(i, 2, create_centered_item(f"{amount_val:,.2f}"))
 
-                print("INFO: [Dashboard] ✅ تم تحديث الداشبورد بنجاح")
+                safe_print("INFO: [Dashboard] ✅ تم تحديث الداشبورد بنجاح")
             except Exception as e:
-                print(f"ERROR: [Dashboard] فشل تحديث الواجهة: {e}")
+                safe_print(f"ERROR: [Dashboard] فشل تحديث الواجهة: {e}")
                 import traceback
                 traceback.print_exc()
 
         def on_error(error_msg):
-            print(f"ERROR: [Dashboard] {error_msg}")
+            safe_print(f"ERROR: [Dashboard] {error_msg}")
 
         data_loader = get_data_loader()
         data_loader.load_async(

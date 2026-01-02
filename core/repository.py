@@ -1,4 +1,4 @@
-# الملف: core/repository.py
+﻿# الملف: core/repository.py
 """
 ⚡ المخزن الذكي - Sky Wave ERP
 محسّن للسرعة القصوى مع نظام Cache ذكي
@@ -7,6 +7,7 @@
 import json
 import os
 import sqlite3
+import sys
 import threading
 import time
 from datetime import datetime
@@ -16,13 +17,31 @@ import pymongo
 
 from . import schemas
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    import re
+    def safe_print(msg: str):
+        """طباعة آمنة تتعامل مع مشاكل الترميز في Windows"""
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            # إزالة الـ emoji وطباعة النص فقط
+            clean_msg = re.sub(r'[^\x00-\x7F\u0600-\u06FF]+', '', msg)
+            try:
+                print(clean_msg)
+            except Exception:
+                pass  # تجاهل أي خطأ في الطباعة
+
+
 # ⚡ استيراد محسّن السرعة
 try:
     from .speed_optimizer import LRUCache, cached, invalidate_cache  # noqa: F401
     CACHE_ENABLED = True
 except ImportError:
     CACHE_ENABLED = False
-    print("WARNING: speed_optimizer غير متوفر - الـ cache معطل")
+    safe_print("WARNING: speed_optimizer غير متوفر - الـ cache معطل")
 
 # ⚡ استيراد محسّن الأداء الجديد
 try:
@@ -34,7 +53,7 @@ try:
     PERFORMANCE_OPTIMIZER_ENABLED = True
 except ImportError:
     PERFORMANCE_OPTIMIZER_ENABLED = False
-    print("WARNING: performance_optimizer غير متوفر")
+    safe_print(f"WARNING: performance_optimizer غير متوفر")
 
 # --- إعدادات الاتصال ---
 MONGO_URI = "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db"
@@ -76,12 +95,12 @@ def _copy_initial_db():
         if os.path.exists(src_path):
             try:
                 shutil.copy2(src_path, LOCAL_DB_FILE)
-                print(f"INFO: ✅ تم نسخ قاعدة البيانات من {src_path} إلى {LOCAL_DB_FILE}")
+                safe_print(f"INFO: ✅ تم نسخ قاعدة البيانات من {src_path} إلى {LOCAL_DB_FILE}")
                 return
             except Exception as e:
-                print(f"WARNING: فشل نسخ قاعدة البيانات: {e}")
+                safe_print(f"WARNING: فشل نسخ قاعدة البيانات: {e}")
     
-    print("INFO: لم يتم العثور على قاعدة بيانات أولية - سيتم إنشاء قاعدة جديدة")
+    safe_print(f"INFO: لم يتم العثور على قاعدة بيانات أولية - سيتم إنشاء قاعدة جديدة")
 
 # تنفيذ النسخ عند تحميل الموديول
 _copy_initial_db()
@@ -121,7 +140,7 @@ class Repository:
         # ⚡ تطبيق تحسينات SQLite للأداء
         self._apply_sqlite_optimizations()
         
-        print(f"INFO: ✅ متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
+        safe_print(f"INFO: ✅ متصل بقاعدة البيانات الأوفلاين ({LOCAL_DB_FILE}).")
 
         # 2. بناء الجداول الأوفلاين لو مش موجودة
         self._init_local_db()
@@ -153,9 +172,9 @@ class Repository:
             self.sqlite_cursor.execute("PRAGMA mmap_size=268435456")
             # تفعيل الـ foreign keys
             self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
-            print("INFO: ⚡ تم تطبيق تحسينات SQLite للأداء")
+            safe_print(f"INFO: ⚡ تم تطبيق تحسينات SQLite للأداء")
         except Exception as e:
-            print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
+            safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
 
     def _start_mongo_connection(self):
         """⚡ الاتصال بـ MongoDB في Background Thread"""
@@ -167,19 +186,21 @@ class Repository:
             try:
                 self.mongo_client = pymongo.MongoClient(
                     MONGO_URI,
-                    serverSelectionTimeoutMS=2000,  # ⚡ 2 ثواني فقط
-                    connectTimeoutMS=2000,
-                    socketTimeoutMS=3000
+                    serverSelectionTimeoutMS=10000,  # ⚡ 10 ثواني للاتصال
+                    connectTimeoutMS=10000,
+                    socketTimeoutMS=15000,
+                    retryWrites=True,
+                    retryReads=True
                 )
                 self.mongo_client.server_info()
                 self.mongo_db = self.mongo_client[DB_NAME]
                 self.online = True
-                print("INFO: ✅ متصل بـ MongoDB (Background)")
+                safe_print(f"INFO: ✅ متصل بـ MongoDB (Background)")
             except pymongo.errors.ServerSelectionTimeoutError:
-                print("WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
+                safe_print(f"WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
                 self.online = False
             except Exception as e:
-                print(f"WARNING: ⚠️ خطأ في الاتصال بـ MongoDB: {e}")
+                safe_print(f"WARNING: ⚠️ خطأ في الاتصال بـ MongoDB: {e}")
                 self.online = False
             finally:
                 self._mongo_connecting = False
@@ -190,7 +211,7 @@ class Repository:
 
     def _init_local_db(self):
         """دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي فقط إذا لم تكن موجودة."""
-        print("INFO: جاري فحص الجداول المحلية (SQLite)...")
+        safe_print(f"INFO: جاري فحص الجداول المحلية (SQLite)...")
 
         # جدول الحسابات (accounts)
         self.sqlite_cursor.execute("""
@@ -256,7 +277,7 @@ class Repository:
         try:
             self.sqlite_cursor.execute("ALTER TABLE projects ADD COLUMN invoice_number TEXT")
             self.sqlite_conn.commit()
-            print("INFO: [Repository] تم إضافة عمود invoice_number لجدول المشاريع")
+            safe_print(f"INFO: [Repository] تم إضافة عمود invoice_number لجدول المشاريع")
         except sqlite3.OperationalError:
             pass  # العمود موجود بالفعل
 
@@ -280,7 +301,7 @@ class Repository:
         for col_name, col_type in enterprise_columns:
             try:
                 self.sqlite_cursor.execute(f"ALTER TABLE projects ADD COLUMN {col_name} {col_type}")
-                print(f"INFO: [Repository] ✅ تم إضافة عمود {col_name} لجدول المشاريع")
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود {col_name} لجدول المشاريع")
             except sqlite3.OperationalError:
                 pass  # العمود موجود بالفعل
 
@@ -304,7 +325,7 @@ class Repository:
         )
         """)
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول الدفعات المرحلية جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول الدفعات المرحلية جاهز")
 
         # ⚡ جدول أرقام الفواتير الثابتة (مرتبط باسم المشروع وليس الـ ID)
         self.sqlite_cursor.execute("""
@@ -327,7 +348,7 @@ class Repository:
             projects_without_invoice = self.sqlite_cursor.fetchall()
 
             if projects_without_invoice:
-                print(f"INFO: [Repository] توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع...")
+                safe_print(f"INFO: [Repository] توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع...")
 
                 for row in projects_without_invoice:
                     project_id = row[0]
@@ -343,7 +364,7 @@ class Repository:
                     if existing:
                         # استخدم الرقم المحفوظ
                         invoice_number = existing[0]
-                        print(f"  ✓ استخدام رقم محفوظ: {project_name} -> {invoice_number}")
+                        safe_print(f"  ✓ استخدام رقم محفوظ: {project_name} -> {invoice_number}")
                     else:
                         # ولّد رقم جديد
                         self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
@@ -356,7 +377,7 @@ class Repository:
                             "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
                             (project_name, invoice_number, datetime.now().isoformat())
                         )
-                        print(f"  + رقم جديد: {project_name} -> {invoice_number}")
+                        safe_print(f"  + رقم جديد: {project_name} -> {invoice_number}")
 
                     # حدّث المشروع
                     self.sqlite_cursor.execute(
@@ -365,9 +386,9 @@ class Repository:
                     )
 
                 self.sqlite_conn.commit()
-                print(f"INFO: [Repository] ✅ تم توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع")
+                safe_print(f"INFO: [Repository] ✅ تم توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع")
         except Exception as e:
-            print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
+            safe_print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
             import traceback
             traceback.print_exc()
 
@@ -398,7 +419,7 @@ class Repository:
         try:
             self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN logo_data TEXT")
             self.sqlite_conn.commit()
-            print("INFO: [Repository] تم إضافة عمود logo_data لجدول العملاء")
+            safe_print(f"INFO: [Repository] تم إضافة عمود logo_data لجدول العملاء")
         except Exception:
             pass  # العمود موجود بالفعل
 
@@ -517,31 +538,6 @@ class Repository:
             method TEXT
         )""")
 
-        # جدول عروض الأسعار (quotations)
-        self.sqlite_cursor.execute("""
-        CREATE TABLE IF NOT EXISTS quotations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            _mongo_id TEXT,
-            sync_status TEXT NOT NULL DEFAULT 'new_offline',
-            created_at TEXT NOT NULL,
-            last_modified TEXT NOT NULL,
-            quote_number TEXT NOT NULL UNIQUE,
-            client_id TEXT NOT NULL,
-            project_id TEXT,
-            issue_date TEXT NOT NULL,
-            expiry_date TEXT NOT NULL,
-            items TEXT NOT NULL,
-            subtotal REAL NOT NULL,
-            discount_rate REAL DEFAULT 0.0,
-            discount_amount REAL DEFAULT 0.0,
-            tax_rate REAL DEFAULT 0.0,
-            tax_amount REAL NOT NULL,
-            total_amount REAL NOT NULL,
-            status TEXT NOT NULL,
-            currency TEXT NOT NULL,
-            notes TEXT
-        )""")
-
         # جدول العملات (currencies)
         self.sqlite_cursor.execute("""
         CREATE TABLE IF NOT EXISTS currencies (
@@ -624,7 +620,7 @@ class Repository:
             notes TEXT
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول الموظفين جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول الموظفين جاهز")
 
         # جدول سلف الموظفين (employee_loans)
         self.sqlite_cursor.execute("""
@@ -648,7 +644,7 @@ class Repository:
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول سلف الموظفين جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول سلف الموظفين جاهز")
 
         # جدول مرتبات الموظفين (employee_salaries)
         self.sqlite_cursor.execute("""
@@ -680,7 +676,7 @@ class Repository:
             UNIQUE(employee_id, month)
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول مرتبات الموظفين جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول مرتبات الموظفين جاهز")
 
         # جدول حضور الموظفين (employee_attendance)
         self.sqlite_cursor.execute("""
@@ -702,7 +698,7 @@ class Repository:
             UNIQUE(employee_id, date)
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول حضور الموظفين جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول حضور الموظفين جاهز")
 
         # جدول إجازات الموظفين (employee_leaves)
         self.sqlite_cursor.execute("""
@@ -725,7 +721,7 @@ class Repository:
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول إجازات الموظفين جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول إجازات الموظفين جاهز")
 
         # جدول أقساط السلف (loan_payments)
         self.sqlite_cursor.execute("""
@@ -745,7 +741,7 @@ class Repository:
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )""")
         self.sqlite_conn.commit()
-        print("INFO: [Repository] ✅ جدول أقساط السلف جاهز")
+        safe_print(f"INFO: [Repository] ✅ جدول أقساط السلف جاهز")
 
         # جدول المهام (tasks) - نظام TODO
         self.sqlite_cursor.execute("""
@@ -805,7 +801,7 @@ class Repository:
         try:
             self.sqlite_cursor.execute("ALTER TABLE sync_queue ADD COLUMN action TEXT")
             self.sqlite_conn.commit()
-            print("INFO: [Repository] Added 'action' column to sync_queue table")
+            safe_print(f"INFO: [Repository] Added 'action' column to sync_queue table")
         except Exception:
             # العمود موجود بالفعل أو خطأ آخر
             pass
@@ -827,7 +823,7 @@ class Repository:
         """)
 
         self.sqlite_conn.commit()
-        print("INFO: الجداول المحلية جاهزة.")
+        safe_print(f"INFO: الجداول المحلية جاهزة.")
 
         # ⚡ إنشاء indexes لتحسين الأداء (مهم جداً للسرعة)
         self._create_sqlite_indexes()
@@ -844,7 +840,7 @@ class Repository:
         إنشاء indexes في SQLite لتحسين الأداء
         """
         try:
-            print("INFO: جاري إنشاء indexes في SQLite...")
+            safe_print(f"INFO: جاري إنشاء indexes في SQLite...")
 
             # Indexes لـ clients
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)")
@@ -896,16 +892,16 @@ class Repository:
             self.sqlite_cursor.execute("CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)")
 
             self.sqlite_conn.commit()
-            print("INFO: تم إنشاء indexes في SQLite بنجاح.")
+            safe_print(f"INFO: تم إنشاء indexes في SQLite بنجاح.")
         except Exception as e:
-            print(f"WARNING: فشل إنشاء بعض indexes في SQLite: {e}")
+            safe_print(f"WARNING: فشل إنشاء بعض indexes في SQLite: {e}")
 
     def _optimize_sqlite_performance(self):
         """
         ⚡ تحسين أداء SQLite للسرعة القصوى
         """
         try:
-            print("INFO: جاري تحسين أداء قاعدة البيانات...")
+            safe_print(f"INFO: جاري تحسين أداء قاعدة البيانات...")
 
             # تفعيل WAL mode للأداء الأفضل
             self.sqlite_cursor.execute("PRAGMA journal_mode=WAL")
@@ -923,16 +919,16 @@ class Repository:
             self.sqlite_cursor.execute("PRAGMA temp_store=MEMORY")
 
             self.sqlite_conn.commit()
-            print("INFO: تم تحسين أداء قاعدة البيانات بنجاح.")
+            safe_print(f"INFO: تم تحسين أداء قاعدة البيانات بنجاح.")
         except Exception as e:
-            print(f"WARNING: فشل تحسين أداء قاعدة البيانات: {e}")
+            safe_print(f"WARNING: فشل تحسين أداء قاعدة البيانات: {e}")
 
     def _init_mongo_indexes(self):
         """
         إنشاء indexes في MongoDB لتحسين الأداء
         """
         try:
-            print("INFO: جاري إنشاء indexes في MongoDB...")
+            safe_print(f"INFO: جاري إنشاء indexes في MongoDB...")
 
             # Indexes لـ sync_queue
             self.mongo_db.sync_queue.create_index([("status", 1)])
@@ -962,9 +958,9 @@ class Repository:
             self.mongo_db.notifications.create_index([("created_at", -1)])
             self.mongo_db.notifications.create_index([("expires_at", 1)])
 
-            print("INFO: تم إنشاء indexes في MongoDB بنجاح.")
+            safe_print(f"INFO: تم إنشاء indexes في MongoDB بنجاح.")
         except Exception as e:
-            print(f"WARNING: فشل إنشاء بعض indexes في MongoDB: {e}")
+            safe_print(f"WARNING: فشل إنشاء بعض indexes في MongoDB: {e}")
 
     def is_online(self) -> bool:
         """ دالة بسيطة لمعرفة حالة الاتصال """
@@ -981,20 +977,20 @@ class Repository:
         # ✅ فحص التكرار قبل الإضافة (بالاسم - exact match)
         existing_client = self.get_client_by_name(client_data.name)
         if existing_client:
-            print(f"WARNING: العميل '{client_data.name}' موجود بالفعل!")
+            safe_print(f"WARNING: العميل '{client_data.name}' موجود بالفعل!")
             raise Exception(f"العميل '{client_data.name}' موجود بالفعل في النظام")
 
         # ✅ فحص التكرار بالاسم (case insensitive)
         similar_client = self._get_similar_client(client_data.name)
         if similar_client:
-            print(f"WARNING: يوجد عميل مشابه '{similar_client.name}'!")
+            safe_print(f"WARNING: يوجد عميل مشابه '{similar_client.name}'!")
             raise Exception(f"يوجد عميل مشابه بالاسم '{similar_client.name}'")
 
         # ✅ فحص التكرار بالهاتف أيضاً
         if client_data.phone:
             existing_by_phone = self._get_client_by_phone(client_data.phone)
             if existing_by_phone:
-                print(f"WARNING: العميل برقم الهاتف '{client_data.phone}' موجود بالفعل!")
+                safe_print(f"WARNING: العميل برقم الهاتف '{client_data.phone}' موجود بالفعل!")
                 raise Exception(f"يوجد عميل آخر بنفس رقم الهاتف '{client_data.phone}'")
 
         now = datetime.now()
@@ -1022,7 +1018,7 @@ class Repository:
         self.sqlite_conn.commit()
 
         local_id = self.sqlite_cursor.lastrowid
-        print(f"INFO: تم حفظ العميل '{client_data.name}' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ العميل '{client_data.name}' محلياً (ID: {local_id}).")
 
         # 2. محاولة الحفظ في MongoDB (الأونلاين)
         if self.online:
@@ -1033,7 +1029,7 @@ class Repository:
                 # ⚡ التأكد من حفظ logo_data بشكل صحيح
                 if client_data.logo_data:
                     client_dict['logo_data'] = client_data.logo_data
-                    print(f"INFO: [Repo] حفظ logo_data ({len(client_data.logo_data)} حرف) في MongoDB")
+                    safe_print(f"INFO: [Repo] حفظ logo_data ({len(client_data.logo_data)} حرف) في MongoDB")
                 
                 result = self.mongo_db.clients.insert_one(client_dict)
                 mongo_id = str(result.inserted_id)
@@ -1047,10 +1043,10 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة العميل '{client_data.name}' أونلاين (Mongo ID: {mongo_id}).")
+                safe_print(f"INFO: تم مزامنة العميل '{client_data.name}' أونلاين (Mongo ID: {mongo_id}).")
 
             except Exception as e:
-                print(f"ERROR: فشل مزامنة العميل الجديد '{client_data.name}': {e}")
+                safe_print(f"ERROR: فشل مزامنة العميل الجديد '{client_data.name}': {e}")
                 # (سيبقى الـ status 'new_offline' ليتم مزامنته لاحقاً)
 
         return client_data
@@ -1059,7 +1055,7 @@ class Repository:
         """
         (جديدة) تحديث بيانات عميل موجود.
         """
-        print(f"INFO: [Repo] جاري تحديث العميل ID: {client_id}...")
+        safe_print(f"INFO: [Repo] جاري تحديث العميل ID: {client_id}...")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -1084,7 +1080,7 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث العميل (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث العميل (SQLite): {e}")
             return None
 
         if self.online:
@@ -1100,12 +1096,12 @@ class Repository:
                 if logo_data_value:
                     # صورة جديدة - رفعها للسحابة
                     update_dict['logo_data'] = logo_data_value
-                    print(f"INFO: [Repo] 📷 حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB")
+                    safe_print(f"INFO: [Repo] 📷 حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB")
                 elif not logo_path_value:
                     # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
                     update_dict['logo_data'] = ""
                     update_dict['logo_path'] = ""
-                    print(f"INFO: [Repo] 🗑️ حذف logo_data من MongoDB (حذف صريح)")
+                    safe_print(f"INFO: [Repo] 🗑️ حذف logo_data من MongoDB (حذف صريح)")
                 else:
                     # logo_data فارغ لكن logo_path موجود = الاحتفاظ بالقديم
                     try:
@@ -1115,7 +1111,7 @@ class Repository:
                         )
                         if existing and existing.get('logo_data'):
                             del update_dict['logo_data']
-                            print(f"INFO: [Repo] 📷 الاحتفاظ بـ logo_data الموجود في MongoDB")
+                            safe_print(f"INFO: [Repo] 📷 الاحتفاظ بـ logo_data الموجود في MongoDB")
                     except Exception:
                         pass
 
@@ -1129,10 +1125,10 @@ class Repository:
                     (client_id, client_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: [Repo] تم مزامنة تحديث العميل ID: {client_id} أونلاين.")
+                safe_print(f"INFO: [Repo] تم مزامنة تحديث العميل ID: {client_id} أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث العميل (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث العميل (Mongo): {e}")
 
         return client_data
 
@@ -1150,11 +1146,11 @@ class Repository:
             
             # ⚡ تسجيل عدد العملاء اللي عندهم صور
             clients_with_logo = sum(1 for c in clients_list if c.logo_data)
-            print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي ({clients_with_logo} عميل لديه صورة)")
+            safe_print(f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي ({clients_with_logo} عميل لديه صورة)")
             
             return clients_list
         except Exception as e:
-            print(f"ERROR: فشل جلب العملاء من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب العملاء من SQLite: {e}")
 
         # Fallback إلى MongoDB إذا فشل SQLite
         if self.online:
@@ -1169,10 +1165,10 @@ class Repository:
                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
                     except Exception:
                         continue
-                print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
+                safe_print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
                 return clients_list
             except Exception as e:
-                print(f"ERROR: فشل جلب العملاء من MongoDB: {e}")
+                safe_print(f"ERROR: فشل جلب العملاء من MongoDB: {e}")
 
         return []
 
@@ -1191,7 +1187,7 @@ class Repository:
                     clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
                 return clients_list
             except Exception as e:
-                print(f"ERROR: فشل جلب العملاء المؤرشفين (Mongo): {e}.")
+                safe_print(f"ERROR: فشل جلب العملاء المؤرشفين (Mongo): {e}.")
 
         self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (archived_status,))
         rows = self.sqlite_cursor.fetchall()
@@ -1208,10 +1204,10 @@ class Repository:
                     client_data.pop('_mongo_id', None)
                     client_data.pop('mongo_id', None)
                     client = schemas.Client(**client_data, _mongo_id=mongo_id)
-                    print(f"INFO: تم جلب العميل (MongoID: {client_id}) من الأونلاين.")
+                    safe_print(f"INFO: تم جلب العميل (MongoID: {client_id}) من الأونلاين.")
                     return client
             except Exception as e:
-                print(f"WARNING: فشل البحث بالـ MongoID {client_id}: {e}. جاري البحث المحلي...")
+                safe_print(f"WARNING: فشل البحث بالـ MongoID {client_id}: {e}. جاري البحث المحلي...")
 
         try:
             self.sqlite_cursor.execute(
@@ -1221,10 +1217,10 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             if row:
                 client = schemas.Client(**dict(row))
-                print(f"INFO: تم جلب العميل (ID: {client_id}) من المحلي.")
+                safe_print(f"INFO: تم جلب العميل (ID: {client_id}) من المحلي.")
                 return client
         except Exception as e:
-            print(f"ERROR: فشل جلب العميل (ID: {client_id}) من المحلي: {e}.")
+            safe_print(f"ERROR: فشل جلب العميل (ID: {client_id}) من المحلي: {e}.")
 
         return None
 
@@ -1262,7 +1258,7 @@ class Repository:
                     client_data.pop('mongo_id', None)
                     return schemas.Client(**client_data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"WARNING: فشل البحث بالهاتف (Mongo): {e}")
+                safe_print(f"WARNING: فشل البحث بالهاتف (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -1273,7 +1269,7 @@ class Repository:
             if row:
                 return schemas.Client(**dict(row))
         except Exception as e:
-            print(f"WARNING: فشل البحث بالهاتف (SQLite): {e}")
+            safe_print(f"WARNING: فشل البحث بالهاتف (SQLite): {e}")
 
         return None
 
@@ -1307,7 +1303,7 @@ class Repository:
                         project_data['currency'] = 'EGP'
                     return schemas.Project(**project_data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"WARNING: فشل البحث عن مشروع مشابه (Mongo): {e}")
+                safe_print(f"WARNING: فشل البحث عن مشروع مشابه (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -1330,7 +1326,7 @@ class Repository:
                         row_dict['milestones'] = []
                 return schemas.Project(**row_dict)
         except Exception as e:
-            print(f"WARNING: فشل البحث عن مشروع مشابه (SQLite): {e}")
+            safe_print(f"WARNING: فشل البحث عن مشروع مشابه (SQLite): {e}")
 
         return None
 
@@ -1359,7 +1355,7 @@ class Repository:
                     payment_data.pop('mongo_id', None)
                     return schemas.Payment(**payment_data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"WARNING: فشل البحث عن دفعة مكررة (Mongo): {e}")
+                safe_print(f"WARNING: فشل البحث عن دفعة مكررة (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -1371,7 +1367,7 @@ class Repository:
             if row:
                 return schemas.Payment(**dict(row))
         except Exception as e:
-            print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
+            safe_print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
 
         return None
 
@@ -1395,7 +1391,7 @@ class Repository:
                     client_data.pop('mongo_id', None)
                     return schemas.Client(**client_data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"WARNING: فشل البحث عن عميل مشابه (Mongo): {e}")
+                safe_print(f"WARNING: فشل البحث عن عميل مشابه (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -1406,7 +1402,7 @@ class Repository:
             if row:
                 return schemas.Client(**dict(row))
         except Exception as e:
-            print(f"WARNING: فشل البحث عن عميل مشابه (SQLite): {e}")
+            safe_print(f"WARNING: فشل البحث عن عميل مشابه (SQLite): {e}")
 
         return None
 
@@ -1414,7 +1410,7 @@ class Repository:
         """
         (جديدة) أرشفة عميل (Soft Delete) عن طريق تحديث حالته.
         """
-        print(f"INFO: [Repo] جاري أرشفة العميل ID: {client_id}")
+        safe_print(f"INFO: [Repo] جاري أرشفة العميل ID: {client_id}")
 
         archive_status = schemas.ClientStatus.ARCHIVED.value
         now_dt = datetime.now()
@@ -1443,7 +1439,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل أرشفة العميل (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل أرشفة العميل (Mongo): {e}")
                 return False
 
         return True
@@ -1452,7 +1448,7 @@ class Repository:
         """
         حذف عميل نهائياً من قاعدة البيانات (Hard Delete)
         """
-        print(f"INFO: [Repo] جاري حذف العميل نهائياً ID: {client_id}")
+        safe_print(f"INFO: [Repo] جاري حذف العميل نهائياً ID: {client_id}")
 
         try:
             client_id_num = int(client_id)
@@ -1470,9 +1466,9 @@ class Repository:
             local_id = row[0]
             mongo_id = row[1] if row[1] else client_id
             client_name = row[2]
-            print(f"INFO: [Repo] العميل المراد حذفه: {client_name} (local_id={local_id}, mongo_id={mongo_id})")
+            safe_print(f"INFO: [Repo] العميل المراد حذفه: {client_name} (local_id={local_id}, mongo_id={mongo_id})")
         else:
-            print(f"WARNING: [Repo] العميل غير موجود في SQLite! client_id={client_id}")
+            safe_print(f"WARNING: [Repo] العميل غير موجود في SQLite! client_id={client_id}")
             mongo_id = client_id
             local_id = client_id_num
 
@@ -1485,9 +1481,9 @@ class Repository:
         self.sqlite_conn.commit()
         
         if deleted_rows > 0:
-            print(f"INFO: [Repo] ✅ تم حذف {deleted_rows} سجل من SQLite")
+            safe_print(f"INFO: [Repo] ✅ تم حذف {deleted_rows} سجل من SQLite")
         else:
-            print(f"WARNING: [Repo] ❌ لم يتم حذف أي سجل من SQLite!")
+            safe_print(f"WARNING: [Repo] ❌ لم يتم حذف أي سجل من SQLite!")
 
         # حذف من MongoDB
         if self.online:
@@ -1499,11 +1495,11 @@ class Repository:
                     ]}
                 )
                 if result.deleted_count > 0:
-                    print(f"INFO: [Repo] ✅ تم حذف العميل من MongoDB")
+                    safe_print(f"INFO: [Repo] ✅ تم حذف العميل من MongoDB")
                 else:
-                    print(f"WARNING: [Repo] العميل غير موجود في MongoDB")
+                    safe_print(f"WARNING: [Repo] العميل غير موجود في MongoDB")
             except Exception as e:
-                print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
+                safe_print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
 
         return deleted_rows > 0
 
@@ -1511,7 +1507,7 @@ class Repository:
         """
         (جديدة) تحديث قيد يومية موجود (للروبوت المحاسبي).
         """
-        print(f"INFO: [Repo] جاري تحديث القيد المحاسبي المرتبط بـ {doc_id}...")
+        safe_print(f"INFO: [Repo] جاري تحديث القيد المحاسبي المرتبط بـ {doc_id}...")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -1527,7 +1523,7 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث القيد (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث القيد (SQLite): {e}")
             return False
 
         if self.online:
@@ -1548,62 +1544,9 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث القيد (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث القيد (Mongo): {e}")
 
         return True
-
-    def update_quotation(self, quote_number: str, quote_data: schemas.Quotation) -> schemas.Quotation | None:
-        """ (جديدة) تحديث بيانات عرض سعر موجود بالكامل. """
-        print(f"INFO: [Repo] جاري تحديث عرض السعر {quote_number} في قاعدة البيانات...")
-
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
-        items_json = json.dumps([item.model_dump() for item in quote_data.items])
-
-        try:
-            sql = """
-                UPDATE quotations SET
-                    client_id = ?, issue_date = ?, expiry_date = ?, items = ?,
-                    subtotal = ?, discount_rate = ?, discount_amount = ?,
-                    tax_rate = ?, tax_amount = ?, total_amount = ?,
-                    notes = ?, status = ?, last_modified = ?, sync_status = 'modified_offline'
-                WHERE quote_number = ?
-            """
-            params = (
-                quote_data.client_id, quote_data.issue_date.isoformat(),
-                quote_data.expiry_date.isoformat(), items_json,
-                quote_data.subtotal, quote_data.discount_rate,
-                quote_data.discount_amount, quote_data.tax_rate,
-                quote_data.tax_amount, quote_data.total_amount,
-                quote_data.notes, quote_data.status.value, now_iso,
-                quote_number
-            )
-            self.sqlite_cursor.execute(sql, params)
-            self.sqlite_conn.commit()
-        except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث عرض السعر (SQLite): {e}")
-            return None
-
-        if self.online:
-            try:
-                update_dict = quote_data.model_dump(exclude={"_mongo_id", "id", "created_at"})
-                update_dict['status'] = quote_data.status.value
-                update_dict['currency'] = quote_data.currency.value
-                update_dict['last_modified'] = now_dt
-
-                self.mongo_db.quotations.update_one(
-                    {"quote_number": quote_number},
-                    {"$set": update_dict}
-                )
-                self.sqlite_cursor.execute(
-                    "UPDATE quotations SET sync_status = 'synced' WHERE quote_number = ?",
-                    (quote_number,)
-                )
-                self.sqlite_conn.commit()
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث عرض السعر (Mongo): {e}")
-
-        return quote_data
 
     def get_client_by_name(self, name: str) -> schemas.Client | None:
         """ (جديدة) جلب عميل واحد بالاسم (بذكاء) """
@@ -1615,20 +1558,20 @@ class Repository:
                     client_data.pop('_mongo_id', None)
                     client_data.pop('mongo_id', None)
                     client = schemas.Client(**client_data, _mongo_id=mongo_id)
-                    print(f"INFO: تم جلب العميل (Name: {name}) من الأونلاين.")
+                    safe_print(f"INFO: تم جلب العميل (Name: {name}) من الأونلاين.")
                     return client
             except Exception as e:
-                print(f"ERROR: فشل جلب العميل بالاسم (Mongo): {e}.")
+                safe_print(f"ERROR: فشل جلب العميل بالاسم (Mongo): {e}.")
 
         try:
             self.sqlite_cursor.execute("SELECT * FROM clients WHERE name = ?", (name,))
             row = self.sqlite_cursor.fetchone()
             if row:
                 client = schemas.Client(**dict(row))
-                print(f"INFO: تم جلب العميل (Name: {name}) من المحلي.")
+                safe_print(f"INFO: تم جلب العميل (Name: {name}) من المحلي.")
                 return client
         except Exception as e:
-            print(f"ERROR: فشل جلب العميل بالاسم (SQLite): {e}.")
+            safe_print(f"ERROR: فشل جلب العميل بالاسم (SQLite): {e}.")
 
         return None
 
@@ -1659,7 +1602,7 @@ class Repository:
         self.sqlite_cursor.execute(sql, params)
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
-        print(f"INFO: ✅ تم حفظ الحساب '{account_data.name}' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: ✅ تم حفظ الحساب '{account_data.name}' محلياً (ID: {local_id}).")
 
         # ⚡ 2. مزامنة مع MongoDB في الخلفية (لا يعطل الواجهة)
         if self.online:
@@ -1676,11 +1619,11 @@ class Repository:
                         (mongo_id, 'synced', local_id)
                     )
                     self.sqlite_conn.commit()
-                    print(f"INFO: ✅ تم مزامنة الحساب '{account_data.name}' مع السيرفر (خلفية)")
+                    safe_print(f"INFO: ✅ تم مزامنة الحساب '{account_data.name}' مع السيرفر (خلفية)")
 
                 except Exception as e:
                     if "E11000 duplicate key" in str(e):
-                        print(f"WARNING: الحساب بكود '{account_data.code}' موجود بالفعل أونلاين.")
+                        safe_print(f"WARNING: الحساب بكود '{account_data.code}' موجود بالفعل أونلاين.")
                         try:
                             existing = self.mongo_db.accounts.find_one({"code": account_data.code})
                             if existing:
@@ -1693,7 +1636,7 @@ class Repository:
                         except Exception:
                             pass
                     else:
-                        print(f"WARNING: فشل مزامنة الحساب '{account_data.name}': {e}")
+                        safe_print(f"WARNING: فشل مزامنة الحساب '{account_data.name}': {e}")
             
             import threading
             threading.Thread(target=sync_to_mongo, daemon=True).start()
@@ -1713,10 +1656,10 @@ class Repository:
                     account_data.pop('_mongo_id', None)
                     account_data.pop('mongo_id', None)
                     account = schemas.Account(**account_data, _mongo_id=mongo_id)
-                    print(f"INFO: تم جلب الحساب (Code: {code}) من الأونلاين.")
+                    safe_print(f"INFO: تم جلب الحساب (Code: {code}) من الأونلاين.")
                     return account
             except Exception as e:
-                print(f"ERROR: فشل جلب الحساب (Code: {code}) من Mongo: {e}.")
+                safe_print(f"ERROR: فشل جلب الحساب (Code: {code}) من Mongo: {e}.")
 
         # الجلب من SQLite في حالة الأوفلاين أو عدم وجوده أونلاين
         try:
@@ -1724,10 +1667,10 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             if row:
                 account = schemas.Account(**dict(row))
-                print(f"INFO: تم جلب الحساب (Code: {code}) من المحلي.")
+                safe_print(f"INFO: تم جلب الحساب (Code: {code}) من المحلي.")
                 return account
         except Exception as e:
-            print(f"ERROR: فشل جلب الحساب (Code: {code}) من المحلي: {e}.")
+            safe_print(f"ERROR: فشل جلب الحساب (Code: {code}) من المحلي: {e}.")
 
         return None # لو الحساب مش موجود خالص
 
@@ -1742,10 +1685,10 @@ class Repository:
                 temp_cursor.close()
             if rows:
                 accounts_list = [schemas.Account(**dict(row)) for row in rows]
-                print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
+                safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
                 return accounts_list
         except Exception as e:
-            print(f"ERROR: فشل جلب الحسابات من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب الحسابات من SQLite: {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -1758,10 +1701,10 @@ class Repository:
                         acc.pop('_mongo_id', None)
                         acc.pop('mongo_id', None)
                         accounts_list.append(schemas.Account(**acc, _mongo_id=mongo_id))
-                    print(f"INFO: تم جلب {len(accounts_list)} حساب من الأونلاين (MongoDB).")
+                    safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من الأونلاين (MongoDB).")
                     return accounts_list
             except Exception as e:
-                print(f"ERROR: فشل جلب الحسابات من Mongo: {e}")
+                safe_print(f"ERROR: فشل جلب الحسابات من Mongo: {e}")
 
         return []
 
@@ -1779,7 +1722,7 @@ class Repository:
             if row:
                 return schemas.Account(**dict(row))
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب الحساب {account_id} (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب الحساب {account_id} (SQLite): {e}")
 
         return None
 
@@ -1839,16 +1782,16 @@ class Repository:
                     )
                     self.sqlite_conn.commit()
 
-                    print(f"INFO: [Repository] تم إنشاء مستخدم: {user.username} (MongoDB + SQLite)")
+                    safe_print(f"INFO: [Repository] تم إنشاء مستخدم: {user.username} (MongoDB + SQLite)")
                     return mongo_id
                 except Exception as e:
-                    print(f"WARNING: [Repository] فشل حفظ المستخدم في MongoDB: {e}")
+                    safe_print(f"WARNING: [Repository] فشل حفظ المستخدم في MongoDB: {e}")
 
-            print(f"INFO: [Repository] تم إنشاء مستخدم: {user.username} (SQLite فقط)")
+            safe_print(f"INFO: [Repository] تم إنشاء مستخدم: {user.username} (SQLite فقط)")
             return local_id
 
         except Exception as e:
-            print(f"ERROR: [Repository] فشل إنشاء المستخدم: {e}")
+            safe_print(f"ERROR: [Repository] فشل إنشاء المستخدم: {e}")
             raise
 
     def get_user_by_username(self, username: str):
@@ -1870,7 +1813,7 @@ class Repository:
                             user_data['last_login'] = user_data['last_login'].isoformat()
                         return User(**user_data)
                 except Exception as e:
-                    print(f"WARNING: [Repository] فشل جلب المستخدم من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repository] فشل جلب المستخدم من MongoDB: {e}")
 
             # البحث في SQLite
             self.sqlite_cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
@@ -1893,7 +1836,7 @@ class Repository:
 
             return None
         except Exception as e:
-            print(f"ERROR: [Repository] فشل جلب المستخدم: {e}")
+            safe_print(f"ERROR: [Repository] فشل جلب المستخدم: {e}")
             return None
 
     def update_user_by_username(self, username: str, update_data: dict) -> bool:
@@ -1904,8 +1847,8 @@ class Repository:
             now_dt = datetime.now()
             now_iso = now_dt.isoformat()
 
-            print(f"INFO: [Repository] جاري تحديث المستخدم: {username}")
-            print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
+            safe_print(f"INFO: [Repository] جاري تحديث المستخدم: {username}")
+            safe_print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
 
             # تحديث في SQLite
             update_data_copy = update_data.copy()
@@ -1929,14 +1872,14 @@ class Repository:
 
             sql = f"UPDATE users SET {set_clause} WHERE username = ?"
 
-            print(f"INFO: [Repository] SQL: {sql}")
-            print(f"INFO: [Repository] Values: {values}")
+            safe_print(f"INFO: [Repository] SQL: {sql}")
+            safe_print(f"INFO: [Repository] Values: {values}")
 
             self.sqlite_cursor.execute(sql, values)
             self.sqlite_conn.commit()
 
             rows_affected = self.sqlite_cursor.rowcount
-            print(f"INFO: [Repository] تم تحديث {rows_affected} صف في SQLite")
+            safe_print(f"INFO: [Repository] تم تحديث {rows_affected} صف في SQLite")
 
             # تحديث في MongoDB
             if self.online and self.mongo_db is not None:
@@ -1948,7 +1891,7 @@ class Repository:
                         {"username": username},
                         {"$set": mongo_update}
                     )
-                    print(f"INFO: [Repository] تم تحديث {result.modified_count} مستخدم في MongoDB")
+                    safe_print(f"INFO: [Repository] تم تحديث {result.modified_count} مستخدم في MongoDB")
 
                     # تحديث حالة المزامنة
                     self.sqlite_cursor.execute(
@@ -1958,11 +1901,11 @@ class Repository:
                     self.sqlite_conn.commit()
 
                 except Exception as e:
-                    print(f"WARNING: [Repository] فشل تحديث المستخدم في MongoDB: {e}")
+                    safe_print(f"WARNING: [Repository] فشل تحديث المستخدم في MongoDB: {e}")
 
             return rows_affected > 0
         except Exception as e:
-            print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
+            safe_print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1970,8 +1913,8 @@ class Repository:
     def update_user(self, user_id: str, update_data: dict) -> bool:
         """تحديث بيانات مستخدم باستخدام ID - يستخدم update_user_by_username داخلياً"""
         try:
-            print(f"INFO: [Repository] جاري تحديث المستخدم بـ ID: {user_id}")
-            print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
+            safe_print(f"INFO: [Repository] جاري تحديث المستخدم بـ ID: {user_id}")
+            safe_print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
 
             # أولاً: التحقق من وجود المستخدم وجلب username
             username = None
@@ -1982,7 +1925,7 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             if row:
                 username = row[0]
-                print(f"INFO: [Repository] تم العثور على المستخدم في SQLite: {username}")
+                safe_print(f"INFO: [Repository] تم العثور على المستخدم في SQLite: {username}")
             else:
                 # محاولة البحث في MongoDB
                 if self.online and self.mongo_db is not None:
@@ -1990,24 +1933,24 @@ class Repository:
                         mongo_user = self.mongo_db.users.find_one({"_id": self._to_objectid(user_id)})
                         if mongo_user:
                             username = mongo_user.get('username')
-                            print(f"INFO: [Repository] تم العثور على المستخدم في MongoDB: {username}")
+                            safe_print(f"INFO: [Repository] تم العثور على المستخدم في MongoDB: {username}")
                     except Exception as e:
-                        print(f"WARNING: [Repository] فشل البحث في MongoDB: {e}")
+                        safe_print(f"WARNING: [Repository] فشل البحث في MongoDB: {e}")
 
             if not username:
-                print(f"ERROR: [Repository] المستخدم غير موجود بـ ID: {user_id}")
+                safe_print(f"ERROR: [Repository] المستخدم غير موجود بـ ID: {user_id}")
                 return False
 
             # استخدام الدالة الجديدة للتحديث باستخدام username
             return self.update_user_by_username(username, update_data)
 
         except Exception as e:
-            print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
+            safe_print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
             return False
 
     def get_all_users(self):
         """جلب جميع المستخدمين من MongoDB أو SQLite"""
-        print("INFO: [Repository] جاري جلب المستخدمين...")
+        safe_print(f"INFO: [Repository] جاري جلب المستخدمين...")
         try:
             from core.auth_models import User, UserRole
             users = []
@@ -2016,17 +1959,17 @@ class Repository:
             import time
             wait_count = 0
             while self._mongo_connecting and wait_count < 10:
-                print(f"INFO: [Repository] انتظار اتصال MongoDB... ({wait_count + 1}/10)")
+                safe_print(f"INFO: [Repository] انتظار اتصال MongoDB... ({wait_count + 1}/10)")
                 time.sleep(0.5)
                 wait_count += 1
 
-            print(f"INFO: [Repository] حالة الاتصال: online={self.online}, mongo_db={self.mongo_db is not None}")
+            safe_print(f"INFO: [Repository] حالة الاتصال: online={self.online}, mongo_db={self.mongo_db is not None}")
 
             # جلب من MongoDB أولاً
             if self.online and self.mongo_db is not None:
                 try:
                     users_data = list(self.mongo_db.users.find())
-                    print(f"INFO: [Repository] وجدت {len(users_data)} مستخدم في MongoDB")
+                    safe_print(f"INFO: [Repository] وجدت {len(users_data)} مستخدم في MongoDB")
                     for user_data in users_data:
                         try:
                             # استخراج _id من MongoDB
@@ -2069,26 +2012,26 @@ class Repository:
                                 custom_permissions=user_data.get('custom_permissions')
                             )
                             users.append(user)
-                            print(f"INFO: [Repository] تم تحويل مستخدم من MongoDB: {user.username}")
+                            safe_print(f"INFO: [Repository] تم تحويل مستخدم من MongoDB: {user.username}")
                         except Exception as e:
-                            print(f"WARNING: [Repository] فشل تحويل مستخدم من MongoDB: {e}")
+                            safe_print(f"WARNING: [Repository] فشل تحويل مستخدم من MongoDB: {e}")
                             import traceback
                             traceback.print_exc()
                             continue
 
                     if users:
-                        print(f"INFO: [Repository] تم جلب {len(users)} مستخدم من MongoDB")
+                        safe_print(f"INFO: [Repository] تم جلب {len(users)} مستخدم من MongoDB")
                         return users
                 except Exception as e:
-                    print(f"WARNING: [Repository] فشل جلب المستخدمين من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repository] فشل جلب المستخدمين من MongoDB: {e}")
                     import traceback
                     traceback.print_exc()
 
             # جلب من SQLite
-            print("INFO: [Repository] جاري جلب المستخدمين من SQLite...")
+            safe_print(f"INFO: [Repository] جاري جلب المستخدمين من SQLite...")
             self.sqlite_cursor.execute("SELECT * FROM users")
             rows = self.sqlite_cursor.fetchall()
-            print(f"INFO: [Repository] وجدت {len(rows)} مستخدم في SQLite")
+            safe_print(f"INFO: [Repository] وجدت {len(rows)} مستخدم في SQLite")
 
             for row in rows:
                 try:
@@ -2126,17 +2069,17 @@ class Repository:
                     )
 
                     users.append(user)
-                    print(f"INFO: [Repository] تم تحويل مستخدم: {user.username}")
+                    safe_print(f"INFO: [Repository] تم تحويل مستخدم: {user.username}")
                 except Exception as e:
-                    print(f"WARNING: [Repository] فشل تحويل مستخدم من SQLite: {e}")
+                    safe_print(f"WARNING: [Repository] فشل تحويل مستخدم من SQLite: {e}")
                     import traceback
                     traceback.print_exc()
                     continue
 
-            print(f"INFO: [Repository] تم جلب {len(users)} مستخدم إجمالاً")
+            safe_print(f"INFO: [Repository] تم جلب {len(users)} مستخدم إجمالاً")
             return users
         except Exception as e:
-            print(f"ERROR: [Repository] فشل جلب المستخدمين: {e}")
+            safe_print(f"ERROR: [Repository] فشل جلب المستخدمين: {e}")
             import traceback
             traceback.print_exc()
             return []
@@ -2153,7 +2096,7 @@ class Repository:
             from datetime import datetime
 
             # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
-            print("INFO: [Repository] 📤 جاري رفع المستخدمين المحليين إلى السحابة...")
+            safe_print(f"INFO: [Repository] 📤 جاري رفع المستخدمين المحليين إلى السحابة...")
             self.sqlite_cursor.execute("""
                 SELECT * FROM users 
                 WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
@@ -2190,7 +2133,7 @@ class Repository:
                             (mongo_id, local_id)
                         )
                         result['uploaded'] += 1
-                        print(f"INFO: [Repository]   ✅ تم تحديث المستخدم في السحابة: {username}")
+                        safe_print(f"INFO: [Repository]   ✅ تم تحديث المستخدم في السحابة: {username}")
                     else:
                         new_user = {
                             'username': username,
@@ -2209,7 +2152,7 @@ class Repository:
                             (mongo_id, local_id)
                         )
                         result['uploaded'] += 1
-                        print(f"INFO: [Repository]   ✅ تم رفع مستخدم جديد للسحابة: {username}")
+                        safe_print(f"INFO: [Repository]   ✅ تم رفع مستخدم جديد للسحابة: {username}")
                 except Exception as e:
                     result['errors'].append(f"خطأ في رفع {username}: {e}")
 
@@ -2217,7 +2160,7 @@ class Repository:
                 self.sqlite_conn.commit()
 
             # === 2. تنزيل المستخدمين من السحابة ===
-            print("INFO: [Repository] 📥 جاري تنزيل المستخدمين من السحابة...")
+            safe_print(f"INFO: [Repository] 📥 جاري تنزيل المستخدمين من السحابة...")
             cloud_users = list(self.mongo_db.users.find())
 
             for u in cloud_users:
@@ -2263,22 +2206,22 @@ class Repository:
                             u.get('last_modified', datetime.now().isoformat())
                         ))
                         result['downloaded'] += 1
-                        print(f"INFO: [Repository]   ✅ تم تنزيل مستخدم جديد: {username}")
+                        safe_print(f"INFO: [Repository]   ✅ تم تنزيل مستخدم جديد: {username}")
                 except Exception as e:
                     result['errors'].append(f"خطأ في تنزيل {username}: {e}")
 
             self.sqlite_conn.commit()
-            print(f"INFO: [Repository] ✅ تم مزامنة المستخدمين (رفع: {result['uploaded']}, تنزيل: {result['downloaded']})")
+            safe_print(f"INFO: [Repository] ✅ تم مزامنة المستخدمين (رفع: {result['uploaded']}, تنزيل: {result['downloaded']})")
 
         except Exception as e:
             result['errors'].append(str(e))
-            print(f"ERROR: [Repository] فشل مزامنة المستخدمين: {e}")
+            safe_print(f"ERROR: [Repository] فشل مزامنة المستخدمين: {e}")
 
         return result
 
     def update_account(self, account_id: str, account_data: schemas.Account) -> schemas.Account | None:
         """ ⚡ تحديث بيانات حساب - محلي أولاً ثم مزامنة في الخلفية """
-        print(f"INFO: [Repo] جاري تحديث الحساب ID: {account_id}")
+        safe_print(f"INFO: [Repo] جاري تحديث الحساب ID: {account_id}")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -2317,9 +2260,9 @@ class Repository:
         try:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
-            print("INFO: [Repo] ✅ تم تحديث الحساب محلياً")
+            safe_print(f"INFO: [Repo] ✅ تم تحديث الحساب محلياً")
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث الحساب (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث الحساب (SQLite): {e}")
 
         # ⚡ مزامنة مع MongoDB في الخلفية (لا يعطل الواجهة)
         if self.online:
@@ -2343,9 +2286,9 @@ class Repository:
                         (account_id_num, account_id),
                     )
                     self.sqlite_conn.commit()
-                    print("INFO: [Repo] ✅ تم مزامنة الحساب مع السيرفر (خلفية)")
+                    safe_print(f"INFO: [Repo] ✅ تم مزامنة الحساب مع السيرفر (خلفية)")
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل مزامنة الحساب مع السيرفر: {e}")
+                    safe_print(f"WARNING: [Repo] فشل مزامنة الحساب مع السيرفر: {e}")
             
             import threading
             threading.Thread(target=sync_to_mongo, daemon=True).start()
@@ -2354,7 +2297,7 @@ class Repository:
 
     def archive_account_by_id(self, account_id: str) -> bool:
         """ (جديدة) أرشفة حساب (Soft Delete). """
-        print(f"INFO: [Repo] جاري أرشفة الحساب ID: {account_id}")
+        safe_print(f"INFO: [Repo] جاري أرشفة الحساب ID: {account_id}")
         try:
             account = self.get_account_by_id(account_id)
             if not account:
@@ -2364,12 +2307,12 @@ class Repository:
             self.update_account(account_id, account)
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل أرشفة الحساب: {e}")
+            safe_print(f"ERROR: [Repo] فشل أرشفة الحساب: {e}")
             return False
 
     def delete_account_permanently(self, account_id: str) -> bool:
         """ ⚡ حذف حساب نهائياً - محلي أولاً ثم مزامنة في الخلفية """
-        print(f"INFO: [Repo] جاري حذف الحساب نهائياً ID: {account_id}")
+        safe_print(f"INFO: [Repo] جاري حذف الحساب نهائياً ID: {account_id}")
         try:
             # محاولة تحويل account_id إلى رقم
             try:
@@ -2383,7 +2326,7 @@ class Repository:
                 (account_id_num, account_id, account_id)
             )
             self.sqlite_conn.commit()
-            print("INFO: [Repo] ✅ تم حذف الحساب من المحلي")
+            safe_print(f"INFO: [Repo] ✅ تم حذف الحساب من المحلي")
 
             # ⚡ حذف من MongoDB في الخلفية (لا يعطل الواجهة)
             if self.online:
@@ -2394,16 +2337,16 @@ class Repository:
                             self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
                         except Exception:
                             self.mongo_db.accounts.delete_one({"code": account_id})
-                        print("INFO: [Repo] ✅ تم حذف الحساب من MongoDB (خلفية)")
+                        safe_print(f"INFO: [Repo] ✅ تم حذف الحساب من MongoDB (خلفية)")
                     except Exception as e:
-                        print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+                        safe_print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
                 
                 import threading
                 threading.Thread(target=delete_from_mongo, daemon=True).start()
 
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حذف الحساب: {e}")
+            safe_print(f"ERROR: [Repo] فشل حذف الحساب: {e}")
             return False
 
     # --- دوال التعامل مع الفواتير ---
@@ -2440,7 +2383,7 @@ class Repository:
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
         invoice_data.id = local_id
-        print(f"INFO: تم حفظ الفاتورة '{invoice_data.invoice_number}' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ الفاتورة '{invoice_data.invoice_number}' محلياً (ID: {local_id}).")
 
         if self.online:
             try:
@@ -2463,10 +2406,10 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة الفاتورة '{invoice_data.invoice_number}' أونلاين.")
+                safe_print(f"INFO: تم مزامنة الفاتورة '{invoice_data.invoice_number}' أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: فشل مزامنة الفاتورة الجديدة '{invoice_data.invoice_number}': {e}")
+                safe_print(f"ERROR: فشل مزامنة الفاتورة الجديدة '{invoice_data.invoice_number}': {e}")
 
         return invoice_data
 
@@ -2481,10 +2424,10 @@ class Repository:
                     inv.pop('_mongo_id', None)
                     inv.pop('mongo_id', None)
                     invoices_list.append(schemas.Invoice(**inv, _mongo_id=mongo_id))
-                print("INFO: تم جلب الفواتير من الأونلاين (MongoDB).")
+                safe_print(f"INFO: تم جلب الفواتير من الأونلاين (MongoDB).")
                 return invoices_list
             except Exception as e:
-                print(f"ERROR: فشل جلب الفواتير من Mongo: {e}. سيتم الجلب من المحلي.")
+                safe_print(f"ERROR: فشل جلب الفواتير من Mongo: {e}. سيتم الجلب من المحلي.")
 
         # الجلب من SQLite في حالة الأوفلاين
         self.sqlite_cursor.execute("SELECT * FROM invoices")
@@ -2496,7 +2439,7 @@ class Repository:
             row_dict['items'] = json.loads(row_dict['items'])
             invoices_list.append(schemas.Invoice(**row_dict))
 
-        print("INFO: تم جلب الفواتير من المحلي (SQLite).")
+        safe_print(f"INFO: تم جلب الفواتير من المحلي (SQLite).")
         return invoices_list
 
     # --- دوال التعامل مع قيود اليومية ---
@@ -2527,7 +2470,7 @@ class Repository:
         self.sqlite_cursor.execute(sql, params)
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
-        print(f"INFO: تم حفظ قيد اليومية '{entry_data.description[:20]}...' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ قيد اليومية '{entry_data.description[:20]}...' محلياً (ID: {local_id}).")
 
         # 2. محاولة الحفظ في MongoDB (الأونلاين)
         if self.online:
@@ -2546,10 +2489,10 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة قيد اليومية '{entry_data.description[:20]}...' أونلاين.")
+                safe_print(f"INFO: تم مزامنة قيد اليومية '{entry_data.description[:20]}...' أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: فشل مزامنة قيد اليومية الجديد: {e}")
+                safe_print(f"ERROR: فشل مزامنة قيد اليومية الجديد: {e}")
 
         return entry_data
 
@@ -2582,13 +2525,13 @@ class Repository:
                 try:
                     entries_list.append(schemas.JournalEntry(**row_dict))
                 except Exception as entry_error:
-                    print(f"WARNING: تخطي قيد فاسد: {entry_error}")
+                    safe_print(f"WARNING: تخطي قيد فاسد: {entry_error}")
                     continue
                     
-            print(f"INFO: تم جلب {len(entries_list)} قيد من المحلي.")
+            safe_print(f"INFO: تم جلب {len(entries_list)} قيد من المحلي.")
             return entries_list
         except Exception as e:
-            print(f"ERROR: فشل جلب القيود من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب القيود من SQLite: {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -2600,10 +2543,10 @@ class Repository:
                     entry.pop('_mongo_id', None)
                     entry.pop('mongo_id', None)
                     entries_list.append(schemas.JournalEntry(**entry, _mongo_id=mongo_id))
-                print("INFO: تم جلب قيود اليومية من الأونلاين (MongoDB).")
+                safe_print(f"INFO: تم جلب قيود اليومية من الأونلاين (MongoDB).")
                 return entries_list
             except Exception as e:
-                print(f"ERROR: فشل جلب قيود اليومية من Mongo: {e}")
+                safe_print(f"ERROR: فشل جلب قيود اليومية من Mongo: {e}")
 
         return []
 
@@ -2618,7 +2561,7 @@ class Repository:
                     data.pop('mongo_id', None)
                     return schemas.JournalEntry(**data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب القيد (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب القيد (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -2641,7 +2584,7 @@ class Repository:
                 
                 return schemas.JournalEntry(**row_dict)
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب القيد (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب القيد (SQLite): {e}")
 
         return None
 
@@ -2659,7 +2602,7 @@ class Repository:
             payment_data.amount
         )
         if existing_payment:
-            print(f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})")
+            safe_print(f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})")
             raise Exception(f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})")
 
         payment_data.created_at = now_dt
@@ -2684,7 +2627,7 @@ class Repository:
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
         payment_data.id = local_id
-        print(f"INFO: تم حفظ الدفعة (للمشروع {payment_data.project_id}) محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ الدفعة (للمشروع {payment_data.project_id}) محلياً (ID: {local_id}).")
 
         # 2. محاولة الحفظ في MongoDB (الأونلاين)
         if self.online:
@@ -2703,10 +2646,10 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة الدفعة (Mongo ID: {mongo_id}) أونلاين.")
+                safe_print(f"INFO: تم مزامنة الدفعة (Mongo ID: {mongo_id}) أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: فشل مزامنة الدفعة الجديدة: {e}")
+                safe_print(f"ERROR: فشل مزامنة الدفعة الجديدة: {e}")
 
         return payment_data
 
@@ -2728,7 +2671,7 @@ class Repository:
                     payments_list.append(schemas.Payment(**d, _mongo_id=mongo_id))
                 return payments_list
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب دفعات المشروع (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (Mongo): {e}")
 
         # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
         try:
@@ -2739,7 +2682,7 @@ class Repository:
                 temp_cursor.close()
             return [schemas.Payment(**dict(row)) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب دفعات المشروع (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (SQLite): {e}")
             return []
 
     def get_all_payments(self) -> list[schemas.Payment]:
@@ -2749,10 +2692,10 @@ class Repository:
             self.sqlite_cursor.execute("SELECT * FROM payments ORDER BY date DESC")
             rows = self.sqlite_cursor.fetchall()
             payments = [schemas.Payment(**dict(row)) for row in rows]
-            print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
+            safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
             return payments
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب الدفعات (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب الدفعات (SQLite): {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -2764,10 +2707,10 @@ class Repository:
                     d.pop('_mongo_id', None)
                     d.pop('mongo_id', None)
                     payments.append(schemas.Payment(**d, _mongo_id=mongo_id))
-                print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
+                safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
                 return payments
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب الدفعات (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب الدفعات (Mongo): {e}")
 
         return []
 
@@ -2790,7 +2733,7 @@ class Repository:
             )
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
-            print(f"INFO: [Repo] تم تعديل الدفعة محلياً (ID: {payment_id}).")
+            safe_print(f"INFO: [Repo] تم تعديل الدفعة محلياً (ID: {payment_id}).")
 
             if self.online:
                 try:
@@ -2817,13 +2760,13 @@ class Repository:
                             ('synced', payment_id, str(payment_id))
                         )
                         self.sqlite_conn.commit()
-                        print("INFO: [Repo] تم مزامنة تعديل الدفعة أونلاين.")
+                        safe_print(f"INFO: [Repo] تم مزامنة تعديل الدفعة أونلاين.")
                 except Exception as e:
-                    print(f"ERROR: [Repo] فشل مزامنة تعديل الدفعة: {e}")
+                    safe_print(f"ERROR: [Repo] فشل مزامنة تعديل الدفعة: {e}")
 
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تعديل الدفعة: {e}")
+            safe_print(f"ERROR: [Repo] فشل تعديل الدفعة: {e}")
             return False
 
     def get_payment_by_id(self, payment_id) -> schemas.Payment | None:
@@ -2838,7 +2781,7 @@ class Repository:
                 return schemas.Payment(**dict(row))
             return None
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب الدفعة: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب الدفعة: {e}")
             return None
 
     def delete_payment(self, payment_id) -> bool:
@@ -2858,31 +2801,31 @@ class Repository:
                 (payment_id, str(payment_id))
             )
             self.sqlite_conn.commit()
-            print(f"INFO: [Repo] تم حذف الدفعة محلياً (ID: {payment_id}).")
+            safe_print(f"INFO: [Repo] تم حذف الدفعة محلياً (ID: {payment_id}).")
 
             # حذف من MongoDB
             if self.online and mongo_id:
                 try:
                     from bson import ObjectId
                     self.mongo_db.payments.delete_one({'_id': ObjectId(mongo_id)})
-                    print("INFO: [Repo] تم حذف الدفعة من MongoDB.")
+                    safe_print(f"INFO: [Repo] تم حذف الدفعة من MongoDB.")
                 except Exception as e:
-                    print(f"ERROR: [Repo] فشل حذف الدفعة من MongoDB: {e}")
+                    safe_print(f"ERROR: [Repo] فشل حذف الدفعة من MongoDB: {e}")
 
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حذف الدفعة: {e}")
+            safe_print(f"ERROR: [Repo] فشل حذف الدفعة: {e}")
             return False
 
     def update_invoice_after_payment(self, invoice_number: str, new_payment_amount: float) -> schemas.Invoice | None:
         """
         (جديدة) تحديث المبلغ المدفوع وحالة الفاتورة بعد استلام دفعة.
         """
-        print(f"INFO: [Repo] جاري تحديث الفاتورة {invoice_number} بدفعة {new_payment_amount}")
+        safe_print(f"INFO: [Repo] جاري تحديث الفاتورة {invoice_number} بدفعة {new_payment_amount}")
 
         invoice = self.get_invoice_by_number(invoice_number)
         if not invoice:
-            print(f"ERROR: [Repo] لم يتم العثور على الفاتورة {invoice_number} لتحديثها.")
+            safe_print(f"ERROR: [Repo] لم يتم العثور على الفاتورة {invoice_number} لتحديثها.")
             return None
 
         new_amount_paid = invoice.amount_paid + new_payment_amount
@@ -2903,7 +2846,7 @@ class Repository:
             )
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث الفاتورة (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث الفاتورة (SQLite): {e}")
 
         if self.online:
             try:
@@ -2923,7 +2866,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث الفاتورة (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث الفاتورة (Mongo): {e}")
 
         invoice.amount_paid = new_amount_paid
         invoice.status = new_status
@@ -2935,7 +2878,7 @@ class Repository:
         """
         (جديدة) تحديث بيانات فاتورة موجودة بالكامل.
         """
-        print(f"INFO: [Repo] جاري تحديث الفاتورة {invoice_number} في قاعدة البيانات...")
+        safe_print(f"INFO: [Repo] جاري تحديث الفاتورة {invoice_number} في قاعدة البيانات...")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -2970,7 +2913,7 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث الفاتورة (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث الفاتورة (SQLite): {e}")
             return None
 
         if self.online:
@@ -2992,10 +2935,10 @@ class Repository:
                     (invoice_number,)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: [Repo] تم مزامنة تحديث الفاتورة {invoice_number} أونلاين.")
+                safe_print(f"INFO: [Repo] تم مزامنة تحديث الفاتورة {invoice_number} أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث الفاتورة (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث الفاتورة (Mongo): {e}")
 
         return invoice_data
 
@@ -3010,7 +2953,7 @@ class Repository:
                     data.pop('mongo_id', None)
                     return schemas.Invoice(**data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب الفاتورة {invoice_number} (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب الفاتورة {invoice_number} (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -3023,7 +2966,7 @@ class Repository:
                 row_dict['items'] = json.loads(row_dict['items'])
                 return schemas.Invoice(**row_dict)
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب الفاتورة {invoice_number} (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب الفاتورة {invoice_number} (SQLite): {e}")
 
         return None
 
@@ -3062,11 +3005,11 @@ class Repository:
         """
         (جديدة) إلغاء فاتورة: تحديث الحالة إلى "ملغاة".
         """
-        print(f"INFO: [Repo] جاري إلغاء الفاتورة {invoice_number}")
+        safe_print(f"INFO: [Repo] جاري إلغاء الفاتورة {invoice_number}")
 
         invoice = self.get_invoice_by_number(invoice_number)
         if not invoice:
-            print(f"ERROR: [Repo] لم يتم العثور على الفاتورة {invoice_number} لإلغائها.")
+            safe_print(f"ERROR: [Repo] لم يتم العثور على الفاتورة {invoice_number} لإلغائها.")
             return None
 
         new_status = schemas.InvoiceStatus.VOID
@@ -3080,7 +3023,7 @@ class Repository:
             )
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل إلغاء الفاتورة (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل إلغاء الفاتورة (SQLite): {e}")
 
         if self.online:
             try:
@@ -3099,7 +3042,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل إلغاء الفاتورة (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل إلغاء الفاتورة (Mongo): {e}")
 
         invoice.status = new_status
         invoice.last_modified = now_dt
@@ -3114,7 +3057,7 @@ class Repository:
         self.sqlite_cursor.execute("SELECT id FROM services WHERE name = ?", (service_data.name,))
         existing = self.sqlite_cursor.fetchone()
         if existing:
-            print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل!")
+            safe_print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل!")
             raise Exception(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
 
         now_dt = datetime.now()
@@ -3138,7 +3081,7 @@ class Repository:
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
         service_data.id = local_id
-        print(f"INFO: تم حفظ الخدمة '{service_data.name}' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ الخدمة '{service_data.name}' محلياً (ID: {local_id}).")
 
         if self.online:
             try:
@@ -3156,13 +3099,13 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة الخدمة '{service_data.name}' أونلاين.")
+                safe_print(f"INFO: تم مزامنة الخدمة '{service_data.name}' أونلاين.")
 
             except Exception as e:
                 if "E11000 duplicate key" in str(e):
-                    print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل أونلاين.")
+                    safe_print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل أونلاين.")
                 else:
-                    print(f"ERROR: فشل مزامنة الخدمة الجديدة '{service_data.name}': {e}")
+                    safe_print(f"ERROR: فشل مزامنة الخدمة الجديدة '{service_data.name}': {e}")
 
         return service_data
 
@@ -3175,10 +3118,10 @@ class Repository:
             self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (active_status,))
             rows = self.sqlite_cursor.fetchall()
             services_list = [schemas.Service(**dict(row)) for row in rows]
-            print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من المحلي.")
+            safe_print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من المحلي.")
             return services_list
         except Exception as e:
-            print(f"ERROR: فشل جلب الخدمات من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب الخدمات من SQLite: {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -3190,10 +3133,10 @@ class Repository:
                     s.pop('_mongo_id', None)
                     s.pop('mongo_id', None)
                     services_list.append(schemas.Service(**s, _mongo_id=mongo_id))
-                print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من الأونلاين.")
+                safe_print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من الأونلاين.")
                 return services_list
             except Exception as e:
-                print(f"ERROR: فشل جلب الخدمات من Mongo: {e}")
+                safe_print(f"ERROR: فشل جلب الخدمات من Mongo: {e}")
 
         return []
 
@@ -3213,7 +3156,7 @@ class Repository:
                     data.pop('mongo_id', None)
                     return schemas.Service(**data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب الخدمة {service_id} (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب الخدمة {service_id} (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute("SELECT * FROM services WHERE id = ? OR _mongo_id = ?", (service_id_num, service_id))
@@ -3221,7 +3164,7 @@ class Repository:
             if row:
                 return schemas.Service(**dict(row))
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب الخدمة {service_id} (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب الخدمة {service_id} (SQLite): {e}")
 
         return None
 
@@ -3229,7 +3172,7 @@ class Repository:
         """
         (جديدة) تحديث بيانات خدمة موجودة.
         """
-        print(f"INFO: [Repo] جاري تحديث الخدمة ID: {service_id}")
+        safe_print(f"INFO: [Repo] جاري تحديث الخدمة ID: {service_id}")
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
@@ -3253,7 +3196,7 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث الخدمة (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث الخدمة (SQLite): {e}")
             return None
 
         if self.online:
@@ -3272,7 +3215,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث الخدمة (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث الخدمة (Mongo): {e}")
 
         return service_data
 
@@ -3280,7 +3223,7 @@ class Repository:
         """
         (جديدة) أرشفة خدمة (Soft Delete).
         """
-        print(f"INFO: [Repo] جاري أرشفة الخدمة ID: {service_id}")
+        safe_print(f"INFO: [Repo] جاري أرشفة الخدمة ID: {service_id}")
         try:
             service = self.get_service_by_id(service_id)
             if not service:
@@ -3290,14 +3233,14 @@ class Repository:
             self.update_service(service_id, service)
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل أرشفة الخدمة: {e}")
+            safe_print(f"ERROR: [Repo] فشل أرشفة الخدمة: {e}")
             return False
 
     def delete_service_permanently(self, service_id: str) -> bool:
         """
         حذف خدمة نهائياً من قاعدة البيانات (Hard Delete)
         """
-        print(f"INFO: [Repo] جاري حذف الخدمة نهائياً ID: {service_id}")
+        safe_print(f"INFO: [Repo] جاري حذف الخدمة نهائياً ID: {service_id}")
 
         try:
             service_id_num = int(service_id)
@@ -3318,7 +3261,7 @@ class Repository:
             (service_id_num, service_id)
         )
         self.sqlite_conn.commit()
-        print(f"INFO: [Repo] ✅ تم حذف الخدمة من SQLite")
+        safe_print(f"INFO: [Repo] ✅ تم حذف الخدمة من SQLite")
 
         # حذف من MongoDB
         if self.online:
@@ -3330,11 +3273,11 @@ class Repository:
                     ]}
                 )
                 if result.deleted_count > 0:
-                    print(f"INFO: [Repo] ✅ تم حذف الخدمة من MongoDB")
+                    safe_print(f"INFO: [Repo] ✅ تم حذف الخدمة من MongoDB")
                 else:
-                    print(f"WARNING: [Repo] الخدمة غير موجودة في MongoDB")
+                    safe_print(f"WARNING: [Repo] الخدمة غير موجودة في MongoDB")
             except Exception as e:
-                print(f"WARNING: [Repo] فشل حذف الخدمة من MongoDB: {e}")
+                safe_print(f"WARNING: [Repo] فشل حذف الخدمة من MongoDB: {e}")
 
         return True
 
@@ -3352,7 +3295,7 @@ class Repository:
                     services_list.append(schemas.Service(**s, _mongo_id=mongo_id))
                 return services_list
             except Exception as e:
-                print(f"ERROR: فشل جلب الخدمات المؤرشفة (Mongo): {e}.")
+                safe_print(f"ERROR: فشل جلب الخدمات المؤرشفة (Mongo): {e}.")
 
         self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (archived_status,))
         rows = self.sqlite_cursor.fetchall()
@@ -3382,7 +3325,7 @@ class Repository:
         self.sqlite_conn.commit()
         local_id = self.sqlite_cursor.lastrowid
         expense_data.id = local_id
-        print(f"INFO: تم حفظ المصروف '{expense_data.category}' محلياً (ID: {local_id}).")
+        safe_print(f"INFO: تم حفظ المصروف '{expense_data.category}' محلياً (ID: {local_id}).")
 
         if self.online:
             try:
@@ -3400,10 +3343,10 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة المصروف '{expense_data.category}' أونلاين.")
+                safe_print(f"INFO: تم مزامنة المصروف '{expense_data.category}' أونلاين.")
 
             except Exception as e:
-                print(f"ERROR: فشل مزامنة المصروف الجديد '{expense_data.category}': {e}")
+                safe_print(f"ERROR: فشل مزامنة المصروف الجديد '{expense_data.category}': {e}")
 
         return expense_data
 
@@ -3414,10 +3357,10 @@ class Repository:
             self.sqlite_cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
             rows = self.sqlite_cursor.fetchall()
             expenses_list = [schemas.Expense(**dict(row)) for row in rows]
-            print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
+            safe_print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
             return expenses_list
         except Exception as e:
-            print(f"ERROR: فشل جلب المصروفات من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب المصروفات من SQLite: {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -3429,10 +3372,10 @@ class Repository:
                     exp.pop('_mongo_id', None)
                     exp.pop('mongo_id', None)
                     expenses_list.append(schemas.Expense(**exp, _mongo_id=mongo_id))
-                print("INFO: تم جلب المصروفات من الأونلاين (MongoDB).")
+                safe_print(f"INFO: تم جلب المصروفات من الأونلاين (MongoDB).")
                 return expenses_list
             except Exception as e:
-                print(f"ERROR: فشل جلب المصروفات من Mongo: {e}")
+                safe_print(f"ERROR: فشل جلب المصروفات من Mongo: {e}")
 
         return []
 
@@ -3456,7 +3399,7 @@ class Repository:
             )
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
-            print(f"INFO: تم تعديل المصروف محلياً (ID: {expense_id}).")
+            safe_print(f"INFO: تم تعديل المصروف محلياً (ID: {expense_id}).")
 
             # تحديث في MongoDB
             if self.online:
@@ -3487,13 +3430,13 @@ class Repository:
                             ('synced', expense_id, str(expense_id))
                         )
                         self.sqlite_conn.commit()
-                        print("INFO: تم مزامنة تعديل المصروف أونلاين.")
+                        safe_print(f"INFO: تم مزامنة تعديل المصروف أونلاين.")
                 except Exception as e:
-                    print(f"ERROR: فشل مزامنة تعديل المصروف: {e}")
+                    safe_print(f"ERROR: فشل مزامنة تعديل المصروف: {e}")
 
             return True
         except Exception as e:
-            print(f"ERROR: فشل تعديل المصروف: {e}")
+            safe_print(f"ERROR: فشل تعديل المصروف: {e}")
             return False
 
     def delete_expense(self, expense_id) -> bool:
@@ -3513,179 +3456,21 @@ class Repository:
                 (expense_id, str(expense_id))
             )
             self.sqlite_conn.commit()
-            print(f"INFO: تم حذف المصروف محلياً (ID: {expense_id}).")
+            safe_print(f"INFO: تم حذف المصروف محلياً (ID: {expense_id}).")
 
             # حذف من MongoDB
             if self.online and mongo_id:
                 try:
                     from bson import ObjectId
                     self.mongo_db.expenses.delete_one({'_id': ObjectId(mongo_id)})
-                    print("INFO: تم حذف المصروف من الأونلاين.")
+                    safe_print(f"INFO: تم حذف المصروف من الأونلاين.")
                 except Exception as e:
-                    print(f"ERROR: فشل حذف المصروف من Mongo: {e}")
+                    safe_print(f"ERROR: فشل حذف المصروف من Mongo: {e}")
 
             return True
         except Exception as e:
-            print(f"ERROR: فشل حذف المصروف: {e}")
+            safe_print(f"ERROR: فشل حذف المصروف: {e}")
             return False
-
-    # --- دوال التعامل مع عروض الأسعار ---
-
-    def create_quotation(self, quote_data: schemas.Quotation) -> schemas.Quotation:
-        """ إنشاء عرض سعر جديد (بذكاء) """
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
-        quote_data.created_at = now_dt
-        quote_data.last_modified = now_dt
-        quote_data.sync_status = 'new_offline'
-
-        items_json = json.dumps([item.model_dump() for item in quote_data.items])
-
-        sql = """
-            INSERT INTO quotations (
-                sync_status, created_at, last_modified, quote_number, client_id,
-                project_id, issue_date, expiry_date, items, subtotal,
-                discount_rate, discount_amount, tax_rate, tax_amount,
-                total_amount, status, currency, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            quote_data.sync_status, now_iso, now_iso, quote_data.quote_number,
-            quote_data.client_id, quote_data.project_id,
-            quote_data.issue_date.isoformat(), quote_data.expiry_date.isoformat(),
-            items_json, quote_data.subtotal, quote_data.discount_rate,
-            quote_data.discount_amount, quote_data.tax_rate, quote_data.tax_amount,
-            quote_data.total_amount, quote_data.status.value,
-            quote_data.currency.value, quote_data.notes
-        )
-
-        self.sqlite_cursor.execute(sql, params)
-        self.sqlite_conn.commit()
-        local_id = self.sqlite_cursor.lastrowid
-        quote_data.id = local_id
-        print(f"INFO: تم حفظ عرض السعر '{quote_data.quote_number}' محلياً (ID: {local_id}).")
-
-        if self.online:
-            try:
-                quote_dict = quote_data.model_dump(exclude={"_mongo_id", "id"})
-                quote_dict['status'] = quote_data.status.value
-                quote_dict['currency'] = quote_data.currency.value
-                quote_dict['issue_date'] = quote_data.issue_date
-                quote_dict['expiry_date'] = quote_data.expiry_date
-
-                result = self.mongo_db.quotations.insert_one(quote_dict)
-                mongo_id = str(result.inserted_id)
-
-                quote_data._mongo_id = mongo_id
-                quote_data.sync_status = 'synced'
-
-                self.sqlite_cursor.execute(
-                    "UPDATE quotations SET _mongo_id = ?, sync_status = ? WHERE id = ?",
-                    (mongo_id, 'synced', local_id)
-                )
-                self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة عرض السعر '{quote_data.quote_number}' أونلاين.")
-
-            except Exception as e:
-                print(f"ERROR: فشل مزامنة عرض السعر الجديد: {e}")
-
-        return quote_data
-
-    def get_all_quotations(self) -> list[schemas.Quotation]:
-        """ ⚡ جلب كل عروض الأسعار (SQLite أولاً للسرعة) """
-        # ⚡ جلب من SQLite أولاً (سريع جداً)
-        try:
-            self.sqlite_cursor.execute("SELECT * FROM quotations ORDER BY issue_date DESC")
-            rows = self.sqlite_cursor.fetchall()
-            data_list = []
-            for row in rows:
-                row_dict = dict(row)
-                items_value = row_dict.get('items')
-                if isinstance(items_value, str):
-                    try:
-                        row_dict['items'] = json.loads(items_value)
-                    except json.JSONDecodeError:
-                        row_dict['items'] = []
-                data_list.append(schemas.Quotation(**row_dict))
-            print(f"INFO: تم جلب {len(data_list)} عرض سعر من المحلي (SQLite).")
-            return data_list
-        except Exception as e:
-            print(f"ERROR: فشل جلب عروض الأسعار من SQLite: {e}")
-
-        # Fallback إلى MongoDB
-        if self.online:
-            try:
-                data = list(self.mongo_db.quotations.find().sort("issue_date", -1))
-                data_list = []
-                for d in data:
-                    mongo_id = str(d.pop('_id'))
-                    d.pop('_mongo_id', None)
-                    d.pop('mongo_id', None)
-                    data_list.append(schemas.Quotation(**d, _mongo_id=mongo_id))
-                print("INFO: تم جلب عروض الأسعار من الأونلاين (MongoDB).")
-                return data_list
-            except Exception as e:
-                print(f"ERROR: فشل جلب عروض الأسعار من Mongo: {e}")
-
-        return []
-
-    def get_quotation_by_number(self, quote_number: str) -> schemas.Quotation | None:
-        """ (جديدة) جلب عرض سعر واحد برقمه """
-        if self.online:
-            try:
-                data = self.mongo_db.quotations.find_one({"quote_number": quote_number})
-                if data:
-                    mongo_id = str(data.pop('_id'))
-                    data.pop('_mongo_id', None)
-                    data.pop('mongo_id', None)
-                    return schemas.Quotation(**data, _mongo_id=mongo_id)
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب عرض السعر {quote_number} (Mongo): {e}")
-
-        try:
-            self.sqlite_cursor.execute("SELECT * FROM quotations WHERE quote_number = ?", (quote_number,))
-            row = self.sqlite_cursor.fetchone()
-            if row:
-                row_dict = dict(row)
-                row_dict['items'] = json.loads(row_dict['items'])
-                return schemas.Quotation(**row_dict)
-        except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب عرض السعر {quote_number} (SQLite): {e}")
-
-        return None
-
-    def update_quotation_status(self, quote_number: str, new_status: schemas.QuotationStatus) -> bool:
-        """ (جديدة) تحديث حالة عرض السعر (مثلاً: إلى "مقبول"). """
-        print(f"INFO: [Repo] جاري تحديث حالة عرض السعر {quote_number} إلى {new_status.value}")
-
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
-
-        try:
-            self.sqlite_cursor.execute(
-                "UPDATE quotations SET status = ?, last_modified = ?, sync_status = 'modified_offline' WHERE quote_number = ?",
-                (new_status.value, now_iso, quote_number)
-            )
-            self.sqlite_conn.commit()
-        except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث حالة عرض السعر (SQLite): {e}")
-            return False
-
-        if self.online:
-            try:
-                self.mongo_db.quotations.update_one(
-                    {"quote_number": quote_number},
-                    {"$set": {"status": new_status.value, "last_modified": now_dt}}
-                )
-                self.sqlite_cursor.execute(
-                    "UPDATE quotations SET sync_status = 'synced' WHERE quote_number = ?",
-                    (quote_number,)
-                )
-                self.sqlite_conn.commit()
-            except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث حالة عرض السعر (Mongo): {e}")
-
-        return True
 
     # --- دوال التعامل مع المشاريع ---
 
@@ -3697,13 +3482,13 @@ class Repository:
         # ✅ فحص التكرار قبل الإضافة
         existing_project = self.get_project_by_number(project_data.name)
         if existing_project:
-            print(f"WARNING: المشروع '{project_data.name}' موجود بالفعل!")
+            safe_print(f"WARNING: المشروع '{project_data.name}' موجود بالفعل!")
             raise Exception(f"المشروع '{project_data.name}' موجود بالفعل في النظام")
 
         # ✅ فحص تكرار بنفس العميل ونفس الاسم (case insensitive)
         similar_project = self._get_similar_project(project_data.name, project_data.client_id)
         if similar_project:
-            print(f"WARNING: يوجد مشروع مشابه '{similar_project.name}' لنفس العميل!")
+            safe_print(f"WARNING: يوجد مشروع مشابه '{similar_project.name}' لنفس العميل!")
             raise Exception(f"يوجد مشروع مشابه '{similar_project.name}' لنفس العميل")
 
         project_data.created_at = now_dt
@@ -3809,7 +3594,7 @@ class Repository:
             self.sqlite_conn.commit()
             project_data.invoice_number = invoice_number
         except Exception as e:
-            print(f"WARNING: خطأ في توليد رقم الفاتورة: {e}")
+            safe_print(f"WARNING: خطأ في توليد رقم الفاتورة: {e}")
             # fallback: استخدم أعلى رقم + 1
             self.sqlite_cursor.execute(
                 "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
@@ -3831,7 +3616,7 @@ class Repository:
             self.sqlite_conn.commit()
             project_data.invoice_number = invoice_number
 
-        print(f"INFO: تم حفظ المشروع '{project_data.name}' محلياً (ID: {local_id}, Invoice: {invoice_number}).")
+        safe_print(f"INFO: تم حفظ المشروع '{project_data.name}' محلياً (ID: {local_id}, Invoice: {invoice_number}).")
 
         if self.online:
             try:
@@ -3855,13 +3640,13 @@ class Repository:
                     (mongo_id, 'synced', local_id)
                 )
                 self.sqlite_conn.commit()
-                print(f"INFO: تم مزامنة المشروع '{project_data.name}' أونلاين.")
+                safe_print(f"INFO: تم مزامنة المشروع '{project_data.name}' أونلاين.")
 
             except Exception as e:
                 if "E11000 duplicate key" in str(e):
-                    print(f"WARNING: المشروع باسم '{project_data.name}' موجود بالفعل أونلاين.")
+                    safe_print(f"WARNING: المشروع باسم '{project_data.name}' موجود بالفعل أونلاين.")
                 else:
-                    print(f"ERROR: فشل مزامنة المشروع الجديد: {e}")
+                    safe_print(f"ERROR: فشل مزامنة المشروع الجديد: {e}")
 
         return project_data
 
@@ -3906,10 +3691,10 @@ class Repository:
                     except json.JSONDecodeError:
                         row_dict["milestones"] = []
                 data_list.append(schemas.Project(**row_dict))
-            print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
+            safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
             return data_list
         except Exception as e:
-            print(f"ERROR: فشل جلب المشاريع من SQLite: {e}")
+            safe_print(f"ERROR: فشل جلب المشاريع من SQLite: {e}")
 
         # Fallback إلى MongoDB
         if self.online:
@@ -3945,10 +3730,10 @@ class Repository:
                         data_list.append(schemas.Project(**d, _mongo_id=mongo_id))
                     except Exception:
                         continue
-                print(f"INFO: تم جلب {len(data_list)} مشروع من الأونلاين.")
+                safe_print(f"INFO: تم جلب {len(data_list)} مشروع من الأونلاين.")
                 return data_list
             except Exception as e:
-                print(f"ERROR: فشل جلب المشاريع من Mongo: {e}")
+                safe_print(f"ERROR: فشل جلب المشاريع من Mongo: {e}")
 
         return []
 
@@ -3963,7 +3748,7 @@ class Repository:
                     data.pop('mongo_id', None)
                     return schemas.Project(**data, _mongo_id=mongo_id)
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
@@ -3985,7 +3770,7 @@ class Repository:
                         row_dict["milestones"] = []
                 return schemas.Project(**row_dict)
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (SQLite): {e}")
 
         return None
 
@@ -3993,7 +3778,7 @@ class Repository:
         """
         (جديدة) تحديث بيانات مشروع موجود بالكامل.
         """
-        print(f"INFO: [Repo] جاري تحديث المشروع {project_name} في قاعدة البيانات...")
+        safe_print(f"INFO: [Repo] جاري تحديث المشروع {project_name} في قاعدة البيانات...")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -4026,7 +3811,7 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
             return None
 
         # --- 2. تحديث MongoDB ---
@@ -4046,39 +3831,88 @@ class Repository:
                 self.sqlite_cursor.execute("UPDATE projects SET sync_status = 'synced' WHERE name = ?", (project_name,))
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"ERROR: [Repo] فشل تحديث المشروع (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل تحديث المشروع (Mongo): {e}")
 
         return project_data
 
+    def delete_project(self, project_id: str) -> bool:
+        """🗑️ حذف مشروع نهائياً من قاعدة البيانات"""
+        safe_print(f"INFO: [Repo] 🗑️ جاري حذف المشروع: {project_id}")
+        
+        try:
+            # البحث عن المشروع بالاسم (get_project_by_number تبحث بالاسم)
+            project = self.get_project_by_number(project_id)
+            
+            if not project:
+                safe_print(f"WARNING: [Repo] المشروع غير موجود: {project_id}")
+                return False
+            
+            project_name = project.name
+            mongo_id = getattr(project, '_mongo_id', None)
+            local_id = getattr(project, 'id', None)
+            
+            safe_print(f"INFO: [Repo] وجدنا المشروع: {project_name}, mongo_id={mongo_id}, local_id={local_id}")
+            
+            # 1. حذف من SQLite
+            self.sqlite_cursor.execute("DELETE FROM projects WHERE name = ?", (project_name,))
+            self.sqlite_conn.commit()
+            safe_print(f"INFO: [Repo] تم حذف المشروع من SQLite")
+            
+            # 2. حذف من MongoDB
+            if self.online and mongo_id:
+                try:
+                    from bson import ObjectId
+                    self.mongo_db.projects.delete_one({"_id": ObjectId(mongo_id)})
+                    safe_print(f"INFO: [Repo] تم حذف المشروع من MongoDB")
+                except Exception as e:
+                    safe_print(f"WARNING: [Repo] فشل حذف المشروع من MongoDB: {e}")
+            
+            # 3. حذف الدفعات المرتبطة
+            try:
+                self.sqlite_cursor.execute("DELETE FROM payments WHERE project_id = ?", (project_name,))
+                self.sqlite_conn.commit()
+                safe_print(f"INFO: [Repo] تم حذف الدفعات المرتبطة")
+            except Exception as e:
+                safe_print(f"WARNING: [Repo] فشل حذف الدفعات المرتبطة: {e}")
+            
+            safe_print(f"SUCCESS: [Repo] ✅ تم حذف المشروع {project_name} بنجاح")
+            return True
+            
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حذف المشروع: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     def get_project_revenue(self, project_name: str) -> float:
         """ (معدلة بالطريقة البسيطة) تحسب إجمالي إيرادات مشروع """
-        print(f"INFO: [Repo] جاري حساب إيرادات مشروع: {project_name}")
+        safe_print(f"INFO: [Repo] جاري حساب إيرادات مشروع: {project_name}")
         total_revenue = 0.0
         try:
             invoices = self.get_invoices_for_project(project_name)
             for inv in invoices:
                 total_revenue += inv.total_amount
-            print(f"INFO: [Repo] إيرادات المشروع (محسوبة): {total_revenue}")
+            safe_print(f"INFO: [Repo] إيرادات المشروع (محسوبة): {total_revenue}")
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حساب إيرادات المشروع: {e}")
+            safe_print(f"ERROR: [Repo] فشل حساب إيرادات المشروع: {e}")
         return total_revenue
 
     def get_project_expenses(self, project_name: str) -> float:
         """ (معدلة بالطريقة البسيطة) تحسب إجمالي مصروفات مشروع """
-        print(f"INFO: [Repo] جاري حساب مصروفات مشروع: {project_name}")
+        safe_print(f"INFO: [Repo] جاري حساب مصروفات مشروع: {project_name}")
         total_expenses = 0.0
         try:
             expenses = self.get_expenses_for_project(project_name)
             for exp in expenses:
                 total_expenses += exp.amount
-            print(f"INFO: [Repo] مصروفات المشروع (محسوبة): {total_expenses}")
+            safe_print(f"INFO: [Repo] مصروفات المشروع (محسوبة): {total_expenses}")
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حساب مصروفات المشروع: {e}")
+            safe_print(f"ERROR: [Repo] فشل حساب مصروفات المشروع: {e}")
         return total_expenses
 
     def get_invoices_for_project(self, project_name: str) -> list[schemas.Invoice]:
         """ (معدلة) جلب كل الفواتير المرتبطة بمشروع (أونلاين أولاً) """
-        print(f"INFO: [Repo] جلب فواتير مشروع: {project_name}")
+        safe_print(f"INFO: [Repo] جلب فواتير مشروع: {project_name}")
         query_filter = {
             "project_id": project_name,
             "status": {"$ne": schemas.InvoiceStatus.VOID.value}
@@ -4096,7 +3930,7 @@ class Repository:
                     invoices_list.append(schemas.Invoice(**d, _mongo_id=mongo_id))
                 return invoices_list
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب فواتير المشروع (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب فواتير المشروع (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute(
@@ -4111,12 +3945,12 @@ class Repository:
                 data_list.append(schemas.Invoice(**row_dict))
             return data_list
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب فواتير المشروع (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب فواتير المشروع (SQLite): {e}")
             return []
 
     def get_expenses_for_project(self, project_name: str) -> list[schemas.Expense]:
         """ (معدلة) جلب كل المصروفات المرتبطة بمشروع (أونلاين أولاً) """
-        print(f"INFO: [Repo] جلب مصروفات مشروع: {project_name}")
+        safe_print(f"INFO: [Repo] جلب مصروفات مشروع: {project_name}")
         query_filter = {"project_id": project_name}
 
         if self.online:
@@ -4131,14 +3965,14 @@ class Repository:
                     expenses_list.append(schemas.Expense(**d, _mongo_id=mongo_id))
                 return expenses_list
             except Exception as e:
-                print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (Mongo): {e}")
+                safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (Mongo): {e}")
 
         try:
             self.sqlite_cursor.execute("SELECT * FROM expenses WHERE project_id = ?", (project_name,))
             rows = self.sqlite_cursor.fetchall()
             return [schemas.Expense(**dict(row)) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (SQLite): {e}")
             return []
 
     # --- دوال الداشبورد (جديدة) ---
@@ -4156,10 +3990,10 @@ class Repository:
         # ⚡ استخدام الـ cache إذا كان صالحاً
         current_time = time.time()
         if not force_refresh and Repository._dashboard_cache and (current_time - Repository._dashboard_cache_time) < Repository._DASHBOARD_CACHE_TTL:
-            print("INFO: [Repo] استخدام cache الداشبورد")
+            safe_print(f"INFO: [Repo] استخدام cache الداشبورد")
             return Repository._dashboard_cache
 
-        print("INFO: [Repo] ⚡ جاري حساب أرقام الداشبورد (SQLite - سريع)...")
+        safe_print(f"INFO: [Repo] ⚡ جاري حساب أرقام الداشبورد (SQLite - سريع)...")
         total_collected = 0.0
         total_outstanding = 0.0
         total_expenses = 0.0
@@ -4199,10 +4033,10 @@ class Repository:
 
             net_profit_cash = total_collected - total_expenses
 
-            print(f"INFO: [Repo] (Offline) Collected: {total_collected}, Expenses: {total_expenses}, Outstanding: {total_outstanding}")
+            safe_print(f"INFO: [Repo] (Offline) Collected: {total_collected}, Expenses: {total_expenses}, Outstanding: {total_outstanding}")
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حساب أرقام الداشبورد (SQLite): {e}")
+            safe_print(f"ERROR: [Repo] فشل حساب أرقام الداشبورد (SQLite): {e}")
 
         result = {
             "total_collected": total_collected,
@@ -4235,10 +4069,10 @@ class Repository:
                             'is_base': bool(c.get('is_base', False)),
                             'active': bool(c.get('active', True))
                         })
-                    print(f"INFO: [Repo] تم جلب {len(currencies)} عملة من الأونلاين")
+                    safe_print(f"INFO: [Repo] تم جلب {len(currencies)} عملة من الأونلاين")
                     return currencies
             except Exception as e:
-                print(f"WARNING: [Repo] فشل جلب العملات من MongoDB: {e}")
+                safe_print(f"WARNING: [Repo] فشل جلب العملات من MongoDB: {e}")
 
         # الجلب من SQLite
         try:
@@ -4257,7 +4091,7 @@ class Repository:
                 })
             return currencies
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب العملات: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب العملات: {e}")
             return []
 
     def save_currency(self, currency_data: dict) -> bool:
@@ -4304,7 +4138,7 @@ class Repository:
                 ))
 
             self.sqlite_conn.commit()
-            print(f"INFO: [Repo] تم حفظ العملة {code} محلياً")
+            safe_print(f"INFO: [Repo] تم حفظ العملة {code} محلياً")
 
             # 2. المزامنة مع MongoDB
             if self.online:
@@ -4332,22 +4166,22 @@ class Repository:
                         (code,)
                     )
                     self.sqlite_conn.commit()
-                    print(f"INFO: [Repo] تم مزامنة العملة {code} أونلاين")
+                    safe_print(f"INFO: [Repo] تم مزامنة العملة {code} أونلاين")
 
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل مزامنة العملة {code} أونلاين: {e}")
+                    safe_print(f"WARNING: [Repo] فشل مزامنة العملة {code} أونلاين: {e}")
 
             return True
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حفظ العملة {code}: {e}")
+            safe_print(f"ERROR: [Repo] فشل حفظ العملة {code}: {e}")
             return False
 
     def delete_currency(self, code: str) -> bool:
         """حذف عملة (مع مزامنة)"""
         try:
             if code.upper() == 'EGP':
-                print("WARNING: [Repo] لا يمكن حذف العملة الأساسية")
+                safe_print(f"WARNING: [Repo] لا يمكن حذف العملة الأساسية")
                 return False
 
             # حذف من SQLite
@@ -4358,14 +4192,14 @@ class Repository:
             if self.online:
                 try:
                     self.mongo_db.currencies.delete_one({'code': code.upper()})
-                    print(f"INFO: [Repo] تم حذف العملة {code} من الأونلاين")
+                    safe_print(f"INFO: [Repo] تم حذف العملة {code} من الأونلاين")
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل حذف العملة من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repo] فشل حذف العملة من MongoDB: {e}")
 
-            print(f"INFO: [Repo] تم حذف العملة {code}")
+            safe_print(f"INFO: [Repo] تم حذف العملة {code}")
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حذف العملة {code}: {e}")
+            safe_print(f"ERROR: [Repo] فشل حذف العملة {code}: {e}")
             return False
 
     def fetch_live_exchange_rate(self, currency_code: str) -> float | None:
@@ -4389,10 +4223,10 @@ class Repository:
 
                     if egp_rate > 0 and currency_rate > 0:
                         rate = egp_rate / currency_rate
-                        print(f"INFO: [Repo] سعر {currency_code} = {rate:.4f} EGP (من API)")
+                        safe_print(f"INFO: [Repo] سعر {currency_code} = {rate:.4f} EGP (من API)")
                         return float(round(rate, 4))
         except Exception as e:
-            print(f"WARNING: [Repo] فشل جلب السعر من API 1: {e}")
+            safe_print(f"WARNING: [Repo] فشل جلب السعر من API 1: {e}")
 
         try:
             # API 2: ExchangeRate-API
@@ -4403,10 +4237,10 @@ class Repository:
                 if 'rates' in data:
                     egp_rate = data['rates'].get('EGP', 0)
                     if egp_rate > 0:
-                        print(f"INFO: [Repo] سعر {currency_code} = {egp_rate:.4f} EGP (من API 2)")
+                        safe_print(f"INFO: [Repo] سعر {currency_code} = {egp_rate:.4f} EGP (من API 2)")
                         return float(round(egp_rate, 4))
         except Exception as e:
-            print(f"WARNING: [Repo] فشل جلب السعر من API 2: {e}")
+            safe_print(f"WARNING: [Repo] فشل جلب السعر من API 2: {e}")
 
         return None
 
@@ -4419,7 +4253,7 @@ class Repository:
             {'code': 'AED', 'name': 'درهم إماراتي', 'symbol': 'د.إ', 'rate': 12.92},
         ]
 
-        print("INFO: [Repo] جاري إنشاء العملات الافتراضية وجلب الأسعار من الإنترنت...")
+        safe_print(f"INFO: [Repo] جاري إنشاء العملات الافتراضية وجلب الأسعار من الإنترنت...")
 
         for curr in default_currencies:
             code = curr['code']
@@ -4435,15 +4269,15 @@ class Repository:
                     # أسعار احتياطية في حالة فشل الاتصال
                     fallback_rates = {'USD': 49.50, 'SAR': 13.20, 'AED': 13.48}
                     curr['rate'] = fallback_rates.get(code, 1.0)
-                    print(f"WARNING: [Repo] استخدام سعر احتياطي لـ {code}: {curr['rate']}")
+                    safe_print(f"WARNING: [Repo] استخدام سعر احتياطي لـ {code}: {curr['rate']}")
 
             self.save_currency(curr)
 
-        print("INFO: [Repo] تم إنشاء العملات الافتراضية بنجاح")
+        safe_print(f"INFO: [Repo] تم إنشاء العملات الافتراضية بنجاح")
 
     def update_all_exchange_rates(self) -> dict:
         """تحديث جميع أسعار الصرف من الإنترنت"""
-        print("INFO: [Repo] جاري تحديث جميع أسعار الصرف...")
+        safe_print(f"INFO: [Repo] جاري تحديث جميع أسعار الصرف...")
 
         currencies = self.get_all_currencies()
         updated = 0
@@ -4461,13 +4295,13 @@ class Repository:
                 self.save_currency(curr)
                 updated += 1
                 results[code] = {'success': True, 'rate': live_rate}
-                print(f"INFO: [Repo] تم تحديث {code}: {live_rate}")
+                safe_print(f"INFO: [Repo] تم تحديث {code}: {live_rate}")
             else:
                 failed += 1
                 results[code] = {'success': False, 'rate': curr['rate']}
-                print(f"WARNING: [Repo] فشل تحديث {code}")
+                safe_print(f"WARNING: [Repo] فشل تحديث {code}")
 
-        print(f"INFO: [Repo] تم تحديث {updated} عملة، فشل {failed}")
+        safe_print(f"INFO: [Repo] تم تحديث {updated} عملة، فشل {failed}")
         return {'updated': updated, 'failed': failed, 'results': results}
 
     # ============================================
@@ -4479,7 +4313,7 @@ class Repository:
         تنظيف العملاء المكررين (يحتفظ بالأقدم ويحذف الأحدث)
         Returns: dict with counts of duplicates found and removed
         """
-        print("INFO: [Repo] جاري البحث عن العملاء المكررين...")
+        safe_print(f"INFO: [Repo] جاري البحث عن العملاء المكررين...")
         result: dict[str, Any] = {"found": 0, "removed": 0, "details": []}
 
         try:
@@ -4533,9 +4367,9 @@ class Repository:
                     )
                     result["removed"] += 1
                     result["details"].append({"id": client_id, "reason": reason})
-                    print(f"INFO: [Repo] تم أرشفة العميل المكرر ID: {client_id} - {reason}")
+                    safe_print(f"INFO: [Repo] تم أرشفة العميل المكرر ID: {client_id} - {reason}")
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل أرشفة العميل {client_id}: {e}")
+                    safe_print(f"WARNING: [Repo] فشل أرشفة العميل {client_id}: {e}")
 
             self.sqlite_conn.commit()
 
@@ -4549,12 +4383,12 @@ class Repository:
                                 {"$set": {"status": "مؤرشف"}}
                             )
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل مزامنة أرشفة العملاء المكررين: {e}")
+                    safe_print(f"WARNING: [Repo] فشل مزامنة أرشفة العملاء المكررين: {e}")
 
-            print(f"INFO: [Repo] تم العثور على {result['found']} عميل مكرر، تم أرشفة {result['removed']}")
+            safe_print(f"INFO: [Repo] تم العثور على {result['found']} عميل مكرر، تم أرشفة {result['removed']}")
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تنظيف العملاء المكررين: {e}")
+            safe_print(f"ERROR: [Repo] فشل تنظيف العملاء المكررين: {e}")
 
         return result
 
@@ -4562,7 +4396,7 @@ class Repository:
         """
         تنظيف المشاريع المكررة (نفس الاسم لنفس العميل)
         """
-        print("INFO: [Repo] جاري البحث عن المشاريع المكررة...")
+        safe_print(f"INFO: [Repo] جاري البحث عن المشاريع المكررة...")
         result: dict[str, Any] = {"found": 0, "removed": 0, "details": []}
 
         try:
@@ -4598,9 +4432,9 @@ class Repository:
                     )
                     result["removed"] += 1
                     result["details"].append({"id": project_id, "reason": reason})
-                    print(f"INFO: [Repo] تم أرشفة المشروع المكرر ID: {project_id} - {reason}")
+                    safe_print(f"INFO: [Repo] تم أرشفة المشروع المكرر ID: {project_id} - {reason}")
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل أرشفة المشروع {project_id}: {e}")
+                    safe_print(f"WARNING: [Repo] فشل أرشفة المشروع {project_id}: {e}")
 
             self.sqlite_conn.commit()
 
@@ -4613,12 +4447,12 @@ class Repository:
                                 {"$set": {"status": "مؤرشف"}}
                             )
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل مزامنة أرشفة المشاريع المكررة: {e}")
+                    safe_print(f"WARNING: [Repo] فشل مزامنة أرشفة المشاريع المكررة: {e}")
 
-            print(f"INFO: [Repo] تم العثور على {result['found']} مشروع مكرر، تم أرشفة {result['removed']}")
+            safe_print(f"INFO: [Repo] تم العثور على {result['found']} مشروع مكرر، تم أرشفة {result['removed']}")
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تنظيف المشاريع المكررة: {e}")
+            safe_print(f"ERROR: [Repo] فشل تنظيف المشاريع المكررة: {e}")
 
         return result
 
@@ -4626,7 +4460,7 @@ class Repository:
         """
         تنظيف الدفعات المكررة (نفس المشروع + نفس التاريخ + نفس المبلغ)
         """
-        print("INFO: [Repo] جاري البحث عن الدفعات المكررة...")
+        safe_print(f"INFO: [Repo] جاري البحث عن الدفعات المكررة...")
         result: dict[str, Any] = {"found": 0, "removed": 0, "details": []}
 
         try:
@@ -4659,9 +4493,9 @@ class Repository:
                     self.sqlite_cursor.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
                     result["removed"] += 1
                     result["details"].append({"id": payment_id, "reason": reason})
-                    print(f"INFO: [Repo] تم حذف الدفعة المكررة ID: {payment_id} - {reason}")
+                    safe_print(f"INFO: [Repo] تم حذف الدفعة المكررة ID: {payment_id} - {reason}")
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل حذف الدفعة {payment_id}: {e}")
+                    safe_print(f"WARNING: [Repo] فشل حذف الدفعة {payment_id}: {e}")
 
             self.sqlite_conn.commit()
 
@@ -4671,12 +4505,12 @@ class Repository:
                         if mongo_id:
                             self.mongo_db.payments.delete_one({"_id": self._to_objectid(mongo_id)})
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل حذف الدفعات المكررة من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repo] فشل حذف الدفعات المكررة من MongoDB: {e}")
 
-            print(f"INFO: [Repo] تم العثور على {result['found']} دفعة مكررة، تم حذف {result['removed']}")
+            safe_print(f"INFO: [Repo] تم العثور على {result['found']} دفعة مكررة، تم حذف {result['removed']}")
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل تنظيف الدفعات المكررة: {e}")
+            safe_print(f"ERROR: [Repo] فشل تنظيف الدفعات المكررة: {e}")
 
         return result
 
@@ -4684,7 +4518,7 @@ class Repository:
         """
         إصلاح العلاقات الهرمية للحسابات (ربط parent_code بشكل صحيح)
         """
-        print("INFO: [Repo] جاري إصلاح العلاقات الهرمية للحسابات...")
+        safe_print(f"INFO: [Repo] جاري إصلاح العلاقات الهرمية للحسابات...")
         result: dict[str, Any] = {"fixed": 0, "errors": 0, "details": []}
 
         try:
@@ -4723,10 +4557,10 @@ class Repository:
                             )
                             result["fixed"] += 1
                             result["details"].append({"code": code, "new_parent": parent_code})
-                            print(f"INFO: [Repo] تم ربط الحساب {code} بالحساب الأب {parent_code}")
+                            safe_print(f"INFO: [Repo] تم ربط الحساب {code} بالحساب الأب {parent_code}")
                         except Exception as e:
                             result["errors"] += 1
-                            print(f"WARNING: [Repo] فشل ربط الحساب {code}: {e}")
+                            safe_print(f"WARNING: [Repo] فشل ربط الحساب {code}: {e}")
 
             self.sqlite_conn.commit()
 
@@ -4742,12 +4576,12 @@ class Repository:
                             {"$set": {"parent_id": detail["new_parent"], "parent_code": detail["new_parent"]}}
                         )
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل مزامنة إصلاح الحسابات: {e}")
+                    safe_print(f"WARNING: [Repo] فشل مزامنة إصلاح الحسابات: {e}")
 
-            print(f"INFO: [Repo] تم إصلاح {result['fixed']} حساب، أخطاء: {result['errors']}")
+            safe_print(f"INFO: [Repo] تم إصلاح {result['fixed']} حساب، أخطاء: {result['errors']}")
 
         except Exception as e:
-            print(f"ERROR: [Repo] فشل إصلاح العلاقات الهرمية: {e}")
+            safe_print(f"ERROR: [Repo] فشل إصلاح العلاقات الهرمية: {e}")
 
         return result
 
@@ -4768,16 +4602,16 @@ class Repository:
             """)
 
             self.sqlite_conn.commit()
-            print("INFO: [Repo] تم تحديث علامات is_group للحسابات")
+            safe_print(f"INFO: [Repo] تم تحديث علامات is_group للحسابات")
 
         except Exception as e:
-            print(f"WARNING: [Repo] فشل تحديث علامات is_group: {e}")
+            safe_print(f"WARNING: [Repo] فشل تحديث علامات is_group: {e}")
 
     def cleanup_all_duplicates(self) -> dict:
         """
         تنظيف شامل لكل التكرارات (عملاء + مشاريع + دفعات)
         """
-        print("INFO: [Repo] ========== بدء التنظيف الشامل ==========")
+        safe_print(f"INFO: [Repo] ========== بدء التنظيف الشامل ==========")
 
         results = {
             "clients": self.cleanup_duplicate_clients(),
@@ -4789,8 +4623,8 @@ class Repository:
         total_found = sum(r.get("found", 0) for r in results.values())
         total_fixed = sum(r.get("removed", 0) + r.get("fixed", 0) for r in results.values())
 
-        print("INFO: [Repo] ========== انتهى التنظيف الشامل ==========")
-        print(f"INFO: [Repo] إجمالي المشاكل: {total_found}, تم إصلاح: {total_fixed}")
+        safe_print(f"INFO: [Repo] ========== انتهى التنظيف الشامل ==========")
+        safe_print(f"INFO: [Repo] إجمالي المشاكل: {total_found}, تم إصلاح: {total_fixed}")
 
         return results
 
@@ -4850,7 +4684,7 @@ class Repository:
         task_data['created_at'] = now_iso
         task_data['last_modified'] = now_iso
 
-        print(f"INFO: [Repo] تم إنشاء مهمة: {task_data.get('title')} (ID: {local_id})")
+        safe_print(f"INFO: [Repo] تم إنشاء مهمة: {task_data.get('title')} (ID: {local_id})")
 
         # مزامنة مع MongoDB
         if self.online:
@@ -4872,9 +4706,9 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
                 task_data['_mongo_id'] = mongo_id
-                print(f"INFO: [Repo] تم مزامنة المهمة أونلاين (Mongo ID: {mongo_id})")
+                safe_print(f"INFO: [Repo] تم مزامنة المهمة أونلاين (Mongo ID: {mongo_id})")
             except Exception as e:
-                print(f"WARNING: [Repo] فشل مزامنة المهمة: {e}")
+                safe_print(f"WARNING: [Repo] فشل مزامنة المهمة: {e}")
 
         return task_data
 
@@ -4924,7 +4758,7 @@ class Repository:
         ))
         self.sqlite_conn.commit()
 
-        print(f"INFO: [Repo] تم تحديث مهمة: {task_data.get('title')}")
+        safe_print(f"INFO: [Repo] تم تحديث مهمة: {task_data.get('title')}")
 
         # مزامنة مع MongoDB
         if self.online:
@@ -4947,7 +4781,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                print(f"WARNING: [Repo] فشل مزامنة تحديث المهمة: {e}")
+                safe_print(f"WARNING: [Repo] فشل مزامنة تحديث المهمة: {e}")
 
         return task_data
 
@@ -4963,7 +4797,7 @@ class Repository:
             )
             self.sqlite_conn.commit()
 
-            print(f"INFO: [Repo] تم حذف مهمة (ID: {task_id})")
+            safe_print(f"INFO: [Repo] تم حذف مهمة (ID: {task_id})")
 
             # حذف من MongoDB
             if self.online:
@@ -4972,11 +4806,11 @@ class Repository:
                         {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]}
                     )
                 except Exception as e:
-                    print(f"WARNING: [Repo] فشل حذف المهمة من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repo] فشل حذف المهمة من MongoDB: {e}")
 
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل حذف المهمة: {e}")
+            safe_print(f"ERROR: [Repo] فشل حذف المهمة: {e}")
             return False
 
     def get_task_by_id(self, task_id: str) -> dict | None:
@@ -4994,7 +4828,7 @@ class Repository:
                 return dict(self._row_to_task_dict(row))
             return None
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب المهمة: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب المهمة: {e}")
             return None
 
     def get_all_tasks(self) -> list[dict]:
@@ -5006,10 +4840,10 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
 
             tasks = [self._row_to_task_dict(row) for row in rows]
-            print(f"INFO: [Repo] تم جلب {len(tasks)} مهمة")
+            safe_print(f"INFO: [Repo] تم جلب {len(tasks)} مهمة")
             return tasks
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب المهام: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب المهام: {e}")
             return []
 
     def get_tasks_by_status(self, status: str) -> list[dict]:
@@ -5024,7 +4858,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب المهام بالحالة: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب المهام بالحالة: {e}")
             return []
 
     def get_tasks_by_project(self, project_id: str) -> list[dict]:
@@ -5039,7 +4873,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب مهام المشروع: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب مهام المشروع: {e}")
             return []
 
     def get_tasks_by_client(self, client_id: str) -> list[dict]:
@@ -5054,7 +4888,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب مهام العميل: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب مهام العميل: {e}")
             return []
 
     def get_overdue_tasks(self) -> list[dict]:
@@ -5072,7 +4906,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب المهام المتأخرة: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب المهام المتأخرة: {e}")
             return []
 
     def get_today_tasks(self) -> list[dict]:
@@ -5090,7 +4924,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب مهام اليوم: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب مهام اليوم: {e}")
             return []
 
     def _row_to_task_dict(self, row) -> dict:
@@ -5143,7 +4977,7 @@ class Repository:
                 return str(row[0])
             return ""
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب رقم الفاتورة: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب رقم الفاتورة: {e}")
             return ""
 
     def get_all_invoice_numbers(self) -> dict:
@@ -5155,7 +4989,7 @@ class Repository:
             rows = self.sqlite_cursor.fetchall()
             return {row[0]: row[1] for row in rows}
         except Exception as e:
-            print(f"ERROR: [Repo] فشل جلب أرقام الفواتير: {e}")
+            safe_print(f"ERROR: [Repo] فشل جلب أرقام الفواتير: {e}")
             return {}
 
     def ensure_invoice_number(self, project_name: str) -> str:
@@ -5181,10 +5015,10 @@ class Repository:
             )
             self.sqlite_conn.commit()
 
-            print(f"INFO: [Repo] تم إنشاء رقم فاتورة جديد: {project_name} -> {invoice_number}")
+            safe_print(f"INFO: [Repo] تم إنشاء رقم فاتورة جديد: {project_name} -> {invoice_number}")
             return str(invoice_number)
         except Exception as e:
-            print(f"ERROR: [Repo] فشل إنشاء رقم الفاتورة: {e}")
+            safe_print(f"ERROR: [Repo] فشل إنشاء رقم الفاتورة: {e}")
             return ""
 
     def restore_all_invoice_numbers(self):
@@ -5226,17 +5060,17 @@ class Repository:
             if new_projects:
                 self.sqlite_conn.commit()
 
-            print(f"INFO: [Repo] ✅ تم استعادة أرقام الفواتير ({updated} محدث, {len(new_projects)} جديد)")
+            safe_print(f"INFO: [Repo] ✅ تم استعادة أرقام الفواتير ({updated} محدث, {len(new_projects)} جديد)")
             return True
         except Exception as e:
-            print(f"ERROR: [Repo] فشل استعادة أرقام الفواتير: {e}")
+            safe_print(f"ERROR: [Repo] فشل استعادة أرقام الفواتير: {e}")
             return False
 
 
 
 # --- كود للاختبار (اختياري) ---
 if __name__ == "__main__":
-    print("--- بدء اختبار الـ Repository ---")
+    safe_print(f"--- بدء اختبار الـ Repository ---")
     repo = Repository()
-    print(f"حالة الاتصال: {'أونلاين' if repo.is_online() else 'أوفلاين'}")
-    print("--- انتهاء الاختبار ---")
+    safe_print(f"حالة الاتصال: {'أونلاين' if repo.is_online() else 'أوفلاين'}")
+    safe_print(f"--- انتهاء الاختبار ---")

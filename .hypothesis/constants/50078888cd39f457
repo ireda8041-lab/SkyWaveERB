@@ -1,4 +1,0 @@
-# file: D:\blogs\appas\SkyWaveERB\core\conflict_resolver.py
-# hypothesis_version: 6.148.3
-
-[0.001, 100, '%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f', '_id', '_mongo_id', 'account_id', 'accounts', 'amount', 'amount_paid', 'auto_merged', 'auto_merged_fields', 'balance', 'clients', 'code', 'conflict_id', 'conflicting_fields', 'created_at', 'critical', 'critical_fields', 'date', 'default_price', 'discount_amount', 'expenses', 'high', 'id', 'invoices', 'items', 'journal_entries', 'last_attempt', 'last_modified', 'lines', 'local', 'local_data', 'local_values', 'local_wins', 'low', 'manual_resolved', 'medium', 'merged', 'merged_data', 'milestones', 'name', 'non_critical_fields', 'payments', 'pending_review', 'projects', 'quotations', 'remote', 'remote_data', 'remote_values', 'remote_wins', 'services', 'subtotal', 'sync_status', 'tax_amount', 'total_amount', 'total_estimated_cost', 'user', 'winner']

@@ -1,4 +1,4 @@
-# الملف: ui/client_manager.py
+﻿# الملف: ui/client_manager.py
 
 import os
 
@@ -24,6 +24,16 @@ from core import schemas
 from services.client_service import ClientService
 from ui.client_editor_dialog import ClientEditorDialog
 from ui.styles import BUTTON_STYLES, get_cairo_font, TABLE_STYLE_DARK, create_centered_item
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ClientManagerTab(QWidget):
@@ -268,7 +278,7 @@ class ClientManagerTab(QWidget):
                     self.client_service.create_client(client)
                     success_count += 1
                 except Exception as e:
-                    print(f"ERROR: فشل استيراد عميل {client_dict.get('name')}: {e}")
+                    safe_print(f"ERROR: فشل استيراد عميل {client_dict.get('name')}: {e}")
                     failed_count += 1
 
             # تحديث الجدول
@@ -306,7 +316,7 @@ class ClientManagerTab(QWidget):
 
     def load_clients_data(self):
         """⚡ تحميل بيانات العملاء في الخلفية لمنع التجميد"""
-        print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
+        safe_print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
 
         from core.data_loader import get_data_loader
 
@@ -354,7 +364,7 @@ class ClientManagerTab(QWidget):
                     finally:
                         cursor.close()
                 except Exception as e:
-                    print(f"ERROR: فشل حساب الإجماليات: {e}")
+                    safe_print(f"ERROR: فشل حساب الإجماليات: {e}")
 
                 return {
                     'clients': clients,
@@ -362,7 +372,7 @@ class ClientManagerTab(QWidget):
                     'payments_total': client_payments_total
                 }
             except Exception as e:
-                print(f"ERROR: [ClientManager] فشل جلب العملاء: {e}")
+                safe_print(f"ERROR: [ClientManager] فشل جلب العملاء: {e}")
                 return {'clients': [], 'invoices_total': {}, 'payments_total': {}}
 
         # دالة تحديث الواجهة
@@ -375,7 +385,7 @@ class ClientManagerTab(QWidget):
                 self._populate_clients_table(client_invoices_total, client_payments_total)
 
             except Exception as e:
-                print(f"ERROR: [ClientManager] فشل تحديث الجدول: {e}")
+                safe_print(f"ERROR: [ClientManager] فشل تحديث الجدول: {e}")
                 import traceback
                 traceback.print_exc()
             finally:
@@ -384,7 +394,7 @@ class ClientManagerTab(QWidget):
                 self.clients_table.setSortingEnabled(True)
 
         def on_error(error_msg):
-            print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
+            safe_print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
             self.clients_table.blockSignals(False)
             self.clients_table.setUpdatesEnabled(True)
             self.clients_table.setSortingEnabled(True)
@@ -407,33 +417,41 @@ class ClientManagerTab(QWidget):
         for index, client in enumerate(self.clients_list):
             self.clients_table.insertRow(index)
 
+            # ⚡ Container لتوسيط اللوجو في الخلية
+            logo_container = QWidget()
+            logo_layout = QHBoxLayout(logo_container)
+            logo_layout.setContentsMargins(0, 0, 0, 0)
+            logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            logo_label.setFixedSize(50, 50)  # ⚡ تحديد حجم ثابت
+            logo_label.setFixedSize(50, 50)
+            logo_label.setStyleSheet("""
+                QLabel {
+                    background: rgba(10, 108, 241, 0.1);
+                    border-radius: 8px;
+                    border: 1px solid rgba(10, 108, 241, 0.2);
+                }
+            """)
 
             pixmap = None
 
-            # أولاً: محاولة تحميل الصورة من base64 (للمزامنة بين الأجهزة)
+            # أولاً: محاولة تحميل الصورة من base64
             if hasattr(client, 'logo_data') and client.logo_data:
                 try:
                     import base64
-                    # إزالة prefix إذا وجد
                     logo_data = client.logo_data
                     if ',' in logo_data:
                         logo_data = logo_data.split(',')[1]
 
                     img_bytes = base64.b64decode(logo_data)
                     pixmap = QPixmap()
-                    if pixmap.loadFromData(img_bytes):
-                        print(f"INFO: ✅ تم تحميل صورة العميل '{client.name}' من base64 ({len(client.logo_data)} حرف)")
-                    else:
-                        print(f"WARNING: ⚠️ فشل تحميل صورة العميل '{client.name}' - loadFromData فشل")
+                    if not pixmap.loadFromData(img_bytes):
                         pixmap = None
-                except Exception as e:
-                    print(f"WARNING: ⚠️ فشل تحميل صورة العميل '{client.name}': {e}")
+                except Exception:
                     pixmap = None
 
-            # ثانياً: محاولة تحميل الصورة من المسار المحلي (للتوافق القديم)
+            # ثانياً: محاولة تحميل من المسار المحلي
             if not pixmap or pixmap.isNull():
                 if client.logo_path and os.path.exists(client.logo_path):
                     pixmap = QPixmap(client.logo_path)
@@ -441,17 +459,32 @@ class ClientManagerTab(QWidget):
             # عرض الصورة أو أيقونة افتراضية
             if pixmap and not pixmap.isNull():
                 scaled_pixmap = pixmap.scaled(
-                    QSize(48, 48),
+                    QSize(44, 44),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
                 logo_label.setPixmap(scaled_pixmap)
-                logo_label.setStyleSheet("background: transparent;")
+                logo_label.setStyleSheet("""
+                    QLabel {
+                        background: transparent;
+                        border-radius: 8px;
+                        padding: 2px;
+                    }
+                """)
             else:
                 logo_label.setText("👤")
-                logo_label.setStyleSheet("font-size: 24px; color: #0A6CF1;")
+                logo_label.setStyleSheet("""
+                    QLabel {
+                        font-size: 22px;
+                        color: #6B7280;
+                        background: rgba(107, 114, 128, 0.1);
+                        border-radius: 8px;
+                        border: 1px solid rgba(107, 114, 128, 0.2);
+                    }
+                """)
 
-            self.clients_table.setCellWidget(index, 0, logo_label)
+            logo_layout.addWidget(logo_label)
+            self.clients_table.setCellWidget(index, 0, logo_container)
 
             # ⚡ معالجة الأحداث كل batch_size صف
             if (index + 1) % batch_size == 0:
@@ -487,7 +520,7 @@ class ClientManagerTab(QWidget):
             status_item.setForeground(QColor("white"))
             self.clients_table.setItem(index, 7, status_item)
 
-        print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
+        safe_print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
 
         # QApplication مستورد في أعلى الملف
         QApplication.processEvents()
@@ -497,7 +530,7 @@ class ClientManagerTab(QWidget):
 
     def _on_clients_changed(self):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
-        print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
+        safe_print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
         self.load_clients_data()
 
     def open_editor(self, client_to_edit: schemas.Client | None):
@@ -548,13 +581,13 @@ class ClientManagerTab(QWidget):
             try:
                 # ⚡ استخدام المعرف الصحيح (_mongo_id أو id)
                 client_id = getattr(self.selected_client, '_mongo_id', None) or str(self.selected_client.id)
-                print(f"DEBUG: [delete_selected_client] حذف العميل: {self.selected_client.name}")
-                print(f"DEBUG: [delete_selected_client] _mongo_id: {getattr(self.selected_client, '_mongo_id', None)}")
-                print(f"DEBUG: [delete_selected_client] id: {self.selected_client.id}")
-                print(f"DEBUG: [delete_selected_client] client_id المستخدم: {client_id}")
+                safe_print(f"DEBUG: [delete_selected_client] حذف العميل: {self.selected_client.name}")
+                safe_print(f"DEBUG: [delete_selected_client] _mongo_id: {getattr(self.selected_client, '_mongo_id', None)}")
+                safe_print(f"DEBUG: [delete_selected_client] id: {self.selected_client.id}")
+                safe_print(f"DEBUG: [delete_selected_client] client_id المستخدم: {client_id}")
                 
                 result = self.client_service.delete_client(client_id)
-                print(f"DEBUG: [delete_selected_client] نتيجة الحذف: {result}")
+                safe_print(f"DEBUG: [delete_selected_client] نتيجة الحذف: {result}")
                 
                 # رسالة نجاح
                 QMessageBox.information(

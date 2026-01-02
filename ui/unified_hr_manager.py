@@ -1058,7 +1058,7 @@ class UnifiedHRManager(QWidget):
                 border: 1px solid #003366;
                 border-radius: 8px;
                 padding: 10px;
-                font-family: 'Courier New', monospace;
+                font-family: 'Cairo';
                 font-size: 13px;
             }
         """)
@@ -1692,6 +1692,10 @@ class LoanDetailsDialog(QDialog):
         self.setWindowTitle("📋 تفاصيل السلفة")
         self.setModal(True)
         self.setMinimumSize(600, 500)
+        
+        # 📱 سياسة التمدد
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تطبيق شريط العنوان المخصص
         try:

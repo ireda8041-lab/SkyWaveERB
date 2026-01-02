@@ -1,4 +1,4 @@
-# الملف: core/error_handler.py
+﻿# الملف: core/error_handler.py
 # نظام معالجة الأخطاء المركزي
 
 import logging
@@ -6,6 +6,16 @@ import traceback
 from datetime import datetime
 
 from PyQt6.QtWidgets import QMessageBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class ErrorHandler:
@@ -123,7 +133,7 @@ class ErrorHandler:
         logger.critical(
             f"CRITICAL ERROR in {context}: {type(exception).__name__} - {str(exception)}"
         )
-        print(f"⚠️ CRITICAL ERROR: {type(exception).__name__} in {context}")
+        safe_print(f"⚠️ CRITICAL ERROR: {type(exception).__name__} in {context}")
 
     @staticmethod
     def _show_user_dialog(
@@ -156,8 +166,8 @@ class ErrorHandler:
 
         except Exception as e:
             # في حالة فشل عرض النافذة، نطبع في الكونسول
-            print(f"ERROR: فشل عرض رسالة الخطأ: {e}")
-            print(f"Original Error: {exception}")
+            safe_print(f"ERROR: فشل عرض رسالة الخطأ: {e}")
+            safe_print(f"Original Error: {exception}")
 
     @staticmethod
     def _get_user_friendly_message(exception: Exception) -> str:
@@ -260,7 +270,7 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    print("--- اختبار ErrorHandler ---\n")
+    safe_print("--- اختبار ErrorHandler ---\n")
 
     # اختبار 1: خطأ اتصال
     try:
@@ -280,4 +290,4 @@ if __name__ == "__main__":
     except Exception as e:
         ErrorHandler.handle_exception(e, "test_critical", show_dialog=False)
 
-    print("\n--- انتهى الاختبار ---")
+    safe_print("\n--- انتهى الاختبار ---")

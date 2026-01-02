@@ -1,6 +1,16 @@
-import json
+﻿import json
 import os
 from typing import Any
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
 _APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
@@ -33,7 +43,7 @@ class SettingsService:
         self.settings = self.load_settings()
         # دمج الإعدادات من الملف المحلي (مثل smart_scan)
         self._merge_local_settings()
-        print("INFO: قسم الإعدادات (SettingsService) جاهز.")
+        safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
     
     def _merge_local_settings(self):
         """دمج الإعدادات من ملف المشروع المحلي (مثل smart_scan)"""
@@ -45,14 +55,14 @@ class SettingsService:
                 # دمج smart_scan إذا لم يكن موجوداً في الإعدادات الرئيسية
                 if "smart_scan" in local_settings and "smart_scan" not in self.settings:
                     self.settings["smart_scan"] = local_settings["smart_scan"]
-                    print("INFO: [SettingsService] تم دمج إعدادات smart_scan من الملف المحلي")
+                    safe_print("INFO: [SettingsService] تم دمج إعدادات smart_scan من الملف المحلي")
                 
                 # دمج أي إعدادات أخرى غير موجودة
                 for key, value in local_settings.items():
                     if key not in self.settings:
                         self.settings[key] = value
         except Exception as e:
-            print(f"WARNING: [SettingsService] فشل قراءة الملف المحلي: {e}")
+            safe_print(f"WARNING: [SettingsService] فشل قراءة الملف المحلي: {e}")
 
     def load_settings(self) -> dict[str, Any]:
         if os.path.exists(self.SETTINGS_FILE):
@@ -64,10 +74,10 @@ class SettingsService:
                         settings[key] = value
                 return dict(settings)
             except Exception as e:
-                print(f"ERROR: [SettingsService] فشل تحميل ملف الإعدادات: {e}. سيتم استخدام الافتراضي.")
+                safe_print(f"ERROR: [SettingsService] فشل تحميل ملف الإعدادات: {e}. سيتم استخدام الافتراضي.")
                 return dict(self.DEFAULT_SETTINGS)
         else:
-            print("INFO: [SettingsService] ملف الإعدادات غير موجود. سيتم إنشاؤه.")
+            safe_print("INFO: [SettingsService] ملف الإعدادات غير موجود. سيتم إنشاؤه.")
             self.save_settings(self.DEFAULT_SETTINGS)
             return dict(self.DEFAULT_SETTINGS)
 
@@ -76,9 +86,9 @@ class SettingsService:
             with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(settings_data, f, ensure_ascii=False, indent=4)
             self.settings = settings_data
-            print("INFO: [SettingsService] تم حفظ الإعدادات بنجاح.")
+            safe_print("INFO: [SettingsService] تم حفظ الإعدادات بنجاح.")
         except Exception as e:
-            print(f"ERROR: [SettingsService] فشل حفظ الإعدادات: {e}")
+            safe_print(f"ERROR: [SettingsService] فشل حفظ الإعدادات: {e}")
             raise
 
     def get_settings(self) -> dict[str, Any]:

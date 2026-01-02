@@ -1,4 +1,4 @@
-# الملف: ui/user_editor_dialog.py
+﻿# الملف: ui/user_editor_dialog.py
 """
 نافذة إضافة/تعديل المستخدمين
 """
@@ -21,6 +21,16 @@ from PyQt6.QtWidgets import (
 )
 
 from core.auth_models import AuthService, User, UserRole
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class UserEditorDialog(QDialog):
@@ -50,10 +60,11 @@ class UserEditorDialog(QDialog):
             self._original_user_data = None
             self.setWindowTitle("إضافة مستخدم جديد")
 
-        # تصميم متجاوب - حد أدنى فقط
+        # تصميم متجاوب - حد أدنى وأقصى
         self.setMinimumWidth(400)
         self.setMinimumHeight(350)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(550)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -74,6 +85,10 @@ class UserEditorDialog(QDialog):
 
         if self.is_editing:
             self.populate_fields()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
@@ -321,8 +336,8 @@ class UserEditorDialog(QDialog):
                     update_data["password_hash"] = self.auth_service.hash_password(password)
 
                 # استخدام username للتحديث (أكثر أماناً)
-                print(f"INFO: [UserEditorDialog] جاري تحديث المستخدم: {original_username}")
-                print(f"INFO: [UserEditorDialog] البيانات: {update_data}")
+                safe_print(f"INFO: [UserEditorDialog] جاري تحديث المستخدم: {original_username}")
+                safe_print(f"INFO: [UserEditorDialog] البيانات: {update_data}")
 
                 success = self.auth_service.repo.update_user_by_username(
                     original_username,
@@ -358,6 +373,6 @@ class UserEditorDialog(QDialog):
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حفظ المستخدم:\n{str(e)}")
-            print(f"ERROR: [UserEditorDialog] {e}")
+            safe_print(f"ERROR: [UserEditorDialog] {e}")
             import traceback
             traceback.print_exc()

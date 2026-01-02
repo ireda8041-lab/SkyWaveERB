@@ -1,4 +1,4 @@
-# الملف: ui/expense_editor_dialog.py
+﻿# الملف: ui/expense_editor_dialog.py
 """
 نافذة إضافة/تعديل المصروفات - تصميم محسن
 """
@@ -27,6 +27,16 @@ from services.settings_service import SettingsService
 from ui.custom_spinbox import CustomSpinBox
 from ui.smart_combobox import SmartFilterComboBox
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 
 class ExpenseEditorDialog(QDialog):
     """نافذة إضافة/تعديل مصروف - تصميم متجاوب"""
@@ -54,10 +64,11 @@ class ExpenseEditorDialog(QDialog):
         else:
             self.setWindowTitle("مصروف جديد")
 
-        # 📱 Responsive: استخدام الحد الأدنى فقط بدون حجم ثابت
+        # 📱 Responsive: حجم مناسب
         self.setMinimumWidth(420)
         self.setMinimumHeight(400)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(600)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -98,7 +109,7 @@ class ExpenseEditorDialog(QDialog):
                     if result:
                         return result
         except Exception as e:
-            print(f"WARNING: [ExpenseEditorDialog] فشل جلب العملات: {e}")
+            safe_print(f"WARNING: [ExpenseEditorDialog] فشل جلب العملات: {e}")
         return fallback_currencies
 
     def init_ui(self):
@@ -413,7 +424,7 @@ class ExpenseEditorDialog(QDialog):
                 QMessageBox.information(self, "تم", "تم حفظ المصروف بنجاح.")
                 self.accept()
         except Exception as e:
-            print(f"ERROR: [ExpenseEditorDialog] فشل حفظ المصروف: {e}")
+            safe_print(f"ERROR: [ExpenseEditorDialog] فشل حفظ المصروف: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
 
 

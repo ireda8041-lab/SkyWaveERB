@@ -1,4 +1,4 @@
-# الملف: services/hr_service.py
+﻿# الملف: services/hr_service.py
 """
 🏢 خدمة الموارد البشرية المتكاملة - Production Grade
 ====================================================
@@ -15,6 +15,12 @@ from decimal import Decimal
 from typing import Optional, List, Dict, Any, Tuple
 
 from core.logger import get_logger
+
+# إشعارات العمليات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 logger = get_logger(__name__)
 
@@ -283,6 +289,7 @@ class HRService:
                     employee_data.get('notes'), now, employee_data['id']
                 ))
                 msg = f"تم تحديث الموظف: {employee_data['name']}"
+                action = 'updated'
             else:
                 cursor.execute("""
                     INSERT INTO employees (
@@ -301,9 +308,12 @@ class HRService:
                 ))
                 employee_data['id'] = cursor.lastrowid
                 msg = f"تم إضافة الموظف: {employee_data['name']}"
+                action = 'created'
             
             conn.commit()
             conn.close()
+            # 🔔 إشعار
+            notify_operation(action, 'employee', employee_data['name'])
             logger.info(f"✅ {msg}")
             return True, msg
             
@@ -316,6 +326,10 @@ class HRService:
         """حذف موظف"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        
+        # جلب اسم الموظف قبل الحذف
+        employee = self.get_employee_by_id(employee_id)
+        employee_name = employee['name'] if employee else f"موظف #{employee_id}"
         
         # التحقق من عدم وجود سلف نشطة
         cursor.execute("""
@@ -339,6 +353,8 @@ class HRService:
             
             conn.commit()
             conn.close()
+            # 🔔 إشعار
+            notify_operation('deleted', 'employee', employee_name)
             logger.info(f"✅ تم حذف الموظف: {employee_id}")
             return True, "تم حذف الموظف بنجاح"
             
@@ -445,6 +461,8 @@ class HRService:
             employee = self.get_employee_by_id(loan_data['employee_id'])
             employee_name = employee['name'] if employee else f"موظف #{loan_data['employee_id']}"
             
+            # 🔔 إشعار
+            notify_operation('created', 'loan', f"سلفة {loan_data['amount']} ج.م - {employee_name}")
             logger.info(f"✅ تم إضافة سلفة بمبلغ {loan_data['amount']} للموظف {employee_name}")
             return True, f"تم إضافة السلفة بنجاح للموظف {employee_name}", loan_id
             
@@ -914,6 +932,8 @@ class HRService:
             conn.commit()
             conn.close()
             
+            # 🔔 إشعار
+            notify_operation('paid', 'salary', f"راتب {salary['employee_name']} - {month}")
             logger.info(f"✅ تم دفع راتب {salary['employee_name']} لشهر {month}")
             return True, f"تم دفع الراتب بنجاح: {salary['net_salary']:.2f} ج.م"
             

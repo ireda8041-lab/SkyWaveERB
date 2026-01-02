@@ -1,4 +1,4 @@
-# الملف: core/advanced_sync_manager.py
+﻿# الملف: core/advanced_sync_manager.py
 """
 نظام المزامنة المتقدم - Offline-First مع Queue System
 """
@@ -12,6 +12,16 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 from core.repository import Repository
 from core.signals import app_signals
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class SyncQueueItem:
@@ -62,7 +72,7 @@ class ConnectionChecker(QThread):
             if is_connected != self.last_status:
                 self.connection_changed.emit(is_connected)
                 self.last_status = is_connected
-                print(f"INFO: [ConnectionChecker] Connection status changed: {'Online' if is_connected else 'Offline'}")
+                safe_print(f"INFO: [ConnectionChecker] Connection status changed: {'Online' if is_connected else 'Offline'}")
 
             # انتظار قبل الفحص التالي
             self.msleep(self.check_interval * 1000)
@@ -135,7 +145,7 @@ class SyncWorker(QThread):
                         self._increment_retry_count(item.id)
 
                 except Exception as e:
-                    print(f"ERROR: [SyncWorker] Failed to sync item {item.id}: {e}")
+                    safe_print(f"ERROR: [SyncWorker] Failed to sync item {item.id}: {e}")
                     failed_count += 1
                     self._mark_item_failed(item.id, str(e))
 
@@ -152,7 +162,7 @@ class SyncWorker(QThread):
                 app_signals.sync_completed.emit(results)
 
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Sync failed: {e}")
+            safe_print(f"ERROR: [SyncWorker] Sync failed: {e}")
             self.sync_failed.emit(str(e))
             app_signals.sync_failed.emit(str(e))
 
@@ -188,7 +198,7 @@ class SyncWorker(QThread):
             return items
 
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Failed to get pending items: {e}")
+            safe_print(f"ERROR: [SyncWorker] Failed to get pending items: {e}")
             return []
 
     def _sync_item(self, item: SyncQueueItem) -> bool:
@@ -220,7 +230,7 @@ class SyncWorker(QThread):
             return False
 
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Failed to sync item: {e}")
+            safe_print(f"ERROR: [SyncWorker] Failed to sync item: {e}")
             return False
 
     def _mark_item_completed(self, item_id: int):
@@ -233,7 +243,7 @@ class SyncWorker(QThread):
             """, (datetime.now().isoformat(), item_id))
             self.repo.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Failed to mark item completed: {e}")
+            safe_print(f"ERROR: [SyncWorker] Failed to mark item completed: {e}")
 
     def _mark_item_failed(self, item_id: int, error_message: str):
         """تمييز العنصر كفاشل"""
@@ -245,7 +255,7 @@ class SyncWorker(QThread):
             """, (error_message, datetime.now().isoformat(), item_id))
             self.repo.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Failed to mark item failed: {e}")
+            safe_print(f"ERROR: [SyncWorker] Failed to mark item failed: {e}")
 
     def _increment_retry_count(self, item_id: int):
         """زيادة عداد المحاولات"""
@@ -257,7 +267,7 @@ class SyncWorker(QThread):
             """, (datetime.now().isoformat(), item_id))
             self.repo.sqlite_conn.commit()
         except Exception as e:
-            print(f"ERROR: [SyncWorker] Failed to increment retry count: {e}")
+            safe_print(f"ERROR: [SyncWorker] Failed to increment retry count: {e}")
 
     def stop(self):
         """إيقاف عامل المزامنة"""
@@ -296,7 +306,7 @@ class AdvancedSyncManagerV3(QObject):
         self.connection_checker.start()
         self.sync_worker.start()
 
-        print("INFO: [AdvancedSyncManager] Advanced sync system initialized")
+        safe_print("INFO: [AdvancedSyncManager] Advanced sync system initialized")
 
     def on_connection_changed(self, is_online: bool):
         """معالج تغيير حالة الاتصال"""
@@ -354,14 +364,14 @@ class AdvancedSyncManagerV3(QObject):
 
             self.repo.sqlite_conn.commit()
 
-            print(f"INFO: [AdvancedSyncManager] Added to sync queue: {action} {table_name}")
+            safe_print(f"INFO: [AdvancedSyncManager] Added to sync queue: {action} {table_name}")
 
             # إذا كان متصل، ابدأ المزامنة فوراً
             if self.is_online:
                 self.sync_worker.perform_sync()
 
         except Exception as e:
-            print(f"ERROR: [AdvancedSyncManager] Failed to add to sync queue: {e}")
+            safe_print(f"ERROR: [AdvancedSyncManager] Failed to add to sync queue: {e}")
 
     def get_pending_count(self) -> int:
         """الحصول على عدد العناصر المعلقة"""
@@ -373,7 +383,7 @@ class AdvancedSyncManagerV3(QObject):
             result = self.repo.sqlite_cursor.fetchone()
             return int(result[0]) if result else 0
         except Exception as e:
-            print(f"ERROR: [AdvancedSyncManager] Failed to get pending count: {e}")
+            safe_print(f"ERROR: [AdvancedSyncManager] Failed to get pending count: {e}")
             return 0
 
     def force_sync(self):
@@ -405,14 +415,14 @@ class AdvancedSyncManagerV3(QObject):
             self.repo.sqlite_conn.commit()
 
             if deleted_count > 0:
-                print(f"INFO: [AdvancedSyncManager] Cleaned up {deleted_count} old sync items")
+                safe_print(f"INFO: [AdvancedSyncManager] Cleaned up {deleted_count} old sync items")
 
         except Exception as e:
-            print(f"ERROR: [AdvancedSyncManager] Failed to cleanup: {e}")
+            safe_print(f"ERROR: [AdvancedSyncManager] Failed to cleanup: {e}")
 
     def shutdown(self):
         """إغلاق مدير المزامنة"""
-        print("INFO: [AdvancedSyncManager] Shutting down...")
+        safe_print("INFO: [AdvancedSyncManager] Shutting down...")
 
         self.connection_checker.stop()
         self.sync_worker.stop()
@@ -420,4 +430,4 @@ class AdvancedSyncManagerV3(QObject):
         # تنظيف العناصر القديمة
         self.cleanup_completed_items()
 
-        print("INFO: [AdvancedSyncManager] Shutdown complete")
+        safe_print("INFO: [AdvancedSyncManager] Shutdown complete")

@@ -1,4 +1,4 @@
-# الملف: services/smart_scan_service.py
+﻿# الملف: services/smart_scan_service.py
 """
 خدمة المسح الذكي للفواتير باستخدام Google Gemini AI 🧠
 
@@ -15,6 +15,16 @@ import PIL.Image
 import google.generativeai as genai
 from typing import Dict, Any
 from datetime import datetime
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 # إعداد اللوجر
 logger = logging.getLogger("SmartScanService")
@@ -192,12 +202,12 @@ if __name__ == "__main__":
     test_img = "test_invoice.jpg"
 
     if os.path.exists(test_img):
-        print("🚀 Sending image to Gemini...")
+        safe_print("🚀 Sending image to Gemini...")
         result = service.scan_invoice_image(test_img)
-        print("\n🧾 Extracted Data:")
-        print(json.dumps(result, indent=4, ensure_ascii=False))
+        safe_print("\n🧾 Extracted Data:")
+        safe_print(json.dumps(result, indent=4, ensure_ascii=False))
     else:
-        print(f"⚠️ Please place an image named '{test_img}' to test.")
-        print(f"\n📋 Service Status:")
-        print(f"   - Available: {service.is_available()}")
-        print(f"   - API Key Set: {bool(service.api_key)}")
+        safe_print(f"⚠️ Please place an image named '{test_img}' to test.")
+        safe_print(f"\n📋 Service Status:")
+        safe_print(f"   - Available: {service.is_available()}")
+        safe_print(f"   - API Key Set: {bool(service.api_key)}")

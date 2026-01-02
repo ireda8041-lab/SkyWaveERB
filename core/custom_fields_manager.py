@@ -1,4 +1,4 @@
-"""
+﻿"""
 مدير الحقول المخصصة - لحفظ واسترجاع القيم المخصصة
 Custom Fields Manager - Save and retrieve custom values
 """
@@ -6,6 +6,16 @@ Custom Fields Manager - Save and retrieve custom values
 import json
 import os
 from typing import List, Set
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class CustomFieldsManager:
@@ -44,7 +54,7 @@ class CustomFieldsManager:
                         if key in loaded:
                             self._data[key] = loaded[key]
         except Exception as e:
-            print(f"WARNING: [CustomFieldsManager] فشل تحميل البيانات: {e}")
+            safe_print(f"WARNING: [CustomFieldsManager] فشل تحميل البيانات: {e}")
     
     def _save(self):
         """حفظ البيانات في الملف"""
@@ -52,7 +62,7 @@ class CustomFieldsManager:
             with open(self._file_path, 'w', encoding='utf-8') as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"ERROR: [CustomFieldsManager] فشل حفظ البيانات: {e}")
+            safe_print(f"ERROR: [CustomFieldsManager] فشل حفظ البيانات: {e}")
     
     def add_value(self, field_name: str, value: str) -> bool:
         """إضافة قيمة جديدة لحقل معين"""

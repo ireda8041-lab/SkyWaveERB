@@ -1,4 +1,4 @@
-# الملف: ui/styles.py
+﻿# الملف: ui/styles.py
 """
 ملف الأنماط الموحدة لكل الأزرار والعناصر في التطبيق
 SkyWave Brand Identity Colors
@@ -6,6 +6,16 @@ SkyWave Brand Identity Colors
 
 import os
 import sys
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 def _get_asset_path(filename):
@@ -533,8 +543,9 @@ QDateEdit, QTimeEdit {{
     background-color: {COLORS['bg_medium']};
     border: 1px solid #374151;
     border-radius: 4px;
-    padding: 6px 10px 6px 28px;
-    min-height: 32px;
+    padding: 8px 12px 8px 30px;
+    min-height: 36px;
+    min-width: 130px;
     color: #F8FAFC;
     font-size: 13px;
 }}
@@ -949,13 +960,13 @@ def apply_styles(app):
                 cairo_font = QFont(cairo_font_family, 13)
                 cairo_font.setWeight(QFont.Weight.Normal)
                 app.setFont(cairo_font)
-                print(f"✅ تم تحميل خط Cairo من: {font_path}")
+                safe_print(f"✅ تم تحميل خط Cairo من: {font_path}")
             else:
-                print("⚠️ فشل تحميل خط Cairo")
+                safe_print("⚠️ فشل تحميل خط Cairo")
         else:
-            print("⚠️ فشل إضافة خط Cairo")
+            safe_print("⚠️ فشل إضافة خط Cairo")
     else:
-        print(f"⚠️ ملف الخط غير موجود: {font_path}")
+        safe_print(f"⚠️ ملف الخط غير موجود: {font_path}")
 
     # حفظ اسم الخط للاستخدام في الـ stylesheet
     global CAIRO_FONT_FAMILY
@@ -994,8 +1005,10 @@ INPUT_STYLE = f"""
         background-color: {COLORS['bg_medium']};
         border: 1px solid {COLORS['border']};
         border-radius: 6px;
-        padding: 5px;
+        padding: 8px 10px;
+        min-height: 20px;
         color: {COLORS['text_primary']};
+        font-size: 12px;
     }}
     QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QComboBox:focus {{
         border: 2px solid {COLORS['primary']};
@@ -1004,6 +1017,9 @@ INPUT_STYLE = f"""
         background-color: {COLORS['bg_medium']};
         color: {COLORS['text_primary']};
         selection-background-color: {COLORS['primary']};
+    }}
+    QDateEdit {{
+        min-width: 130px;
     }}
 """
 
@@ -1095,10 +1111,10 @@ def setup_custom_title_bar(window):
                 )
 
             except Exception as e:
-                print(f"تعذر تخصيص شريط العنوان للنافذة: {e}")
+                safe_print(f"تعذر تخصيص شريط العنوان للنافذة: {e}")
 
     except Exception as e:
-        print(f"خطأ في تخصيص شريط العنوان: {e}")
+        safe_print(f"خطأ في تخصيص شريط العنوان: {e}")
 
 def get_dialog_style():
     """
@@ -1492,8 +1508,9 @@ RESPONSIVE_INPUT_STYLE = f"""
         background-color: {COLORS['bg_medium']};
         border: 1px solid {COLORS['border']};
         border-radius: 6px;
-        padding: 8px 12px;
-        min-height: 32px;
+        padding: 8px 12px 8px 30px;
+        min-height: 36px;
+        min-width: 140px;
         color: {COLORS['text_primary']};
         font-size: 13px;
     }}
@@ -1502,7 +1519,7 @@ RESPONSIVE_INPUT_STYLE = f"""
     }}
     QDateEdit::drop-down {{
         border: none;
-        width: 25px;
+        width: 28px;
     }}
 """
 
@@ -1909,3 +1926,75 @@ def fix_table_rtl(table):
     v_header = table.verticalHeader()
     if v_header:
         v_header.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+
+
+def apply_rtl_alignment_to_all_fields(widget):
+    """
+    تطبيق محاذاة النص لليمين (RTL) على كل حقول الإدخال في الـ widget
+    
+    Args:
+        widget: الـ widget الأب الذي يحتوي على الحقول
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox
+    
+    # البحث عن كل حقول الإدخال
+    for child in widget.findChildren(QLineEdit):
+        child.setAlignment(Qt.AlignmentFlag.AlignRight)
+    
+    for child in widget.findChildren(QTextEdit):
+        child.setAlignment(Qt.AlignmentFlag.AlignRight)
+    
+    for child in widget.findChildren(QPlainTextEdit):
+        # QPlainTextEdit لا يدعم setAlignment مباشرة
+        pass
+    
+    for child in widget.findChildren(QComboBox):
+        if child.lineEdit():
+            child.lineEdit().setAlignment(Qt.AlignmentFlag.AlignRight)
+    
+    for child in widget.findChildren(QSpinBox):
+        child.setAlignment(Qt.AlignmentFlag.AlignRight)
+    
+    for child in widget.findChildren(QDoubleSpinBox):
+        child.setAlignment(Qt.AlignmentFlag.AlignRight)
+
+
+def setup_auto_responsive_dialog(dialog):
+    """
+    إعداد الديالوج ليكون متجاوباً تلقائياً
+    يطبق إعدادات الحجم والتوسيط والـ RTL
+    
+    Args:
+        dialog: QDialog المراد إعداده
+    """
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtWidgets import QSizePolicy
+    
+    # تطبيق سياسة الحجم المتجاوب
+    dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    
+    # تطبيق محاذاة RTL على كل الحقول
+    apply_rtl_alignment_to_all_fields(dialog)
+    
+    # توسيط كل الجداول إن وجدت
+    apply_center_alignment_to_all_tables(dialog)
+
+
+def setup_responsive_dialog(dialog, min_width=400, min_height=300):
+    """
+    إعداد الديالوج بأبعاد محددة ومتجاوب
+    
+    Args:
+        dialog: QDialog المراد إعداده
+        min_width: الحد الأدنى للعرض
+        min_height: الحد الأدنى للارتفاع
+    """
+    from PyQt6.QtWidgets import QSizePolicy
+    
+    dialog.setMinimumWidth(min_width)
+    dialog.setMinimumHeight(min_height)
+    dialog.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    
+    # تطبيق الإعدادات التلقائية
+    setup_auto_responsive_dialog(dialog)

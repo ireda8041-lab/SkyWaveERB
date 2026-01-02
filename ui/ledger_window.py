@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 نافذة كشف الحساب - عرض جميع الحركات المحاسبية لحساب معين
 """
@@ -23,6 +23,16 @@ from PyQt6.QtWidgets import (
 
 from core import schemas
 from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class LedgerWindow(QDialog):
@@ -283,7 +293,7 @@ class LedgerWindow(QDialog):
 
     def load_ledger_data(self):
         """تحميل بيانات كشف الحساب"""
-        print(f"INFO: [LedgerWindow] جاري تحميل كشف حساب: {self.account.name}")
+        safe_print(f"INFO: [LedgerWindow] جاري تحميل كشف حساب: {self.account.name}")
 
         try:
             # الحصول على الفترة
@@ -392,10 +402,10 @@ class LedgerWindow(QDialog):
             net_movement = total_debit - total_credit
             self.net_movement_label.setText(f"صافي الحركة: {net_movement:,.2f} جنيه")
 
-            print(f"INFO: [LedgerWindow] تم تحميل {len(movements)} حركة")
+            safe_print(f"INFO: [LedgerWindow] تم تحميل {len(movements)} حركة")
 
         except Exception as e:
-            print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
+            safe_print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{str(e)}")
@@ -470,7 +480,7 @@ class LedgerWindow(QDialog):
             )
 
         except Exception as e:
-            print(f"ERROR: [LedgerWindow] فشل التصدير: {e}")
+            safe_print(f"ERROR: [LedgerWindow] فشل التصدير: {e}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(
@@ -589,7 +599,7 @@ class LedgerWindow(QDialog):
                 raise e
 
         except Exception as e:
-            print(f"ERROR: [LedgerWindow] فشل الطباعة: {e}")
+            safe_print(f"ERROR: [LedgerWindow] فشل الطباعة: {e}")
             import traceback
             traceback.print_exc()
             QMessageBox.critical(

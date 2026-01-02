@@ -1,4 +1,4 @@
-# الملف: ui/settings_tab.py
+﻿# الملف: ui/settings_tab.py
 """
 تاب الإعدادات المتقدمة - يشمل:
 - إدارة الحسابات
@@ -39,6 +39,16 @@ from services.settings_service import SettingsService
 from ui.currency_editor_dialog import CurrencyEditorDialog
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
 from ui.smart_combobox import SmartFilterComboBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class SettingsTab(QWidget):
@@ -117,11 +127,15 @@ class SettingsTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_settings_data() - يتم استدعاؤها من MainWindow
         # self.load_users() - يتم استدعاؤها من MainWindow
+        
+        # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
+        from ui.styles import apply_rtl_alignment_to_all_fields
+        apply_rtl_alignment_to_all_fields(self)
 
     def _on_sub_tab_changed(self, index):
         """معالج تغيير التاب الفرعي"""
         tab_text = self.tabs.tabText(index)
-        print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
+        safe_print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
 
         if "المستخدمين" in tab_text:
             self.load_users()
@@ -612,7 +626,7 @@ class SettingsTab(QWidget):
                 self.logo_preview.setProperty("logo_path", file_path)
 
     def load_settings_data(self):
-        print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
+        safe_print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
         try:
             # ⚡ معالجة الأحداث لمنع التجميد
             from PyQt6.QtWidgets import QApplication
@@ -640,10 +654,10 @@ class SettingsTab(QWidget):
             else:
                 self.logo_preview.setText("📷\nلا يوجد شعار")
         except Exception as e:
-            print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
+            safe_print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
 
     def save_settings(self):
-        print("INFO: [SettingsTab] جاري حفظ الإعدادات...")
+        safe_print("INFO: [SettingsTab] جاري حفظ الإعدادات...")
         try:
             logo_path = self.logo_preview.property("logo_path") or ""
             new_settings = {
@@ -903,7 +917,6 @@ class SettingsTab(QWidget):
                     "services": [],
                     "projects": [],
                     "invoices": [],
-                    "quotations": [],
                     "expenses": [],
                     "accounts": [],
                     "currencies": [],
@@ -917,76 +930,69 @@ class SettingsTab(QWidget):
                     clients = self.repository.get_all_clients()
                     backup_data["clients"] = [self._serialize_object(c) for c in clients]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب العملاء: {e}")
+                    safe_print(f"WARNING: فشل جلب العملاء: {e}")
 
                 # جلب الخدمات
                 try:
                     services = self.repository.get_all_services()
                     backup_data["services"] = [self._serialize_object(s) for s in services]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب الخدمات: {e}")
+                    safe_print(f"WARNING: فشل جلب الخدمات: {e}")
 
                 # جلب المشاريع
                 try:
                     projects = self.repository.get_all_projects()
                     backup_data["projects"] = [self._serialize_object(p) for p in projects]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب المشاريع: {e}")
+                    safe_print(f"WARNING: فشل جلب المشاريع: {e}")
 
                 # جلب الفواتير
                 try:
                     invoices = self.repository.get_all_invoices()
                     backup_data["invoices"] = [self._serialize_object(i) for i in invoices]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب الفواتير: {e}")
-
-                # جلب عروض الأسعار
-                try:
-                    quotations = self.repository.get_all_quotations()
-                    backup_data["quotations"] = [self._serialize_object(q) for q in quotations]
-                except Exception as e:
-                    print(f"WARNING: فشل جلب عروض الأسعار: {e}")
+                    safe_print(f"WARNING: فشل جلب الفواتير: {e}")
 
                 # جلب المصروفات
                 try:
                     expenses = self.repository.get_all_expenses()
                     backup_data["expenses"] = [self._serialize_object(e) for e in expenses]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب المصروفات: {e}")
+                    safe_print(f"WARNING: فشل جلب المصروفات: {e}")
 
                 # جلب الحسابات
                 try:
                     accounts = self.repository.get_all_accounts()
                     backup_data["accounts"] = [self._serialize_object(a) for a in accounts]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب الحسابات: {e}")
+                    safe_print(f"WARNING: فشل جلب الحسابات: {e}")
 
                 # جلب العملات
                 try:
                     currencies = self.repository.get_all_currencies()
                     backup_data["currencies"] = currencies if isinstance(currencies, list) else [currencies]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب العملات: {e}")
+                    safe_print(f"WARNING: فشل جلب العملات: {e}")
 
                 # جلب قيود اليومية
                 try:
                     journal_entries = self.repository.get_all_journal_entries()
                     backup_data["journal_entries"] = [self._serialize_object(j) for j in journal_entries]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب قيود اليومية: {e}")
+                    safe_print(f"WARNING: فشل جلب قيود اليومية: {e}")
 
                 # جلب الدفعات
                 try:
                     payments = self.repository.get_all_payments()
                     backup_data["payments"] = [self._serialize_object(p) for p in payments]
                 except Exception as e:
-                    print(f"WARNING: فشل جلب الدفعات: {e}")
+                    safe_print(f"WARNING: فشل جلب الدفعات: {e}")
 
                 # جلب الإعدادات
                 try:
                     backup_data["settings"] = self.settings_service.get_settings()
                 except Exception as e:
-                    print(f"WARNING: فشل جلب الإعدادات: {e}")
+                    safe_print(f"WARNING: فشل جلب الإعدادات: {e}")
 
                 # حفظ الملف
                 with open(file_path, 'w', encoding='utf-8') as f:
@@ -998,7 +1004,6 @@ class SettingsTab(QWidget):
                     len(backup_data["services"]),
                     len(backup_data["projects"]),
                     len(backup_data["invoices"]),
-                    len(backup_data["quotations"]),
                     len(backup_data["expenses"]),
                     len(backup_data["accounts"]),
                     len(backup_data["currencies"]),
@@ -1107,22 +1112,16 @@ class SettingsTab(QWidget):
                 currencies_count = len(self.repository.get_all_currencies())
                 journal_count = len(self.repository.get_all_journal_entries())
 
-                # محاولة جلب المشاريع وعروض الأسعار
+                # محاولة جلب المشاريع
                 try:
                     projects_count = len(self.repository.get_all_projects())
                 except (AttributeError, TypeError) as e:
-                    print(f"WARNING: فشل جلب عدد المشاريع: {e}")
+                    safe_print(f"WARNING: فشل جلب عدد المشاريع: {e}")
                     projects_count = 0
-
-                try:
-                    quotations_count = len(self.repository.get_all_quotations())
-                except (AttributeError, TypeError) as e:
-                    print(f"WARNING: فشل جلب عدد عروض الأسعار: {e}")
-                    quotations_count = 0
 
                 total = (clients_count + services_count + invoices_count +
                         expenses_count + accounts_count + currencies_count +
-                        journal_count + projects_count + quotations_count)
+                        journal_count + projects_count)
 
                 # حالة الاتصال
                 connection_status = "✅ متصل" if self.repository.online else "⚠️ غير متصل"
@@ -1134,7 +1133,6 @@ class SettingsTab(QWidget):
 • الخدمات: {services_count} سجل
 • المشاريع: {projects_count} سجل
 • الفواتير: {invoices_count} سجل
-• عروض الأسعار: {quotations_count} سجل
 • المصروفات: {expenses_count} سجل
 • الحسابات المحاسبية: {accounts_count} سجل
 • العملات: {currencies_count} سجل
@@ -1273,7 +1271,7 @@ class SettingsTab(QWidget):
             self._select_account_by_code(self.default_client_combo, settings.get('default_client_account', '1140'))
 
         except Exception as e:
-            print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
+            safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
 
     def _populate_account_combo(self, combo, accounts: list, default_code: str | None = None):
@@ -1333,25 +1331,25 @@ class SettingsTab(QWidget):
             )
 
         except Exception as e:
-            print(f"ERROR: فشل حفظ الحسابات الافتراضية: {e}")
+            safe_print(f"ERROR: فشل حفظ الحسابات الافتراضية: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
 
     def load_users(self):
         """تحميل المستخدمين من قاعدة البيانات"""
-        print("=" * 50)
-        print("INFO: [SettingsTab] ========== جاري تحميل المستخدمين ==========")
-        print(f"INFO: [SettingsTab] repository موجود: {self.repository is not None}")
+        safe_print("=" * 50)
+        safe_print("INFO: [SettingsTab] ========== جاري تحميل المستخدمين ==========")
+        safe_print(f"INFO: [SettingsTab] repository موجود: {self.repository is not None}")
         self.users_table.setRowCount(0)
 
         if not self.repository:
-            print("WARNING: [SettingsTab] لا يوجد repository!")
+            safe_print("WARNING: [SettingsTab] لا يوجد repository!")
             return
 
         try:
             # جلب المستخدمين من قاعدة البيانات
-            print("INFO: [SettingsTab] جاري استدعاء get_all_users...")
+            safe_print("INFO: [SettingsTab] جاري استدعاء get_all_users...")
             users = self.repository.get_all_users()
-            print(f"INFO: [SettingsTab] ✅ تم جلب {len(users)} مستخدم")
+            safe_print(f"INFO: [SettingsTab] ✅ تم جلب {len(users)} مستخدم")
 
             for i, user in enumerate(users):
                 self.users_table.insertRow(i)
@@ -1385,7 +1383,7 @@ class SettingsTab(QWidget):
                 }
                 role_display = role_display_map.get(role_value.lower(), role_value)
                 self.users_table.setItem(i, 4, create_centered_item(role_display))
-                print(f"INFO: [SettingsTab] تم إضافة مستخدم: {user.username} - {role_display}")
+                safe_print(f"INFO: [SettingsTab] تم إضافة مستخدم: {user.username} - {role_display}")
 
                 # العمود 5: الحالة
                 status = "✅ نشط" if user.is_active else "❌ غير نشط"
@@ -1397,11 +1395,11 @@ class SettingsTab(QWidget):
 
             # تحديث الجدول
             self.users_table.viewport().update()
-            print(f"INFO: [SettingsTab] ✅ تم تحميل {self.users_table.rowCount()} صف في الجدول")
-            print("=" * 50)
+            safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {self.users_table.rowCount()} صف في الجدول")
+            safe_print("=" * 50)
 
         except Exception as e:
-            print(f"ERROR: فشل تحميل المستخدمين: {e}")
+            safe_print(f"ERROR: فشل تحميل المستخدمين: {e}")
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self, "خطأ", f"فشل تحميل المستخدمين: {e}")
@@ -1444,7 +1442,7 @@ class SettingsTab(QWidget):
             return
 
         username = username_item.text()
-        print(f"INFO: [SettingsTab] جاري تعديل المستخدم: {username}")
+        safe_print(f"INFO: [SettingsTab] جاري تعديل المستخدم: {username}")
 
         from ui.user_editor_dialog import UserEditorDialog
 
@@ -1457,7 +1455,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "خطأ", f"لم يتم العثور على المستخدم: {username}")
             return
 
-        print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم: {user.username}, {user.full_name}, {user.email}")
+        safe_print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم: {user.username}, {user.full_name}, {user.email}")
 
         # فتح نافذة التعديل مع بيانات المستخدم
         dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
@@ -1484,7 +1482,7 @@ class SettingsTab(QWidget):
             return
 
         username = username_item.text()
-        print(f"INFO: [SettingsTab] جاري تحرير صلاحيات المستخدم: {username}")
+        safe_print(f"INFO: [SettingsTab] جاري تحرير صلاحيات المستخدم: {username}")
 
         auth_service = AuthService(self.repository)
 
@@ -1494,7 +1492,7 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "خطأ", f"لم يتم العثور على المستخدم: {username}")
             return
 
-        print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم للصلاحيات: {user.username}")
+        safe_print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم للصلاحيات: {user.username}")
 
         # فتح نافذة تحرير الصلاحيات
         from ui.user_permissions_dialog import UserPermissionsDialog
@@ -1543,7 +1541,7 @@ class SettingsTab(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 # تعطيل المستخدم باستخدام username مباشرة
-                print(f"INFO: [SettingsTab] جاري تعطيل المستخدم: {username}")
+                safe_print(f"INFO: [SettingsTab] جاري تعطيل المستخدم: {username}")
                 success = self.repository.update_user_by_username(username, {"is_active": False})
 
                 if success:
@@ -1591,7 +1589,7 @@ class SettingsTab(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 # تفعيل المستخدم باستخدام username مباشرة
-                print(f"INFO: [SettingsTab] جاري تفعيل المستخدم: {username}")
+                safe_print(f"INFO: [SettingsTab] جاري تفعيل المستخدم: {username}")
                 success = self.repository.update_user_by_username(username, {"is_active": True})
 
                 if success:

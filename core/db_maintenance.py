@@ -1,4 +1,4 @@
-"""
+﻿"""
 صيانة قاعدة البيانات التلقائية
 يتم تشغيلها تلقائياً عند بدء البرنامج
 الإصدار المحسّن للأداء
@@ -8,6 +8,16 @@ import sqlite3
 from datetime import datetime
 import json
 import time
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class DatabaseMaintenance:
@@ -29,7 +39,7 @@ class DatabaseMaintenance:
             self.cursor.execute("PRAGMA cache_size=5000")
             return True
         except Exception as e:
-            print(f"ERROR: [DBMaintenance] فشل الاتصال: {e}")
+            safe_print(f"ERROR: [DBMaintenance] فشل الاتصال: {e}")
             return False
     
     def close(self):
@@ -43,9 +53,9 @@ class DatabaseMaintenance:
             return False
         
         start_time = time.time()
-        print("\n" + "="*60)
-        print("🔧 [DBMaintenance] بدء صيانة قاعدة البيانات...")
-        print("="*60)
+        safe_print("\n" + "="*60)
+        safe_print("🔧 [DBMaintenance] بدء صيانة قاعدة البيانات...")
+        safe_print("="*60)
         
         try:
             # ⚡ تشغيل كل العمليات في transaction واحد للسرعة
@@ -73,22 +83,22 @@ class DatabaseMaintenance:
             self.cursor.execute("ANALYZE")
             
             elapsed = time.time() - start_time
-            print("="*60)
-            print(f"✅ [DBMaintenance] اكتملت الصيانة في {elapsed:.2f} ثانية")
-            print("="*60 + "\n")
+            safe_print("="*60)
+            safe_print(f"✅ [DBMaintenance] اكتملت الصيانة في {elapsed:.2f} ثانية")
+            safe_print("="*60 + "\n")
             
             return True
             
         except Exception as e:
             self.db.rollback()
-            print(f"ERROR: [DBMaintenance] فشلت الصيانة: {e}")
+            safe_print(f"ERROR: [DBMaintenance] فشلت الصيانة: {e}")
             return False
         finally:
             self.close()
     
     def _add_unique_constraints(self):
         """إضافة قيود unique لمنع التكرار"""
-        print("📋 [1/5] إضافة قيود Unique...")
+        safe_print("📋 [1/5] إضافة قيود Unique...")
         
         constraints = [
             ("idx_projects_name", "projects", "name"),
@@ -117,11 +127,11 @@ class DatabaseMaintenance:
                 pass
         
         self.db.commit()
-        print("  ✅ تم إضافة القيود")
+        safe_print("  ✅ تم إضافة القيود")
     
     def _remove_duplicates(self):
         """حذف السجلات المكررة - يحتفظ بالسجل الذي له _mongo_id أو الأقدم"""
-        print("📋 [2/5] حذف التكرارات...")
+        safe_print("📋 [2/5] حذف التكرارات...")
         
         total_deleted = 0
         
@@ -132,7 +142,6 @@ class DatabaseMaintenance:
             'services': 'name',
             'accounts': 'code',
             'invoices': 'invoice_number',
-            'quotations': 'quote_number',
             'currencies': 'code',
             'users': 'username',
             'expenses': 'id',  # للمصروفات نستخدم _mongo_id
@@ -145,9 +154,9 @@ class DatabaseMaintenance:
                 deleted = self._remove_table_duplicates_smart(table, unique_field)
                 total_deleted += deleted
                 if deleted > 0:
-                    print(f"  • حذف {deleted} سجل مكرر من {table}")
+                    safe_print(f"  • حذف {deleted} سجل مكرر من {table}")
             except Exception as e:
-                print(f"  ⚠️ خطأ في حذف تكرارات {table}: {e}")
+                safe_print(f"  ⚠️ خطأ في حذف تكرارات {table}: {e}")
         
         # حذف الدفعات المكررة (بناءً على project_id + date + amount)
         try:
@@ -162,16 +171,16 @@ class DatabaseMaintenance:
             deleted = self.cursor.rowcount
             total_deleted += deleted
             if deleted > 0:
-                print(f"  • حذف {deleted} دفعة مكررة")
+                safe_print(f"  • حذف {deleted} دفعة مكررة")
         except Exception as e:
-            print(f"  ⚠️ خطأ في حذف الدفعات: {e}")
+            safe_print(f"  ⚠️ خطأ في حذف الدفعات: {e}")
         
         self.db.commit()
         
         if total_deleted == 0:
-            print("  ✅ لا توجد تكرارات")
+            safe_print("  ✅ لا توجد تكرارات")
         else:
-            print(f"  ✅ تم حذف {total_deleted} سجل مكرر")
+            safe_print(f"  ✅ تم حذف {total_deleted} سجل مكرر")
 
     def _remove_table_duplicates_smart(self, table_name: str, unique_field: str) -> int:
         """
@@ -216,7 +225,7 @@ class DatabaseMaintenance:
     
     def _fix_invoice_numbers(self):
         """إصلاح أرقام الفواتير المفقودة"""
-        print("📋 [3/5] إصلاح أرقام الفواتير...")
+        safe_print("📋 [3/5] إصلاح أرقام الفواتير...")
         
         try:
             self.cursor.execute("""
@@ -226,7 +235,7 @@ class DatabaseMaintenance:
             projects_without_invoice = self.cursor.fetchall()
             
             if not projects_without_invoice:
-                print("  ✅ جميع المشاريع لديها أرقام فواتير")
+                safe_print("  ✅ جميع المشاريع لديها أرقام فواتير")
                 return
             
             fixed_count = 0
@@ -262,17 +271,17 @@ class DatabaseMaintenance:
                     fixed_count += 1
                     
                 except Exception as e:
-                    print(f"  ⚠️ فشل إصلاح {project_name}: {e}")
+                    safe_print(f"  ⚠️ فشل إصلاح {project_name}: {e}")
             
             self.db.commit()
-            print(f"  ✅ تم إصلاح {fixed_count} رقم فاتورة")
+            safe_print(f"  ✅ تم إصلاح {fixed_count} رقم فاتورة")
             
         except Exception as e:
-            print(f"  ⚠️ خطأ في إصلاح أرقام الفواتير: {e}")
+            safe_print(f"  ⚠️ خطأ في إصلاح أرقام الفواتير: {e}")
     
     def _fix_sync_status(self):
         """تحديث حالة المزامنة"""
-        print("📋 [4/5] تحديث حالة المزامنة...")
+        safe_print("📋 [4/5] تحديث حالة المزامنة...")
         
         try:
             # تحديث المشاريع المتزامنة
@@ -297,16 +306,16 @@ class DatabaseMaintenance:
             self.db.commit()
             
             if updated > 0:
-                print(f"  ✅ تم تحديث {updated} سجل")
+                safe_print(f"  ✅ تم تحديث {updated} سجل")
             else:
-                print("  ✅ حالة المزامنة صحيحة")
+                safe_print("  ✅ حالة المزامنة صحيحة")
                 
         except Exception as e:
-            print(f"  ⚠️ خطأ في تحديث حالة المزامنة: {e}")
+            safe_print(f"  ⚠️ خطأ في تحديث حالة المزامنة: {e}")
     
     def _cleanup_corrupted_data(self):
         """تنظيف البيانات الفاسدة"""
-        print("📋 [5/5] تنظيف البيانات الفاسدة...")
+        safe_print("📋 [5/5] تنظيف البيانات الفاسدة...")
         
         cleaned = 0
         
@@ -356,12 +365,12 @@ class DatabaseMaintenance:
             self.db.commit()
             
             if cleaned > 0:
-                print(f"  ✅ تم تنظيف {cleaned} سجل")
+                safe_print(f"  ✅ تم تنظيف {cleaned} سجل")
             else:
-                print("  ✅ لا توجد بيانات فاسدة")
+                safe_print("  ✅ لا توجد بيانات فاسدة")
                 
         except Exception as e:
-            print(f"  ⚠️ خطأ في التنظيف: {e}")
+            safe_print(f"  ⚠️ خطأ في التنظيف: {e}")
 
 
 def run_maintenance():

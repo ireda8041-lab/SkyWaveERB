@@ -1,4 +1,4 @@
-# الملف: core/performance_optimizer.py
+﻿# الملف: core/performance_optimizer.py
 """
 ⚡ محسّن الأداء الشامل - Sky Wave ERP
 ================================
@@ -23,6 +23,16 @@ from queue import Queue
 from typing import Any
 
 from core.logger import get_logger
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 logger = get_logger(__name__)
 
@@ -428,9 +438,9 @@ def print_performance_stats():
     cache = SmartQueryCache()
     memory = MemoryManager()
     
-    print("\n" + "="*60)
-    print("⚡ إحصائيات الأداء - Sky Wave ERP")
-    print("="*60)
-    print(f"📊 Query Cache: {cache.get_stats()}")
-    print(f"💾 Memory: {memory.get_memory_usage()}")
-    print("="*60 + "\n")
+    safe_print("\n" + "="*60)
+    safe_print("⚡ إحصائيات الأداء - Sky Wave ERP")
+    safe_print("="*60)
+    safe_print(f"📊 Query Cache: {cache.get_stats()}")
+    safe_print(f"💾 Memory: {memory.get_memory_usage()}")
+    safe_print("="*60 + "\n")

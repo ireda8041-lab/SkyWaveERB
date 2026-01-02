@@ -1,4 +1,4 @@
-# الملف: ui/main_window.py
+﻿# الملف: ui/main_window.py
 
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -13,7 +13,6 @@ from services.expense_service import ExpenseService
 from services.invoice_service import InvoiceService
 from services.notification_service import NotificationService  # (الجديد) خدمة الإشعارات
 from services.project_service import ProjectService
-from services.quotation_service import QuotationService
 from services.service_service import ServiceService
 
 # (الأقسام اللي شغالين بيها)
@@ -28,11 +27,20 @@ from ui.expense_manager import ExpenseManagerTab  # (التاب الجديد ب�
 # تم حذف نظام الإشعارات
 from ui.payments_manager import PaymentsManagerTab  # (الجديد) تاب الدفعات
 from ui.project_manager import ProjectManagerTab
-from ui.quotation_manager import QuotationManagerTab
 from ui.service_manager import ServiceManagerTab
 from ui.settings_tab import SettingsTab
 from ui.shortcuts_help_dialog import ShortcutsHelpDialog  # (الجديد) نافذة مساعدة الاختصارات
 from ui.styles import COLORS  # ألوان التطبيق
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class MainWindow(QMainWindow):
@@ -52,7 +60,6 @@ class MainWindow(QMainWindow):
         service_service: ServiceService,
         expense_service: ExpenseService,
         invoice_service: InvoiceService,
-        quotation_service: QuotationService,
         project_service: ProjectService,
         notification_service: NotificationService | None = None,
         printing_service = None,
@@ -77,7 +84,6 @@ class MainWindow(QMainWindow):
         self.service_service = service_service
         self.expense_service = expense_service
         self.invoice_service = invoice_service
-        self.quotation_service = quotation_service
         self.project_service = project_service
         self.sync_manager = sync_manager
         self.notification_service = notification_service
@@ -342,7 +348,7 @@ class MainWindow(QMainWindow):
         """⚡ إنشاء كل التابات مرة واحدة (بدون تحميل بيانات)"""
         from PyQt6.QtWidgets import QApplication
 
-        print("INFO: [MainWindow] ⚡ إنشاء كل التابات...")
+        safe_print("INFO: [MainWindow] ⚡ إنشاء كل التابات...")
 
         # 1. Dashboard
         self.dashboard_tab = DashboardTab(self.accounting_service)
@@ -361,17 +367,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.projects_tab, "🚀 المشاريع")
         QApplication.processEvents()
 
-        # 3. Quotations
-        self.quotes_tab = QuotationManagerTab(
-            self.quotation_service,
-            self.client_service,
-            self.service_service,
-            self.settings_service,
-        )
-        self.tabs.addTab(self.quotes_tab, "📝 عروض الأسعار")
-        QApplication.processEvents()
-
-        # 4. Expenses
+        # 3. Expenses (كان 4 سابقاً)
         self.expense_tab = ExpenseManagerTab(
             self.expense_service,
             self.accounting_service,
@@ -426,13 +422,21 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_tab, "🔧 الإعدادات")
         QApplication.processEvents()
 
-        print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
+        safe_print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
+        
+        # ⚡ تطبيق محاذاة النص لليمين على كل الحقول في كل التابات
+        from ui.styles import apply_rtl_alignment_to_all_fields
+        for i in range(self.tabs.count()):
+            tab_widget = self.tabs.widget(i)
+            if tab_widget:
+                apply_rtl_alignment_to_all_fields(tab_widget)
+        safe_print("INFO: [MainWindow] ⚡ تم تطبيق محاذاة RTL على كل الحقول")
 
     def on_tab_changed(self, index):
         """⚡ تحميل بيانات التاب عند التنقل - محسّن لمنع التجميد"""
         try:
             tab_name = self.tabs.tabText(index)
-            print(f"INFO: [MainWindow] تم اختيار التاب: {tab_name}")
+            safe_print(f"INFO: [MainWindow] تم اختيار التاب: {tab_name}")
 
             # ⚡ معالجة الأحداث فوراً لإظهار التاب
             from PyQt6.QtWidgets import QApplication
@@ -440,14 +444,14 @@ class MainWindow(QMainWindow):
 
             # ⚡ تحميل البيانات فقط إذا لم تكن محملة
             if not self._tab_data_loaded.get(tab_name, False):
-                print(f"INFO: [MainWindow] جاري تحميل بيانات: {tab_name}")
+                safe_print(f"INFO: [MainWindow] جاري تحميل بيانات: {tab_name}")
                 # ⚡ تأخير قصير لإظهار التاب أولاً ثم تحميل البيانات
                 QTimer.singleShot(50, lambda tn=tab_name: self._do_load_tab_data_safe(tn))
             else:
-                print(f"INFO: [MainWindow] البيانات محملة مسبقاً: {tab_name}")
+                safe_print(f"INFO: [MainWindow] البيانات محملة مسبقاً: {tab_name}")
 
         except Exception as e:
-            print(f"ERROR: خطأ في تغيير التاب: {e}")
+            safe_print(f"ERROR: خطأ في تغيير التاب: {e}")
 
     # ⚡ Cache لتتبع التابات المحملة (لتجنب إعادة التحميل)
     # Note: This is a class-level cache, initialized in __init__
@@ -456,7 +460,7 @@ class MainWindow(QMainWindow):
         """⚡ تحميل بيانات التاب في الخلفية (لتجنب التجميد)"""
         # ⚡ تجنب إعادة التحميل إذا البيانات محملة بالفعل
         if not force_reload and self._tab_data_loaded.get(tab_name, False):
-            print(f"INFO: [MainWindow] ⚡ التاب محمل بالفعل: {tab_name}")
+            safe_print(f"INFO: [MainWindow] ⚡ التاب محمل بالفعل: {tab_name}")
             return
 
         # ⚡ تحميل البيانات بعد 50ms لإعطاء الواجهة فرصة للظهور
@@ -475,8 +479,6 @@ class MainWindow(QMainWindow):
                 return lambda: self._load_dashboard_data()
             elif tab_name == "🚀 المشاريع":
                 return lambda: self._load_projects_data()
-            elif tab_name == "📝 عروض الأسعار":
-                return lambda: self._load_quotations_data()
             elif tab_name == "💳 المصروفات":
                 return lambda: self._load_expenses_data()
             elif tab_name == "💰 الدفعات":
@@ -502,13 +504,13 @@ class MainWindow(QMainWindow):
             try:
                 self._update_tab_ui(tab_name, data)
                 self._tab_data_loaded[tab_name] = True
-                print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
+                safe_print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
             except Exception as e:
-                print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
+                safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
 
         def on_error(error_msg):
             """معالج الخطأ"""
-            print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {error_msg}")
+            safe_print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {error_msg}")
 
         # تحميل البيانات في الخلفية
         data_loader.load_async(
@@ -531,12 +533,6 @@ class MainWindow(QMainWindow):
             self.projects_tab.service_service = self.service_service
             self.projects_tab.accounting_service = self.accounting_service
         return {"type": "projects"}
-
-    def _load_quotations_data(self):
-        """تحميل بيانات عروض الأسعار"""
-        if hasattr(self, 'quotes_tab'):
-            self.quotes_tab.project_service = self.project_service
-        return {"type": "quotations"}
 
     def _load_expenses_data(self):
         """تحميل بيانات المصروفات"""
@@ -580,10 +576,6 @@ class MainWindow(QMainWindow):
                 if hasattr(self, 'projects_tab'):
                     QApplication.processEvents()
                     self.projects_tab.load_projects_data()
-            elif tab_name == "📝 عروض الأسعار":
-                if hasattr(self, 'quotes_tab'):
-                    QApplication.processEvents()
-                    self.quotes_tab.load_quotations_data()
             elif tab_name == "💳 المصروفات":
                 if hasattr(self, 'expense_tab'):
                     QApplication.processEvents()
@@ -617,7 +609,7 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
         except Exception as e:
-            print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
+            safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -630,13 +622,13 @@ class MainWindow(QMainWindow):
     def _load_initial_data_safely(self):
         """⚡ تحميل البيانات الأولية بسرعة"""
         try:
-            print("INFO: [MainWindow] بدء تحميل البيانات الأولية...")
+            safe_print("INFO: [MainWindow] بدء تحميل البيانات الأولية...")
             # ⚡ تحميل بيانات الداشبورد فوراً
             if hasattr(self, 'dashboard_tab'):
                 self.dashboard_tab.refresh_data()
-            print("INFO: [MainWindow] تم تحميل البيانات الأولية")
+            safe_print("INFO: [MainWindow] تم تحميل البيانات الأولية")
         except Exception as e:
-            print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
+            safe_print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
 
     def _check_project_due_dates_background(self):
         """⚡ فحص مواعيد المشاريع في الخلفية (لتجنب التجميد)"""
@@ -646,7 +638,7 @@ class MainWindow(QMainWindow):
                 if self.notification_service:
                     self.notification_service.check_project_due_dates()
             except Exception as e:
-                print(f"WARNING: فشل فحص مواعيد المشاريع: {e}")
+                safe_print(f"WARNING: فشل فحص مواعيد المشاريع: {e}")
 
         thread = threading.Thread(target=check_in_background, daemon=True)
         thread.start()
@@ -663,19 +655,10 @@ class MainWindow(QMainWindow):
 
     def setup_auto_sync(self):
         """
-        ⚡ إعداد المزامنة التلقائية في الخلفية (محسّنة)
+        ⚡ إعداد المزامنة التلقائية - يتم التحكم فيها من UnifiedSyncManagerV3
         """
-        from PyQt6.QtCore import QTimer
-
-        # مؤقت للمزامنة التلقائية كل 15 دقيقة
-        self.auto_sync_timer = QTimer(self)
-        self.auto_sync_timer.timeout.connect(self.trigger_background_sync)
-        self.auto_sync_timer.start(900000)  # 15 دقيقة
-
-        # ⚡ لا نشغل المزامنة فوراً - ننتظر حتى يستقر البرنامج
-        # المزامنة ستبدأ من main.py بعد 8 ثواني
-
-        print("INFO: ⚡ تم تفعيل المزامنة التلقائية (كل 15 دقيقة)")
+        # المزامنة التلقائية تُدار الآن من unified_sync في main.py
+        safe_print("INFO: ⚡ المزامنة التلقائية تُدار من UnifiedSyncManagerV3")
 
     def trigger_background_sync(self):
         """
@@ -683,21 +666,21 @@ class MainWindow(QMainWindow):
         """
         try:
             if not self.sync_manager:
-                print("INFO: مدير المزامنة غير متاح")
+                safe_print("INFO: مدير المزامنة غير متاح")
                 return
 
             # التحقق من الاتصال
             if not self.sync_manager.repository.online:
-                print("INFO: تخطي المزامنة التلقائية (غير متصل)")
+                safe_print("INFO: تخطي المزامنة التلقائية (غير متصل)")
                 return
 
-            print("INFO: بدء المزامنة التلقائية في الخلفية...")
+            safe_print("INFO: بدء المزامنة التلقائية في الخلفية...")
 
             # تشغيل المزامنة
             self.sync_manager.start_sync()
 
         except Exception as e:
-            print(f"ERROR: خطأ في المزامنة التلقائية: {e}")
+            safe_print(f"ERROR: خطأ في المزامنة التلقائية: {e}")
 
     def on_auto_sync_completed(self, result: dict):
         """
@@ -706,13 +689,13 @@ class MainWindow(QMainWindow):
         try:
             synced = result.get('synced', 0)
             failed = result.get('failed', 0)
-            print(f"INFO: اكتملت المزامنة التلقائية - نجح: {synced}, فشل: {failed}")
+            safe_print(f"INFO: اكتملت المزامنة التلقائية - نجح: {synced}, فشل: {failed}")
 
             # تحديث الواجهة إذا كانت هناك تغييرات
             if synced > 0:
                 self.on_sync_completed()
         except Exception as e:
-            print(f"ERROR: خطأ في معالجة نتيجة المزامنة التلقائية: {e}")
+            safe_print(f"ERROR: خطأ في معالجة نتيجة المزامنة التلقائية: {e}")
 
     def on_sync_completed(self):
         """
@@ -724,7 +707,7 @@ class MainWindow(QMainWindow):
             current_index = self.tabs.currentIndex()
             self.on_tab_changed(current_index)
         except Exception as e:
-            print(f"خطأ في تحديث البيانات بعد المزامنة: {e}")
+            safe_print(f"خطأ في تحديث البيانات بعد المزامنة: {e}")
 
     def _on_instant_sync(self):
         """
@@ -733,7 +716,7 @@ class MainWindow(QMainWindow):
         import threading
 
         try:
-            print("INFO: 🔄 بدء المزامنة اللحظية...")
+            safe_print("INFO: 🔄 بدء المزامنة اللحظية...")
 
             # تحديث حالة الشريط
             self.status_bar.update_sync_status("syncing")
@@ -747,20 +730,20 @@ class MainWindow(QMainWindow):
                     elif self.sync_manager:
                         self.sync_manager.start_sync()
                     else:
-                        print("WARNING: لا يوجد مدير مزامنة متاح")
+                        safe_print("WARNING: لا يوجد مدير مزامنة متاح")
                         return
 
-                    print("INFO: ✅ اكتملت المزامنة اللحظية بنجاح")
+                    safe_print("INFO: ✅ اكتملت المزامنة اللحظية بنجاح")
 
                 except Exception as e:
-                    print(f"ERROR: فشلت المزامنة اللحظية: {e}")
+                    safe_print(f"ERROR: فشلت المزامنة اللحظية: {e}")
 
             # تشغيل المزامنة في الخلفية
             sync_thread = threading.Thread(target=do_sync, daemon=True)
             sync_thread.start()
 
         except Exception as e:
-            print(f"ERROR: خطأ في بدء المزامنة اللحظية: {e}")
+            safe_print(f"ERROR: خطأ في بدء المزامنة اللحظية: {e}")
             self.status_bar.update_sync_status("error")
 
     def _on_full_sync_clicked(self):
@@ -813,10 +796,10 @@ class MainWindow(QMainWindow):
         def do_full_sync():
             """تنفيذ المزامنة الكاملة في thread منفصل"""
             try:
-                print("INFO: 🔥 بدء المزامنة الكاملة...")
+                safe_print("INFO: 🔥 بدء المزامنة الكاملة...")
 
-                # استخدام نظام المزامنة الجديد
-                from core.startup_sync import get_startup_sync
+                # استخدام UnifiedSyncManagerV3 مباشرة
+                from core.unified_sync import UnifiedSyncManagerV3
                 
                 # الحصول على repository
                 repo = None
@@ -825,10 +808,9 @@ class MainWindow(QMainWindow):
                 elif self.sync_manager and hasattr(self.sync_manager, 'repository'):
                     repo = self.sync_manager.repository
                 
-                startup_sync = get_startup_sync(repo)
-                
-                if startup_sync:
-                    result = startup_sync.force_sync_now()
+                if repo:
+                    unified_sync = UnifiedSyncManagerV3(repo)
+                    result = unified_sync.full_sync_from_cloud()
                 elif self.sync_manager:
                     # fallback للنظام القديم
                     result = self.sync_manager.safe_sync_all()
@@ -839,14 +821,14 @@ class MainWindow(QMainWindow):
                 try:
                     self.sync_completed.emit(result)
                 except Exception as signal_error:
-                    print(f"WARNING: فشل في إرسال signal: {signal_error}")
+                    safe_print(f"WARNING: فشل في إرسال signal: {signal_error}")
                     try:
                         self._on_full_sync_completed(result)
                     except:
                         pass
 
             except Exception as e:
-                print(f"ERROR: فشلت المزامنة الكاملة: {e}")
+                safe_print(f"ERROR: فشلت المزامنة الكاملة: {e}")
                 import traceback
                 traceback.print_exc()
                 try:
@@ -910,11 +892,7 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            print("INFO: [MainWindow] جاري تسجيل الخروج...")
-
-            # إيقاف المزامنة التلقائية
-            if hasattr(self, 'auto_sync_timer'):
-                self.auto_sync_timer.stop()
+            safe_print("INFO: [MainWindow] جاري تسجيل الخروج...")
 
             # إيقاف أي عمليات خلفية
             if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
@@ -938,7 +916,6 @@ class MainWindow(QMainWindow):
         self.shortcuts_manager.new_project.connect(self._on_new_project)
         self.shortcuts_manager.new_client.connect(self._on_new_client)
         self.shortcuts_manager.new_expense.connect(self._on_new_expense)
-        self.shortcuts_manager.new_quotation.connect(self._on_new_quotation)
         self.shortcuts_manager.new_payment.connect(self._on_new_payment)
 
         # اختصارات التنقل والبحث
@@ -1011,12 +988,6 @@ class MainWindow(QMainWindow):
         """معالج اختصار عرض المساعدة"""
         dialog = ShortcutsHelpDialog(self.shortcuts_manager, self)
         dialog.exec()
-
-    def _on_new_quotation(self):
-        """معالج اختصار عرض سعر جديد"""
-        self.tabs.setCurrentIndex(2)
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(100, lambda: self.quotes_tab.open_quote_editor())
 
     def _on_new_payment(self):
         """معالج اختصار دفعة جديدة"""
@@ -1097,20 +1068,19 @@ class MainWindow(QMainWindow):
 
         user_role = self.current_user.role
         role_display = user_role.value if hasattr(user_role, 'value') else str(user_role)
-        print(f"INFO: [MainWindow] تطبيق صلاحيات الدور: {role_display}")
+        safe_print(f"INFO: [MainWindow] تطبيق صلاحيات الدور: {role_display}")
 
-        # قائمة التابات مع أسمائها الداخلية (محدثة مع تاب المهام)
+        # قائمة التابات مع أسمائها الداخلية (محدثة بعد إزالة عروض الأسعار)
         tab_permissions = {
             'dashboard': 0,      # الداشبورد
             'projects': 1,       # المشاريع
-            'quotes': 2,         # عروض الأسعار
-            'expenses': 3,       # المصروفات
-            'payments': 4,       # الدفعات
-            'clients': 5,        # العملاء
-            'services': 6,       # الخدمات
-            'accounting': 7,     # المحاسبة
-            'todo': 8,           # المهام
-            'settings': 9        # الإعدادات
+            'expenses': 2,       # المصروفات
+            'payments': 3,       # الدفعات
+            'clients': 4,        # العملاء
+            'services': 5,       # الخدمات
+            'accounting': 6,     # المحاسبة
+            'todo': 7,           # المهام
+            'settings': 8        # الإعدادات
         }
 
         # إخفاء التابات غير المسموحة (باستخدام النظام الجديد)
@@ -1124,21 +1094,21 @@ class MainWindow(QMainWindow):
             if tab_index < self.tabs.count():
                 self.tabs.widget(tab_index)
                 self.tabs.removeTab(tab_index)
-                print(f"INFO: [MainWindow] تم إخفاء تاب: {tab_name}")
+                safe_print(f"INFO: [MainWindow] تم إخفاء تاب: {tab_name}")
 
         # تطبيق قيود إضافية حسب الدور
         if user_role == UserRole.SALES:
             # مندوب المبيعات: قيود إضافية
-            print("INFO: [MainWindow] تطبيق قيود مندوب المبيعات")
+            safe_print("INFO: [MainWindow] تطبيق قيود مندوب المبيعات")
             # يمكن إضافة قيود أخرى هنا مثل إخفاء أزرار الحذف
 
         elif user_role == UserRole.ACCOUNTANT:
             # المحاسب: قيود محدودة
-            print("INFO: [MainWindow] تطبيق قيود المحاسب")
+            safe_print("INFO: [MainWindow] تطبيق قيود المحاسب")
 
         elif user_role == UserRole.ADMIN:
             # المدير: لا توجد قيود
-            print("INFO: [MainWindow] المدير - جميع الصلاحيات متاحة")
+            safe_print("INFO: [MainWindow] المدير - جميع الصلاحيات متاحة")
 
         # تحديث شريط العنوان ليعكس الصلاحيات
         role_display = {
@@ -1195,7 +1165,7 @@ class MainWindow(QMainWindow):
                     )
 
                 except Exception as e:
-                    print(f"تعذر تخصيص شريط العنوان: {e}")
+                    safe_print(f"تعذر تخصيص شريط العنوان: {e}")
 
             # تطبيق نمط عام للنافذة
             self.setStyleSheet("""
@@ -1228,4 +1198,4 @@ class MainWindow(QMainWindow):
             """)
 
         except Exception as e:
-            print(f"خطأ في تخصيص شريط العنوان: {e}")
+            safe_print(f"خطأ في تخصيص شريط العنوان: {e}")

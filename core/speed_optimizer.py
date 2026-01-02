@@ -1,4 +1,4 @@
-"""
+﻿"""
 ⚡ محسّن السرعة - Sky Wave ERP
 يوفر أدوات لتسريع البرنامج بشكل كبير
 الإصدار المحسّن مع دعم أفضل للـ threading
@@ -11,6 +11,16 @@ import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 # ⚡ إعدادات الأداء
 DEFAULT_CACHE_SIZE = 1000
@@ -296,6 +306,6 @@ def get_cache_stats() -> dict[str, Any]:
 def print_cache_stats():
     """طباعة إحصائيات الـ cache"""
     stats = get_cache_stats()
-    print("\n⚡ إحصائيات الـ Cache:")
-    print(f"  Data Cache: {stats['data_cache']}")
-    print(f"  Query Cache: {stats['query_cache']}")
+    safe_print("\n⚡ إحصائيات الـ Cache:")
+    safe_print(f"  Data Cache: {stats['data_cache']}")
+    safe_print(f"  Query Cache: {stats['query_cache']}")

@@ -1,4 +1,4 @@
-# الملف: ui/client_editor_dialog.py
+﻿# الملف: ui/client_editor_dialog.py
 """
 نافذة إضافة/تعديل العملاء - تصميم متجاوب (Responsive)
 """
@@ -31,6 +31,16 @@ from core.custom_fields_manager import custom_fields
 from services.client_service import ClientService
 from ui.smart_combobox import SmartFilterComboBox
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 
 class ClientEditorDialog(QDialog):
     """نافذة إضافة/تعديل عميل - تصميم متجاوب"""
@@ -48,10 +58,11 @@ class ClientEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة عميل جديد")
 
-        # 📱 Responsive: الحد الأدنى فقط
+        # 📱 Responsive: الحد الأدنى والأقصى
         self.setMinimumWidth(420)
         self.setMinimumHeight(450)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(650)  # ⚡ منع التمدد الزائد
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -318,6 +329,8 @@ class ClientEditorDialog(QDialog):
         self.logo_path_label = QLabel("لم يتم اختيار صورة")
         self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px;")
         self.logo_path_label.setWordWrap(True)
+        self.logo_path_label.setMaximumHeight(40)  # ⚡ منع التمدد الزائد
+        self.logo_path_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         
         # زرار اختيار الصورة
         select_logo_btn = QPushButton("اختيار...")
@@ -436,7 +449,7 @@ class ClientEditorDialog(QDialog):
             self.client_to_edit.logo_data = None
             self.client_to_edit.logo_path = None
         
-        print("INFO: 🗑️ تم تحديد صورة العميل للحذف")
+        safe_print("INFO: 🗑️ تم تحديد صورة العميل للحذف")
 
     def load_client_data(self):
         """يملأ الحقول ببيانات العميل القديمة"""
@@ -473,42 +486,47 @@ class ClientEditorDialog(QDialog):
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
 
     def _convert_image_to_base64(self, image_path: str) -> str:
-        """تحويل صورة إلى base64 للحفظ في قاعدة البيانات"""
+        """تحويل صورة إلى base64 للحفظ في قاعدة البيانات - جودة عالية"""
         import base64
 
         if not image_path or not os.path.exists(image_path):
             return ""
 
         try:
-            with open(image_path, "rb") as img_file:
-                img_data = img_file.read()
+            from PyQt6.QtCore import QBuffer, QIODevice
+            from PyQt6.QtGui import QPixmap
 
-            if len(img_data) > 500 * 1024:
-                from PyQt6.QtCore import QBuffer, QIODevice
-                from PyQt6.QtGui import QPixmap
+            # تحميل الصورة الأصلية
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                return ""
 
-                pixmap = QPixmap(image_path)
-                scaled = pixmap.scaled(300, 300, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            # ⚡ تصغير الصور الكبيرة جداً فقط (أكبر من 800x800)
+            max_size = 800
+            if pixmap.width() > max_size or pixmap.height() > max_size:
+                pixmap = pixmap.scaled(
+                    max_size, max_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                safe_print(f"INFO: 📷 تم تصغير الصورة إلى {pixmap.width()}x{pixmap.height()}")
 
-                buffer = QBuffer()
-                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-                scaled.save(buffer, "PNG", 80)
-                img_data = buffer.data().data()
+            # حفظ بجودة عالية (PNG بدون ضغط)
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, "PNG", 100)  # جودة 100%
+            img_data = buffer.data().data()
+
+            # التحقق من الحجم النهائي
+            size_kb = len(img_data) / 1024
+            safe_print(f"INFO: 📷 حجم الصورة: {size_kb:.1f} KB")
 
             base64_str = base64.b64encode(img_data).decode('utf-8')
 
-            ext = os.path.splitext(image_path)[1].lower()
-            mime_type = {
-                '.png': 'image/png',
-                '.jpg': 'image/jpeg',
-                '.jpeg': 'image/jpeg',
-                '.gif': 'image/gif'
-            }.get(ext, 'image/png')
-
-            return f"data:{mime_type};base64,{base64_str}"
+            return f"data:image/png;base64,{base64_str}"
 
         except Exception as e:
-            print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
+            safe_print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
             return ""
 
     def get_form_data(self) -> dict[str, Any]:
@@ -524,22 +542,22 @@ class ClientEditorDialog(QDialog):
             # تم حذف الصورة صراحة بالضغط على زر الحذف
             logo_value = ""
             logo_data = "__DELETE__"  # علامة خاصة للحذف
-            print("INFO: 🗑️ سيتم حذف صورة العميل (flag)")
+            safe_print("INFO: 🗑️ سيتم حذف صورة العميل (flag)")
         elif "محفوظة في قاعدة البيانات" in logo_text:
             # الاحتفاظ بالصورة القديمة (لا نرسل logo_data)
             logo_data = None  # None = الاحتفاظ بالقديم
-            print("INFO: 📷 الاحتفاظ بالصورة القديمة")
+            safe_print("INFO: 📷 الاحتفاظ بالصورة القديمة")
         elif "لم يتم" in logo_text:
             # لم يتم اختيار صورة (عميل جديد بدون صورة)
             logo_value = ""
             logo_data = ""
-            print("INFO: ℹ️ عميل بدون صورة")
+            safe_print("INFO: ℹ️ عميل بدون صورة")
         else:
             # صورة جديدة من مسار محلي
             logo_value = logo_text
             if logo_value and os.path.exists(logo_value):
                 logo_data = self._convert_image_to_base64(logo_value)
-                print(f"INFO: 📷 تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
+                safe_print(f"INFO: 📷 تم تحويل الصورة إلى base64 ({len(logo_data)} حرف)")
 
         result = {
             "name": self.name_input.text(),
@@ -567,8 +585,8 @@ class ClientEditorDialog(QDialog):
         client_data = self.get_form_data()
         
         # ⚡ تسجيل بيانات الصورة
-        print(f"DEBUG: [save_client] logo_path = {client_data.get('logo_path', '')}")
-        print(f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}")
+        safe_print(f"DEBUG: [save_client] logo_path = {client_data.get('logo_path', '')}")
+        safe_print(f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}")
 
         if not client_data["name"]:
             QMessageBox.warning(self, "خطأ", "اسم العميل مطلوب")
@@ -582,11 +600,11 @@ class ClientEditorDialog(QDialog):
             
             if self.is_editing:
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
-                print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
+                safe_print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 self.client_service.update_client(client_id, client_data)
                 QMessageBox.information(self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح.")
             else:
-                print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
+                safe_print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 new_client_schema = schemas.Client(**client_data)
                 self.client_service.create_client(new_client_schema)
                 QMessageBox.information(self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح.")
@@ -594,5 +612,5 @@ class ClientEditorDialog(QDialog):
             self.accept()
 
         except Exception as e:
-            print(f"ERROR: [ClientEditorDialog] فشل حفظ العميل: {e}")
+            safe_print(f"ERROR: [ClientEditorDialog] فشل حفظ العميل: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")

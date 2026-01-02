@@ -1,4 +1,4 @@
-from typing import Any
+﻿from typing import Any
 
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -21,6 +21,16 @@ from core import schemas
 from services.accounting_service import AccountingService
 from ui.custom_spinbox import CustomSpinBox
 from ui.smart_combobox import SmartFilterComboBox
+
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
 
 
 class AccountEditorDialog(QDialog):
@@ -48,10 +58,11 @@ class AccountEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة حساب جديد")
 
-        # تصميم متجاوب - حد أدنى فقط
+        # تصميم متجاوب - حد أدنى وأقصى
         self.setMinimumWidth(450)
         self.setMinimumHeight(450)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMaximumHeight(650)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -71,6 +82,10 @@ class AccountEditorDialog(QDialog):
         """)
 
         self.init_ui()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def init_ui(self):
         """إنشاء واجهة المستخدم - Standard Form Layout with Smart Features"""
@@ -346,8 +361,8 @@ class AccountEditorDialog(QDialog):
         if not self.account_to_edit:
             return
 
-        print(f"INFO: [AccountDialog] Loading account: {self.account_to_edit.name}")
-        print(f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}, parent_id = {self.account_to_edit.parent_id}")
+        safe_print(f"INFO: [AccountDialog] Loading account: {self.account_to_edit.name}")
+        safe_print(f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}, parent_id = {self.account_to_edit.parent_id}")
 
         # 1. Code
         self.code_input.setText(self.account_to_edit.code or "")
@@ -365,7 +380,7 @@ class AccountEditorDialog(QDialog):
         parent_code = self.account_to_edit.parent_code or self.account_to_edit.parent_id
         if parent_code:
             parent_code_str = str(parent_code).strip()
-            print(f"DEBUG: [AccountDialog] Searching for parent: '{parent_code_str}'")
+            safe_print(f"DEBUG: [AccountDialog] Searching for parent: '{parent_code_str}'")
 
             # البحث في جميع عناصر الـ combo
             found = False
@@ -373,26 +388,26 @@ class AccountEditorDialog(QDialog):
                 item_data = self.parent_combo.itemData(i)
                 if item_data and str(item_data).strip() == parent_code_str:
                     self.parent_combo.setCurrentIndex(i)
-                    print(f"SUCCESS: [AccountDialog] Parent found at index {i}: {parent_code_str}")
+                    safe_print(f"SUCCESS: [AccountDialog] Parent found at index {i}: {parent_code_str}")
                     found = True
                     break
 
             if not found:
                 # إذا لم يتم العثور، نحاول إضافته يدوياً
-                print(f"WARNING: [AccountDialog] Parent {parent_code_str} not found in combo")
+                safe_print(f"WARNING: [AccountDialog] Parent {parent_code_str} not found in combo")
                 parent_account = next((acc for acc in self.all_accounts if str(acc.code).strip() == parent_code_str), None)
                 if parent_account:
                     indent = "  └─ " if parent_account.parent_code else ""
                     display_text = f"{indent}{parent_account.code} - {parent_account.name}"
                     self.parent_combo.addItem(display_text, userData=str(parent_account.code))
                     self.parent_combo.setCurrentIndex(self.parent_combo.count() - 1)
-                    print(f"SUCCESS: [AccountDialog] Added and selected parent: {parent_account.code}")
+                    safe_print(f"SUCCESS: [AccountDialog] Added and selected parent: {parent_account.code}")
                 else:
-                    print(f"ERROR: [AccountDialog] Parent account {parent_code_str} not found anywhere!")
+                    safe_print(f"ERROR: [AccountDialog] Parent account {parent_code_str} not found anywhere!")
         else:
             # No parent - set to "No Parent" (index 0)
             self.parent_combo.setCurrentIndex(0)
-            print("INFO: [AccountDialog] No parent_code, setting to 'No Parent'")
+            safe_print("INFO: [AccountDialog] No parent_code, setting to 'No Parent'")
 
         # 5. Currency
         if self.account_to_edit.currency:
@@ -509,7 +524,7 @@ class AccountEditorDialog(QDialog):
             self.accept()
 
         except Exception as e:
-            print(f"ERROR: [AccountEditorDialog] Failed to save account: {e}")
+            safe_print(f"ERROR: [AccountEditorDialog] Failed to save account: {e}")
             import traceback
             traceback.print_exc()
 

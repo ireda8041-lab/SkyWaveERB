@@ -37,6 +37,10 @@ class TemplateEditorDialog(QDialog):
 
         if template_data:
             self.load_template_data()
+        
+        # ⚡ تطبيق الستايلات المتجاوبة
+        from ui.styles import setup_auto_responsive_dialog
+        setup_auto_responsive_dialog(self)
 
     def setup_ui(self):
         """إعداد واجهة المستخدم"""

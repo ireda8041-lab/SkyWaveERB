@@ -1,4 +1,4 @@
-"""
+﻿"""
 🚀 مدير المزامنة الجديد - الإصدار الثالث
 =====================================
 حل نهائي لجميع مشاكل المزامنة:
@@ -41,7 +41,7 @@ class SyncManagerV3(QObject):
     SYNC_TABLES = [
         'clients', 'projects', 'services', 'accounts', 'employees',
         'invoices', 'payments', 'expenses', 'journal_entries',
-        'quotations', 'currencies', 'notifications', 'tasks'
+        'currencies', 'notifications', 'tasks'
     ]
     
     # الجداول المحمية (لا تُحذف أبداً)
@@ -57,7 +57,6 @@ class SyncManagerV3(QObject):
         'users': 'username',
         'tasks': 'id',
         'invoices': 'invoice_number',
-        'quotations': 'quote_number',
         'currencies': 'code'
     }
     

@@ -8,11 +8,15 @@ from PyQt6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QPushButton, QVBoxLayou
 class CustomSpinBox(QWidget):
     """
     SpinBox مخصص مع أزرار + و - عمودية
+    الأزرار على اليمين والقيمة على اليسار (للعربية)
     """
     valueChanged = pyqtSignal(float)
 
     def __init__(self, parent=None, decimals=2, minimum=0.0, maximum=999999999.99):
         super().__init__(parent)
+        
+        # ⚡ إجبار الـ widget على LTR لضمان ترتيب ثابت
+        self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         # إنشاء Layout أفقي رئيسي
         main_layout = QHBoxLayout(self)
@@ -27,6 +31,8 @@ class CustomSpinBox(QWidget):
         self.spinbox.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.NoButtons)
         self.spinbox.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # ⚡ إجبار الـ SpinBox على LTR
+        self.spinbox.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
         # منع التحديد التلقائي عند الكتابة
         self.spinbox.lineEdit().setSelection(0, 0)
@@ -35,7 +41,7 @@ class CustomSpinBox(QWidget):
         # إنشاء Layout عمودي للأزرار
         buttons_layout = QVBoxLayout()
         buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(1)
+        buttons_layout.setSpacing(0)
 
         # إنشاء أزرار الأسهم (فوق وتحت)
         self.btn_plus = QPushButton("▲")
@@ -48,17 +54,15 @@ class CustomSpinBox(QWidget):
                     stop:0 #1e3a5f,
                     stop:1 #0f2744);
                 border: 1px solid #374151;
-                border-radius: 2px;
-                border-bottom-left-radius: 0px;
-                border-bottom-right-radius: 0px;
-                border-bottom: none;
+                border-radius: 0px;
+                border-top-right-radius: 3px;
                 color: #94a3b8;
                 font-size: 7px;
-                font-weight: bold;
+                font-weight: normal;
                 min-width: 18px;
                 max-width: 18px;
-                min-height: 11px;
-                max-height: 11px;
+                min-height: 12px;
+                max-height: 12px;
                 padding: 0px;
                 margin: 0px;
             }
@@ -77,17 +81,16 @@ class CustomSpinBox(QWidget):
                     stop:0 #1e3a5f,
                     stop:1 #0f2744);
                 border: 1px solid #374151;
-                border-radius: 2px;
-                border-top-left-radius: 0px;
-                border-top-right-radius: 0px;
                 border-top: none;
+                border-radius: 0px;
+                border-bottom-right-radius: 3px;
                 color: #94a3b8;
                 font-size: 7px;
-                font-weight: bold;
+                font-weight: normal;
                 min-width: 18px;
                 max-width: 18px;
-                min-height: 11px;
-                max-height: 11px;
+                min-height: 12px;
+                max-height: 12px;
                 padding: 0px;
                 margin: 0px;
             }
@@ -103,7 +106,7 @@ class CustomSpinBox(QWidget):
         self.btn_plus.setStyleSheet(button_style_up)
         self.btn_minus.setStyleSheet(button_style_down)
 
-        # تنسيق SpinBox - مصغر ومتناسق
+        # تنسيق SpinBox - مع عرض كافي للقيمة
         spinbox_style = """
             QDoubleSpinBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
@@ -113,17 +116,17 @@ class CustomSpinBox(QWidget):
                 border-radius: 3px;
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
-                padding: 2px 4px;
-                min-height: 22px;
-                max-height: 24px;
+                border-right: none;
+                padding: 4px 6px;
+                min-height: 24px;
+                min-width: 80px;
                 color: #F8FAFC;
-                font-size: 11px;
+                font-size: 12px;
+                font-weight: normal;
             }
             QDoubleSpinBox:focus {
                 border: 1px solid #0A6CF1;
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #0A2A55,
-                    stop:1 #0A6CF1);
+                border-right: none;
             }
         """
         self.spinbox.setStyleSheet(spinbox_style)
@@ -132,8 +135,8 @@ class CustomSpinBox(QWidget):
         buttons_layout.addWidget(self.btn_plus)
         buttons_layout.addWidget(self.btn_minus)
 
-        # إضافة العناصر للـ Layout الرئيسي
-        main_layout.addWidget(self.spinbox)
+        # ⚡ ترتيب: SpinBox أولاً ثم الأزرار (LTR)
+        main_layout.addWidget(self.spinbox, 1)  # stretch=1 للتمدد
         main_layout.addLayout(buttons_layout)
 
         # ربط الإشارات

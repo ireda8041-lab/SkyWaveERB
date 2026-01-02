@@ -1,4 +1,4 @@
-# الملف: services/service_service.py
+﻿# الملف: services/service_service.py
 
 
 from core import schemas
@@ -7,6 +7,12 @@ from core.logger import get_logger
 from core.repository import Repository
 from core.signals import app_signals
 from services.settings_service import SettingsService
+
+# إشعارات العمليات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 logger = get_logger(__name__)
 
@@ -82,6 +88,8 @@ class ServiceService:
             created_service = self.repo.create_service(new_service_schema)
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('services')
+            # 🔔 إشعار
+            notify_operation('created', 'service', created_service.name)
             logger.info(f"[ServiceService] تم إضافة الخدمة {created_service.name} بنجاح")
             return created_service
         except Exception as e:
@@ -114,6 +122,8 @@ class ServiceService:
             app_signals.emit_data_changed('services')
 
             if saved_service is not None:
+                # 🔔 إشعار
+                notify_operation('updated', 'service', saved_service.name)
                 logger.info(f"[ServiceService] تم تعديل الخدمة {saved_service.name} بنجاح")
             return saved_service
         except Exception as e:
@@ -135,10 +145,16 @@ class ServiceService:
         """
         logger.info(f"[ServiceService] استلام طلب حذف الخدمة نهائياً ID: {service_id}")
         try:
+            # جلب اسم الخدمة قبل الحذف
+            existing_service = self.repo.get_service_by_id(service_id)
+            service_name = existing_service.name if existing_service else f"خدمة #{service_id}"
+            
             success = self.repo.delete_service_permanently(service_id)
             if success:
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('services')
+                # 🔔 إشعار
+                notify_operation('deleted', 'service', service_name)
                 logger.info("[ServiceService] ✅ تم حذف الخدمة نهائياً")
             return success
         except Exception as e:

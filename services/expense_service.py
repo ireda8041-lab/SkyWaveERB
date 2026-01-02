@@ -28,6 +28,12 @@ if TYPE_CHECKING:
     from core.event_bus import EventBus
     from core.repository import Repository
 
+# استيراد دالة الإشعارات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
+
 logger = get_logger(__name__)
 
 
@@ -126,6 +132,9 @@ class ExpenseService:
 
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed('expenses')
+            
+            # 🔔 إشعار
+            notify_operation('created', 'expense', f"{expense_data.amount:,.0f} ج.م - {expense_data.category}")
 
             logger.info("[ExpenseService] تم إضافة المصروف وإنشاء القيد المحاسبي")
             return created_expense
@@ -157,6 +166,8 @@ class ExpenseService:
                 self.bus.publish('EXPENSE_UPDATED', expense_data)
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
+                # 🔔 إشعار
+                notify_operation('updated', 'expense', f"{expense_data.amount:,.0f} ج.م - {expense_data.category}")
                 logger.info("[ExpenseService] تم تعديل المصروف بنجاح")
             return result
         except Exception as e:
@@ -185,6 +196,8 @@ class ExpenseService:
                 self.bus.publish('EXPENSE_DELETED', {'id': expense_id})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
+                # 🔔 إشعار
+                notify_operation('deleted', 'expense', expense_id)
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:

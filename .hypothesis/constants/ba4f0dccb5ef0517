@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\hello.py
-# hypothesis_version: 6.148.3
-
-['$clusterTime', '_awaitable', '_doc', '_is_readable', '_is_writable', '_server_type', 'arbiterOnly', 'arbiters', 'compression', 'connectionId', 'electionId', 'hello', 'helloOk', 'hidden', 'hosts', 'isWritablePrimary', 'isdbgrid', 'ismaster', 'isreplicaset', 'lastWrite', 'lastWriteDate', 'maxBsonObjectSize', 'maxMessageSizeBytes', 'maxWireVersion', 'maxWriteBatchSize', 'me', 'minWireVersion', 'msg', 'not master', 'ok', 'passives', 'primary', 'saslSupportedMechs', 'secondary', 'serviceId', 'setName', 'setVersion', 'tags', 'topologyVersion']
