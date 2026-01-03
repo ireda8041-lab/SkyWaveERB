@@ -2237,12 +2237,13 @@ class Repository:
         currency_value = account_data.currency.value if account_data.currency else 'EGP'
         parent_value = account_data.parent_id or account_data.parent_code
 
+        # ⚡ إصلاح: دعم البحث بالـ code أيضاً
         sql = """
             UPDATE accounts SET
                 name = ?, code = ?, type = ?, parent_id = ?, status = ?,
                 balance = ?, currency = ?, description = ?,
                 last_modified = ?, sync_status = 'modified_offline'
-            WHERE id = ? OR _mongo_id = ?
+            WHERE id = ? OR _mongo_id = ? OR code = ?
         """
         params = (
             account_data.name,
@@ -2256,6 +2257,7 @@ class Repository:
             now_iso,
             account_id_num,
             account_id,
+            account_id,  # البحث بالـ code أيضاً
         )
         try:
             self.sqlite_cursor.execute(sql, params)
@@ -2273,17 +2275,19 @@ class Repository:
                     update_dict['status'] = account_data.status.value
                     update_dict['last_modified'] = now_dt
 
+                    # ⚡ إصلاح: دعم البحث بالـ code أيضاً
                     self.mongo_db.accounts.update_one(
                         {"$or": [
                             {"_id": self._to_objectid(account_id)},
                             {"_mongo_id": account_id},
                             {"id": account_id_num},
+                            {"code": account_id},  # البحث بالـ code
                         ]},
                         {"$set": update_dict},
                     )
                     self.sqlite_cursor.execute(
-                        "UPDATE accounts SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
-                        (account_id_num, account_id),
+                        "UPDATE accounts SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ? OR code = ?",
+                        (account_id_num, account_id, account_id),
                     )
                     self.sqlite_conn.commit()
                     safe_print(f"INFO: [Repo] ✅ تم مزامنة الحساب مع السيرفر (خلفية)")

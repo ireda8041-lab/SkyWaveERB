@@ -619,13 +619,19 @@ class ProjectService:
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
             self._auto_update_project_status(project.name, force_update=True)
 
-            # ⚡ إرسال إشارات التحديث للـ UI
-            app_signals.emit_data_changed('projects')
-            app_signals.emit_data_changed('payments')
-            app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
+            # ⚡ إرسال إشارات التحديث للـ UI (مع حماية من الأخطاء)
+            try:
+                app_signals.emit_data_changed('projects')
+                app_signals.emit_data_changed('payments')
+                app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
+            except Exception as sig_err:
+                safe_print(f"WARNING: [ProjectService] فشل إرسال إشارات التحديث: {sig_err}")
             
-            # 🔔 إشعار
-            notify_operation('paid', 'payment', f"{amount:,.0f} ج.م - {project.name}")
+            # 🔔 إشعار (مع حماية من الأخطاء)
+            try:
+                notify_operation('paid', 'payment', f"{amount:,.0f} ج.م - {project.name}")
+            except Exception as notify_err:
+                safe_print(f"WARNING: [ProjectService] فشل إرسال الإشعار: {notify_err}")
 
             safe_print(f"SUCCESS: [ProjectService] ✅ تم تسجيل الدفعة بمبلغ {amount} للمشروع {project.name}")
             return created_payment

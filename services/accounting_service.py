@@ -870,7 +870,12 @@ class AccountingService:
             safe_print(f"  - الرصيد الجديد: {new_balance}")
 
             # تحديث الحساب في قاعدة البيانات
-            account_id = receiving_account._mongo_id or str(receiving_account.id)
+            # ⚡ إصلاح: التحقق من وجود ID صالح - استخدام code كـ fallback
+            account_id = receiving_account._mongo_id or (str(receiving_account.id) if receiving_account.id else None) or receiving_account.code
+            if not account_id:
+                safe_print(f"ERROR: [AccountingService] ❌ لا يوجد ID صالح للحساب {receiving_account.name}")
+                return
+            
             updated_account = receiving_account.model_copy(update={"balance": new_balance})
             result = self.repo.update_account(account_id, updated_account)
 
@@ -957,7 +962,12 @@ class AccountingService:
             safe_print(f"  - الرصيد الجديد: {new_balance}")
 
             # تحديث الحساب في قاعدة البيانات
-            account_id = receiving_account._mongo_id or str(receiving_account.id)
+            # ⚡ إصلاح: التحقق من وجود ID صالح - استخدام code كـ fallback
+            account_id = receiving_account._mongo_id or (str(receiving_account.id) if receiving_account.id else None) or receiving_account.code
+            if not account_id:
+                safe_print(f"ERROR: [AccountingService] ❌ لا يوجد ID صالح للحساب {receiving_account.name}")
+                return
+            
             updated_account = receiving_account.model_copy(update={"balance": new_balance})
             result = self.repo.update_account(account_id, updated_account)
 
@@ -994,7 +1004,12 @@ class AccountingService:
             safe_print(f"  - المبلغ: {amount} ({'مدين' if is_debit else 'دائن'})")
             safe_print(f"  - الرصيد الجديد: {new_balance}")
 
-            account_id = account._mongo_id or str(account.id)
+            # ⚡ إصلاح: التحقق من وجود ID صالح - استخدام code كـ fallback
+            account_id = account._mongo_id or (str(account.id) if account.id else None) or account.code
+            if not account_id:
+                safe_print(f"ERROR: [AccountingService] ❌ لا يوجد ID صالح للحساب {account.name}")
+                return
+            
             updated_account = account.model_copy(update={"balance": new_balance})
             result = self.repo.update_account(account_id, updated_account)
 
