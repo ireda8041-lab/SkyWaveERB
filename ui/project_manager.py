@@ -175,15 +175,32 @@ class ProjectEditorDialog(QDialog):
         else:
             self.setWindowTitle("مشروع جديد")
 
-        # تفعيل زر التكبير والتصغير
-        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint | Qt.WindowType.WindowMinimizeButtonHint)
+        # ⚡ فتح النافذة بحجم الشاشة الكامل
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMaximizeButtonHint | 
+            Qt.WindowType.WindowMinimizeButtonHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         
-        self.setMinimumWidth(750)
-        self.setMinimumHeight(500)
+        # الحصول على حجم الشاشة وفتح النافذة بحجم كبير
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            # فتح بنسبة 90% من حجم الشاشة
+            width = int(screen_geo.width() * 0.9)
+            height = int(screen_geo.height() * 0.9)
+            x = (screen_geo.width() - width) // 2
+            y = (screen_geo.height() - height) // 2
+            self.setGeometry(x, y, width, height)
         
-        # 📱 سياسة التمدد
+        self.setMinimumWidth(900)
+        self.setMinimumHeight(600)
+        
+        # 📱 سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -355,6 +372,31 @@ class ProjectEditorDialog(QDialog):
         self.service_combo.currentIndexChanged.connect(self.on_service_selected)
         self.add_item_button.clicked.connect(lambda: self.add_item_to_table(item_to_add=None))
         items_layout.addLayout(add_item_layout)
+        
+        # ⚡ إضافة label لعرض وصف الخدمة بشكل واضح
+        from PyQt6.QtWidgets import QSizePolicy
+        self.service_description_label = QLabel("")
+        self.service_description_label.setWordWrap(True)
+        self.service_description_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.service_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.service_description_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text_primary']};
+                font-size: 12px;
+                font-family: 'Cairo';
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(59, 130, 246, 0.15),
+                    stop:1 rgba(59, 130, 246, 0.05));
+                border: 1px solid rgba(59, 130, 246, 0.3);
+                border-radius: 8px;
+                padding: 12px 15px;
+                margin: 5px 0;
+                line-height: 1.6;
+            }}
+        """)
+        self.service_description_label.setVisible(False)  # مخفي افتراضياً
+        items_layout.addWidget(self.service_description_label)
+        
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(6)
         self.items_table.setHorizontalHeaderLabels(["البند", "الكمية", "السعر", "خصم", "الإجمالي", "حذف"])
@@ -389,9 +431,9 @@ class ProjectEditorDialog(QDialog):
         self.items_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.items_table.verticalHeader().setVisible(True)
         self.items_table.setShowGrid(True)
-        items_layout.addWidget(self.items_table)
+        items_layout.addWidget(self.items_table, 1)  # ⚡ stretch factor للتمدد
         items_group.setLayout(items_layout)
-        left_side.addWidget(items_group)
+        left_side.addWidget(items_group, 1)  # ⚡ stretch factor للتمدد
         
         # --- 3. الإجماليات ---
         totals_group = QGroupBox("الإجماليات")
@@ -577,7 +619,7 @@ class ProjectEditorDialog(QDialog):
         # إضافة الجانبين للتخطيط الأفقي الرئيسي
         main_horizontal_layout.addLayout(left_side, 3)  # البيانات والبنود على اليسار (أوسع)
         main_horizontal_layout.addLayout(right_side, 2)  # الوصف والدفعة على اليمين
-        main_layout.addLayout(main_horizontal_layout)
+        main_layout.addLayout(main_horizontal_layout, 1)  # ⚡ stretch factor للتمدد
 
         # --- 5. أزرار التحكم ---
         buttons_layout = QHBoxLayout()
@@ -682,6 +724,23 @@ class ProjectEditorDialog(QDialog):
         service = self.service_combo.currentData()
         if service:
             self.item_price_input.setValue(service.default_price)
+            # ⚡ عرض وصف الخدمة بشكل واضح
+            service_desc = getattr(service, 'description', None)
+            safe_print(f"DEBUG: [ProjectEditor] الخدمة: {service.name}, الوصف: {service_desc}")
+            
+            if service_desc and str(service_desc).strip():
+                self.service_description_label.setText(f"📝 وصف الخدمة: {service_desc}")
+                self.service_description_label.setVisible(True)
+                self.service_combo.setToolTip(f"📝 {service_desc}")
+            else:
+                self.service_description_label.setText("📝 لا يوجد وصف لهذه الخدمة")
+                self.service_description_label.setVisible(True)
+                self.service_combo.setToolTip("")
+        else:
+            # إخفاء الوصف عند عدم اختيار خدمة
+            if hasattr(self, 'service_description_label'):
+                self.service_description_label.setVisible(False)
+            self.service_combo.setToolTip("")
 
     def add_item_to_table(self, item_to_add: Optional[schemas.ProjectItem] = None):
         if item_to_add is None:
@@ -708,17 +767,25 @@ class ProjectEditorDialog(QDialog):
             if quantity <= 0:
                 QMessageBox.warning(self, "خطأ", "الرجاء إدخال كمية صحيحة")
                 return
+            
             # حساب الإجمالي بدون خصم أولاً
             subtotal_item = quantity * price
+            
+            # إنشاء وصف يشمل اسم الخدمة ووصفها
+            service_desc = service.description or ""
+            item_description = service.name
+            
             item_schema = schemas.ProjectItem(
                 service_id=service._mongo_id or str(service.id),
-                description=service.name,
+                description=item_description,
                 quantity=quantity,
                 unit_price=price,
                 discount_rate=0.0,
                 discount_amount=0.0,
                 total=subtotal_item
             )
+            # حفظ وصف الخدمة الكامل للـ tooltip
+            item_schema._service_full_desc = service_desc
         else:
             item_schema = item_to_add
         self.project_items.append(item_schema)
@@ -745,10 +812,22 @@ class ProjectEditorDialog(QDialog):
         for index, item in enumerate(self.project_items):
             self.items_table.insertRow(index)
             
-            # عمود الوصف (غير قابل للتعديل، في الوسط)
+            # عمود الوصف (غير قابل للتعديل) - مع tooltip للوصف الكامل
             desc_item = QTableWidgetItem(item.description)
             desc_item.setFlags(desc_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            
+            # إضافة tooltip بوصف الخدمة الكامل إذا وجد
+            full_desc = getattr(item, '_service_full_desc', None)
+            if full_desc:
+                desc_item.setToolTip(f"📝 {full_desc}")
+            else:
+                # محاولة جلب وصف الخدمة من القائمة
+                for service in self.services_list:
+                    if service.name == item.description and service.description:
+                        desc_item.setToolTip(f"📝 {service.description}")
+                        break
+            
             self.items_table.setItem(index, 0, desc_item)
             
             # عمود الكمية (قابل للتعديل، في الوسط)
@@ -2087,6 +2166,9 @@ class ProjectManagerTab(QWidget):
     def _on_projects_changed(self):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
+        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
+        if hasattr(self.project_service, 'invalidate_cache'):
+            self.project_service.invalidate_cache()
         self.load_projects_data()
 
     def _load_project_tasks(self, project_id: str):

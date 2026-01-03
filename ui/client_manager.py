@@ -417,85 +417,122 @@ class ClientManagerTab(QWidget):
         for index, client in enumerate(self.clients_list):
             self.clients_table.insertRow(index)
 
-            # ⚡ Container لتوسيط اللوجو في الخلية
+            # ⚡ عرض لوجو العميل بشكل دائري احترافي
             logo_container = QWidget()
             logo_layout = QHBoxLayout(logo_container)
-            logo_layout.setContentsMargins(0, 0, 0, 0)
+            logo_layout.setContentsMargins(2, 2, 2, 2)
             logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
+            # إنشاء الـ label
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            logo_label.setFixedSize(50, 50)
-            logo_label.setStyleSheet("""
-                QLabel {
-                    background: rgba(10, 108, 241, 0.1);
-                    border-radius: 8px;
-                    border: 1px solid rgba(10, 108, 241, 0.2);
-                }
-            """)
-
+            logo_label.setFixedSize(44, 44)
+            
             pixmap = None
+            has_logo = False
 
-            # أولاً: محاولة تحميل الصورة من base64
-            if hasattr(client, 'logo_data') and client.logo_data:
+            # محاولة تحميل الصورة من base64
+            if hasattr(client, 'logo_data') and client.logo_data and client.logo_data.strip():
                 try:
                     import base64
-                    logo_data = client.logo_data
-                    if ',' in logo_data:
+                    logo_data = client.logo_data.strip()
+                    if logo_data.startswith('data:image'):
                         logo_data = logo_data.split(',')[1]
-
                     img_bytes = base64.b64decode(logo_data)
                     pixmap = QPixmap()
-                    if not pixmap.loadFromData(img_bytes):
-                        pixmap = None
-                except Exception:
+                    if pixmap.loadFromData(img_bytes):
+                        has_logo = True
+                except:
                     pixmap = None
 
-            # ثانياً: محاولة تحميل من المسار المحلي
-            if not pixmap or pixmap.isNull():
-                if client.logo_path and os.path.exists(client.logo_path):
+            # محاولة تحميل من المسار المحلي
+            if not has_logo and hasattr(client, 'logo_path') and client.logo_path and os.path.exists(client.logo_path):
+                try:
                     pixmap = QPixmap(client.logo_path)
+                    if not pixmap.isNull():
+                        has_logo = True
+                except:
+                    pixmap = None
 
-            # عرض الصورة أو أيقونة افتراضية
-            if pixmap and not pixmap.isNull():
-                scaled_pixmap = pixmap.scaled(
-                    QSize(44, 44),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                logo_label.setPixmap(scaled_pixmap)
-                logo_label.setStyleSheet("""
-                    QLabel {
-                        background: transparent;
-                        border-radius: 8px;
-                        padding: 2px;
-                    }
-                """)
+            # عرض الصورة الدائرية
+            if has_logo and pixmap and not pixmap.isNull():
+                from PyQt6.QtGui import QPainter, QBrush, QPainterPath
+                from PyQt6.QtCore import QRectF
+                
+                # تصغير الصورة
+                size = 40
+                scaled = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+                
+                # قص لتكون مربعة
+                if scaled.width() > size:
+                    x = (scaled.width() - size) // 2
+                    scaled = scaled.copy(x, 0, size, size)
+                if scaled.height() > size:
+                    y = (scaled.height() - size) // 2
+                    scaled = scaled.copy(0, y, size, size)
+                
+                # إنشاء صورة دائرية
+                circular = QPixmap(size, size)
+                circular.fill(Qt.GlobalColor.transparent)
+                
+                painter = QPainter(circular)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                
+                path = QPainterPath()
+                path.addEllipse(QRectF(0, 0, size, size))
+                painter.setClipPath(path)
+                painter.drawPixmap(0, 0, scaled)
+                painter.end()
+                
+                logo_label.setPixmap(circular)
+                logo_label.setStyleSheet("background: transparent; border: none;")
             else:
-                logo_label.setText("👤")
-                logo_label.setStyleSheet("""
-                    QLabel {
-                        font-size: 22px;
-                        color: #6B7280;
-                        background: rgba(107, 114, 128, 0.1);
-                        border-radius: 8px;
-                        border: 1px solid rgba(107, 114, 128, 0.2);
-                    }
-                """)
+                # أيقونة افتراضية - دائرة ملونة مع الحرف الأول
+                first_char = (client.name[0] if client.name else "?")
+                
+                colors = ["#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#06B6D4"]
+                color_idx = sum(ord(c) for c in (client.name or "A")) % len(colors)
+                bg = colors[color_idx]
+                
+                # رسم الدائرة مع الحرف
+                from PyQt6.QtGui import QPainter, QFont, QPen
+                from PyQt6.QtCore import QRectF
+                
+                size = 40
+                avatar = QPixmap(size, size)
+                avatar.fill(Qt.GlobalColor.transparent)
+                
+                painter = QPainter(avatar)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                
+                # رسم الدائرة الملونة
+                painter.setBrush(QColor(bg))
+                painter.setPen(QPen(Qt.GlobalColor.transparent))
+                painter.drawEllipse(0, 0, size, size)
+                
+                # رسم الحرف
+                painter.setPen(QPen(QColor("white")))
+                font = QFont("Cairo", 16, QFont.Weight.Bold)
+                painter.setFont(font)
+                painter.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, first_char)
+                painter.end()
+                
+                logo_label.setPixmap(avatar)
+                logo_label.setStyleSheet("background: transparent; border: none;")
 
             logo_layout.addWidget(logo_label)
             self.clients_table.setCellWidget(index, 0, logo_container)
 
-            # ⚡ معالجة الأحداث كل batch_size صف
+            # معالجة الأحداث كل batch_size صف
             if (index + 1) % batch_size == 0:
-                QApplication.processEvents()  # noqa: F823
+                QApplication.processEvents()
 
             self.clients_table.setItem(index, 1, create_centered_item(client.name or ""))
             self.clients_table.setItem(index, 2, create_centered_item(client.company_name or ""))
             self.clients_table.setItem(index, 3, create_centered_item(client.phone or ""))
             self.clients_table.setItem(index, 4, create_centered_item(client.email or ""))
 
-            # ⚡ جلب إجماليات العميل
+            # جلب إجماليات العميل
             client_name = client.name
             total_invoices = client_invoices_total.get(client_name, 0.0)
             total_payments = client_payments_total.get(client_name, 0.0)
@@ -531,6 +568,8 @@ class ClientManagerTab(QWidget):
     def _on_clients_changed(self):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
+        # ⚡ إبطال الـ cache لضمان جلب البيانات الجديدة (بما فيها الصور)
+        self.client_service.invalidate_cache()
         self.load_clients_data()
 
     def open_editor(self, client_to_edit: schemas.Client | None):
@@ -606,7 +645,3 @@ class ClientManagerTab(QWidget):
                     "❌ خطأ",
                     f"فشل حذف العميل:\n{str(e)}"
                 )
-
-    def _on_clients_changed(self):
-        """تحديث الجدول عند تغيير البيانات"""
-        self.load_clients_data()

@@ -476,8 +476,30 @@ class SkyWaveERPApp:
             except Exception as e:
                 logger.error(f"[MainApp] ❌ خطأ في بدء المزامنة التلقائية: {e}")
         
+        # 🔄 تفعيل نظام المزامنة الفورية (Real-time Sync)
+        def start_realtime_sync():
+            """بدء نظام المزامنة الفورية"""
+            try:
+                logger.info("[MainApp] 🔄 بدء نظام المزامنة الفورية...")
+                
+                # إعداد نظام المزامنة الفورية
+                from core.realtime_sync import setup_realtime_sync
+                realtime_manager = setup_realtime_sync(self.repository)
+                
+                if realtime_manager:
+                    logger.info("[MainApp] ✅ تم تفعيل نظام المزامنة الفورية بنجاح")
+                    # حفظ المرجع لإغلاقه لاحقاً
+                    self.realtime_manager = realtime_manager
+                else:
+                    logger.warning("[MainApp] ⚠️ فشل تفعيل نظام المزامنة الفورية")
+                
+            except Exception as e:
+                logger.error(f"[MainApp] ❌ خطأ في بدء المزامنة الفورية: {e}")
+        
         QTimer.singleShot(2000, start_auto_sync_system)
+        QTimer.singleShot(3000, start_realtime_sync)  # بدء المزامنة الفورية بعد 3 ثواني
         logger.info("[MainApp] 🚀 نظام المزامنة التلقائية سيبدأ بعد 2 ثانية")
+        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد 3 ثواني")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -556,6 +578,14 @@ class SkyWaveERPApp:
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
         try:
+            # إيقاف نظام المزامنة الفورية
+            if hasattr(self, 'realtime_manager') and self.realtime_manager:
+                try:
+                    self.realtime_manager.stop()
+                    logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
+                except Exception as e:
+                    logger.warning(f"[MainApp] فشل إيقاف المزامنة الفورية: {e}")
+
             # إيقاف المزامنة التلقائية (لو كانت مفعلة)
             # إيقاف نظام المزامنة الموحد
             if hasattr(self, 'unified_sync') and self.unified_sync:
@@ -699,6 +729,14 @@ if __name__ == "__main__":
             NotificationManager.shutdown()
         except Exception:
             pass
+        
+        # إغلاق نظام المزامنة الفورية
+        try:
+            from core.realtime_sync import shutdown_realtime_sync
+            shutdown_realtime_sync()
+        except Exception:
+            pass
+            
         logger.info("="*80)
         logger.info("إغلاق التطبيق")
         logger.info("="*80)

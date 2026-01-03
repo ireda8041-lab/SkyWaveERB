@@ -16,7 +16,7 @@ def _get_today_version() -> str:
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = "1.3.0"  # الإصدار الثابت
+CURRENT_VERSION = "1.3.1"  # الإصدار الثابت
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 
@@ -25,7 +25,7 @@ UPDATE_CHECK_URL = "https://raw.githubusercontent.com/ireda8041-lab/SkyWaveERB/m
 
 # ==================== إعدادات التحديث التلقائي ====================
 AUTO_UPDATE_ENABLED = True
-AUTO_UPDATE_INTERVAL_HOURS = 24  # التحقق كل 4 ساعات
+AUTO_UPDATE_INTERVAL_HOURS = 24  # التحقق كل 24 ساعة
 AUTO_UPDATE_ON_STARTUP = True   # التحقق عند بدء التشغيل
 
 

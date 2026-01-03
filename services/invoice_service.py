@@ -5,6 +5,13 @@ from core import schemas
 from core.event_bus import EventBus
 from core.logger import get_logger
 from core.repository import Repository
+from core.signals import app_signals
+
+# إشعارات العمليات
+try:
+    from core.notification_bridge import notify_operation
+except ImportError:
+    def notify_operation(action, entity_type, entity_name): pass
 
 logger = get_logger(__name__)
 
@@ -57,6 +64,10 @@ class InvoiceService:
             created_invoice = self.repo.create_invoice(invoice_data)
             # إرسال الحدث للروبوت المحاسبي
             self.bus.publish('INVOICE_CREATED', {'invoice': created_invoice})
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('invoices')
+            # 🔔 إشعار
+            notify_operation('created', 'invoice', created_invoice.invoice_number)
             logger.info(f"[InvoiceService] تم إنشاء الفاتورة {created_invoice.invoice_number}")
             return created_invoice
         except Exception as e:
@@ -83,6 +94,10 @@ class InvoiceService:
             if updated_invoice:
                 # إرسال الحدث للروبوت المحاسبي
                 self.bus.publish('INVOICE_EDITED', {'invoice': updated_invoice})
+                # ⚡ إرسال إشارة التحديث الفوري
+                app_signals.emit_data_changed('invoices')
+                # 🔔 إشعار
+                notify_operation('updated', 'invoice', updated_invoice.invoice_number)
                 logger.info(f"[InvoiceService] تم تعديل الفاتورة {updated_invoice.invoice_number}")
             return updated_invoice
         except Exception as e:
@@ -115,6 +130,10 @@ class InvoiceService:
             if updated_invoice:
                 # إرسال الحدث للروبوت المحاسبي
                 self.bus.publish('INVOICE_VOIDED', updated_invoice)
+                # ⚡ إرسال إشارة التحديث الفوري
+                app_signals.emit_data_changed('invoices')
+                # 🔔 إشعار
+                notify_operation('voided', 'invoice', updated_invoice.invoice_number)
                 logger.info(f"[InvoiceService] تم إلغاء الفاتورة {updated_invoice.invoice_number}")
                 return True
             return False

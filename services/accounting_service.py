@@ -563,6 +563,13 @@ class AccountingService:
 
             if success:
                 safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}")
+                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
+                try:
+                    app_signals.emit_data_changed('accounting')
+                    app_signals.emit_data_changed('projects')
+                    safe_print(f"INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للمشروع")
+                except Exception as sig_err:
+                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
             else:
                 safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمشروع {project.name}")
 
@@ -686,6 +693,13 @@ class AccountingService:
 
             if success:
                 safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمصروف {expense.category}")
+                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
+                try:
+                    app_signals.emit_data_changed('accounting')
+                    app_signals.emit_data_changed('expenses')
+                    safe_print(f"INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للمصروف")
+                except Exception as sig_err:
+                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
             else:
                 safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمصروف {expense.category}")
 
@@ -868,6 +882,14 @@ class AccountingService:
                 project_name = getattr(project, 'name', '') if project else ''
                 safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}")
                 safe_print(f"SUCCESS: [AccountingService] ✅ دفعة {payment.amount} جنيه للمشروع {project_name}")
+                
+                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
+                try:
+                    app_signals.emit_data_changed('accounting')
+                    app_signals.emit_data_changed('payments')
+                    safe_print(f"INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للدفعة")
+                except Exception as sig_err:
+                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
             else:
                 safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
 
@@ -1346,6 +1368,8 @@ class AccountingService:
                 self.repo.update_is_group_flags()
 
             if saved_account is not None:
+                # ⚡ إرسال إشارة التحديث الفوري
+                app_signals.emit_data_changed('accounts')
                 # 🔔 إشعار
                 notify_operation('updated', 'account', f"{saved_account.code} - {saved_account.name}")
                 safe_print(f"SUCCESS: [AccountingService] تم تعديل الحساب {saved_account.name} بنجاح.")
@@ -1386,6 +1410,8 @@ class AccountingService:
             
             result = self.repo.delete_account_permanently(account_id)
             if result:
+                # ⚡ إرسال إشارة التحديث الفوري
+                app_signals.emit_data_changed('accounts')
                 # 🔔 إشعار
                 notify_operation('deleted', 'account', account_name)
             return result
@@ -1601,6 +1627,15 @@ class AccountingService:
             safe_print(f"SUCCESS: [AccountingService] ✅ الأرصدة بعد التحديث:")
             safe_print(f"  - {debit_account.name}: {updated_debit.balance if updated_debit else 'N/A'}")
             safe_print(f"  - {credit_account.name}: {updated_credit.balance if updated_credit else 'N/A'}")
+
+            # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
+            try:
+                entry_id = str(getattr(created_entry, 'id', '') or getattr(created_entry, '_mongo_id', '') or ref_id)
+                app_signals.emit_journal_entry_created(entry_id)
+                app_signals.emit_data_changed('accounting')
+                safe_print(f"INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
             safe_print("SUCCESS: [AccountingService] ✅ تم إنشاء القيد وتحديث الأرصدة بنجاح")
             return True

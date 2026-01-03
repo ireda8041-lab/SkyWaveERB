@@ -250,6 +250,9 @@ class ExpenseManagerTab(QWidget):
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
+        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
+        if hasattr(self.expense_service, 'invalidate_cache'):
+            self.expense_service.invalidate_cache()
         self.load_expenses_data()
 
     def get_selected_expense(self) -> schemas.Expense | None:

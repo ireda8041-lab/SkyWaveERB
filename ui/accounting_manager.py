@@ -90,33 +90,83 @@ class AccountingManagerTab(QWidget):
         # تاب إدارة الحسابات (التاب الوحيد)
         self.setup_accounts_tab(main_layout)
 
-        # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
-        # self.load_accounts_data() - يتم استدعاؤها عند فتح التاب
-
-        # ربط الإشارات للتحديث التلقائي
-        app_signals.data_changed.connect(self.on_data_changed)
-        app_signals.accounts_changed.connect(self.load_accounts_data)
-        app_signals.journal_entry_created.connect(self.on_journal_entry_created)
-
-        # ✨ Connect to Global Events for Real-time Updates
-        if EVENTS_AVAILABLE:
-            events.data_changed.connect(self.on_data_changed)
-            events.accounting_refresh.connect(self.load_accounts_data)
-            safe_print("INFO: ✅ تم ربط الأحداث العالمية - التحديث الفوري مفعّل!")
+        # ⚡ ربط جميع الإشارات للتحديث التلقائي الفوري (Real-time Sync)
+        self._connect_realtime_signals()
         
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
         from ui.styles import apply_rtl_alignment_to_all_fields
         apply_rtl_alignment_to_all_fields(self)
 
-    def on_data_changed(self):
-        """معالج التحديث الفوري عند تغيير البيانات"""
-        safe_print("INFO: ✅ تحديث فوري - إعادة تحميل البيانات...")
+    def _connect_realtime_signals(self):
+        """⚡ ربط جميع الإشارات للتحديث الفوري التلقائي"""
+        # إشارات التحديث العامة
+        app_signals.data_changed.connect(self._on_any_data_changed)
+        app_signals.accounts_changed.connect(self.load_accounts_data)
+        app_signals.journal_entry_created.connect(self._on_journal_entry_created)
+        app_signals.accounting_changed.connect(self.load_accounts_data)
+        
+        # ⚡ إشارات المشاريع والدفعات (للتحديث الفوري عند إنشاء مشروع أو دفعة)
+        app_signals.projects_changed.connect(self._on_projects_changed)
+        app_signals.payments_changed.connect(self._on_payments_changed)
+        
+        # ⚡ إشارات المصروفات
+        app_signals.expenses_changed.connect(self._on_expenses_changed)
+
+        # ✨ Connect to Global Events for Real-time Updates
+        if EVENTS_AVAILABLE:
+            events.data_changed.connect(self._on_any_data_changed)
+            events.accounting_refresh.connect(self.load_accounts_data)
+            safe_print("INFO: ✅ [AccManager] تم ربط الأحداث العالمية - التحديث الفوري مفعّل!")
+        
+        safe_print("INFO: ✅ [AccManager] تم ربط جميع إشارات Real-time Sync")
+
+    def _on_any_data_changed(self, data_type: str = None):
+        """⚡ معالج التحديث الفوري عند تغيير أي بيانات"""
+        # تحديث فقط إذا كان التغيير متعلق بالمحاسبة
+        relevant_types = ['accounts', 'accounting', 'projects', 'payments', 'expenses', 'journal_entries', None]
+        if data_type in relevant_types:
+            safe_print(f"INFO: ✅ [AccManager] تحديث فوري - نوع البيانات: {data_type}")
+            self.load_accounts_data()
+
+    def _on_journal_entry_created(self, entry_id: str = None):
+        """⚡ معالج إنشاء قيد محاسبي جديد - تحديث فوري"""
+        safe_print(f"INFO: ✅ [AccManager] قيد محاسبي جديد: {entry_id} - تحديث الأرصدة فوراً...")
+        # إبطال الـ cache لضمان جلب البيانات الجديدة
+        self.accounting_service._hierarchy_cache = None
+        self.accounting_service._hierarchy_cache_time = 0
         self.load_accounts_data()
 
-    def on_journal_entry_created(self, entry_id: str):
-        """معالج إنشاء قيد محاسبي جديد"""
-        safe_print(f"INFO: ✅ تم إنشاء قيد محاسبي جديد: {entry_id} - تحديث الأرصدة...")
+    def _on_projects_changed(self):
+        """⚡ معالج تغيير المشاريع - تحديث المحاسبة فوراً"""
+        safe_print("INFO: ✅ [AccManager] تغيير في المشاريع - تحديث المحاسبة...")
+        # إبطال الـ cache
+        self.accounting_service._hierarchy_cache = None
+        self.accounting_service._hierarchy_cache_time = 0
         self.load_accounts_data()
+
+    def _on_payments_changed(self):
+        """⚡ معالج تغيير الدفعات - تحديث المحاسبة فوراً"""
+        safe_print("INFO: ✅ [AccManager] تغيير في الدفعات - تحديث المحاسبة...")
+        # إبطال الـ cache
+        self.accounting_service._hierarchy_cache = None
+        self.accounting_service._hierarchy_cache_time = 0
+        self.load_accounts_data()
+
+    def _on_expenses_changed(self):
+        """⚡ معالج تغيير المصروفات - تحديث المحاسبة فوراً"""
+        safe_print("INFO: ✅ [AccManager] تغيير في المصروفات - تحديث المحاسبة...")
+        # إبطال الـ cache
+        self.accounting_service._hierarchy_cache = None
+        self.accounting_service._hierarchy_cache_time = 0
+        self.load_accounts_data()
+
+    def on_data_changed(self):
+        """معالج التحديث الفوري عند تغيير البيانات (للتوافق)"""
+        self._on_any_data_changed()
+
+    def on_journal_entry_created(self, entry_id: str):
+        """معالج إنشاء قيد محاسبي جديد (للتوافق)"""
+        self._on_journal_entry_created(entry_id)
 
     def resizeEvent(self, event):
         """معالج تغيير حجم النافذة - تحويل الـ splitter حسب العرض"""
@@ -813,23 +863,78 @@ class AccountingManagerTab(QWidget):
             # إذا لم يتم تمرير tree_map أو كان فارغاً، نجلبه من الخدمة
             if not tree_map or not isinstance(tree_map, dict) or len(tree_map) == 0:
                 safe_print("DEBUG: [Summary] tree_map فارغ - جلب البيانات من الخدمة...")
-                tree_map = self.accounting_service.get_hierarchy_with_balances()
+                tree_map = self.accounting_service.get_hierarchy_with_balances(force_refresh=True)
 
-            # استخراج الأرصدة من الحسابات الرئيسية (يدعم نظام 4 و 6 أرقام)
-            # نظام 6 أرقام (Enterprise)
-            total_assets = tree_map.get('100000', {}).get('total', 0.0) or tree_map.get('1000', {}).get('total', 0.0)
-            total_liabilities = tree_map.get('200000', {}).get('total', 0.0) or tree_map.get('2000', {}).get('total', 0.0)
-            total_equity = tree_map.get('300000', {}).get('total', 0.0) or tree_map.get('3000', {}).get('total', 0.0)
-            total_revenue = tree_map.get('400000', {}).get('total', 0.0) or tree_map.get('4000', {}).get('total', 0.0)
-            # COGS (500000) + OPEX (600000) = إجمالي المصروفات
-            total_cogs = tree_map.get('500000', {}).get('total', 0.0)
-            total_opex = tree_map.get('600000', {}).get('total', 0.0)
-            total_expenses = total_cogs + total_opex or tree_map.get('5000', {}).get('total', 0.0)
+            # ⚡ طريقة محسّنة: استخدام get_financial_summary للحصول على الأرقام الصحيحة
+            try:
+                summary = self.accounting_service.get_financial_summary()
+                total_assets = summary.get('assets', 0.0)
+                total_liabilities = summary.get('liabilities', 0.0)
+                total_equity = summary.get('equity', 0.0)
+                total_revenue = summary.get('revenue', 0.0)
+                total_expenses = summary.get('expenses', 0.0)
+                net_profit = summary.get('net_profit', 0.0)
+                
+                safe_print(f"DEBUG: [Summary] من get_financial_summary: أصول:{total_assets}, خصوم:{total_liabilities}, إيرادات:{total_revenue}, مصروفات:{total_expenses}")
+            except Exception as e:
+                safe_print(f"WARNING: [Summary] فشل get_financial_summary: {e} - استخدام الطريقة البديلة")
+                total_assets = 0.0
+                total_liabilities = 0.0
+                total_equity = 0.0
+                total_revenue = 0.0
+                total_expenses = 0.0
 
-            safe_print(f"DEBUG: [Summary] أصول:{total_assets}, خصوم:{total_liabilities}, إيرادات:{total_revenue}, مصروفات:{total_expenses}")
+            # ⚡ إذا كانت القيم صفر، نحاول من tree_map مباشرة
+            if total_assets == 0 and total_liabilities == 0 and total_revenue == 0 and total_expenses == 0:
+                safe_print("DEBUG: [Summary] محاولة من tree_map...")
+                
+                # جمع الأرصدة من كل الحسابات حسب النوع
+                for code, node in tree_map.items():
+                    acc = node.get('obj')
+                    if not acc:
+                        continue
+                    
+                    # الحصول على الرصيد
+                    balance = node.get('total', 0.0)
+                    if balance == 0:
+                        balance = getattr(acc, 'balance', 0.0) or 0.0
+                    
+                    # تصنيف حسب نوع الحساب
+                    acc_type = acc.type.value if hasattr(acc.type, 'value') else str(acc.type)
+                    
+                    # فقط الحسابات الفرعية (ليست مجموعات) لتجنب التكرار
+                    is_group = getattr(acc, 'is_group', False) or node.get('is_group', False) or bool(node.get('children'))
+                    
+                    if not is_group:
+                        if acc_type in ['ASSET', 'CASH', 'أصول', 'أصول نقدية']:
+                            total_assets += balance
+                        elif acc_type in ['LIABILITY', 'خصوم']:
+                            total_liabilities += balance
+                        elif acc_type in ['EQUITY', 'حقوق ملكية']:
+                            total_equity += balance
+                        elif acc_type in ['REVENUE', 'إيرادات']:
+                            total_revenue += balance
+                        elif acc_type in ['EXPENSE', 'مصروفات']:
+                            total_expenses += balance
+
+            # إذا كانت كل القيم صفر، نحاول من الحسابات الرئيسية
+            if total_assets == 0 and total_liabilities == 0 and total_revenue == 0 and total_expenses == 0:
+                safe_print("DEBUG: [Summary] محاولة من الحسابات الرئيسية...")
+                # نظام 6 أرقام (Enterprise)
+                total_assets = tree_map.get('100000', {}).get('total', 0.0) or tree_map.get('1000', {}).get('total', 0.0)
+                total_liabilities = tree_map.get('200000', {}).get('total', 0.0) or tree_map.get('2000', {}).get('total', 0.0)
+                total_equity = tree_map.get('300000', {}).get('total', 0.0) or tree_map.get('3000', {}).get('total', 0.0)
+                total_revenue = tree_map.get('400000', {}).get('total', 0.0) or tree_map.get('4000', {}).get('total', 0.0)
+                # COGS (500000) + OPEX (600000) = إجمالي المصروفات
+                total_cogs = tree_map.get('500000', {}).get('total', 0.0)
+                total_opex = tree_map.get('600000', {}).get('total', 0.0)
+                total_expenses = total_cogs + total_opex or tree_map.get('5000', {}).get('total', 0.0)
+
+            safe_print(f"DEBUG: [Summary] النهائي - أصول:{total_assets}, خصوم:{total_liabilities}, إيرادات:{total_revenue}, مصروفات:{total_expenses}")
 
             # حساب صافي الربح = الإيرادات - المصروفات
-            net_profit = total_revenue - total_expenses
+            if 'net_profit' not in locals() or net_profit == 0:
+                net_profit = total_revenue - total_expenses
 
             # تحديث Labels باستخدام الدوال المساعدة
             self._update_summary_value(self.assets_label, total_assets)

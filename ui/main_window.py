@@ -281,6 +281,10 @@ class MainWindow(QMainWindow):
             self.advanced_sync_manager.sync_progress.connect(self.status_bar.update_sync_progress)
             self.advanced_sync_manager.notification_ready.connect(self.status_bar.show_notification)
 
+        # ⚡ ربط إشارات المزامنة الفورية
+        from core.signals import app_signals
+        app_signals.realtime_sync_status.connect(self._on_realtime_sync_status_changed)
+
         # ربط زر تسجيل الخروج
         self.status_bar.logout_requested.connect(self._handle_logout)
 
@@ -874,6 +878,21 @@ class MainWindow(QMainWindow):
                     msg = f"فشلت المزامنة: {error}"
 
                 QMessageBox.warning(self, "❌ فشلت المزامنة", msg)
+
+    def _on_realtime_sync_status_changed(self, is_connected: bool):
+        """معالج تغيير حالة المزامنة الفورية"""
+        try:
+            if hasattr(self, 'status_bar'):
+                if is_connected:
+                    # إضافة مؤشر المزامنة الفورية
+                    self.status_bar.set_realtime_sync_status(True)
+                    safe_print("INFO: [MainWindow] ✅ مؤشر المزامنة الفورية: نشط")
+                else:
+                    # إزالة مؤشر المزامنة الفورية
+                    self.status_bar.set_realtime_sync_status(False)
+                    safe_print("INFO: [MainWindow] ❌ مؤشر المزامنة الفورية: متوقف")
+        except Exception as e:
+            safe_print(f"ERROR: [MainWindow] فشل تحديث مؤشر المزامنة الفورية: {e}")
         else:
             QMessageBox.warning(
                 self,

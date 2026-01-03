@@ -486,7 +486,7 @@ class ClientEditorDialog(QDialog):
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
 
     def _convert_image_to_base64(self, image_path: str) -> str:
-        """تحويل صورة إلى base64 للحفظ في قاعدة البيانات - جودة عالية"""
+        """تحويل صورة إلى base64 للحفظ في قاعدة البيانات - محسّن للأداء والجودة"""
         import base64
 
         if not image_path or not os.path.exists(image_path):
@@ -499,10 +499,14 @@ class ClientEditorDialog(QDialog):
             # تحميل الصورة الأصلية
             pixmap = QPixmap(image_path)
             if pixmap.isNull():
+                safe_print(f"ERROR: فشل تحميل الصورة: {image_path}")
                 return ""
 
-            # ⚡ تصغير الصور الكبيرة جداً فقط (أكبر من 800x800)
-            max_size = 800
+            original_size = f"{pixmap.width()}x{pixmap.height()}"
+            safe_print(f"INFO: 📷 تحميل صورة {original_size}")
+
+            # ⚡ تصغير ذكي حسب الحجم
+            max_size = 400  # حجم أصغر للأداء الأفضل
             if pixmap.width() > max_size or pixmap.height() > max_size:
                 pixmap = pixmap.scaled(
                     max_size, max_size,
@@ -511,22 +515,51 @@ class ClientEditorDialog(QDialog):
                 )
                 safe_print(f"INFO: 📷 تم تصغير الصورة إلى {pixmap.width()}x{pixmap.height()}")
 
-            # حفظ بجودة عالية (PNG بدون ضغط)
+            # ⚡ ضغط ذكي - JPEG للصور الكبيرة، PNG للصور الصغيرة
             buffer = QBuffer()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            pixmap.save(buffer, "PNG", 100)  # جودة 100%
+            
+            # تجربة JPEG أولاً (أصغر حجماً)
+            pixmap.save(buffer, "JPEG", 85)  # جودة 85% - توازن جيد
+            jpeg_size = buffer.size()
+            
+            # إعادة تعيين البافر
+            buffer.close()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            
+            # تجربة PNG
+            pixmap.save(buffer, "PNG", 100)
+            png_size = buffer.size()
+            
+            # اختيار الأصغر حجماً
+            if jpeg_size < png_size * 0.7:  # JPEG أصغر بـ 30% على الأقل
+                buffer.close()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                pixmap.save(buffer, "JPEG", 85)
+                format_used = "JPEG"
+                final_size = jpeg_size
+            else:
+                format_used = "PNG"
+                final_size = png_size
+            
             img_data = buffer.data().data()
+            buffer.close()
 
             # التحقق من الحجم النهائي
             size_kb = len(img_data) / 1024
-            safe_print(f"INFO: 📷 حجم الصورة: {size_kb:.1f} KB")
+            safe_print(f"INFO: 📷 حجم الصورة النهائي: {size_kb:.1f} KB ({format_used})")
+            
+            # تحذير إذا كانت الصورة كبيرة جداً
+            if size_kb > 500:
+                safe_print(f"WARNING: 📷 الصورة كبيرة ({size_kb:.1f} KB) - قد تؤثر على الأداء")
 
             base64_str = base64.b64encode(img_data).decode('utf-8')
-
-            return f"data:image/png;base64,{base64_str}"
+            return f"data:image/{format_used.lower()};base64,{base64_str}"
 
         except Exception as e:
             safe_print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
 
     def get_form_data(self) -> dict[str, Any]:
@@ -602,15 +635,47 @@ class ClientEditorDialog(QDialog):
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
                 safe_print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 self.client_service.update_client(client_id, client_data)
+                
+                # 🔔 إشعار محسّن للتحديث
+                if client_data.get('logo_data') and client_data['logo_data'] != "__DELETE__":
+                    notify_success(
+                        f"تم تحديث العميل '{client_data['name']}' مع اللوجو 🖼️",
+                        "✅ تحديث عميل"
+                    )
+                elif client_data.get('logo_data') == "__DELETE__":
+                    notify_success(
+                        f"تم تحديث العميل '{client_data['name']}' وحذف اللوجو 🗑️",
+                        "✅ تحديث عميل"
+                    )
+                else:
+                    notify_success(
+                        f"تم تحديث العميل '{client_data['name']}'",
+                        "✅ تحديث عميل"
+                    )
+                    
                 QMessageBox.information(self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح.")
             else:
                 safe_print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 new_client_schema = schemas.Client(**client_data)
                 self.client_service.create_client(new_client_schema)
+                
+                # 🔔 إشعار محسّن للإضافة
+                if client_data.get('logo_data') and client_data['logo_data']:
+                    notify_success(
+                        f"تم إضافة العميل '{client_data['name']}' مع اللوجو 🖼️",
+                        "✅ عميل جديد"
+                    )
+                else:
+                    notify_success(
+                        f"تم إضافة العميل '{client_data['name']}'",
+                        "✅ عميل جديد"
+                    )
+                    
                 QMessageBox.information(self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح.")
 
             self.accept()
 
         except Exception as e:
             safe_print(f"ERROR: [ClientEditorDialog] فشل حفظ العميل: {e}")
+            notify_error(f"فشل حفظ العميل: {str(e)}", "❌ خطأ")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")

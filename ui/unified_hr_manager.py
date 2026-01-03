@@ -37,6 +37,10 @@ class UnifiedHRManager(QWidget):
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
+        # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
+        from core.signals import app_signals
+        app_signals.hr_changed.connect(self._on_hr_changed)
+        
         self.init_ui()
         self.load_employees()
     
@@ -176,6 +180,26 @@ class UnifiedHRManager(QWidget):
             self._update_employees_table()
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في تحميل الموظفين:\n{e}")
+    
+    def _on_hr_changed(self):
+        """⚡ استجابة لإشارة تحديث الموارد البشرية - تحديث الجداول أوتوماتيك"""
+        try:
+            from core.safe_print import safe_print
+            safe_print("INFO: [HRManager] ⚡ استلام إشارة تحديث HR - جاري التحديث...")
+        except:
+            pass
+        self.load_employees()
+        # تحديث السلف والمرتبات إذا كانت موجودة
+        if hasattr(self, 'load_loans'):
+            try:
+                self.load_loans()
+            except:
+                pass
+        if hasattr(self, 'load_salaries'):
+            try:
+                self.load_salaries()
+            except:
+                pass
     
     def _update_employees_table(self):
         """تحديث جدول الموظفين"""

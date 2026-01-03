@@ -96,8 +96,18 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
-            # 🔔 إشعار
-            notify_operation('created', 'client', created_client.name)
+            
+            # 🔔 إشعار مخصص (يُرسل لجميع الأجهزة)
+            if hasattr(client_data, 'logo_data') and client_data.logo_data:
+                from ui.notification_system import notify_success
+                notify_success(
+                    f"تم إضافة العميل '{created_client.name}' مع الصورة 🖼️",
+                    "👥 عميل جديد",
+                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                )
+            else:
+                notify_operation('created', 'client', created_client.name)
+            
             logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
             return created_client
         except Exception as e:
@@ -151,8 +161,27 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
-            # 🔔 إشعار
-            notify_operation('updated', 'client', updated_client_schema.name)
+            
+            # 🔔 إشعار مخصص حسب نوع التحديث (يُرسل لجميع الأجهزة)
+            if 'logo_data' in new_data and new_data.get('logo_data') and new_data['logo_data'] != "__DELETE__":
+                # تم تحديث الصورة
+                from ui.notification_system import notify_success
+                notify_success(
+                    f"تم تحديث صورة العميل '{updated_client_schema.name}' 🖼️",
+                    "👥 تحديث صورة",
+                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                )
+            elif 'logo_data' in new_data and (not new_data.get('logo_data') or new_data['logo_data'] == ""):
+                # تم حذف الصورة
+                from ui.notification_system import notify_info
+                notify_info(
+                    f"تم حذف صورة العميل '{updated_client_schema.name}' 🗑️",
+                    "👥 حذف صورة",
+                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                )
+            else:
+                # تحديث عادي
+                notify_operation('updated', 'client', updated_client_schema.name)
 
             logger.info(f"[ClientService] ✅ تم تعديل العميل {updated_client_schema.name}")
             return saved_client

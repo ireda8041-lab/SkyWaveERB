@@ -281,6 +281,9 @@ class ServiceManagerTab(QWidget):
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
+        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
+        if hasattr(self.service_service, 'invalidate_cache'):
+            self.service_service.invalidate_cache()
         self.load_services_data()
 
     def open_editor(self, service_to_edit: schemas.Service | None):

@@ -16,6 +16,16 @@ from PyQt6.QtWidgets import (
 
 from ui.styles import get_cairo_font
 
+# استيراد دالة الطباعة الآمنة
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass
+
 
 class SyncIndicator(QWidget):
     """مؤشر حالة الاتصال - تصميم بسيط ونظيف"""
@@ -394,6 +404,39 @@ class StatusBarWidget(QWidget):
     def update_sync_progress(self, current: int, total: int):
         """تحديث تقدم المزامنة"""
         self.sync_indicator.update_progress(current, total)
+
+    def set_realtime_sync_status(self, is_active: bool):
+        """تحديث حالة المزامنة الفورية"""
+        try:
+            if is_active:
+                # إضافة مؤشر المزامنة الفورية
+                if not hasattr(self, 'realtime_indicator'):
+                    from ui.styles import COLORS
+                    self.realtime_indicator = QLabel("🔄 مزامنة فورية")
+                    self.realtime_indicator.setFont(get_cairo_font(10))
+                    self.realtime_indicator.setStyleSheet(f"""
+                        QLabel {{
+                            color: #10B981;
+                            background: rgba(16, 185, 129, 0.1);
+                            border: 1px solid rgba(16, 185, 129, 0.3);
+                            border-radius: 12px;
+                            padding: 4px 8px;
+                            font-weight: bold;
+                        }}
+                    """)
+                    self.realtime_indicator.setToolTip("المزامنة الفورية نشطة - التحديثات تظهر فوراً على جميع الأجهزة")
+                    
+                    # إضافة المؤشر بجانب مؤشر المزامنة العادي
+                    layout = self.layout()
+                    layout.insertWidget(2, self.realtime_indicator)
+                
+                self.realtime_indicator.setVisible(True)
+            else:
+                # إخفاء مؤشر المزامنة الفورية
+                if hasattr(self, 'realtime_indicator'):
+                    self.realtime_indicator.setVisible(False)
+        except Exception as e:
+            safe_print(f"ERROR: [StatusBarWidget] فشل تحديث مؤشر المزامنة الفورية: {e}")
 
     def show_notification(self, title: str, message: str, duration: int = 3000):
         """عرض إشعار منبثق"""

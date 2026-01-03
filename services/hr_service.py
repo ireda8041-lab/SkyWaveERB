@@ -15,6 +15,7 @@ from decimal import Decimal
 from typing import Optional, List, Dict, Any, Tuple
 
 from core.logger import get_logger
+from core.signals import app_signals
 
 # إشعارات العمليات
 try:
@@ -312,6 +313,8 @@ class HRService:
             
             conn.commit()
             conn.close()
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('hr')
             # 🔔 إشعار
             notify_operation(action, 'employee', employee_data['name'])
             logger.info(f"✅ {msg}")
@@ -353,6 +356,8 @@ class HRService:
             
             conn.commit()
             conn.close()
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('hr')
             # 🔔 إشعار
             notify_operation('deleted', 'employee', employee_name)
             logger.info(f"✅ تم حذف الموظف: {employee_id}")
@@ -461,6 +466,8 @@ class HRService:
             employee = self.get_employee_by_id(loan_data['employee_id'])
             employee_name = employee['name'] if employee else f"موظف #{loan_data['employee_id']}"
             
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('hr')
             # 🔔 إشعار
             notify_operation('created', 'loan', f"سلفة {loan_data['amount']} ج.م - {employee_name}")
             logger.info(f"✅ تم إضافة سلفة بمبلغ {loan_data['amount']} للموظف {employee_name}")
@@ -622,6 +629,9 @@ class HRService:
             conn.commit()
             conn.close()
             
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('hr')
+            
             msg = f"تم سداد {amount} ج.م من السلفة. المتبقي: {new_remaining} ج.م"
             if new_status == 'مكتمل':
                 msg += " - تم إغلاق السلفة"
@@ -647,6 +657,9 @@ class HRService:
         
         conn.commit()
         conn.close()
+        
+        # ⚡ إرسال إشارة التحديث الفوري
+        app_signals.emit_data_changed('hr')
         
         logger.info(f"✅ تم إغلاق السلفة #{loan_id}")
         return True, "تم إغلاق السلفة بنجاح"
@@ -932,6 +945,8 @@ class HRService:
             conn.commit()
             conn.close()
             
+            # ⚡ إرسال إشارة التحديث الفوري
+            app_signals.emit_data_changed('hr')
             # 🔔 إشعار
             notify_operation('paid', 'salary', f"راتب {salary['employee_name']} - {month}")
             logger.info(f"✅ تم دفع راتب {salary['employee_name']} لشهر {month}")

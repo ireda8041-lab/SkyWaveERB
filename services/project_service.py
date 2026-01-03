@@ -622,6 +622,7 @@ class ProjectService:
             # ⚡ إرسال إشارات التحديث للـ UI
             app_signals.emit_data_changed('projects')
             app_signals.emit_data_changed('payments')
+            app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
             
             # 🔔 إشعار
             notify_operation('paid', 'payment', f"{amount:,.0f} ج.م - {project.name}")
@@ -713,6 +714,11 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
+                app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
+                
+                # 🔔 إشعار
+                notify_operation('updated', 'payment', f"{payment_data.amount:,.0f} ج.م")
+                
                 safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
@@ -756,6 +762,11 @@ class ProjectService:
                 self.invalidate_cache()
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
+                app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
+                
+                # 🔔 إشعار
+                notify_operation('deleted', 'payment', f"{payment.amount:,.0f} ج.م")
+                
                 safe_print(f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
