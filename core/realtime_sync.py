@@ -37,77 +37,21 @@ class RealtimeSync(QObject):
         self.watch_threads = {}
         self.stop_event = Event()
         
-        # المجموعات المراد مراقبتها - جميع أقسام البرنامج
+        # المجموعات المراد مراقبتها - الأساسية فقط لتجنب البطء
         self.collections_to_watch = [
-            # إدارة المشاريع
             'projects',
-            'project_items',
-            'project_templates',
-            
-            # إدارة العملاء
             'clients',
-            'client_contacts',
-            
-            # إدارة الخدمات
             'services',
-            'service_categories',
-            'service_templates',
-            
-            # إدارة المدفوعات والمالية
             'payments',
-            'invoices',
-            'quotes',
-            'contracts',
-            
-            # إدارة المصروفات
             'expenses',
-            'expense_categories',
-            'expense_receipts',
-            
-            # المحاسبة
             'accounts',
-            'journal_entries',
-            'financial_reports',
-            'budgets',
-            
-            # إدارة الموارد البشرية
-            'employees',
-            'departments',
-            'attendance',
-            'payroll',
-            'leave_requests',
-            
-            # إدارة المخزون (إذا كان موجود)
-            'inventory_items',
-            'stock_movements',
-            'suppliers',
-            
-            # النظام والإعدادات
-            'users',
-            'user_permissions',
-            'system_settings',
             'notifications',
-            'audit_logs',
-            
-            # التقارير والتحليلات
-            'reports',
-            'dashboards',
-            'analytics_data',
-            
-            # الملفات والمرفقات
-            'file_attachments',
-            'document_templates',
-            
-            # المهام والتذكيرات
-            'tasks',
-            'reminders',
-            'calendar_events'
         ]
         
         # تايمر للتحقق من الاتصال
         self.connection_timer = QTimer()
         self.connection_timer.timeout.connect(self._check_connection)
-        self.connection_timer.start(5000)  # كل 5 ثواني
+        self.connection_timer.start(30000)  # كل 30 ثانية بدلاً من 5
         
         self.last_connection_status = False
     
@@ -258,71 +202,15 @@ class RealtimeDataManager(QObject):
             # إرسال إشارة تحديث للواجهة
             from core.signals import app_signals
             
-            # تحديد نوع البيانات المتغيرة - جميع أقسام البرنامج
+            # تحديد نوع البيانات المتغيرة - الأساسية فقط
             data_type_map = {
-                # إدارة المشاريع
                 'projects': 'projects',
-                'project_items': 'projects',
-                'project_templates': 'projects',
-                
-                # إدارة العملاء
                 'clients': 'clients',
-                'client_contacts': 'clients',
-                
-                # إدارة الخدمات
                 'services': 'services',
-                'service_categories': 'services',
-                'service_templates': 'services',
-                
-                # إدارة المدفوعات والمالية
                 'payments': 'payments',
-                'invoices': 'invoices',
-                'quotes': 'quotes',
-                'contracts': 'contracts',
-                
-                # إدارة المصروفات
                 'expenses': 'expenses',
-                'expense_categories': 'expenses',
-                'expense_receipts': 'expenses',
-                
-                # المحاسبة
                 'accounts': 'accounting',
-                'journal_entries': 'accounting',
-                'financial_reports': 'accounting',
-                'budgets': 'accounting',
-                
-                # إدارة الموارد البشرية
-                'employees': 'hr',
-                'departments': 'hr',
-                'attendance': 'hr',
-                'payroll': 'hr',
-                'leave_requests': 'hr',
-                
-                # إدارة المخزون
-                'inventory_items': 'inventory',
-                'stock_movements': 'inventory',
-                'suppliers': 'inventory',
-                
-                # النظام والإعدادات
-                'users': 'system',
-                'user_permissions': 'system',
-                'system_settings': 'system',
                 'notifications': 'notifications',
-                'audit_logs': 'system',
-                
-                # التقارير والتحليلات
-                'reports': 'reports',
-                'dashboards': 'reports',
-                'analytics_data': 'reports',
-                
-                # الملفات والمرفقات
-                'file_attachments': 'files',
-                'document_templates': 'files',
-                
-                # المهام والتذكيرات
-                'tasks': 'tasks',
-                'reminders': 'tasks',
-                'calendar_events': 'tasks'
             }
             
             data_type = data_type_map.get(collection_name, collection_name)

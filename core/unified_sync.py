@@ -77,9 +77,9 @@ class UnifiedSyncManagerV3(QObject):
         
         # ⚡ إعدادات المزامنة التلقائية
         self._auto_sync_enabled = True
-        self._auto_sync_interval = 5 * 60 * 1000  # 5 دقائق
-        self._quick_sync_interval = 30 * 1000  # 30 ثانية للتغييرات المحلية
-        self._connection_check_interval = 15 * 1000  # 15 ثانية
+        self._auto_sync_interval = 10 * 60 * 1000  # 10 دقائق بدلاً من 5
+        self._quick_sync_interval = 60 * 1000  # 60 ثانية بدلاً من 30
+        self._connection_check_interval = 30 * 1000  # 30 ثانية بدلاً من 15
         
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -504,16 +504,59 @@ class UnifiedSyncManagerV3(QObject):
         )
 
     def _insert_record(self, cursor, table_name: str, data: dict):
-        """إدراج سجل جديد"""
+        """إدراج سجل جديد مع التعامل مع التكرارات"""
         if not data:
             return
 
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
-        cursor.execute(
-            f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
-            list(data.values())
-        )
+        
+        try:
+            cursor.execute(
+                f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
+                list(data.values())
+            )
+        except Exception as e:
+            # في حالة UNIQUE constraint - نحاول التحديث بدلاً من الإدراج
+            if "UNIQUE constraint" in str(e):
+                # البحث عن السجل الموجود وتحديثه
+                unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
+                unique_value = data.get(unique_field)
+                mongo_id = data.get('_mongo_id')
+                
+                if unique_value:
+                    try:
+                        # تحديث السجل الموجود
+                        cursor.execute(
+                            f"SELECT id FROM {table_name} WHERE {unique_field} = ?",
+                            (unique_value,)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            self._update_record(cursor, table_name, row[0], data)
+                            logger.debug(f"تم تحديث السجل المكرر: {unique_value}")
+                            return
+                    except Exception:
+                        pass
+                
+                # محاولة البحث بـ mongo_id
+                if mongo_id:
+                    try:
+                        cursor.execute(
+                            f"SELECT id FROM {table_name} WHERE _mongo_id = ?",
+                            (mongo_id,)
+                        )
+                        row = cursor.fetchone()
+                        if row:
+                            self._update_record(cursor, table_name, row[0], data)
+                            return
+                    except Exception:
+                        pass
+                
+                # تجاهل الخطأ إذا فشل كل شيء
+                logger.debug(f"تجاهل سجل مكرر في {table_name}")
+            else:
+                raise
 
 
     def _push_pending_changes(self):
