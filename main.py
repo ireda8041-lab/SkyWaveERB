@@ -465,16 +465,11 @@ class SkyWaveERPApp:
                 
                 # ربط إشارة اكتمال المزامنة بتحديث الواجهة
                 self.unified_sync.sync_completed.connect(
-                    lambda result: QTimer.singleShot(100, main_window.on_sync_completed)
-                )
-                
-                # ربط إشارة تغيير الاتصال
-                self.unified_sync.connection_changed.connect(
-                    lambda online: logger.info(f"🔌 حالة الاتصال: {'متصل' if online else 'غير متصل'}")
+                    lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
                 )
                 
             except Exception as e:
-                logger.error(f"[MainApp] ❌ خطأ في بدء المزامنة التلقائية: {e}")
+                logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة التلقائية: {e}")
         
         # 🔄 تفعيل نظام المزامنة الفورية (Real-time Sync)
         def start_realtime_sync():
@@ -490,16 +485,14 @@ class SkyWaveERPApp:
                     logger.info("[MainApp] ✅ تم تفعيل نظام المزامنة الفورية بنجاح")
                     # حفظ المرجع لإغلاقه لاحقاً
                     self.realtime_manager = realtime_manager
-                else:
-                    logger.warning("[MainApp] ⚠️ فشل تفعيل نظام المزامنة الفورية")
                 
             except Exception as e:
-                logger.error(f"[MainApp] ❌ خطأ في بدء المزامنة الفورية: {e}")
+                logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: {e}")
         
-        QTimer.singleShot(2000, start_auto_sync_system)
-        QTimer.singleShot(3000, start_realtime_sync)  # بدء المزامنة الفورية بعد 3 ثواني
-        logger.info("[MainApp] 🚀 نظام المزامنة التلقائية سيبدأ بعد 2 ثانية")
-        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد 3 ثواني")
+        # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
+        QTimer.singleShot(5000, start_auto_sync_system)  # 5 ثواني بدلاً من 2
+        QTimer.singleShot(8000, start_realtime_sync)  # 8 ثواني بدلاً من 3
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 5 ثواني")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)

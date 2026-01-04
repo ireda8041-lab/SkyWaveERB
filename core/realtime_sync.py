@@ -48,12 +48,13 @@ class RealtimeSync(QObject):
             'notifications',
         ]
         
-        # تايمر للتحقق من الاتصال
+        # تايمر للتحقق من الاتصال - محسّن
         self.connection_timer = QTimer()
         self.connection_timer.timeout.connect(self._check_connection)
-        self.connection_timer.start(30000)  # كل 30 ثانية بدلاً من 5
+        self.connection_timer.start(60000)  # كل دقيقة بدلاً من 30 ثانية
         
         self.last_connection_status = False
+        self._enabled = True  # للتحكم في تشغيل/إيقاف المزامنة
     
     def start(self):
         """بدء المزامنة الفورية"""
@@ -101,29 +102,47 @@ class RealtimeSync(QObject):
         safe_print("INFO: [RealtimeSync] تم إيقاف المزامنة الفورية")
     
     def _watch_collection(self, collection_name: str):
-        """مراقبة مجموعة واحدة للتغييرات"""
-        try:
-            collection = self.repo.mongo_db[collection_name]
-            
-            # إنشاء Change Stream
-            with collection.watch(full_document='updateLookup') as stream:
-                safe_print(f"INFO: [RealtimeSync] بدء مراقبة {collection_name}")
-                
-                for change in stream:
-                    if self.stop_event.is_set():
-                        break
+        """مراقبة مجموعة واحدة للتغييرات - محسّنة ومحمية"""
+        retry_count = 0
+        max_retries = 3
+        
+        while not self.stop_event.is_set() and retry_count < max_retries and self._enabled:
+            try:
+                if not self.repo or not self.repo.online or self.repo.mongo_db is None:
+                    time.sleep(5)
+                    continue
                     
-                    try:
-                        self._handle_change(collection_name, change)
-                    except Exception as e:
-                        safe_print(f"ERROR: [RealtimeSync] خطأ في معالجة التغيير: {e}")
+                collection = self.repo.mongo_db[collection_name]
+                
+                # إنشاء Change Stream مع timeout
+                with collection.watch(
+                    full_document='updateLookup',
+                    max_await_time_ms=5000  # timeout 5 ثواني
+                ) as stream:
+                    safe_print(f"INFO: [RealtimeSync] بدء مراقبة {collection_name}")
+                    retry_count = 0  # إعادة تعيين عداد المحاولات
+                    
+                    for change in stream:
+                        if self.stop_event.is_set() or not self._enabled:
+                            break
                         
-        except PyMongoError as e:
-            safe_print(f"ERROR: [RealtimeSync] خطأ MongoDB في {collection_name}: {e}")
-        except Exception as e:
-            safe_print(f"ERROR: [RealtimeSync] خطأ عام في مراقبة {collection_name}: {e}")
-        finally:
-            safe_print(f"INFO: [RealtimeSync] انتهت مراقبة {collection_name}")
+                        try:
+                            self._handle_change(collection_name, change)
+                        except Exception as e:
+                            safe_print(f"WARNING: [RealtimeSync] خطأ في معالجة التغيير: {e}")
+                            
+            except PyMongoError as e:
+                retry_count += 1
+                safe_print(f"WARNING: [RealtimeSync] خطأ MongoDB في {collection_name} (محاولة {retry_count}): {e}")
+                if retry_count < max_retries:
+                    time.sleep(10)  # انتظار 10 ثواني قبل إعادة المحاولة
+            except Exception as e:
+                retry_count += 1
+                safe_print(f"WARNING: [RealtimeSync] خطأ عام في {collection_name} (محاولة {retry_count}): {e}")
+                if retry_count < max_retries:
+                    time.sleep(10)
+                    
+        safe_print(f"INFO: [RealtimeSync] انتهت مراقبة {collection_name}")
     
     def _handle_change(self, collection_name: str, change: Dict[str, Any]):
         """معالجة تغيير في المجموعة"""
@@ -147,14 +166,19 @@ class RealtimeSync(QObject):
             safe_print(f"ERROR: [RealtimeSync] فشل معالجة التغيير: {e}")
     
     def _check_connection(self):
-        """فحص حالة الاتصال"""
+        """فحص حالة الاتصال - محسّن ومحمي"""
+        if not self._enabled:
+            return
+            
         try:
-            is_connected = (
-                self.repo and 
-                self.repo.online and 
-                self.repo.mongo_db and
-                self.repo.mongo_db.admin.command('ping')
-            )
+            is_connected = False
+            if self.repo and self.repo.online and self.repo.mongo_db is not None:
+                try:
+                    # فحص سريع بدون blocking
+                    self.repo.mongo_db.admin.command('ping', maxTimeMS=3000)
+                    is_connected = True
+                except Exception:
+                    is_connected = False
             
             if is_connected != self.last_connection_status:
                 self.last_connection_status = is_connected
@@ -162,18 +186,14 @@ class RealtimeSync(QObject):
                 
                 if is_connected:
                     safe_print("INFO: [RealtimeSync] ✅ الاتصال متاح")
-                    if not self.is_running:
+                    if not self.is_running and self._enabled:
                         self.start()
                 else:
                     safe_print("WARNING: [RealtimeSync] ❌ فقدان الاتصال")
-                    if self.is_running:
-                        self.stop()
                         
         except Exception as e:
-            if self.last_connection_status:
-                safe_print(f"WARNING: [RealtimeSync] فشل فحص الاتصال: {e}")
-                self.last_connection_status = False
-                self.connection_status_changed.emit(False)
+            # تجاهل الأخطاء - لا نريد crash
+            pass
 
 
 class RealtimeDataManager(QObject):

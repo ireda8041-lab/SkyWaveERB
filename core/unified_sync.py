@@ -75,11 +75,11 @@ class UnifiedSyncManagerV3(QObject):
         self._max_retries = 3
         self._last_online_status = None
         
-        # ⚡ إعدادات المزامنة التلقائية
+        # ⚡ إعدادات المزامنة التلقائية - محسّنة للسرعة والاستقرار
         self._auto_sync_enabled = True
-        self._auto_sync_interval = 10 * 60 * 1000  # 10 دقائق بدلاً من 5
-        self._quick_sync_interval = 60 * 1000  # 60 ثانية بدلاً من 30
-        self._connection_check_interval = 30 * 1000  # 30 ثانية بدلاً من 15
+        self._auto_sync_interval = 15 * 60 * 1000  # 15 دقيقة - تقليل الضغط
+        self._quick_sync_interval = 2 * 60 * 1000  # 2 دقيقة - تقليل الضغط
+        self._connection_check_interval = 60 * 1000  # دقيقة واحدة
         
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -137,26 +137,26 @@ class UnifiedSyncManagerV3(QObject):
             self._connection_timer = None
     
     def _check_connection(self):
-        """🔌 فحص حالة الاتصال"""
+        """🔌 فحص حالة الاتصال - محسّن"""
         try:
             current_status = self.is_online
             
-            # إرسال إشارة عند تغيير الحالة
+            # إرسال إشارة عند تغيير الحالة فقط
             if current_status != self._last_online_status:
                 self._last_online_status = current_status
                 self.connection_changed.emit(current_status)
                 
                 if current_status:
-                    logger.info("🟢 تم استعادة الاتصال - جاري المزامنة...")
-                    # مزامنة فورية عند استعادة الاتصال
-                    self._auto_full_sync()
+                    logger.info("🟢 تم استعادة الاتصال")
+                    # لا نعمل مزامنة فورية - ننتظر الدورة التالية
                 else:
                     logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
         except Exception as e:
-            logger.debug(f"خطأ في فحص الاتصال: {e}")
+            # تجاهل الأخطاء
+            pass
     
     def _initial_sync(self):
-        """🚀 المزامنة الأولية عند بدء التشغيل"""
+        """🚀 المزامنة الأولية عند بدء التشغيل - محسّنة"""
         if not self.is_online:
             logger.info("📴 لا يوجد اتصال - العمل بالبيانات المحلية")
             return
@@ -169,13 +169,13 @@ class UnifiedSyncManagerV3(QObject):
                 if result.get('success'):
                     logger.info(f"✅ المزامنة الأولية: {result.get('total_synced', 0)} سجل")
             except Exception as e:
-                logger.error(f"❌ فشلت المزامنة الأولية: {e}")
+                logger.warning(f"⚠️ المزامنة الأولية: {e}")
         
         thread = threading.Thread(target=sync_thread, daemon=True)
         thread.start()
     
     def _auto_full_sync(self):
-        """🔄 المزامنة الكاملة التلقائية"""
+        """🔄 المزامنة الكاملة التلقائية - محسّنة"""
         if self._is_syncing or not self.is_online:
             return
             
@@ -183,9 +183,12 @@ class UnifiedSyncManagerV3(QObject):
             try:
                 result = self.full_sync_from_cloud()
                 if result.get('success'):
-                    logger.debug(f"🔄 مزامنة تلقائية: {result.get('total_synced', 0)} سجل")
+                    total = result.get('total_synced', 0)
+                    if total > 0:
+                        logger.debug(f"🔄 مزامنة تلقائية: {total} سجل")
             except Exception as e:
-                logger.error(f"❌ فشلت المزامنة التلقائية: {e}")
+                # تجاهل الأخطاء - لا نريد spam في الـ logs
+                pass
         
         thread = threading.Thread(target=sync_thread, daemon=True)
         thread.start()

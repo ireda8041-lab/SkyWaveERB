@@ -186,11 +186,13 @@ class Repository:
             try:
                 self.mongo_client = pymongo.MongoClient(
                     MONGO_URI,
-                    serverSelectionTimeoutMS=10000,  # ⚡ 10 ثواني للاتصال
-                    connectTimeoutMS=10000,
-                    socketTimeoutMS=15000,
+                    serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال - أسرع
+                    connectTimeoutMS=5000,
+                    socketTimeoutMS=10000,  # ⚡ 10 ثواني للعمليات
                     retryWrites=True,
-                    retryReads=True
+                    retryReads=True,
+                    maxPoolSize=10,  # ⚡ تقليل عدد الاتصالات
+                    minPoolSize=1
                 )
                 self.mongo_client.server_info()
                 self.mongo_db = self.mongo_client[DB_NAME]
