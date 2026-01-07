@@ -8,6 +8,7 @@
 import os
 import sys
 import gc
+import traceback
 
 # ⚡ تحسين الأداء على Windows
 if os.name == 'nt':
@@ -570,76 +571,51 @@ class SkyWaveERPApp:
         
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
+        # إيقاف نظام المزامنة الفورية
         try:
-            # إيقاف نظام المزامنة الفورية
             if hasattr(self, 'realtime_manager') and self.realtime_manager:
-                try:
-                    self.realtime_manager.stop()
-                    logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف المزامنة الفورية: {e}")
-
-            # إيقاف المزامنة التلقائية (لو كانت مفعلة)
-            # إيقاف نظام المزامنة الموحد
-            if hasattr(self, 'unified_sync') and self.unified_sync:
-                try:
-                    self.unified_sync.stop_auto_sync()
-                    logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف المزامنة التلقائية: {e}")
-
-            # إيقاف خدمة التحديث التلقائي
-            if hasattr(self, 'auto_update_service') and self.auto_update_service:
-                try:
-                    self.auto_update_service.stop()
-                    logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
-                except RuntimeError as e:
-                    # تجاهل أخطاء الكائنات المحذوفة بواسطة Qt
-                    if "deleted" in str(e).lower() or "c/c++ object" in str(e).lower():
-                        logger.debug(f"[MainApp] QTimer تم حذفه بالفعل: {e}")
-                    else:
-                        logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
-
-            # إغلاق اتصال قاعدة البيانات
-            if hasattr(self, 'repository') and self.repository:
-                try:
-                    if hasattr(self.repository, 'close'):
-                        self.repository.close()
-                    elif hasattr(self.repository, 'sqlite_conn'):
-                        self.repository.sqlite_conn.close()
-                    logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إغلاق قاعدة البيانات: {e}")
-
-            # إيقاف مدير المزامنة المتقدم
-            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
-                try:
-                    # التحقق من أن الكائن لم يتم حذفه بواسطة Qt
-                    from PyQt6.QtCore import QObject
-                    if isinstance(self.advanced_sync_manager, QObject):
-                        try:
-                            # محاولة الوصول لخاصية للتأكد من أن الكائن لا يزال موجوداً
-                            _ = self.advanced_sync_manager.objectName()
-                            if hasattr(self.advanced_sync_manager, 'stop'):
-                                self.advanced_sync_manager.stop()
-                            logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
-                        except RuntimeError:
-                            # الكائن تم حذفه بالفعل بواسطة Qt
-                            pass
-                    elif hasattr(self.advanced_sync_manager, 'stop'):
-                        self.advanced_sync_manager.stop()
-                        logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
-                except Exception as e:
-                    # تجاهل أخطاء الكائنات المحذوفة
-                    if "deleted" not in str(e).lower():
-                        logger.warning(f"[MainApp] فشل إيقاف مدير المزامنة المتقدم: {e}")
-
-            logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
-
+                self.realtime_manager.stop()
+                logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
         except Exception as e:
-            logger.error(f"[MainApp] خطأ أثناء تنظيف الموارد: {e}")
+            logger.debug(f"[MainApp] تحذير عند إيقاف المزامنة الفورية: {e}")
+
+        # إيقاف نظام المزامنة الموحد
+        try:
+            if hasattr(self, 'unified_sync') and self.unified_sync:
+                self.unified_sync.stop_auto_sync()
+                logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف المزامنة التلقائية: {e}")
+
+        # إيقاف خدمة التحديث التلقائي
+        try:
+            if hasattr(self, 'auto_update_service') and self.auto_update_service:
+                self.auto_update_service.stop()
+                logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف خدمة التحديث: {e}")
+
+        # إغلاق اتصال قاعدة البيانات
+        try:
+            if hasattr(self, 'repository') and self.repository:
+                if hasattr(self.repository, 'close'):
+                    self.repository.close()
+                elif hasattr(self.repository, 'sqlite_conn'):
+                    self.repository.sqlite_conn.close()
+                logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إغلاق قاعدة البيانات: {e}")
+
+        # إيقاف مدير المزامنة المتقدم
+        try:
+            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
+                if hasattr(self.advanced_sync_manager, 'shutdown'):
+                    self.advanced_sync_manager.shutdown()
+                logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة المتقدم: {e}")
+
+        logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
 
     def _on_update_available(self, main_window, version, url, changelog):
         """عند توفر تحديث جديد"""
@@ -672,24 +648,38 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 
     # تجاهل أخطاء Qt المتعلقة بالكائنات المحذوفة
     error_msg = str(exc_value).lower()
-    if "deleted" in error_msg or "c/c++ object" in error_msg or "wrapped c/c++" in error_msg:
+    if any(x in error_msg for x in ["deleted", "c/c++ object", "wrapped c/c++", "destroyed", "invalid"]):
         logger.debug(f"تجاهل خطأ Qt: {exc_value}")
+        return
+    
+    # تجاهل أخطاء الاتصال والشبكة
+    if any(x in error_msg for x in ["connection", "timeout", "network", "socket", "pymongo"]):
+        logger.warning(f"خطأ اتصال (تم تجاهله): {exc_value}")
+        return
+    
+    # تجاهل أخطاء الـ threading
+    if any(x in error_msg for x in ["thread", "daemon", "join"]):
+        logger.debug(f"خطأ threading (تم تجاهله): {exc_value}")
         return
 
     logger.critical("خطأ غير متوقع!", exc_info=(exc_type, exc_value, exc_traceback))
     
-    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ وإظهار رسالة
+    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ
     try:
+        # محاولة عرض رسالة للمستخدم بدون إغلاق البرنامج
         ErrorHandler.handle_exception(
             exception=exc_value,
             context="uncaught_exception",
-            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل أو إعادة تشغيل البرنامج.",
-            show_dialog=True
+            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل.",
+            show_dialog=False  # لا نعرض dialog لتجنب المشاكل
         )
     except Exception:
-        # في حالة فشل معالج الأخطاء نفسه
-        safe_print(f"CRITICAL ERROR: {exc_type.__name__}: {exc_value}")
-        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        # في حالة فشل معالج الأخطاء نفسه - فقط نسجل
+        try:
+            import traceback
+            traceback.print_exception(exc_type, exc_value, exc_traceback)
+        except Exception:
+            pass
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception

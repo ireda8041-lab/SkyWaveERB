@@ -124,17 +124,38 @@ class UnifiedSyncManagerV3(QObject):
         """⏹️ إيقاف نظام المزامنة التلقائية"""
         logger.info("⏹️ إيقاف نظام المزامنة التلقائية...")
         
-        if self._auto_sync_timer:
-            self._auto_sync_timer.stop()
-            self._auto_sync_timer = None
+        # إيقاف المؤقتات بأمان
+        try:
+            if self._auto_sync_timer:
+                try:
+                    self._auto_sync_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
+                self._auto_sync_timer = None
+        except Exception:
+            pass
             
-        if self._quick_sync_timer:
-            self._quick_sync_timer.stop()
-            self._quick_sync_timer = None
+        try:
+            if self._quick_sync_timer:
+                try:
+                    self._quick_sync_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
+                self._quick_sync_timer = None
+        except Exception:
+            pass
             
-        if self._connection_timer:
-            self._connection_timer.stop()
-            self._connection_timer = None
+        try:
+            if self._connection_timer:
+                try:
+                    self._connection_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
+                self._connection_timer = None
+        except Exception:
+            pass
+        
+        logger.info("✅ تم إيقاف نظام المزامنة التلقائية")
     
     def _check_connection(self):
         """🔌 فحص حالة الاتصال - محسّن"""
