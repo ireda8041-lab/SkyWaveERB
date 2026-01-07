@@ -55,13 +55,26 @@ except ImportError:
     PERFORMANCE_OPTIMIZER_ENABLED = False
     safe_print(f"WARNING: performance_optimizer غير متوفر")
 
-# --- إعدادات الاتصال ---
-MONGO_URI = "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db"
-DB_NAME = "skywave_erp_db"
+# ⚡ استيراد إعدادات التكوين الآمنة
+try:
+    from .config import Config
+    CONFIG_LOADED = True
+except ImportError:
+    CONFIG_LOADED = False
+    safe_print("WARNING: config module غير متوفر - استخدام القيم الافتراضية")
 
-# ✅ استخدام مجلد المشروع الحالي لقاعدة البيانات المحلية
-_PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
-LOCAL_DB_FILE = os.path.join(_PROJECT_DIR, "skywave_local.db")
+# --- إعدادات الاتصال (من متغيرات البيئة) ---
+if CONFIG_LOADED:
+    MONGO_URI = Config.get_mongo_uri()
+    DB_NAME = Config.get_db_name()
+    LOCAL_DB_FILE = Config.get_local_db_path()
+else:
+    # قيم احتياطية للتوافق
+    import os as _os
+    MONGO_URI = _os.environ.get('MONGO_URI', 'mongodb://localhost:27017/skywave_erp_db')
+    DB_NAME = _os.environ.get('MONGO_DB_NAME', 'skywave_erp_db')
+    _PROJECT_DIR = _os.path.dirname(_os.path.dirname(__file__))
+    LOCAL_DB_FILE = _os.path.join(_PROJECT_DIR, "skywave_local.db")
 
 # ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
 def _copy_initial_db():
