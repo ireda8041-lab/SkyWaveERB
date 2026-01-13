@@ -353,9 +353,10 @@ class AccountingService:
                 else:
                     calculated_balance = credit_total - debit_total
 
-                # إذا لم توجد حركات، استخدم الرصيد المخزن كـ fallback
+                # ⚡ استخدام الرصيد المخزن دائماً إذا لم توجد حركات
                 if debit_total == 0 and credit_total == 0:
                     calculated_balance = getattr(acc, 'balance', 0.0) or 0.0
+                    safe_print(f"DEBUG: {acc.code} ({acc.name}): استخدام الرصيد المخزن = {calculated_balance}")
 
                 node['total'] = calculated_balance
 
@@ -433,7 +434,9 @@ class AccountingService:
         """
         جلب ملخص مالي سريع (الأصول، الخصوم، الإيرادات، المصروفات، صافي الربح)
 
-        يدعم نظام 4 أرقام (القديم) و 6 أرقام (Enterprise)
+        ⚡ محسّن: 
+        - يحسب الإيرادات من الدفعات المستلمة من المشاريع
+        - يحسب المصروفات من جدول expenses
 
         Returns:
             Dict مع المفاتيح: assets, liabilities, equity, revenue, expenses, cogs, opex, gross_profit, net_profit
@@ -442,29 +445,59 @@ class AccountingService:
             tree_map = self.get_hierarchy_with_balances()
 
             # استخراج الأرصدة من الحسابات الرئيسية (يدعم 4 و 6 أرقام)
-            # نظام 6 أرقام (Enterprise)
             assets = tree_map.get('100000', {}).get('total', 0.0) or tree_map.get('1000', {}).get('total', 0.0)
             liabilities = tree_map.get('200000', {}).get('total', 0.0) or tree_map.get('2000', {}).get('total', 0.0)
             equity = tree_map.get('300000', {}).get('total', 0.0) or tree_map.get('3000', {}).get('total', 0.0)
+            
+            # ⚡ حساب الإيرادات من حسابات الإيرادات أو من الدفعات
             revenue = tree_map.get('400000', {}).get('total', 0.0) or tree_map.get('4000', {}).get('total', 0.0)
+            
+            # ⚡ إذا لم توجد حسابات إيرادات، احسب من الدفعات المستلمة
+            if revenue == 0:
+                try:
+                    all_payments = self.repo.get_all_payments()
+                    revenue = sum(p.amount for p in all_payments)
+                    safe_print(f"INFO: [AccountingService] الإيرادات من الدفعات: {revenue}")
+                except Exception as e:
+                    safe_print(f"WARNING: [AccountingService] فشل جلب الدفعات: {e}")
 
             # ⚡ Enterprise: فصل COGS عن OPEX
-            cogs = tree_map.get('500000', {}).get('total', 0.0)  # تكاليف الإيرادات المباشرة
-            opex = tree_map.get('600000', {}).get('total', 0.0)  # المصروفات التشغيلية
+            cogs = tree_map.get('500000', {}).get('total', 0.0)
+            opex = tree_map.get('600000', {}).get('total', 0.0)
 
             # للتوافق مع النظام القديم (4 أرقام)
             if cogs == 0 and opex == 0:
-                expenses = tree_map.get('5000', {}).get('total', 0.0)
-                cogs = expenses
+                expenses_from_accounts = tree_map.get('5000', {}).get('total', 0.0)
+                cogs = expenses_from_accounts
                 opex = 0
 
-            # إجمالي المصروفات
+            # إجمالي المصروفات من الحسابات
             total_expenses = cogs + opex
+            
+            # ⚡ إذا لم توجد حسابات مصروفات، احسب من جدول expenses مباشرة
+            if total_expenses == 0:
+                try:
+                    all_expenses = self.repo.get_all_expenses()
+                    total_expenses = sum(exp.amount for exp in all_expenses)
+                    safe_print(f"INFO: [AccountingService] المصروفات من جدول expenses: {total_expenses}")
+                except Exception as e:
+                    safe_print(f"WARNING: [AccountingService] فشل جلب المصروفات: {e}")
+            
+            # ⚡ حساب الأصول من الحسابات النقدية إذا لم توجد حسابات أصول رئيسية
+            if assets == 0:
+                for code, node in tree_map.items():
+                    if code.startswith('11') and not node.get('children'):
+                        assets += node.get('total', 0.0)
+                if assets == 0:
+                    for code, node in tree_map.items():
+                        if code.startswith('111') and node.get('children'):
+                            assets = node.get('total', 0.0)
+                            break
 
-            # ⚡ Enterprise: هامش الربح الإجمالي (Gross Profit)
+            # ⚡ هامش الربح الإجمالي
             gross_profit = revenue - cogs
 
-            # صافي الربح = الإيرادات - (COGS + OPEX)
+            # ⚡ صافي الربح = الإيرادات (الدفعات) - المصروفات
             net_profit = revenue - total_expenses
 
             return {
@@ -472,10 +505,10 @@ class AccountingService:
                 'liabilities': liabilities,
                 'equity': equity,
                 'revenue': revenue,
-                'cogs': cogs,              # ⚡ تكاليف الإيرادات (500000)
-                'opex': opex,              # ⚡ المصروفات التشغيلية (600000)
+                'cogs': cogs,
+                'opex': opex,
                 'expenses': total_expenses,
-                'gross_profit': gross_profit,  # ⚡ هامش الربح الإجمالي
+                'gross_profit': gross_profit,
                 'net_profit': net_profit
             }
 
@@ -652,6 +685,8 @@ class AccountingService:
         القيد المحاسبي للمصروف:
         - مدين: حساب المصروف (5xxx) - يزيد المصروفات
         - دائن: حساب الدفع (11xx) - ينقص النقدية
+        
+        ملاحظة: إذا لم يوجد حساب مصروفات، يتم خصم المبلغ من حساب الدفع فقط
         """
         # دعم استقبال البيانات كـ dict أو كـ Expense مباشرة
         if isinstance(data, dict):
@@ -669,30 +704,64 @@ class AccountingService:
             expense_account_code = getattr(expense, 'account_id', None)
             payment_account_code = getattr(expense, 'payment_account_id', None)
 
-            if not expense_account_code:
-                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب المصروف، سيتم استخدام الحساب الافتراضي 5900")
-                expense_account_code = "5900"  # مصروفات متنوعة
-
             if not payment_account_code:
                 safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111")
                 payment_account_code = self.CASH_ACCOUNT_CODE  # الخزنة الرئيسية
 
+            # التحقق من وجود حساب الدفع
+            payment_account = self.repo.get_account_by_code(payment_account_code)
+            if not payment_account:
+                safe_print(f"ERROR: [AccountingService] حساب الدفع {payment_account_code} غير موجود!")
+                return
+
             # إنشاء معرف المصروف
             expense_id = getattr(expense, '_mongo_id', None) or str(getattr(expense, 'id', '')) or f"EXP-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-            # إنشاء القيد المحاسبي
-            success = self.post_journal_entry(
-                date=expense.date or datetime.now(),
-                description=f"مصروف: {expense.category} - {expense.description or ''}",
-                ref_type="expense",
-                ref_id=expense_id,
-                debit_account_code=expense_account_code,  # حساب المصروف (مدين)
-                credit_account_code=payment_account_code,  # حساب الدفع (دائن)
-                amount=expense.amount
-            )
+            # البحث عن حساب مصروفات مناسب (يبدأ بـ 5)
+            expense_account = None
+            if expense_account_code and expense_account_code.startswith('5'):
+                expense_account = self.repo.get_account_by_code(expense_account_code)
+            
+            if not expense_account:
+                # البحث عن أي حساب مصروفات موجود
+                all_accounts = self.repo.get_all_accounts()
+                expense_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('5')]
+                if expense_accounts:
+                    expense_account = expense_accounts[0]
+                    safe_print(f"INFO: [AccountingService] استخدام حساب المصروفات: {expense_account.name}")
+
+            if expense_account:
+                # إنشاء قيد محاسبي كامل (مدين: مصروفات، دائن: نقدية)
+                success = self.post_journal_entry(
+                    date=expense.date or datetime.now(),
+                    description=f"مصروف: {expense.category} - {expense.description or ''}",
+                    ref_type="expense",
+                    ref_id=expense_id,
+                    debit_account_code=expense_account.code,  # حساب المصروف (مدين)
+                    credit_account_code=payment_account_code,  # حساب الدفع (دائن)
+                    amount=expense.amount
+                )
+            else:
+                # لا يوجد حساب مصروفات - خصم المبلغ من حساب الدفع فقط
+                safe_print(f"INFO: [AccountingService] لا يوجد حساب مصروفات - خصم المبلغ من {payment_account.name}")
+                
+                # تحديث رصيد حساب الدفع مباشرة (خصم)
+                new_balance = (payment_account.balance or 0) - expense.amount
+                self.repo.update_account_balance(payment_account_code, new_balance)
+                
+                # تحديث الحساب الأب إن وجد
+                if payment_account.parent_code:
+                    self._update_parent_balance_recursive(payment_account.parent_code)
+                
+                # إبطال الـ cache
+                AccountingService._hierarchy_cache = None
+                AccountingService._hierarchy_cache_time = 0
+                
+                success = True
+                safe_print(f"SUCCESS: [AccountingService] تم خصم {expense.amount} من {payment_account.name} - الرصيد الجديد: {new_balance}")
 
             if success:
-                safe_print(f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمصروف {expense.category}")
+                safe_print(f"SUCCESS: [AccountingService] تم معالجة المصروف {expense.category}")
                 # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
                 try:
                     app_signals.emit_data_changed('accounting')
@@ -701,7 +770,12 @@ class AccountingService:
                 except Exception as sig_err:
                     safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
             else:
-                safe_print(f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمصروف {expense.category}")
+                safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف {expense.category}")
+
+        except Exception as e:
+            safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف: {e}")
+            import traceback
+            traceback.print_exc()
 
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف: {e}")
@@ -1528,6 +1602,36 @@ class AccountingService:
             import traceback
             traceback.print_exc()
             return False
+
+    def _update_parent_balance_recursive(self, parent_code: str):
+        """
+        تحديث رصيد الحساب الأب بناءً على مجموع أرصدة الأبناء
+        """
+        try:
+            parent_account = self.repo.get_account_by_code(parent_code)
+            if not parent_account:
+                return
+            
+            # جلب جميع الحسابات الأبناء
+            all_accounts = self.repo.get_all_accounts()
+            children = [acc for acc in all_accounts if acc.parent_code == parent_code]
+            
+            # حساب مجموع أرصدة الأبناء
+            total_balance = sum(acc.balance or 0 for acc in children)
+            
+            # تحديث رصيد الأب
+            if abs((parent_account.balance or 0) - total_balance) > 0.01:
+                account_id = parent_account._mongo_id or str(parent_account.id) or parent_code
+                updated_account = parent_account.model_copy(update={"balance": total_balance})
+                self.repo.update_account(account_id, updated_account)
+                safe_print(f"INFO: [AccountingService] تحديث رصيد الأب {parent_account.name}: {total_balance}")
+            
+            # تحديث الأب الأعلى إن وجد
+            if parent_account.parent_code:
+                self._update_parent_balance_recursive(parent_account.parent_code)
+                
+        except Exception as e:
+            safe_print(f"WARNING: [AccountingService] فشل تحديث رصيد الأب: {e}")
 
     def _update_account_balance_recursive(self, account, amount: float, is_debit: bool):
         """

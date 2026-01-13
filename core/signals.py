@@ -48,8 +48,16 @@ class AppSignals(QObject):
     # 🔔 إشارات الإشعارات التفصيلية
     operation_completed = pyqtSignal(str, str, str)  # (action, entity_type, entity_name)
 
+    # ⚡ مرجع لمدير المزامنة (يُعيّن من main.py)
+    _sync_manager = None
+    
+    @classmethod
+    def set_sync_manager(cls, sync_manager):
+        """تعيين مدير المزامنة للمزامنة الفورية"""
+        cls._sync_manager = sync_manager
+
     def emit_data_changed(self, data_type: str):
-        """إرسال إشارة تحديث البيانات - محسّن لجميع الأقسام"""
+        """إرسال إشارة تحديث البيانات - محسّن لجميع الأقسام + مزامنة فورية"""
         self.data_changed.emit(data_type)
 
         # إرسال إشارات محددة حسب نوع البيانات
@@ -76,6 +84,13 @@ class AppSignals(QObject):
         signals_to_emit = signal_map.get(data_type, [])
         for signal in signals_to_emit:
             signal.emit()
+        
+        # ⚡ مزامنة فورية مع السحابة
+        if self._sync_manager:
+            try:
+                self._sync_manager.instant_sync(data_type)
+            except Exception:
+                pass  # تجاهل الأخطاء
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""

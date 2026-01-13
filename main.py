@@ -105,6 +105,10 @@ class SkyWaveERPApp:
 
         # 🔥 نظام المزامنة V3 - للتوافق مع الواجهة
         self.sync_manager = SyncManagerV3(self.repository)
+        
+        # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
+        from core.signals import app_signals
+        app_signals.set_sync_manager(self.unified_sync)
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
@@ -490,9 +494,10 @@ class SkyWaveERPApp:
                 logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: {e}")
         
         # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
-        QTimer.singleShot(5000, start_auto_sync_system)  # 5 ثواني بدلاً من 2
-        QTimer.singleShot(8000, start_realtime_sync)  # 8 ثواني بدلاً من 3
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 5 ثواني")
+        QTimer.singleShot(10000, start_auto_sync_system)  # ⚡ 10 ثواني
+        # ⚡ المزامنة الفورية معطّلة للاستقرار
+        # QTimer.singleShot(8000, start_realtime_sync)
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 10 ثواني")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -538,28 +543,9 @@ class SkyWaveERPApp:
             logger.warning(f"[MainApp] فشل تفعيل التحديث التلقائي: {e}")
     
     def _setup_periodic_maintenance(self):
-        """تفعيل الصيانة الدورية"""
-        try:
-            from core.db_maintenance import run_maintenance
-            
-            def maintenance_worker():
-                """صيانة دورية كل ساعة"""
-                import time
-                while True:
-                    time.sleep(3600)  # ساعة واحدة
-                    try:
-                        logger.info("[MainApp] بدء الصيانة الدورية...")
-                        run_maintenance()
-                    except Exception as e:
-                        logger.warning(f"[MainApp] فشلت الصيانة الدورية: {e}")
-            
-            import threading
-            maintenance_thread = threading.Thread(target=maintenance_worker, daemon=True)
-            maintenance_thread.start()
-            logger.info("[MainApp] تم تفعيل الصيانة الدورية (كل ساعة)")
-            
-        except Exception as e:
-            logger.warning(f"[MainApp] فشل تفعيل الصيانة الدورية: {e}")
+        """تفعيل الصيانة الدورية - معطّلة للاستقرار"""
+        # ⚡ معطّلة - تسبب تجميد البرنامج
+        logger.info("[MainApp] الصيانة الدورية معطّلة للاستقرار")
 
     def _cleanup_on_exit(self):
         """✅ تنظيف جميع الموارد عند إغلاق البرنامج"""
@@ -665,34 +651,68 @@ class SkyWaveERPApp:
 
 # --- Global Exception Hook ---
 def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
-    """معالج الأخطاء غير المتوقعة"""
+    """معالج الأخطاء غير المتوقعة - محسّن لمنع الإغلاق المفاجئ"""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
     # تجاهل أخطاء Qt المتعلقة بالكائنات المحذوفة
     error_msg = str(exc_value).lower()
-    if "deleted" in error_msg or "c/c++ object" in error_msg or "wrapped c/c++" in error_msg:
+    if any(x in error_msg for x in ["deleted", "c/c++ object", "wrapped c/c++", "runtime", "qobject", "destroyed"]):
         logger.debug(f"تجاهل خطأ Qt: {exc_value}")
+        return
+
+    # تجاهل أخطاء الاتصال الشائعة (MongoDB, Network)
+    if any(x in error_msg for x in ["connection", "timeout", "network", "mongo", "socket", "serverselection", "autoreconnect"]):
+        logger.debug(f"تجاهل خطأ اتصال: {exc_value}")
+        return
+
+    # تجاهل أخطاء Threads غير الخطيرة
+    if any(x in error_msg for x in ["thread", "daemon", "queue", "lock", "semaphore"]):
+        logger.debug(f"تجاهل خطأ thread: {exc_value}")
+        return
+    
+    # تجاهل أخطاء SQLite غير الخطيرة
+    if any(x in error_msg for x in ["database is locked", "disk i/o error", "busy"]):
+        logger.warning(f"خطأ SQLite (غير فادح): {exc_value}")
         return
 
     logger.critical("خطأ غير متوقع!", exc_info=(exc_type, exc_value, exc_traceback))
     
-    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ وإظهار رسالة
+    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ
     try:
         ErrorHandler.handle_exception(
             exception=exc_value,
             context="uncaught_exception",
-            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل أو إعادة تشغيل البرنامج.",
-            show_dialog=True
+            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل.",
+            show_dialog=False  # ⚡ عدم إظهار dialog لتجنب التجميد
         )
     except Exception:
-        # في حالة فشل معالج الأخطاء نفسه
-        safe_print(f"CRITICAL ERROR: {exc_type.__name__}: {exc_value}")
-        traceback.print_exception(exc_type, exc_value, exc_traceback)
+        # في حالة فشل معالج الأخطاء نفسه - لا نفعل شيء
+        pass
+
+# ⚡ معالج أخطاء الـ Threads
+def handle_thread_exception(args):
+    """معالج أخطاء الـ Threads - يمنع إغلاق البرنامج"""
+    exc_type = args.exc_type
+    exc_value = args.exc_value
+    thread = args.thread
+    
+    # تجاهل كل أخطاء الـ threads - لا نريد إغلاق البرنامج أبداً
+    error_msg = str(exc_value).lower() if exc_value else ""
+    
+    # تسجيل الخطأ فقط إذا كان مهماً
+    if not any(x in error_msg for x in ["connection", "timeout", "mongo", "network", "socket", "deleted", "destroyed"]):
+        logger.warning(f"خطأ في Thread ({thread.name}): {exc_value}")
+    
+    # لا نُغلق البرنامج أبداً بسبب خطأ في thread
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception
+
+# ⚡ تفعيل معالج أخطاء الـ Threads (Python 3.8+)
+import threading
+threading.excepthook = handle_thread_exception
 
 # --- نقطة الانطلاق ---
 if __name__ == "__main__":

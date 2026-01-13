@@ -186,13 +186,15 @@ class Repository:
             try:
                 self.mongo_client = pymongo.MongoClient(
                     MONGO_URI,
-                    serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال - أسرع
-                    connectTimeoutMS=5000,
-                    socketTimeoutMS=10000,  # ⚡ 10 ثواني للعمليات
+                    serverSelectionTimeoutMS=3000,  # ⚡ 3 ثواني للاتصال - أسرع
+                    connectTimeoutMS=3000,
+                    socketTimeoutMS=8000,  # ⚡ 8 ثواني للعمليات
                     retryWrites=True,
                     retryReads=True,
-                    maxPoolSize=10,  # ⚡ تقليل عدد الاتصالات
-                    minPoolSize=1
+                    maxPoolSize=5,  # ⚡ تقليل عدد الاتصالات للاستقرار
+                    minPoolSize=1,
+                    maxIdleTimeMS=30000,  # ⚡ إغلاق الاتصالات الخاملة بعد 30 ثانية
+                    waitQueueTimeoutMS=5000,  # ⚡ timeout للانتظار في الطابور
                 )
                 self.mongo_client.server_info()
                 self.mongo_db = self.mongo_client[DB_NAME]
@@ -2316,6 +2318,40 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل أرشفة الحساب: {e}")
             return False
 
+    def update_account_balance(self, account_code: str, new_balance: float) -> bool:
+        """⚡ تحديث رصيد حساب بالكود - سريع ومباشر"""
+        safe_print(f"INFO: [Repo] تحديث رصيد الحساب {account_code}: {new_balance}")
+        
+        now_iso = datetime.now().isoformat()
+        
+        try:
+            # تحديث محلي
+            self.sqlite_cursor.execute("""
+                UPDATE accounts SET balance = ?, last_modified = ?, sync_status = 'modified_offline'
+                WHERE code = ?
+            """, (new_balance, now_iso, account_code))
+            self.sqlite_conn.commit()
+            
+            # مزامنة مع MongoDB
+            if self.online and self.mongo_db:
+                try:
+                    self.mongo_db.accounts.update_one(
+                        {"code": account_code},
+                        {"$set": {"balance": new_balance, "last_modified": datetime.now()}}
+                    )
+                    self.sqlite_cursor.execute(
+                        "UPDATE accounts SET sync_status = 'synced' WHERE code = ?",
+                        (account_code,)
+                    )
+                    self.sqlite_conn.commit()
+                except Exception as e:
+                    safe_print(f"WARNING: [Repo] فشل مزامنة الرصيد مع MongoDB: {e}")
+            
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث رصيد الحساب: {e}")
+            return False
+
     def delete_account_permanently(self, account_id: str) -> bool:
         """ ⚡ حذف حساب نهائياً - محلي أولاً ثم مزامنة في الخلفية """
         safe_print(f"INFO: [Repo] جاري حذف الحساب نهائياً ID: {account_id}")
@@ -2504,10 +2540,15 @@ class Repository:
 
     def get_all_journal_entries(self) -> list[schemas.JournalEntry]:
         """ ⚡ جلب كل قيود اليومية (SQLite أولاً للسرعة) """
-        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        # ⚡ جلب من SQLite أولاً (سريع جداً) - استخدام cursor منفصل
         try:
-            self.sqlite_cursor.execute("SELECT * FROM journal_entries ORDER BY date DESC")
-            rows = self.sqlite_cursor.fetchall()
+            cursor = self.get_cursor()
+            try:
+                cursor.execute("SELECT * FROM journal_entries ORDER BY date DESC")
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+            
             entries_list = []
             for row in rows:
                 row_dict = dict(row)
@@ -3574,8 +3615,11 @@ class Repository:
                 # توليد الرقم الجديد
                 invoice_number = f"SW-{max_num + 1}"
                 
-                # ⚡ التحقق من عدم وجود تكرار
-                while True:
+                # ⚡ التحقق من عدم وجود تكرار (مع حد أقصى للتكرارات)
+                max_iterations = 100
+                iteration = 0
+                while iteration < max_iterations:
+                    iteration += 1
                     self.sqlite_cursor.execute(
                         "SELECT COUNT(*) FROM projects WHERE invoice_number = ?",
                         (invoice_number,)

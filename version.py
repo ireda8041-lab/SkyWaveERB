@@ -16,7 +16,7 @@ def _get_today_version() -> str:
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = "1.3.1"  # الإصدار الثابت
+CURRENT_VERSION = "1.3.7"  # الإصدار الثابت - تحسين اللوجو والسرعة
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 
@@ -87,7 +87,7 @@ def update_version_file():
     """
     version_data = {
         "version": CURRENT_VERSION,
-        "url": "https://github.com/imhzm/SkyWaveERB/releases/latest",
+        "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/latest",
         "changelog": [
             f"تحديث {parse_version_date(CURRENT_VERSION)}",
             "تحسينات في الأداء والسرعة",

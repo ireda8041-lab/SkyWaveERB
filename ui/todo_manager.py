@@ -1413,7 +1413,7 @@ class TodoManagerWidget(QWidget):
 
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._periodic_update)
-        self.update_timer.start(60000)
+        self.update_timer.start(300000)  # ⚡ 5 دقائق بدلاً من دقيقة
 
     def _load_cache_and_tasks(self):
         """تحميل الـ cache ثم المهام"""

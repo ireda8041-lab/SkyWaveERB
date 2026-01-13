@@ -696,6 +696,10 @@ class PaymentsManagerTab(QWidget):
         self.payments_list: list[schemas.Payment] = []
         self.clients_cache: dict[str, str] = {}  # cache للعملاء
 
+        # 📱 تجاوب: سياسة التمدد الكامل
+        from PyQt6.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
         self.setup_ui()
         self.apply_permissions()
 

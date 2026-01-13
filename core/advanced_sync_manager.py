@@ -43,36 +43,37 @@ class SyncQueueItem:
 
 
 class ConnectionChecker(QThread):
-    """فاحص الاتصال في الخلفية"""
+    """فاحص الاتصال في الخلفية - معطّل للاستقرار"""
 
     connection_changed = pyqtSignal(bool)  # True = متصل, False = غير متصل
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.is_running = True
-        self.check_interval = 10  # ثانية
+        self.is_running = False  # ⚡ معطّل بشكل افتراضي
+        self.check_interval = 60  # ⚡ دقيقة واحدة بدلاً من 10 ثواني
         self.last_status = None
 
     def run(self):
-        """تشغيل فاحص الاتصال"""
+        """تشغيل فاحص الاتصال - معطّل للاستقرار"""
+        # ⚡ معطّل - يسبب تجميد البرنامج
+        safe_print("INFO: [ConnectionChecker] معطّل للاستقرار")
+        return
+        
         while self.is_running:
             try:
                 # محاولة الاتصال بـ Google DNS
-                response = requests.get("https://8.8.8.8", timeout=5)
+                response = requests.get("https://8.8.8.8", timeout=3)
                 is_connected = response.status_code == 200
             except (requests.RequestException, OSError):
-                try:
-                    # محاولة بديلة - ping MongoDB server
-                    response = requests.get("https://cloud.mongodb.com", timeout=5)
-                    is_connected = response.status_code == 200
-                except (requests.RequestException, OSError):
-                    is_connected = False
+                is_connected = False
 
             # إرسال إشارة فقط عند تغيير الحالة
             if is_connected != self.last_status:
-                self.connection_changed.emit(is_connected)
+                try:
+                    self.connection_changed.emit(is_connected)
+                except RuntimeError:
+                    return  # Qt object deleted
                 self.last_status = is_connected
-                safe_print(f"INFO: [ConnectionChecker] Connection status changed: {'Online' if is_connected else 'Offline'}")
 
             # انتظار قبل الفحص التالي
             self.msleep(self.check_interval * 1000)
@@ -80,12 +81,15 @@ class ConnectionChecker(QThread):
     def stop(self):
         """إيقاف فاحص الاتصال"""
         self.is_running = False
-        self.quit()
-        self.wait()
+        try:
+            self.quit()
+            self.wait(500)  # ⚡ نصف ثانية فقط
+        except RuntimeError:
+            pass  # Qt object deleted
 
 
 class SyncWorker(QThread):
-    """عامل المزامنة في الخلفية"""
+    """عامل المزامنة في الخلفية - معطّل للاستقرار"""
 
     sync_started = pyqtSignal()
     sync_progress = pyqtSignal(int, int)  # current, total
@@ -96,12 +100,16 @@ class SyncWorker(QThread):
     def __init__(self, repository: Repository, parent=None):
         super().__init__(parent)
         self.repo = repository
-        self.is_running = True
-        self.sync_interval = 60  # ثانية
+        self.is_running = False  # ⚡ معطّل بشكل افتراضي
+        self.sync_interval = 300  # ⚡ 5 دقائق بدلاً من دقيقة
         self.is_online = False
 
     def run(self):
-        """تشغيل عامل المزامنة"""
+        """تشغيل عامل المزامنة - معطّل للاستقرار"""
+        # ⚡ معطّل - نظام المزامنة الموحد يقوم بالمهمة
+        safe_print("INFO: [SyncWorker] معطّل للاستقرار - استخدم نظام المزامنة الموحد")
+        return
+        
         while self.is_running:
             if self.is_online:
                 self.perform_sync()
@@ -272,12 +280,15 @@ class SyncWorker(QThread):
     def stop(self):
         """إيقاف عامل المزامنة"""
         self.is_running = False
-        self.quit()
-        self.wait()
+        try:
+            self.quit()
+            self.wait(500)  # ⚡ نصف ثانية فقط
+        except RuntimeError:
+            pass  # Qt object deleted
 
 
 class AdvancedSyncManagerV3(QObject):
-    """مدير المزامنة المتقدم"""
+    """مدير المزامنة المتقدم - معطّل للاستقرار"""
 
     # إشارات
     connection_status_changed = pyqtSignal(bool)
@@ -291,22 +302,11 @@ class AdvancedSyncManagerV3(QObject):
         self.is_online = False
         self.sync_status = "offline"
 
-        # إنشاء الخيوط
-        self.connection_checker = ConnectionChecker()
-        self.sync_worker = SyncWorker(repository)
+        # ⚡ لا نشغل الخيوط - معطّلة للاستقرار
+        self.connection_checker = None
+        self.sync_worker = None
 
-        # ربط الإشارات
-        self.connection_checker.connection_changed.connect(self.on_connection_changed)
-        self.sync_worker.sync_started.connect(self.on_sync_started)
-        self.sync_worker.sync_progress.connect(self.sync_progress.emit)
-        self.sync_worker.sync_completed.connect(self.on_sync_completed)
-        self.sync_worker.sync_failed.connect(self.on_sync_failed)
-
-        # بدء الخيوط
-        self.connection_checker.start()
-        self.sync_worker.start()
-
-        safe_print("INFO: [AdvancedSyncManager] Advanced sync system initialized")
+        safe_print("INFO: [AdvancedSyncManager] معطّل للاستقرار - استخدم نظام المزامنة الموحد")
 
     def on_connection_changed(self, is_online: bool):
         """معالج تغيير حالة الاتصال"""
@@ -420,12 +420,24 @@ class AdvancedSyncManagerV3(QObject):
         except Exception as e:
             safe_print(f"ERROR: [AdvancedSyncManager] Failed to cleanup: {e}")
 
+    def stop(self):
+        """إيقاف مدير المزامنة بأمان"""
+        safe_print("INFO: [AdvancedSyncManager] Stopping...")
+        try:
+            self.connection_checker.stop()
+        except Exception as e:
+            safe_print(f"WARNING: [AdvancedSyncManager] Error stopping connection checker: {e}")
+        try:
+            self.sync_worker.stop()
+        except Exception as e:
+            safe_print(f"WARNING: [AdvancedSyncManager] Error stopping sync worker: {e}")
+        safe_print("INFO: [AdvancedSyncManager] Stopped")
+
     def shutdown(self):
         """إغلاق مدير المزامنة"""
         safe_print("INFO: [AdvancedSyncManager] Shutting down...")
 
-        self.connection_checker.stop()
-        self.sync_worker.stop()
+        self.stop()
 
         # تنظيف العناصر القديمة
         self.cleanup_completed_items()

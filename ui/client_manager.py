@@ -149,7 +149,7 @@ class ClientManagerTab(QWidget):
         if h_header is not None:
             # اللوجو ثابت، الاسم والشركة والإيميل يتمددون، الباقي بحجم المحتوى
             h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # اللوجو
-            self.clients_table.setColumnWidth(0, 70)
+            self.clients_table.setColumnWidth(0, 60)  # ⚡ تصغير عرض العمود ليكون اللوجو في المنتصف
             h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # الاسم - يتمدد
             h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الشركة - يتمدد
             h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الهاتف
@@ -410,23 +410,42 @@ class ClientManagerTab(QWidget):
         )
 
     def _populate_clients_table(self, client_invoices_total, client_payments_total):
-        """ملء جدول العملاء بالبيانات"""
+        """ملء جدول العملاء بالبيانات - محسّن للسرعة"""
 
-        # ⚡ تحميل البيانات على دفعات لمنع التجميد
-        batch_size = 15
+        # ⚡ تحميل البيانات على دفعات أكبر للسرعة
+        batch_size = 25
+        total_clients = len(self.clients_list)
+        
         for index, client in enumerate(self.clients_list):
             self.clients_table.insertRow(index)
 
-            # ⚡ عرض لوجو العميل بشكل دائري احترافي
+            # ⚡ عرض لوجو العميل بشكل دائري احترافي - بدون مربع
             logo_container = QWidget()
+            logo_container.setStyleSheet("""
+                QWidget {
+                    background: transparent;
+                    border: none;
+                    margin: 0;
+                    padding: 0;
+                }
+            """)
             logo_layout = QHBoxLayout(logo_container)
-            logo_layout.setContentsMargins(2, 2, 2, 2)
+            logo_layout.setContentsMargins(0, 0, 0, 0)
+            logo_layout.setSpacing(0)
             logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
             
-            # إنشاء الـ label
+            # إنشاء الـ label - في المنتصف تماماً
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            logo_label.setFixedSize(44, 44)
+            logo_label.setFixedSize(40, 40)
+            logo_label.setStyleSheet("""
+                QLabel {
+                    background: transparent;
+                    border: none;
+                    margin: 0;
+                    padding: 0;
+                }
+            """)
             
             pixmap = None
             has_logo = False
@@ -485,7 +504,6 @@ class ClientManagerTab(QWidget):
                 painter.end()
                 
                 logo_label.setPixmap(circular)
-                logo_label.setStyleSheet("background: transparent; border: none;")
             else:
                 # أيقونة افتراضية - دائرة ملونة مع الحرف الأول
                 first_char = (client.name[0] if client.name else "?")
@@ -518,9 +536,13 @@ class ClientManagerTab(QWidget):
                 painter.end()
                 
                 logo_label.setPixmap(avatar)
-                logo_label.setStyleSheet("background: transparent; border: none;")
 
             logo_layout.addWidget(logo_label)
+            
+            # ⚡ إضافة item فارغ للتحكم في الـ background
+            empty_item = QTableWidgetItem()
+            empty_item.setBackground(QColor("transparent"))
+            self.clients_table.setItem(index, 0, empty_item)
             self.clients_table.setCellWidget(index, 0, logo_container)
 
             # معالجة الأحداث كل batch_size صف

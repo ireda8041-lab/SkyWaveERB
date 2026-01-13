@@ -1218,3 +1218,84 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             safe_print(f"خطأ في تخصيص شريط العنوان: {e}")
+
+    def closeEvent(self, event):
+        """
+        🛡️ إيقاف آمن لجميع الخدمات عند إغلاق البرنامج
+        يحل مشكلة التجميد والإغلاق المفاجئ
+        """
+        try:
+            safe_print("INFO: [MainWindow] بدء عملية الإغلاق الآمن...")
+
+            # 1. إيقاف مؤقت فحص المشاريع
+            if hasattr(self, 'project_check_timer'):
+                try:
+                    self.project_check_timer.stop()
+                    safe_print("✅ تم إيقاف مؤقت فحص المشاريع")
+                except RuntimeError:
+                    pass  # Timer تم حذفه بالفعل
+
+            # 2. إيقاف خدمة التحديث التلقائي
+            try:
+                from services.auto_update_service import get_auto_update_service
+                auto_update = get_auto_update_service()
+                if auto_update:
+                    auto_update.stop()
+                    safe_print("✅ تم إيقاف خدمة التحديث التلقائي")
+            except Exception as e:
+                safe_print(f"تحذير: فشل إيقاف خدمة التحديث: {e}")
+
+            # 3. إيقاف خدمة المزامنة
+            if hasattr(self, 'sync_manager') and self.sync_manager:
+                try:
+                    self.sync_manager.stop()
+                    safe_print("✅ تم إيقاف خدمة المزامنة")
+                except Exception as e:
+                    safe_print(f"تحذير: فشل إيقاف المزامنة: {e}")
+
+            # 4. إيقاف خدمة المزامنة المتقدمة
+            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
+                try:
+                    self.advanced_sync_manager.stop()
+                    safe_print("✅ تم إيقاف خدمة المزامنة المتقدمة")
+                except Exception as e:
+                    safe_print(f"تحذير: فشل إيقاف المزامنة المتقدمة: {e}")
+
+            # 5. إيقاف نظام المزامنة الفورية
+            try:
+                from core.realtime_sync import shutdown_realtime_sync
+                shutdown_realtime_sync()
+                safe_print("✅ تم إيقاف المزامنة الفورية")
+            except Exception as e:
+                safe_print(f"تحذير: فشل إيقاف المزامنة الفورية: {e}")
+
+            # 6. إيقاف نظام الإشعارات
+            try:
+                from ui.notification_system import NotificationManager
+                NotificationManager.shutdown()
+                safe_print("✅ تم إيقاف نظام الإشعارات")
+            except Exception as e:
+                safe_print(f"تحذير: فشل إيقاف الإشعارات: {e}")
+
+            # 7. إغلاق قاعدة البيانات بشكل آمن
+            if hasattr(self, 'accounting_service') and hasattr(self.accounting_service, 'repo'):
+                try:
+                    self.accounting_service.repo.close()
+                    safe_print("✅ تم إغلاق قاعدة البيانات")
+                except Exception as e:
+                    safe_print(f"تحذير: فشل إغلاق قاعدة البيانات: {e}")
+
+            # 8. تنظيف الذاكرة
+            import gc
+            gc.collect()
+            safe_print("✅ تم تنظيف الذاكرة")
+
+            safe_print("INFO: [MainWindow] اكتملت عملية الإغلاق الآمن بنجاح")
+            event.accept()
+
+        except Exception as e:
+            safe_print(f"ERROR: خطأ أثناء الإغلاق: {e}")
+            import traceback
+            traceback.print_exc()
+            # قبول الإغلاق حتى لو حدث خطأ
+            event.accept()

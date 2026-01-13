@@ -263,7 +263,7 @@ class ToastNotification(QWidget):
 
 
 class NotificationSyncWorker(QThread):
-    """عامل مزامنة الإشعارات من MongoDB"""
+    """عامل مزامنة الإشعارات من MongoDB - محسّن للاستقرار"""
     
     new_notification = pyqtSignal(dict)
     
@@ -272,6 +272,7 @@ class NotificationSyncWorker(QThread):
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
+        self._check_interval = 30000  # ⚡ 30 ثانية بدلاً من 10
     
     def set_repository(self, repo):
         self.repo = repo
@@ -284,9 +285,9 @@ class NotificationSyncWorker(QThread):
                 if self.repo and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None):
                     self._check_new_notifications()
             except Exception as e:
-                safe_print(f"ERROR: [NotificationSync] {e}")
+                safe_print(f"WARNING: [NotificationSync] {e}")
             
-            self.msleep(2000)
+            self.msleep(self._check_interval)  # ⚡ 30 ثانية
     
     def _check_new_notifications(self):
         try:
@@ -345,9 +346,15 @@ class NotificationSyncWorker(QThread):
             # لا نوقف الـ worker، فقط نسجل الخطأ ونتابع
     
     def stop(self):
+        """إيقاف آمن للـ worker"""
         self.is_running = False
-        self.quit()
-        self.wait(1000)  # انتظر ثانية واحدة فقط
+        try:
+            self.quit()
+            if not self.wait(500):  # انتظر نصف ثانية فقط
+                self.terminate()  # إجبار الإيقاف إذا لم يستجب
+        except RuntimeError:
+            # Qt object already deleted
+            pass
 
 
 class NotificationManager(QObject):

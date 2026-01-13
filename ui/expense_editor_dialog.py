@@ -79,38 +79,39 @@ class ExpenseEditorDialog(QDialog):
         self.init_ui()
 
     def load_data(self):
-        """جلب الحسابات والمشاريع من قاعدة البيانات"""
+        """جلب الحسابات والمشاريع والفئات من قاعدة البيانات"""
         all_accounts = self.accounting_service.repo.get_all_accounts()
         self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('11')]
-        self.expense_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('5')]
         self.projects_list = self.project_service.get_all_projects()
+        
+        # جلب فئات المصروفات من المصروفات السابقة
+        self.expense_categories = self.expense_service.get_expense_categories()
+        # إضافة فئات افتراضية إذا لم توجد فئات
+        default_categories = [
+            "رواتب وأجور",
+            "إيجار",
+            "كهرباء ومياه",
+            "مواصلات",
+            "صيانة",
+            "مستلزمات مكتبية",
+            "اتصالات وإنترنت",
+            "تسويق وإعلان",
+            "مصروفات متنوعة"
+        ]
+        # دمج الفئات الافتراضية مع الفئات الموجودة
+        all_categories = set(self.expense_categories) | set(default_categories)
+        self.expense_categories = sorted(all_categories)
 
     def _get_currencies_from_db(self) -> list[tuple]:
-        """جلب العملات وأسعارها المحدثة من قاعدة البيانات"""
-        fallback_currencies = [
+        """جلب العملات - الجنيه المصري أولاً دائماً"""
+        # الجنيه المصري دائماً أولاً - ثابت ولا يتغير
+        default_currencies = [
             ("EGP", "جنيه مصري", "ج.م", 1.00),
             ("USD", "دولار أمريكي", "$", 49.50),
             ("SAR", "ريال سعودي", "ر.س", 13.20),
             ("AED", "درهم إماراتي", "د.إ", 13.48),
         ]
-        try:
-            repo = self.accounting_service.repo
-            if hasattr(repo, 'get_all_currencies'):
-                currencies = repo.get_all_currencies()
-                if currencies:
-                    result = []
-                    for curr in currencies:
-                        if curr.get('active', True):
-                            code = curr.get('code', '')
-                            name = curr.get('name', '')
-                            symbol = curr.get('symbol', '')
-                            rate = curr.get('rate', 1.0)
-                            result.append((code, name, symbol, rate))
-                    if result:
-                        return result
-        except Exception as e:
-            safe_print(f"WARNING: [ExpenseEditorDialog] فشل جلب العملات: {e}")
-        return fallback_currencies
+        return default_currencies
 
     def init_ui(self):
         from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
@@ -228,12 +229,15 @@ class ExpenseEditorDialog(QDialog):
         cat_label = QLabel("📂 فئة المصروف")
         cat_label.setStyleSheet(label_style)
         cat_container.addWidget(cat_label)
-        # SmartFilterComboBox مع فلترة ذكية
+        # SmartFilterComboBox مع إمكانية الكتابة الحرة
         self.category_combo = SmartFilterComboBox()
         self.category_combo.setStyleSheet(field_style)
-        for acc in self.expense_accounts:
-            self.category_combo.addItem(acc.name, userData=acc.code)
-        self.category_combo.lineEdit().setPlaceholderText("اكتب للبحث...")
+        self.category_combo.setEditable(True)
+        # إضافة الفئات من المصروفات السابقة + الافتراضية
+        for category in self.expense_categories:
+            self.category_combo.addItem(category, userData=category)
+        self.category_combo.lineEdit().setPlaceholderText("اكتب فئة جديدة أو اختر...")
+        self.category_combo.setCurrentIndex(-1)  # لا يوجد اختيار افتراضي
         cat_container.addWidget(self.category_combo)
         row1.addLayout(cat_container, 1)
         
@@ -264,8 +268,11 @@ class ExpenseEditorDialog(QDialog):
         self.currency_combo = QComboBox()
         self.currency_combo.setStyleSheet(field_style)
         currencies_data = self._get_currencies_from_db()
-        for code, name, symbol, rate in currencies_data:
+        # الجنيه المصري دائماً أولاً (index 0) بسبب _get_currencies_from_db
+        for idx, (code, name, symbol, rate) in enumerate(currencies_data):
             self.currency_combo.addItem(f"{symbol} {name}", userData={"code": code, "rate": rate})
+        # تعيين الجنيه المصري كعملة افتراضية (أول عنصر)
+        self.currency_combo.setCurrentIndex(0)
         curr_container.addWidget(self.currency_combo)
         row2.addLayout(curr_container, 1)
         
@@ -355,17 +362,18 @@ class ExpenseEditorDialog(QDialog):
                     self.project_combo.setCurrentIndex(i)
                     break
 
-        if hasattr(exp, 'account_id') and exp.account_id:
+        # تحميل الفئة - البحث بالنص أو تعيينها مباشرة
+        if exp.category:
+            found = False
             for i in range(self.category_combo.count()):
-                acc_code = self.category_combo.itemData(i)
-                if acc_code == exp.account_id:
+                if self.category_combo.itemText(i) == exp.category:
                     self.category_combo.setCurrentIndex(i)
+                    found = True
                     break
-        else:
-            for i in range(self.category_combo.count()):
-                if exp.category in self.category_combo.itemText(i):
-                    self.category_combo.setCurrentIndex(i)
-                    break
+            if not found:
+                # إذا لم توجد الفئة في القائمة، أضفها وحددها
+                self.category_combo.addItem(exp.category, userData=exp.category)
+                self.category_combo.setCurrentIndex(self.category_combo.count() - 1)
 
         if hasattr(exp, 'payment_account_id') and exp.payment_account_id:
             for i in range(self.account_combo.count()):
@@ -383,12 +391,13 @@ class ExpenseEditorDialog(QDialog):
 
     def save_expense(self):
         """حفظ المصروف"""
-        selected_category_code = self.category_combo.currentData()
+        # الحصول على الفئة - إما من القائمة أو مكتوبة يدوياً
+        category_text = self.category_combo.currentText().strip()
         selected_payment_code = self.account_combo.currentData()
         selected_project = self.project_combo.currentData()
 
-        if not selected_category_code:
-            self._show_validation_error("⚠️ الرجاء اختيار فئة المصروف")
+        if not category_text:
+            self._show_validation_error("⚠️ الرجاء إدخال أو اختيار فئة المصروف")
             return
 
         if not selected_payment_code:
@@ -399,12 +408,13 @@ class ExpenseEditorDialog(QDialog):
             self._show_validation_error("⚠️ الرجاء إدخال مبلغ صحيح")
             return
 
+        # استخدام حساب الدفع كـ account_id أيضاً (لأنه لا توجد حسابات مصروفات منفصلة)
         expense_data = schemas.Expense(
             date=self.date_input.dateTime().toPyDateTime(),
-            category=self.category_combo.currentText(),
+            category=category_text,
             amount=self.amount_input.value(),
             description=self.description_input.toPlainText(),
-            account_id=selected_category_code,
+            account_id=selected_payment_code,  # نفس حساب الدفع
             payment_account_id=selected_payment_code,
             project_id=selected_project.name if selected_project else None,
         )

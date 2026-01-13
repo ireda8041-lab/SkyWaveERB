@@ -48,39 +48,21 @@ class RealtimeSync(QObject):
             'notifications',
         ]
         
-        # تايمر للتحقق من الاتصال - محسّن
+        # تايمر للتحقق من الاتصال - معطّل للاستقرار
         self.connection_timer = QTimer()
-        self.connection_timer.timeout.connect(self._check_connection)
-        self.connection_timer.start(60000)  # كل دقيقة بدلاً من 30 ثانية
+        # ⚡ لا نبدأ التايمر - المزامنة الفورية معطّلة
+        # self.connection_timer.timeout.connect(self._check_connection)
+        # self.connection_timer.start(60000)
         
         self.last_connection_status = False
-        self._enabled = True  # للتحكم في تشغيل/إيقاف المزامنة
+        self._enabled = False  # ⚡ معطّل بشكل افتراضي
     
     def start(self):
-        """بدء المزامنة الفورية"""
-        if self.is_running:
-            return
-        
-        if not self.repo or not self.repo.online or not self.repo.mongo_db:
-            safe_print("WARNING: [RealtimeSync] MongoDB غير متاح - لا يمكن بدء المزامنة الفورية")
-            return
-        
-        self.is_running = True
-        self.stop_event.clear()
-        
-        safe_print("INFO: [RealtimeSync] بدء المزامنة الفورية...")
-        
-        # بدء مراقبة كل مجموعة في thread منفصل
-        for collection_name in self.collections_to_watch:
-            thread = Thread(
-                target=self._watch_collection,
-                args=(collection_name,),
-                daemon=True,
-                name=f"RealtimeSync-{collection_name}"
-            )
-            thread.start()
-            self.watch_threads[collection_name] = thread
-            safe_print(f"INFO: [RealtimeSync] بدء مراقبة {collection_name}")
+        """بدء المزامنة الفورية - معطّل للاستقرار"""
+        # ⚡ المزامنة الفورية معطّلة بشكل دائم - تسبب عدم استقرار
+        # نظام المزامنة الموحد (unified_sync) يقوم بالمهمة بشكل أفضل
+        safe_print("INFO: [RealtimeSync] المزامنة الفورية معطّلة - استخدم نظام المزامنة الموحد")
+        return
     
     def stop(self):
         """إيقاف المزامنة الفورية"""
@@ -145,7 +127,7 @@ class RealtimeSync(QObject):
         safe_print(f"INFO: [RealtimeSync] انتهت مراقبة {collection_name}")
     
     def _handle_change(self, collection_name: str, change: Dict[str, Any]):
-        """معالجة تغيير في المجموعة"""
+        """معالجة تغيير في المجموعة - محمية من الأخطاء"""
         try:
             operation_type = change.get('operationType')
             document_id = change.get('documentKey', {}).get('_id')
@@ -160,10 +142,16 @@ class RealtimeSync(QObject):
                 'timestamp': datetime.now().isoformat()
             }
             
-            self.data_updated.emit(collection_name, change_data)
+            # ⚡ إرسال الإشارة بشكل آمن
+            try:
+                self.data_updated.emit(collection_name, change_data)
+            except RuntimeError:
+                # Qt object deleted
+                pass
             
         except Exception as e:
-            safe_print(f"ERROR: [RealtimeSync] فشل معالجة التغيير: {e}")
+            # لا نُسقط البرنامج أبداً بسبب خطأ هنا
+            safe_print(f"WARNING: [RealtimeSync] فشل معالجة التغيير: {e}")
     
     def _check_connection(self):
         """فحص حالة الاتصال - محسّن ومحمي"""
@@ -217,7 +205,7 @@ class RealtimeDataManager(QObject):
         self.realtime_sync.stop()
     
     def _on_data_updated(self, collection_name: str, change_data: Dict[str, Any]):
-        """معالجة تحديث البيانات"""
+        """معالجة تحديث البيانات - محمية من الأخطاء"""
         try:
             # إرسال إشارة تحديث للواجهة
             from core.signals import app_signals
@@ -236,7 +224,13 @@ class RealtimeDataManager(QObject):
             data_type = data_type_map.get(collection_name, collection_name)
             
             safe_print(f"INFO: [RealtimeDataManager] إرسال إشارة تحديث: {data_type} ({collection_name})")
-            app_signals.emit_data_changed(data_type)
+            
+            # ⚡ إرسال الإشارة بشكل آمن
+            try:
+                app_signals.emit_data_changed(data_type)
+            except RuntimeError:
+                # Qt object deleted - تجاهل
+                return
             
             # إشعارات مخصصة لكل قسم
             operation = change_data.get('operation', '')
@@ -244,7 +238,8 @@ class RealtimeDataManager(QObject):
                 self._send_section_notification(collection_name, operation, change_data)
                 
         except Exception as e:
-            safe_print(f"ERROR: [RealtimeDataManager] فشل معالجة التحديث: {e}")
+            # لا نُسقط البرنامج أبداً
+            safe_print(f"WARNING: [RealtimeDataManager] فشل معالجة التحديث: {e}")
     
     def _send_section_notification(self, collection_name: str, operation: str, change_data: dict):
         """إرسال إشعارات مخصصة لكل قسم"""
