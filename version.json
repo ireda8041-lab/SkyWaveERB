@@ -1,22 +1,15 @@
 {
-  "version": "1.3.9",
-  "version_name": "Ultra Speed & Performance - Sky Wave ERP",
+  "version": "1.3.10",
+  "version_name": "Hotfix - Smart Scan Import Fix",
   "release_date": "2026-01-16",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.9/SkyWaveERP-Setup-1.3.9.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.10/SkyWaveERP-Setup-1.3.10.exe",
   "changelog": [
-    "⚡ تحسين شامل للسرعة والاستجابة",
-    "⚡ تسريع عرض بيانات المشروع في المعاينة",
-    "⚡ تحسين تحميل الجداول (setRowCount بدلاً من insertRow)",
-    "⚡ إزالة processEvents من كل الملفات",
-    "⚡ تقليل تكرار المزامنة (10 دقائق بدلاً من 30 ثانية)",
-    "⚡ زيادة فترات الـ Cache للسرعة",
-    "⚡ تحسين استعلامات قاعدة البيانات",
-    "⚡ تحميل بيانات المعاينة في طلب واحد",
-    "✅ استقرار أفضل وعدم إغلاق مفاجئ",
-    "🚀 استجابة فورية لكل العمليات"
+    "🔧 إصلاح مشكلة google.generativeai عند التشغيل",
+    "⚡ استيراد آمن للمكتبات الاختيارية",
+    "✅ البرنامج يعمل حتى بدون مكتبة Smart Scan"
   ],
   "min_version": "1.0.0",
-  "mandatory": false,
-  "notes_ar": "تحسين شامل للسرعة والاستجابة - البرنامج أسرع بكثير الآن",
-  "notes_en": "Comprehensive speed and responsiveness improvement - much faster now"
+  "mandatory": true,
+  "notes_ar": "إصلاح عاجل - البرنامج كان لا يفتح بسبب مكتبة ناقصة",
+  "notes_en": "Hotfix - App was not opening due to missing library"
 }

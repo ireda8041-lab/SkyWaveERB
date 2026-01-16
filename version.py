@@ -16,7 +16,7 @@ def _get_today_version() -> str:
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = "1.3.9"  # الإصدار الثابت - تحسين السرعة والاستجابة
+CURRENT_VERSION = "1.3.10"  # الإصدار الثابت - إصلاح مشكلة google.generativeai
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 

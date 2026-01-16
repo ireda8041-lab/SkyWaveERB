@@ -11,10 +11,22 @@
 import os
 import json
 import logging
-import PIL.Image
-import google.generativeai as genai
 from typing import Dict, Any
 from datetime import datetime
+
+# ⚡ استيراد آمن للمكتبات الاختيارية
+try:
+    import PIL.Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    genai = None
+    GENAI_AVAILABLE = False
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -49,6 +61,15 @@ class SmartScanService:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = None
         
+        # ⚡ فحص توفر المكتبات أولاً
+        if not GENAI_AVAILABLE:
+            logger.warning("⚠️ google.generativeai غير متاح - Smart Scan معطل")
+            return
+        
+        if not PIL_AVAILABLE:
+            logger.warning("⚠️ PIL غير متاح - Smart Scan معطل")
+            return
+        
         if not self.api_key:
             # ⚡ تحذير صامت - لا نريد إزعاج المستخدم
             pass  # Smart Scan غير متاح بدون API key
@@ -57,6 +78,8 @@ class SmartScanService:
 
     def _configure_genai(self):
         """تهيئة Gemini AI"""
+        if not GENAI_AVAILABLE or genai is None:
+            return
         try:
             genai.configure(api_key=self.api_key)
             # نستخدم gemini-2.0-flash (الأحدث والأسرع)
@@ -67,7 +90,7 @@ class SmartScanService:
 
     def is_available(self) -> bool:
         """هل الخدمة متاحة؟"""
-        return self.model is not None
+        return GENAI_AVAILABLE and PIL_AVAILABLE and self.model is not None
 
     # الصيغ المدعومة
     SUPPORTED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
