@@ -141,10 +141,31 @@ class SettingsTab(QWidget):
             self.load_users()
 
     def setup_company_tab(self):
-        """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب"""
-        from PyQt6.QtWidgets import QFrame, QGridLayout, QSizePolicy
+        """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
+        from PyQt6.QtWidgets import QFrame, QGridLayout, QSizePolicy, QScrollArea
         
-        layout = QVBoxLayout(self.company_tab)
+        # ⚡ منطقة التمرير للشاشات الصغيرة
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background: transparent;
+            }
+            QScrollBar:vertical {
+                background: #0d2137;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3d6a9f;
+                border-radius: 4px;
+                min-height: 30px;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 15, 20, 15)
         
@@ -154,19 +175,21 @@ class SettingsTab(QWidget):
                 background: #0d2137;
                 color: #F1F5F9;
                 border: 1px solid #2d4a6f;
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-size: 12px;
-                min-height: 18px;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 13px;
+                min-height: 20px;
             }
             QLineEdit:focus {
-                border: 1px solid #0A6CF1;
+                border: 2px solid #0A6CF1;
+                background: #0f2942;
             }
             QLineEdit:hover {
-                border: 1px solid #3d6a9f;
+                border: 1px solid #4d8ac9;
             }
         """
-        label_style = "color: #60a5fa; font-size: 11px; font-weight: bold;"
+        label_style = "color: #60a5fa; font-size: 12px; font-weight: bold; margin-bottom: 2px;"
+        section_title_style = "color: #93C5FD; font-size: 14px; font-weight: bold; padding: 5px 0;"
         
         # === التخطيط الأفقي الرئيسي ===
         main_h = QHBoxLayout()
@@ -176,23 +199,24 @@ class SettingsTab(QWidget):
         fields_frame = QFrame()
         fields_frame.setStyleSheet("""
             QFrame {
-                background: rgba(13, 33, 55, 0.5);
-                border: 1px solid rgba(45, 74, 111, 0.4);
-                border-radius: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
+                border: 1px solid rgba(45, 74, 111, 0.5);
+                border-radius: 12px;
             }
         """)
         fields_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         fields_container = QVBoxLayout(fields_frame)
-        fields_container.setContentsMargins(15, 15, 15, 15)
-        fields_container.setSpacing(10)
+        fields_container.setContentsMargins(20, 20, 20, 20)
+        fields_container.setSpacing(12)
         
         # عنوان القسم
-        fields_title = QLabel("📋 بيانات الشركة")
-        fields_title.setStyleSheet("color: #93C5FD; font-size: 13px; font-weight: bold;")
+        fields_title = QLabel("📋 بيانات الشركة الأساسية")
+        fields_title.setStyleSheet(section_title_style)
         fields_container.addWidget(fields_title)
         
         fields_layout = QGridLayout()
-        fields_layout.setSpacing(8)
+        fields_layout.setSpacing(10)
         fields_layout.setColumnStretch(0, 1)
         fields_layout.setColumnStretch(1, 1)
         
@@ -251,74 +275,124 @@ class SettingsTab(QWidget):
         fields_layout.addWidget(self.company_vat_input, 5, 1)
         
         fields_container.addLayout(fields_layout)
+        
+        # ⚡ قسم البيانات البنكية
+        bank_title = QLabel("🏦 بيانات الدفع")
+        bank_title.setStyleSheet(section_title_style)
+        fields_container.addWidget(bank_title)
+        
+        bank_layout = QGridLayout()
+        bank_layout.setSpacing(10)
+        bank_layout.setColumnStretch(0, 1)
+        bank_layout.setColumnStretch(1, 1)
+        
+        # اسم البنك
+        bank_name_lbl = QLabel("🏦 اسم البنك")
+        bank_name_lbl.setStyleSheet(label_style)
+        self.bank_name_input = QLineEdit()
+        self.bank_name_input.setPlaceholderText("البنك الأهلي المصري")
+        self.bank_name_input.setStyleSheet(input_style)
+        bank_layout.addWidget(bank_name_lbl, 0, 0)
+        bank_layout.addWidget(self.bank_name_input, 1, 0)
+        
+        # رقم الحساب
+        bank_acc_lbl = QLabel("💳 رقم الحساب")
+        bank_acc_lbl.setStyleSheet(label_style)
+        self.bank_account_input = QLineEdit()
+        self.bank_account_input.setPlaceholderText("XXXX-XXXX-XXXX-XXXX")
+        self.bank_account_input.setStyleSheet(input_style)
+        bank_layout.addWidget(bank_acc_lbl, 0, 1)
+        bank_layout.addWidget(self.bank_account_input, 1, 1)
+        
+        # فودافون كاش
+        vcash_lbl = QLabel("📲 فودافون كاش")
+        vcash_lbl.setStyleSheet(label_style)
+        self.vodafone_cash_input = QLineEdit()
+        self.vodafone_cash_input.setPlaceholderText("010-XXXX-XXXX")
+        self.vodafone_cash_input.setStyleSheet(input_style)
+        bank_layout.addWidget(vcash_lbl, 2, 0)
+        bank_layout.addWidget(self.vodafone_cash_input, 3, 0)
+        
+        fields_container.addLayout(bank_layout)
         main_h.addWidget(fields_frame, 3)
         
         # === الجانب الأيمن: اللوجو ===
         logo_frame = QFrame()
         logo_frame.setStyleSheet("""
             QFrame {
-                background: rgba(13, 33, 55, 0.5);
-                border: 1px solid rgba(45, 74, 111, 0.4);
-                border-radius: 10px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
+                border: 1px solid rgba(45, 74, 111, 0.5);
+                border-radius: 12px;
             }
         """)
         logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        logo_frame.setMinimumWidth(200)
         logo_container = QVBoxLayout(logo_frame)
-        logo_container.setContentsMargins(15, 15, 15, 15)
-        logo_container.setSpacing(10)
+        logo_container.setContentsMargins(20, 20, 20, 20)
+        logo_container.setSpacing(12)
         logo_container.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         
         logo_title = QLabel("🖼️ شعار الشركة")
-        logo_title.setStyleSheet("color: #93C5FD; font-size: 13px; font-weight: bold;")
+        logo_title.setStyleSheet(section_title_style)
         logo_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_container.addWidget(logo_title)
         
-        # إطار اللوجو
+        # إطار اللوجو المحسن
         self.logo_preview = QLabel()
-        self.logo_preview.setFixedSize(130, 130)
+        self.logo_preview.setFixedSize(150, 150)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logo_preview.setStyleSheet("""
             QLabel {
-                background: #0d2137;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #0d2137, stop:1 #0a1929);
                 border: 2px dashed #3d6a9f;
-                border-radius: 10px;
+                border-radius: 12px;
                 color: #64748B;
-                font-size: 11px;
+                font-size: 12px;
             }
         """)
         self.logo_preview.setText("📷\nلا يوجد شعار")
         logo_container.addWidget(self.logo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
         
-        # أزرار اللوجو
+        # أزرار اللوجو المحسنة
         btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
+        btn_layout.setSpacing(10)
         
-        self.select_logo_btn = QPushButton("📷 اختيار")
+        self.select_logo_btn = QPushButton("📷 اختيار صورة")
         self.select_logo_btn.setStyleSheet("""
             QPushButton {
-                background: #0A6CF1;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #0A6CF1, stop:1 #2563eb);
                 color: white;
                 border: none;
-                border-radius: 5px;
-                padding: 8px 14px;
-                font-size: 11px;
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-size: 12px;
                 font-weight: bold;
             }
-            QPushButton:hover { background: #2563eb; }
+            QPushButton:hover { 
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #2563eb, stop:1 #3b82f6);
+            }
         """)
         self.select_logo_btn.clicked.connect(self.select_logo_file)
         
-        self.remove_logo_btn = QPushButton("🗑️")
+        self.remove_logo_btn = QPushButton("🗑️ حذف")
         self.remove_logo_btn.setStyleSheet("""
             QPushButton {
-                background: rgba(239, 68, 68, 0.15);
+                background: rgba(239, 68, 68, 0.2);
                 color: #FCA5A5;
-                border: 1px solid rgba(239, 68, 68, 0.3);
-                border-radius: 5px;
-                padding: 8px 12px;
-                font-size: 11px;
+                border: 1px solid rgba(239, 68, 68, 0.4);
+                border-radius: 8px;
+                padding: 10px 16px;
+                font-size: 12px;
+                font-weight: bold;
             }
-            QPushButton:hover { background: rgba(239, 68, 68, 0.3); }
+            QPushButton:hover { 
+                background: rgba(239, 68, 68, 0.4);
+                color: white;
+            }
         """)
         self.remove_logo_btn.clicked.connect(self._remove_logo)
         
@@ -327,32 +401,53 @@ class SettingsTab(QWidget):
         logo_container.addLayout(btn_layout)
         
         # نص توضيحي
-        hint_lbl = QLabel("PNG, JPG • 200×200 px")
-        hint_lbl.setStyleSheet("color: #64748B; font-size: 9px;")
+        hint_lbl = QLabel("PNG, JPG • 200×200 px\n✅ يتم مزامنته تلقائياً")
+        hint_lbl.setStyleSheet("color: #64748B; font-size: 10px;")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_container.addWidget(hint_lbl)
         
+        logo_container.addStretch()
         main_h.addWidget(logo_frame, 1)
         
         layout.addLayout(main_h, 1)
         
-        # زر الحفظ
+        # ⚡ زر الحفظ المحسن
+        save_container = QHBoxLayout()
+        save_container.addStretch()
+        
         self.save_company_btn = QPushButton("💾 حفظ بيانات الشركة")
+        self.save_company_btn.setMinimumWidth(250)
         self.save_company_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 12px 30px;
-                font-size: 13px;
+                border-radius: 10px;
+                padding: 14px 40px;
+                font-size: 14px;
                 font-weight: bold;
             }
-            QPushButton:hover { background: #059669; }
+            QPushButton:hover { 
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #059669, stop:1 #10b981);
+            }
+            QPushButton:pressed {
+                background: #047857;
+            }
         """)
         self.save_company_btn.clicked.connect(self.save_settings)
-        layout.addWidget(self.save_company_btn)
+        save_container.addWidget(self.save_company_btn)
+        save_container.addStretch()
+        
+        layout.addLayout(save_container)
+        
+        scroll_area.setWidget(scroll_content)
+        
+        # إضافة scroll_area للتاب
+        tab_layout = QVBoxLayout(self.company_tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
 
     def _remove_logo(self):
         """حذف اللوجو الحالي"""
@@ -624,14 +719,14 @@ class SettingsTab(QWidget):
                 )
                 self.logo_preview.setPixmap(scaled)
                 self.logo_preview.setProperty("logo_path", file_path)
+                
+                # ⚡ حفظ اللوجو كـ Base64 للمزامنة بين الأجهزة
+                if self.settings_service.save_logo_from_file(file_path):
+                    safe_print("INFO: [SettingsTab] تم حفظ اللوجو للمزامنة")
 
     def load_settings_data(self):
         safe_print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
         try:
-            # ⚡ معالجة الأحداث لمنع التجميد
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
-
             settings = self.settings_service.get_settings()
             self.company_name_input.setText(settings.get("company_name", ""))
             self.company_address_input.setText(settings.get("company_address", ""))
@@ -639,13 +734,33 @@ class SettingsTab(QWidget):
             self.company_email_input.setText(settings.get("company_email", ""))
             self.company_website_input.setText(settings.get("company_website", ""))
             self.company_vat_input.setText(settings.get("company_vat", ""))
+            
+            # ⚡ بيانات البنك
+            if hasattr(self, 'bank_name_input'):
+                self.bank_name_input.setText(settings.get("bank_name", ""))
+            if hasattr(self, 'bank_account_input'):
+                self.bank_account_input.setText(settings.get("bank_account", ""))
+            if hasattr(self, 'vodafone_cash_input'):
+                self.vodafone_cash_input.setText(settings.get("vodafone_cash", ""))
 
             logo_path = settings.get("company_logo_path", "")
-            if logo_path and os.path.exists(logo_path):
+            
+            # ⚡ أولاً: محاولة تحميل من Base64 (للمزامنة بين الأجهزة)
+            pixmap = self.settings_service.get_logo_as_pixmap()
+            if pixmap and not pixmap.isNull():
+                scaled = pixmap.scaled(
+                    140, 140,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+                self.logo_preview.setPixmap(scaled)
+                self.logo_preview.setProperty("logo_path", logo_path)
+            elif logo_path and os.path.exists(logo_path):
+                # ثانياً: تحميل من المسار المحلي
                 pixmap = QPixmap(logo_path)
                 if not pixmap.isNull():
                     scaled = pixmap.scaled(
-                        120, 120,
+                        140, 140,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation
                     )
@@ -660,6 +775,11 @@ class SettingsTab(QWidget):
         safe_print("INFO: [SettingsTab] جاري حفظ الإعدادات...")
         try:
             logo_path = self.logo_preview.property("logo_path") or ""
+            
+            # الحفاظ على logo_data الموجود
+            current_settings = self.settings_service.get_settings()
+            logo_data = current_settings.get("company_logo_data", "")
+            
             new_settings = {
                 "company_name": self.company_name_input.text(),
                 "company_address": self.company_address_input.text(),
@@ -668,9 +788,24 @@ class SettingsTab(QWidget):
                 "company_website": self.company_website_input.text(),
                 "company_vat": self.company_vat_input.text(),
                 "company_logo_path": logo_path,
+                "company_logo_data": logo_data,  # ⚡ الحفاظ على اللوجو
             }
+            
+            # ⚡ بيانات البنك
+            if hasattr(self, 'bank_name_input'):
+                new_settings["bank_name"] = self.bank_name_input.text()
+            if hasattr(self, 'bank_account_input'):
+                new_settings["bank_account"] = self.bank_account_input.text()
+            if hasattr(self, 'vodafone_cash_input'):
+                new_settings["vodafone_cash"] = self.vodafone_cash_input.text()
+            
             self.settings_service.save_settings(new_settings)
-            QMessageBox.information(self, "نجاح", "تم حفظ بيانات الشركة بنجاح.")
+            
+            # ⚡ رفع الإعدادات للسحابة
+            if hasattr(self, 'repository') and self.repository:
+                self.settings_service.sync_settings_to_cloud(self.repository)
+            
+            QMessageBox.information(self, "نجاح", "تم حفظ بيانات الشركة بنجاح ✅")
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل حفظ الإعدادات: {e}")
 
@@ -692,6 +827,9 @@ class SettingsTab(QWidget):
         if not currencies:
             currencies = self._get_default_currencies()
 
+        # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
+        self.currencies_table.setRowCount(len(currencies))
+
         for i, curr in enumerate(currencies):
             code = curr.get('code', '')
             name = curr.get('name', '')
@@ -700,7 +838,6 @@ class SettingsTab(QWidget):
             is_base = curr.get('is_base', False)
             active = curr.get('active', True)
 
-            self.currencies_table.insertRow(i)
             self.currencies_table.setItem(i, 0, create_centered_item(str(i + 1)))
             self.currencies_table.setItem(i, 1, create_centered_item(code))
 
@@ -1351,9 +1488,10 @@ class SettingsTab(QWidget):
             users = self.repository.get_all_users()
             safe_print(f"INFO: [SettingsTab] ✅ تم جلب {len(users)} مستخدم")
 
-            for i, user in enumerate(users):
-                self.users_table.insertRow(i)
+            # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
+            self.users_table.setRowCount(len(users))
 
+            for i, user in enumerate(users):
                 # العمود 0: الرقم التسلسلي
                 self.users_table.setItem(i, 0, create_centered_item(str(i + 1)))
 

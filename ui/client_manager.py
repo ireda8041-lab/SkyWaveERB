@@ -325,7 +325,6 @@ class ClientManagerTab(QWidget):
         self.clients_table.setUpdatesEnabled(False)
         self.clients_table.blockSignals(True)
         self.clients_table.setRowCount(0)
-        QApplication.processEvents()
 
         # دالة جلب البيانات (تعمل في الخلفية)
         def fetch_clients():
@@ -410,14 +409,23 @@ class ClientManagerTab(QWidget):
         )
 
     def _populate_clients_table(self, client_invoices_total, client_payments_total):
-        """ملء جدول العملاء بالبيانات - محسّن للسرعة"""
+        """ملء جدول العملاء بالبيانات - محسّن للسرعة مع تمييز VIP"""
 
         # ⚡ تحميل البيانات على دفعات أكبر للسرعة
         batch_size = 25
         total_clients = len(self.clients_list)
         
+        # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
+        self.clients_table.setRowCount(total_clients)
+        
+        # ⚡ ألوان VIP الذهبية
+        VIP_BG_COLOR = QColor("#2d2a1a")  # خلفية ذهبية داكنة
+        VIP_TEXT_COLOR = QColor("#fbbf24")  # نص ذهبي
+        VIP_BORDER_COLOR = QColor("#f59e0b")  # حدود ذهبية
+        
         for index, client in enumerate(self.clients_list):
-            self.clients_table.insertRow(index)
+            # ⚡ التحقق من حالة VIP
+            is_vip = getattr(client, 'is_vip', False)
 
             # ⚡ عرض لوجو العميل بشكل دائري احترافي - بدون مربع
             logo_container = QWidget()
@@ -501,6 +509,16 @@ class ClientManagerTab(QWidget):
                 path.addEllipse(QRectF(0, 0, size, size))
                 painter.setClipPath(path)
                 painter.drawPixmap(0, 0, scaled)
+                
+                # ⚡ إضافة حدود ذهبية لـ VIP
+                if is_vip:
+                    from PyQt6.QtGui import QPen
+                    painter.setClipping(False)
+                    pen = QPen(VIP_BORDER_COLOR, 3)
+                    painter.setPen(pen)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawEllipse(1, 1, size-2, size-2)
+                
                 painter.end()
                 
                 logo_label.setPixmap(circular)
@@ -508,9 +526,13 @@ class ClientManagerTab(QWidget):
                 # أيقونة افتراضية - دائرة ملونة مع الحرف الأول
                 first_char = (client.name[0] if client.name else "?")
                 
-                colors = ["#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#06B6D4"]
-                color_idx = sum(ord(c) for c in (client.name or "A")) % len(colors)
-                bg = colors[color_idx]
+                # ⚡ لون ذهبي لـ VIP
+                if is_vip:
+                    bg = "#f59e0b"  # ذهبي
+                else:
+                    colors = ["#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#06B6D4"]
+                    color_idx = sum(ord(c) for c in (client.name or "A")) % len(colors)
+                    bg = colors[color_idx]
                 
                 # رسم الدائرة مع الحرف
                 from PyQt6.QtGui import QPainter, QFont, QPen
@@ -541,18 +563,35 @@ class ClientManagerTab(QWidget):
             
             # ⚡ إضافة item فارغ للتحكم في الـ background
             empty_item = QTableWidgetItem()
-            empty_item.setBackground(QColor("transparent"))
+            if is_vip:
+                empty_item.setBackground(VIP_BG_COLOR)
+            else:
+                empty_item.setBackground(QColor("transparent"))
             self.clients_table.setItem(index, 0, empty_item)
             self.clients_table.setCellWidget(index, 0, logo_container)
 
-            # معالجة الأحداث كل batch_size صف
-            if (index + 1) % batch_size == 0:
-                QApplication.processEvents()
-
-            self.clients_table.setItem(index, 1, create_centered_item(client.name or ""))
-            self.clients_table.setItem(index, 2, create_centered_item(client.company_name or ""))
-            self.clients_table.setItem(index, 3, create_centered_item(client.phone or ""))
-            self.clients_table.setItem(index, 4, create_centered_item(client.email or ""))
+            # ⚡ الاسم مع علامة VIP
+            name_text = f"⭐ {client.name}" if is_vip else (client.name or "")
+            name_item = create_centered_item(name_text)
+            if is_vip:
+                name_item.setForeground(VIP_TEXT_COLOR)
+                name_item.setFont(get_cairo_font(11, bold=True))
+                name_item.setBackground(VIP_BG_COLOR)
+            self.clients_table.setItem(index, 1, name_item)
+            
+            # ⚡ باقي الأعمدة مع تلوين VIP
+            company_item = create_centered_item(client.company_name or "")
+            phone_item = create_centered_item(client.phone or "")
+            email_item = create_centered_item(client.email or "")
+            
+            if is_vip:
+                company_item.setBackground(VIP_BG_COLOR)
+                phone_item.setBackground(VIP_BG_COLOR)
+                email_item.setBackground(VIP_BG_COLOR)
+            
+            self.clients_table.setItem(index, 2, company_item)
+            self.clients_table.setItem(index, 3, phone_item)
+            self.clients_table.setItem(index, 4, email_item)
 
             # جلب إجماليات العميل
             client_name = client.name
@@ -564,6 +603,8 @@ class ClientManagerTab(QWidget):
             total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
             total_item.setForeground(QColor("#2454a5"))
             total_item.setFont(get_cairo_font(10, bold=True))
+            if is_vip:
+                total_item.setBackground(VIP_BG_COLOR)
             self.clients_table.setItem(index, 5, total_item)
 
             # عرض إجمالي المدفوعات
@@ -571,18 +612,24 @@ class ClientManagerTab(QWidget):
             payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)
             payment_item.setForeground(QColor("#00a876"))
             payment_item.setFont(get_cairo_font(10, bold=True))
+            if is_vip:
+                payment_item.setBackground(VIP_BG_COLOR)
             self.clients_table.setItem(index, 6, payment_item)
 
             # الحالة مع لون الخلفية
-            bg_color = QColor("#ef4444") if client.status == schemas.ClientStatus.ARCHIVED else QColor("#0A6CF1")
-            status_item = create_centered_item(client.status.value, bg_color)
-            status_item.setForeground(QColor("white"))
+            if is_vip:
+                # ⚡ VIP يظهر بلون ذهبي
+                status_item = create_centered_item("⭐ VIP")
+                status_item.setBackground(QColor("#f59e0b"))
+                status_item.setForeground(QColor("white"))
+                status_item.setFont(get_cairo_font(10, bold=True))
+            else:
+                bg_color = QColor("#ef4444") if client.status == schemas.ClientStatus.ARCHIVED else QColor("#0A6CF1")
+                status_item = create_centered_item(client.status.value, bg_color)
+                status_item.setForeground(QColor("white"))
             self.clients_table.setItem(index, 7, status_item)
 
         safe_print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
-
-        # QApplication مستورد في أعلى الملف
-        QApplication.processEvents()
 
         self.selected_client = None
         self.update_buttons_state(False)

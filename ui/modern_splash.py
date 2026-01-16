@@ -94,17 +94,17 @@ class ModernSplash(QSplashScreen):
         y = (screen.height() - 400) // 2
         self.move(x, y)
 
-        # Timer لتحديث الدائرة
+        # Timer لتحديث الدائرة - محسّن للأداء
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.repaint)
-        self.timer.start(30)
+        self.timer.start(50)  # ⚡ 50ms بدلاً من 30ms للأداء
 
         self.show()
 
     def show_message(self, message: str):
-        """تحديث الشاشة"""
-        from PyQt6.QtWidgets import QApplication
-        QApplication.processEvents()
+        """تحديث الشاشة - محسّن للسرعة"""
+        # ⚡ لا نستخدم processEvents هنا - الرسم يتم تلقائياً
+        pass
 
     def drawContents(self, painter):
         """رسم المحتويات"""

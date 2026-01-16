@@ -167,16 +167,16 @@ class ClientService:
                 # تم تحديث الصورة
                 from ui.notification_system import notify_success
                 notify_success(
-                    f"تم تحديث صورة العميل '{updated_client_schema.name}' 🖼️",
-                    "👥 تحديث صورة",
+                    f"تم تحديث صورة العميل '{updated_client_schema.name}'",
+                    "تحديث صورة",
                     sync=True  # ⚡ إرسال لجميع الأجهزة
                 )
             elif 'logo_data' in new_data and (not new_data.get('logo_data') or new_data['logo_data'] == ""):
                 # تم حذف الصورة
                 from ui.notification_system import notify_info
                 notify_info(
-                    f"تم حذف صورة العميل '{updated_client_schema.name}' 🗑️",
-                    "👥 حذف صورة",
+                    f"تم حذف صورة العميل '{updated_client_schema.name}'",
+                    "حذف صورة",
                     sync=True  # ⚡ إرسال لجميع الأجهزة
                 )
             else:

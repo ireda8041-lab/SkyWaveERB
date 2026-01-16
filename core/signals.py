@@ -57,40 +57,12 @@ class AppSignals(QObject):
         cls._sync_manager = sync_manager
 
     def emit_data_changed(self, data_type: str):
-        """إرسال إشارة تحديث البيانات - محسّن لجميع الأقسام + مزامنة فورية"""
+        """إرسال إشارة تحديث البيانات - محسّن للسرعة"""
+        # ⚡ إرسال الإشارة العامة فقط - بدون إشارات متعددة
         self.data_changed.emit(data_type)
-
-        # إرسال إشارات محددة حسب نوع البيانات
-        signal_map = {
-            'accounts': [self.accounts_changed, self.accounting_changed],
-            'accounting': [self.accounting_changed],
-            'projects': [self.projects_changed],
-            'expenses': [self.expenses_changed, self.accounting_changed],
-            'clients': [self.clients_changed],
-            'services': [self.services_changed],
-            'payments': [self.payments_changed, self.accounting_changed],
-            'tasks': [self.tasks_changed],
-            'invoices': [self.invoices_changed, self.accounting_changed],
-            'quotes': [self.quotes_changed],
-            'contracts': [self.contracts_changed],
-            'hr': [self.hr_changed],
-            'inventory': [self.inventory_changed],
-            'reports': [self.reports_changed],
-            'system': [self.system_changed],
-            'files': [self.files_changed],
-            'notifications': [self.notifications_changed]
-        }
         
-        signals_to_emit = signal_map.get(data_type, [])
-        for signal in signals_to_emit:
-            signal.emit()
-        
-        # ⚡ مزامنة فورية مع السحابة
-        if self._sync_manager:
-            try:
-                self._sync_manager.instant_sync(data_type)
-            except Exception:
-                pass  # تجاهل الأخطاء
+        # ⚡ المزامنة الفورية معطّلة للسرعة
+        # المزامنة تتم كل 5 دقائق تلقائياً
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""

@@ -34,7 +34,7 @@ class LoggerSetup:
 
     @staticmethod
     def setup_logger(
-        log_level: int = logging.DEBUG,
+        log_level: int = logging.INFO,  # ⚡ تغيير من DEBUG إلى INFO للسرعة
         log_to_console: bool = True,
         log_to_file: bool = True
     ) -> logging.Logger:
@@ -79,7 +79,7 @@ class LoggerSetup:
                 backupCount=LoggerSetup.BACKUP_COUNT,
                 encoding='utf-8'
             )
-            file_handler.setLevel(logging.DEBUG)  # نسجل كل شيء في الملف
+            file_handler.setLevel(logging.INFO)  # ⚡ تغيير من DEBUG إلى INFO للسرعة
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
 

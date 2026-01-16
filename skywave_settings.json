@@ -2,13 +2,14 @@
     "company_name": "Sky Wave",
     "company_address": "القاهرة - دمياط الجديده",
     "company_phone": "01067894321 - 01021965200",
-    "company_email": "skywaveads@gmail.com",
+    "company_email": "skywaveads@hotmail.com",
     "company_website": "www.skywaveads.com/",
     "company_vat": "",
-    "company_logo_path": "D:/blogs/SkyWaveERB/site logo.png",
+    "company_logo_path": "",
+    "company_logo_data": "",
     "smart_scan": {
         "enabled": true,
-        "gemini_api_key": "AIzaSyBEG1-toPdLSkdDB390CDnTnDRaeMPCJXQ",
+        "gemini_api_key": "",
         "model": "gemini-2.0-flash",
         "max_image_size_mb": 100
     }

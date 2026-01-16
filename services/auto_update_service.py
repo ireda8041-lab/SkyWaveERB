@@ -103,8 +103,8 @@ class AutoUpdateService(QObject):
 
         # التحقق عند بدء التشغيل
         if AUTO_UPDATE_ON_STARTUP:
-            # تأخير 30 ثانية بعد بدء التشغيل
-            QTimer.singleShot(30000, self.check_for_updates)
+            # تأخير 60 ثانية بعد بدء التشغيل (بدلاً من 30)
+            QTimer.singleShot(60000, self.check_for_updates)
 
         # بدء المؤقت الدوري
         self._timer.start(self.check_interval)

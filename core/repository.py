@@ -55,13 +55,26 @@ except ImportError:
     PERFORMANCE_OPTIMIZER_ENABLED = False
     safe_print(f"WARNING: performance_optimizer غير متوفر")
 
-# --- إعدادات الاتصال ---
-MONGO_URI = "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db"
-DB_NAME = "skywave_erp_db"
+# ⚡ استيراد إعدادات التكوين الآمنة
+try:
+    from .config import Config
+    CONFIG_LOADED = True
+except ImportError:
+    CONFIG_LOADED = False
+    safe_print("WARNING: config module غير متوفر - استخدام القيم الافتراضية")
 
-# ✅ استخدام مجلد المشروع الحالي لقاعدة البيانات المحلية
-_PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
-LOCAL_DB_FILE = os.path.join(_PROJECT_DIR, "skywave_local.db")
+# --- إعدادات الاتصال (من متغيرات البيئة) ---
+if CONFIG_LOADED:
+    MONGO_URI = Config.get_mongo_uri()
+    DB_NAME = Config.get_db_name()
+    LOCAL_DB_FILE = Config.get_local_db_path()
+else:
+    # قيم احتياطية للتوافق
+    import os as _os
+    MONGO_URI = _os.environ.get('MONGO_URI', 'mongodb://localhost:27017/skywave_erp_db')
+    DB_NAME = _os.environ.get('MONGO_DB_NAME', 'skywave_erp_db')
+    _PROJECT_DIR = _os.path.dirname(_os.path.dirname(__file__))
+    LOCAL_DB_FILE = _os.path.join(_PROJECT_DIR, "skywave_local.db")
 
 # ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
 def _copy_initial_db():
@@ -157,27 +170,47 @@ class Repository:
             cursor = self.sqlite_conn.cursor()
             return cursor
     
+    def close(self):
+        """⚡ إغلاق اتصالات قاعدة البيانات"""
+        try:
+            if self.sqlite_cursor is not None:
+                self.sqlite_cursor.close()
+            if self.sqlite_conn is not None:
+                self.sqlite_conn.close()
+            if self.mongo_client is not None:
+                self.mongo_client.close()
+            safe_print("INFO: [Repository] تم إغلاق اتصالات قاعدة البيانات")
+        except Exception as e:
+            safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
+    
     def _apply_sqlite_optimizations(self):
-        """⚡ تطبيق تحسينات SQLite للأداء الأقصى"""
+        """⚡ تحسينات SQLite للسرعة القصوى"""
         try:
             # WAL mode للقراءة والكتابة المتزامنة
             self.sqlite_cursor.execute("PRAGMA journal_mode=WAL")
-            # تقليل الـ sync للسرعة (آمن مع WAL)
-            self.sqlite_cursor.execute("PRAGMA synchronous=NORMAL")
-            # زيادة حجم الـ cache (10000 صفحة = ~40MB)
-            self.sqlite_cursor.execute("PRAGMA cache_size=10000")
+            # تقليل الـ sync للسرعة القصوى
+            self.sqlite_cursor.execute("PRAGMA synchronous=OFF")
+            # زيادة حجم الـ cache (20000 صفحة = ~80MB)
+            self.sqlite_cursor.execute("PRAGMA cache_size=20000")
             # تخزين الجداول المؤقتة في الذاكرة
             self.sqlite_cursor.execute("PRAGMA temp_store=MEMORY")
-            # تفعيل memory-mapped I/O (256MB)
-            self.sqlite_cursor.execute("PRAGMA mmap_size=268435456")
+            # تفعيل memory-mapped I/O (512MB)
+            self.sqlite_cursor.execute("PRAGMA mmap_size=536870912")
             # تفعيل الـ foreign keys
             self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
+            # تحسين الـ locking
+            self.sqlite_cursor.execute("PRAGMA locking_mode=NORMAL")
+            # تحسين الـ page size
+            self.sqlite_cursor.execute("PRAGMA page_size=4096")
+            safe_print(f"INFO: ⚡ تم تطبيق تحسينات SQLite للسرعة القصوى")
+        except Exception as e:
+            safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
             safe_print(f"INFO: ⚡ تم تطبيق تحسينات SQLite للأداء")
         except Exception as e:
             safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
 
     def _start_mongo_connection(self):
-        """⚡ الاتصال بـ MongoDB في Background Thread"""
+        """⚡ الاتصال بـ MongoDB في Background Thread - محسّن للسرعة"""
         if self._mongo_connecting:
             return
         self._mongo_connecting = True
@@ -186,25 +219,25 @@ class Repository:
             try:
                 self.mongo_client = pymongo.MongoClient(
                     MONGO_URI,
-                    serverSelectionTimeoutMS=3000,  # ⚡ 3 ثواني للاتصال - أسرع
-                    connectTimeoutMS=3000,
-                    socketTimeoutMS=8000,  # ⚡ 8 ثواني للعمليات
+                    serverSelectionTimeoutMS=2000,  # ⚡ 2 ثواني للاتصال - أسرع
+                    connectTimeoutMS=2000,
+                    socketTimeoutMS=5000,  # ⚡ 5 ثواني للعمليات
                     retryWrites=True,
                     retryReads=True,
-                    maxPoolSize=5,  # ⚡ تقليل عدد الاتصالات للاستقرار
+                    maxPoolSize=3,  # ⚡ تقليل عدد الاتصالات للأداء
                     minPoolSize=1,
-                    maxIdleTimeMS=30000,  # ⚡ إغلاق الاتصالات الخاملة بعد 30 ثانية
-                    waitQueueTimeoutMS=5000,  # ⚡ timeout للانتظار في الطابور
+                    maxIdleTimeMS=60000,  # ⚡ إغلاق الاتصالات الخاملة بعد دقيقة
+                    waitQueueTimeoutMS=3000,  # ⚡ timeout للانتظار في الطابور
                 )
                 self.mongo_client.server_info()
                 self.mongo_db = self.mongo_client[DB_NAME]
                 self.online = True
                 safe_print(f"INFO: ✅ متصل بـ MongoDB (Background)")
             except pymongo.errors.ServerSelectionTimeoutError:
-                safe_print(f"WARNING: ⚠️ وضع أوفلاين - MongoDB غير متاح")
+                # ⚡ صامت - العمل بالبيانات المحلية
                 self.online = False
-            except Exception as e:
-                safe_print(f"WARNING: ⚠️ خطأ في الاتصال بـ MongoDB: {e}")
+            except Exception:
+                # ⚡ صامت - العمل بالبيانات المحلية
                 self.online = False
             finally:
                 self._mongo_connecting = False
@@ -416,7 +449,8 @@ class Repository:
             work_field TEXT,
             logo_path TEXT,
             logo_data TEXT,
-            client_notes TEXT
+            client_notes TEXT,
+            is_vip INTEGER DEFAULT 0
         )""")
 
         # إضافة عمود logo_data إذا لم يكن موجوداً (للتوافق مع قواعد البيانات القديمة)
@@ -424,6 +458,14 @@ class Repository:
             self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN logo_data TEXT")
             self.sqlite_conn.commit()
             safe_print(f"INFO: [Repository] تم إضافة عمود logo_data لجدول العملاء")
+        except Exception:
+            pass  # العمود موجود بالفعل
+
+        # ⚡ إضافة عمود is_vip للعملاء المميزين
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN is_vip INTEGER DEFAULT 0")
+            self.sqlite_conn.commit()
+            safe_print(f"INFO: [Repository] تم إضافة عمود is_vip لجدول العملاء")
         except Exception:
             pass  # العمود موجود بالفعل
 
@@ -1008,16 +1050,18 @@ class Repository:
             INSERT INTO clients (
                 sync_status, created_at, last_modified, name, company_name, email,
                 phone, address, country, vat_number, status,
-                client_type, work_field, logo_path, logo_data, client_notes
+                client_type, work_field, logo_path, logo_data, client_notes, is_vip
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
+        # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
+        is_vip_value = 1 if getattr(client_data, 'is_vip', False) else 0
         self.sqlite_cursor.execute(sql, (
             client_data.sync_status, now, now, client_data.name, client_data.company_name,
             client_data.email, client_data.phone, client_data.address, client_data.country,
             client_data.vat_number, client_data.status.value,
             client_data.client_type, client_data.work_field,
-            client_data.logo_path, client_data.logo_data, client_data.client_notes
+            client_data.logo_path, client_data.logo_data, client_data.client_notes, is_vip_value
         ))
         self.sqlite_conn.commit()
 
@@ -1070,19 +1114,22 @@ class Repository:
                     name = ?, company_name = ?, email = ?, phone = ?,
                     address = ?, country = ?, vat_number = ?, status = ?,
                     client_type = ?, work_field = ?, logo_path = ?, logo_data = ?, client_notes = ?,
-                    last_modified = ?, sync_status = 'modified_offline'
+                    is_vip = ?, last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ? OR _mongo_id = ?
             """
+            # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
+            is_vip_value = 1 if getattr(client_data, 'is_vip', False) else 0
             params = (
                 client_data.name, client_data.company_name, client_data.email,
                 client_data.phone, client_data.address, client_data.country,
                 client_data.vat_number, client_data.status.value,
                 client_data.client_type, client_data.work_field,
                 client_data.logo_path, client_data.logo_data, client_data.client_notes,
-                now_iso, client_id, client_id
+                is_vip_value, now_iso, client_id, client_id
             )
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
+            safe_print(f"DEBUG: [Repo] تم تحديث is_vip = {is_vip_value} للعميل {client_id}")
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث العميل (SQLite): {e}")
             return None
@@ -1142,11 +1189,13 @@ class Repository:
         """
         active_status = schemas.ClientStatus.ACTIVE.value
 
-        # ⚡ جلب من SQLite أولاً (سريع جداً)
+        # ⚡ جلب من SQLite أولاً (سريع جداً) - استخدام cursor جديد لتجنب التعارض
         try:
-            self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
-            rows = self.sqlite_cursor.fetchall()
+            cursor = self.sqlite_conn.cursor()
+            cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
+            rows = cursor.fetchall()
             clients_list = [schemas.Client(**dict(row)) for row in rows]
+            cursor.close()
             
             # ⚡ تسجيل عدد العملاء اللي عندهم صور
             clients_with_logo = sum(1 for c in clients_list if c.logo_data)
@@ -1334,44 +1383,70 @@ class Repository:
 
         return None
 
-    def _get_duplicate_payment(self, project_id: str, date, amount: float) -> schemas.Payment | None:
-        """البحث عن دفعة مكررة (نفس المشروع + نفس التاريخ + نفس المبلغ)"""
+    def _get_duplicate_payment(self, project_id: str, date, amount: float, exclude_id: int = None) -> schemas.Payment | None:
+        """البحث عن دفعة مكررة (نفس المشروع + نفس التاريخ + نفس المبلغ) - محسّن"""
         if not project_id:
             return None
 
         date_str = date.isoformat() if hasattr(date, 'isoformat') else str(date)
         date_str_short = date_str[:10]  # YYYY-MM-DD فقط
+        
+        # ⚡ تقريب المبلغ لتجنب مشاكل الـ floating point
+        amount_rounded = round(float(amount), 2)
+        # ⚡ نطاق البحث للمبلغ (±0.01 للتعامل مع floating point)
+        amount_min = amount_rounded - 0.01
+        amount_max = amount_rounded + 0.01
 
+        # ⚡ البحث في SQLite أولاً (أسرع وأدق)
+        try:
+            # ⚡ استخدام cursor منفصل لتجنب مشاكل الـ recursive cursor
+            with self._lock:
+                temp_cursor = self.sqlite_conn.cursor()
+                try:
+                    if exclude_id:
+                        temp_cursor.execute(
+                            """SELECT * FROM payments
+                               WHERE project_id = ? 
+                               AND amount >= ? AND amount <= ?
+                               AND date LIKE ?
+                               AND id != ?
+                               LIMIT 1""",
+                            (project_id, amount_min, amount_max, f"{date_str_short}%", exclude_id)
+                        )
+                    else:
+                        temp_cursor.execute(
+                            """SELECT * FROM payments
+                               WHERE project_id = ? 
+                               AND amount >= ? AND amount <= ?
+                               AND date LIKE ?
+                               LIMIT 1""",
+                            (project_id, amount_min, amount_max, f"{date_str_short}%")
+                        )
+                    row = temp_cursor.fetchone()
+                    if row:
+                        safe_print(f"DEBUG: [_get_duplicate_payment] وجدت دفعة مكررة محلياً: {dict(row)}")
+                        return schemas.Payment(**dict(row))
+                finally:
+                    temp_cursor.close()
+        except Exception as e:
+            safe_print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
+
+        # ⚡ البحث في MongoDB إذا لم نجد محلياً
         if self.online:
             try:
-                # البحث في MongoDB
                 payment_data = self.mongo_db.payments.find_one({
                     "project_id": project_id,
-                    "amount": amount,
-                    "$or": [
-                        {"date": {"$regex": f"^{date_str_short}"}},
-                        {"date": date}
-                    ]
+                    "amount": {"$gte": amount_rounded - 0.01, "$lte": amount_rounded + 0.01},
+                    "date": {"$regex": f"^{date_str_short}"}
                 })
                 if payment_data:
                     mongo_id = str(payment_data.pop('_id'))
                     payment_data.pop('_mongo_id', None)
                     payment_data.pop('mongo_id', None)
+                    safe_print(f"DEBUG: [_get_duplicate_payment] وجدت دفعة مكررة في السحابة")
                     return schemas.Payment(**payment_data, _mongo_id=mongo_id)
             except Exception as e:
                 safe_print(f"WARNING: فشل البحث عن دفعة مكررة (Mongo): {e}")
-
-        try:
-            self.sqlite_cursor.execute(
-                """SELECT * FROM payments
-                   WHERE project_id = ? AND amount = ? AND date LIKE ?""",
-                (project_id, amount, f"{date_str_short}%")
-            )
-            row = self.sqlite_cursor.fetchone()
-            if row:
-                return schemas.Payment(**dict(row))
-        except Exception as e:
-            safe_print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
 
         return None
 
@@ -2638,43 +2713,59 @@ class Repository:
     # --- دوال التعامل مع الدفعات ---
 
     def create_payment(self, payment_data: schemas.Payment) -> schemas.Payment:
-        """ (معدلة) إنشاء دفعة جديدة (مربوطة بمشروع) مع فحص التكرار """
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
+        """ (معدلة) إنشاء دفعة جديدة (مربوطة بمشروع) مع فحص التكرار وقفل المعاملة """
+        # ⚡ قفل المعاملة لمنع التكرار من الضغط المزدوج
+        with self._lock:
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
 
-        # ✅ فحص التكرار قبل الإضافة (نفس المشروع + نفس التاريخ + نفس المبلغ)
-        existing_payment = self._get_duplicate_payment(
-            payment_data.project_id,
-            payment_data.date,
-            payment_data.amount
-        )
-        if existing_payment:
-            safe_print(f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})")
-            raise Exception(f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})")
+            # ✅ فحص التكرار قبل الإضافة (نفس المشروع + نفس التاريخ + نفس المبلغ)
+            existing_payment = self._get_duplicate_payment(
+                payment_data.project_id,
+                payment_data.date,
+                payment_data.amount
+            )
+            if existing_payment:
+                safe_print(f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})")
+                raise Exception(f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})")
 
-        payment_data.created_at = now_dt
-        payment_data.last_modified = now_dt
-        payment_data.sync_status = 'new_offline'
+            payment_data.created_at = now_dt
+            payment_data.last_modified = now_dt
+            payment_data.sync_status = 'new_offline'
 
-        # 1. الحفظ في SQLite (الأوفلاين أولاً)
-        sql = """
-            INSERT INTO payments (
-                sync_status, created_at, last_modified, project_id, client_id,
-                date, amount, account_id, method
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            payment_data.sync_status, now_iso, now_iso,
-            payment_data.project_id, payment_data.client_id,
-            payment_data.date.isoformat(), payment_data.amount,
-            payment_data.account_id, payment_data.method
-        )
+            # 1. الحفظ في SQLite (الأوفلاين أولاً) - داخل transaction
+            try:
+                # ⚡ بدء transaction صريح
+                self.sqlite_cursor.execute("BEGIN IMMEDIATE")
+                
+                sql = """
+                    INSERT INTO payments (
+                        sync_status, created_at, last_modified, project_id, client_id,
+                        date, amount, account_id, method
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """
+                params = (
+                    payment_data.sync_status, now_iso, now_iso,
+                    payment_data.project_id, payment_data.client_id,
+                    payment_data.date.isoformat(), payment_data.amount,
+                    payment_data.account_id, payment_data.method
+                )
 
-        self.sqlite_cursor.execute(sql, params)
-        self.sqlite_conn.commit()
-        local_id = self.sqlite_cursor.lastrowid
-        payment_data.id = local_id
-        safe_print(f"INFO: تم حفظ الدفعة (للمشروع {payment_data.project_id}) محلياً (ID: {local_id}).")
+                self.sqlite_cursor.execute(sql, params)
+                local_id = self.sqlite_cursor.lastrowid
+                
+                # ⚡ تأكيد المعاملة
+                self.sqlite_cursor.execute("COMMIT")
+                
+                payment_data.id = local_id
+                safe_print(f"INFO: تم حفظ الدفعة (للمشروع {payment_data.project_id}) محلياً (ID: {local_id}).")
+            except Exception as e:
+                # ⚡ التراجع في حالة الخطأ
+                try:
+                    self.sqlite_cursor.execute("ROLLBACK")
+                except:
+                    pass
+                raise e
 
         # 2. محاولة الحفظ في MongoDB (الأونلاين)
         if self.online:
@@ -2690,7 +2781,7 @@ class Repository:
 
                 self.sqlite_cursor.execute(
                     "UPDATE payments SET _mongo_id = ?, sync_status = ? WHERE id = ?",
-                    (mongo_id, 'synced', local_id)
+                    (mongo_id, 'synced', payment_data.id)
                 )
                 self.sqlite_conn.commit()
                 safe_print(f"INFO: تم مزامنة الدفعة (Mongo ID: {mongo_id}) أونلاين.")

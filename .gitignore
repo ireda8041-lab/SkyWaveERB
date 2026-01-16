@@ -56,7 +56,13 @@ chrome_profiles/
 
 # الإعدادات المحلية
 .env
+.env.local
+.env.production
 *.local
+
+# ملفات الإعدادات الحساسة (احتفظ بها محلياً فقط)
+# skywave_settings.json  # يحتوي على إعدادات الشركة - قد تحتاج مشاركته
+sync_config.local.json
 
 # نظام التشغيل
 .DS_Store

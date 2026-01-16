@@ -141,6 +141,7 @@ class Client(BaseSchema):
     logo_path: str | None = None  # مسار الصورة المحلي (للتوافق القديم)
     logo_data: str | None = None  # بيانات الصورة بصيغة base64 (للمزامنة بين الأجهزة)
     client_notes: str | None = None
+    is_vip: bool = False  # ⚡ عميل مميز VIP
 
 class Currency(BaseSchema):
     """ نموذج العملات (من collection 'currencies') """

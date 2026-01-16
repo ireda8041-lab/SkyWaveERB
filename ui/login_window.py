@@ -45,7 +45,7 @@ class LoginWindow(QDialog):
             self.setFixedSize(520, 850)
         
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # ⚡ إزالة WA_TranslucentBackground للسرعة
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
@@ -112,6 +112,8 @@ class LoginWindow(QDialog):
         self.username_input = QLineEdit()
         self.username_input.setObjectName("input")
         self.username_input.setPlaceholderText("اصحاااا")
+        # ⚡ تحسين الأداء للسرعة
+        self.username_input.setMaxLength(50)
         # أمان: تأكد من أن الحقول فارغة تماماً
         self.username_input.clear()
         self.username_input.setText("")
@@ -128,6 +130,8 @@ class LoginWindow(QDialog):
         self.password_input.setObjectName("input")
         self.password_input.setPlaceholderText("يلا بينااا")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        # ⚡ تحسين الأداء للسرعة
+        self.password_input.setMaxLength(100)
         # أمان: تأكد من أن الحقول فارغة تماماً
         self.password_input.clear()
         self.password_input.setText("")
@@ -171,14 +175,12 @@ class LoginWindow(QDialog):
         self.password_input.returnPressed.connect(self.attempt_login)
 
     def _get_styles(self):
-        """التصميم"""
+        """التصميم - محسّن للسرعة"""
         return """
             #container {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(30, 33, 57, 0.85), stop:1 rgba(21, 23, 40, 0.85));
+                background: #1e2139;
                 border-radius: 20px;
-                border: 1px solid rgba(42, 45, 69, 0.6);
-                backdrop-filter: blur(10px);
+                border: 1px solid #2a2d45;
             }
 
             #title {
@@ -199,8 +201,8 @@ class LoginWindow(QDialog):
             }
 
             #input {
-                background: rgba(37, 40, 66, 0.7);
-                border: 2px solid rgba(53, 58, 85, 0.6);
+                background: #252842;
+                border: 2px solid #353a55;
                 border-radius: 12px;
                 padding: 16px 20px;
                 font-size: 15px;
@@ -209,8 +211,8 @@ class LoginWindow(QDialog):
             }
 
             #input:focus {
-                border-color: rgba(77, 166, 255, 0.8);
-                background: rgba(42, 47, 74, 0.8);
+                border-color: #4da6ff;
+                background: #2a2f4a;
             }
 
             #input::placeholder {
@@ -220,14 +222,13 @@ class LoginWindow(QDialog):
             #error {
                 color: #ff6b6b;
                 font-size: 13px;
-                background: rgba(255, 107, 107, 0.1);
+                background: #3d1f1f;
                 border-radius: 8px;
                 padding: 10px;
             }
 
             #loginBtn {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(77, 166, 255, 0.9), stop:1 rgba(61, 139, 219, 0.9));
+                background: #4da6ff;
                 color: white;
                 border: none;
                 border-radius: 16px;
@@ -238,18 +239,17 @@ class LoginWindow(QDialog):
             }
 
             #loginBtn:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 rgba(61, 139, 219, 1.0), stop:1 rgba(45, 107, 181, 1.0));
+                background: #3d8bdb;
             }
 
             #loginBtn:pressed {
-                background: rgba(45, 107, 181, 1.0);
+                background: #2d6bb5;
             }
 
             #cancelBtn {
                 background: transparent;
-                color: rgba(122, 127, 157, 0.9);
-                border: 2px solid rgba(53, 58, 85, 0.6);
+                color: #7a7f9d;
+                border: 2px solid #353a55;
                 border-radius: 16px;
                 padding: 20px;
                 font-size: 17px;
@@ -258,7 +258,7 @@ class LoginWindow(QDialog):
             }
 
             #cancelBtn:hover {
-                background: rgba(220, 53, 69, 0.8);
+                background: #dc3545;
                 color: white;
             }
 

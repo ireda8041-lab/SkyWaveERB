@@ -272,7 +272,7 @@ class NotificationSyncWorker(QThread):
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
-        self._check_interval = 30000  # ⚡ 30 ثانية بدلاً من 10
+        self._check_interval = 120000  # ⚡ دقيقتين بدلاً من 30 ثانية
     
     def set_repository(self, repo):
         self.repo = repo
@@ -282,7 +282,7 @@ class NotificationSyncWorker(QThread):
         safe_print(f"INFO: [NotificationSync] Worker started for device {DEVICE_ID}")
         while self.is_running:
             try:
-                if self.repo and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None):
+                if self.repo and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None) is not None:
                     self._check_new_notifications()
             except Exception as e:
                 safe_print(f"WARNING: [NotificationSync] {e}")
@@ -291,7 +291,7 @@ class NotificationSyncWorker(QThread):
     
     def _check_new_notifications(self):
         try:
-            if not self.repo or not self.repo.mongo_db:
+            if not self.repo or self.repo.mongo_db is None:
                 return
                 
             collection = self.repo.mongo_db.notifications

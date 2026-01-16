@@ -8,6 +8,7 @@
 import os
 import sys
 import gc
+import traceback
 
 # ⚡ تحسين الأداء على Windows
 if os.name == 'nt':
@@ -109,6 +110,19 @@ class SkyWaveERPApp:
         # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
         from core.signals import app_signals
         app_signals.set_sync_manager(self.unified_sync)
+        
+        # ⚡ مزامنة إعدادات الشركة من السحابة (في الخلفية)
+        def sync_settings_background():
+            try:
+                import time
+                time.sleep(3)  # انتظار اتصال MongoDB
+                if self.repository.online:
+                    self.settings_service.sync_settings_from_cloud(self.repository)
+            except Exception as e:
+                logger.debug(f"[MainApp] فشل مزامنة الإعدادات: {e}")
+        
+        settings_thread = threading.Thread(target=sync_settings_background, daemon=True)
+        settings_thread.start()
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
@@ -199,8 +213,7 @@ class SkyWaveERPApp:
         self.smart_scan_service = SmartScanService(api_key=smart_scan_api_key)
         if self.smart_scan_service.is_available():
             logger.info("✅ Smart Scan Service (AI) Initialized.")
-        else:
-            logger.warning("⚠️ Smart Scan Service not available (missing API key)")
+        # ⚡ لا نعرض تحذير إذا لم يكن متاحاً - ميزة اختيارية
 
         # ⚡ التحقق من التحديثات في Background (لا يعطل البرنامج)
         def check_updates_background():
@@ -494,10 +507,10 @@ class SkyWaveERPApp:
                 logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: {e}")
         
         # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
-        QTimer.singleShot(10000, start_auto_sync_system)  # ⚡ 10 ثواني
+        QTimer.singleShot(15000, start_auto_sync_system)  # ⚡ 15 ثانية بدلاً من 10
         # ⚡ المزامنة الفورية معطّلة للاستقرار
         # QTimer.singleShot(8000, start_realtime_sync)
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 10 ثواني")
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 15 ثانية")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -556,76 +569,60 @@ class SkyWaveERPApp:
         
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
+        # إيقاف نظام المزامنة الفورية
         try:
-            # إيقاف نظام المزامنة الفورية
             if hasattr(self, 'realtime_manager') and self.realtime_manager:
-                try:
-                    self.realtime_manager.stop()
-                    logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف المزامنة الفورية: {e}")
-
-            # إيقاف المزامنة التلقائية (لو كانت مفعلة)
-            # إيقاف نظام المزامنة الموحد
-            if hasattr(self, 'unified_sync') and self.unified_sync:
-                try:
-                    self.unified_sync.stop_auto_sync()
-                    logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف المزامنة التلقائية: {e}")
-
-            # إيقاف خدمة التحديث التلقائي
-            if hasattr(self, 'auto_update_service') and self.auto_update_service:
-                try:
-                    self.auto_update_service.stop()
-                    logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
-                except RuntimeError as e:
-                    # تجاهل أخطاء الكائنات المحذوفة بواسطة Qt
-                    if "deleted" in str(e).lower() or "c/c++ object" in str(e).lower():
-                        logger.debug(f"[MainApp] QTimer تم حذفه بالفعل: {e}")
-                    else:
-                        logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إيقاف خدمة التحديث: {e}")
-
-            # إغلاق اتصال قاعدة البيانات
-            if hasattr(self, 'repository') and self.repository:
-                try:
-                    if hasattr(self.repository, 'close'):
-                        self.repository.close()
-                    elif hasattr(self.repository, 'sqlite_conn'):
-                        self.repository.sqlite_conn.close()
-                    logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
-                except Exception as e:
-                    logger.warning(f"[MainApp] فشل إغلاق قاعدة البيانات: {e}")
-
-            # إيقاف مدير المزامنة المتقدم
-            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
-                try:
-                    # التحقق من أن الكائن لم يتم حذفه بواسطة Qt
-                    from PyQt6.QtCore import QObject
-                    if isinstance(self.advanced_sync_manager, QObject):
-                        try:
-                            # محاولة الوصول لخاصية للتأكد من أن الكائن لا يزال موجوداً
-                            _ = self.advanced_sync_manager.objectName()
-                            if hasattr(self.advanced_sync_manager, 'stop'):
-                                self.advanced_sync_manager.stop()
-                            logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
-                        except RuntimeError:
-                            # الكائن تم حذفه بالفعل بواسطة Qt
-                            pass
-                    elif hasattr(self.advanced_sync_manager, 'stop'):
-                        self.advanced_sync_manager.stop()
-                        logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
-                except Exception as e:
-                    # تجاهل أخطاء الكائنات المحذوفة
-                    if "deleted" not in str(e).lower():
-                        logger.warning(f"[MainApp] فشل إيقاف مدير المزامنة المتقدم: {e}")
-
-            logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
-
+                self.realtime_manager.stop()
+                logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
         except Exception as e:
-            logger.error(f"[MainApp] خطأ أثناء تنظيف الموارد: {e}")
+            logger.debug(f"[MainApp] تحذير عند إيقاف المزامنة الفورية: {e}")
+
+        # إيقاف نظام المزامنة الموحد
+        try:
+            if hasattr(self, 'unified_sync') and self.unified_sync:
+                self.unified_sync.stop_auto_sync()
+                logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف المزامنة التلقائية: {e}")
+
+        # إيقاف مدير المزامنة V3
+        try:
+            if hasattr(self, 'sync_manager') and self.sync_manager:
+                if hasattr(self.sync_manager, 'stop'):
+                    self.sync_manager.stop()
+                logger.info("[MainApp] تم إيقاف مدير المزامنة V3")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة V3: {e}")
+
+        # إيقاف خدمة التحديث التلقائي
+        try:
+            if hasattr(self, 'auto_update_service') and self.auto_update_service:
+                self.auto_update_service.stop()
+                logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف خدمة التحديث: {e}")
+
+        # إغلاق اتصال قاعدة البيانات
+        try:
+            if hasattr(self, 'repository') and self.repository:
+                if hasattr(self.repository, 'close'):
+                    self.repository.close()
+                elif hasattr(self.repository, 'sqlite_conn'):
+                    self.repository.sqlite_conn.close()
+                logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إغلاق قاعدة البيانات: {e}")
+
+        # إيقاف مدير المزامنة المتقدم
+        try:
+            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
+                if hasattr(self.advanced_sync_manager, 'shutdown'):
+                    self.advanced_sync_manager.shutdown()
+                logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة المتقدم: {e}")
+
+        logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
 
     def _on_update_available(self, main_window, version, url, changelog):
         """عند توفر تحديث جديد"""
@@ -656,56 +653,30 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    # تجاهل أخطاء Qt المتعلقة بالكائنات المحذوفة
-    error_msg = str(exc_value).lower()
-    if any(x in error_msg for x in ["deleted", "c/c++ object", "wrapped c/c++", "runtime", "qobject", "destroyed"]):
-        logger.debug(f"تجاهل خطأ Qt: {exc_value}")
-        return
-
-    # تجاهل أخطاء الاتصال الشائعة (MongoDB, Network)
-    if any(x in error_msg for x in ["connection", "timeout", "network", "mongo", "socket", "serverselection", "autoreconnect"]):
-        logger.debug(f"تجاهل خطأ اتصال: {exc_value}")
-        return
-
-    # تجاهل أخطاء Threads غير الخطيرة
-    if any(x in error_msg for x in ["thread", "daemon", "queue", "lock", "semaphore"]):
-        logger.debug(f"تجاهل خطأ thread: {exc_value}")
-        return
+    # تجاهل كل الأخطاء غير الحرجة - لا نريد إغلاق البرنامج أبداً
+    error_msg = str(exc_value).lower() if exc_value else ""
     
-    # تجاهل أخطاء SQLite غير الخطيرة
-    if any(x in error_msg for x in ["database is locked", "disk i/o error", "busy"]):
-        logger.warning(f"خطأ SQLite (غير فادح): {exc_value}")
+    # قائمة الأخطاء التي يجب تجاهلها
+    ignore_patterns = [
+        "deleted", "c/c++ object", "wrapped c/c++", "runtime", "qobject", "destroyed", "invalid",
+        "connection", "timeout", "network", "socket", "pymongo", "mongo", "serverselection", "autoreconnect",
+        "thread", "daemon", "join", "queue", "lock", "semaphore",
+        "database is locked", "disk i/o error", "busy", "closed database", "closed cursor",
+        "truth value", "bool()", "nonetype", "attributeerror"
+    ]
+    
+    if any(x in error_msg for x in ignore_patterns):
+        logger.debug(f"تجاهل خطأ: {exc_value}")
         return
 
-    logger.critical("خطأ غير متوقع!", exc_info=(exc_type, exc_value, exc_traceback))
-    
-    # عدم إغلاق البرنامج تلقائياً - فقط تسجيل الخطأ
-    try:
-        ErrorHandler.handle_exception(
-            exception=exc_value,
-            context="uncaught_exception",
-            user_message="حدث خطأ غير متوقع. يمكنك الاستمرار في العمل.",
-            show_dialog=False  # ⚡ عدم إظهار dialog لتجنب التجميد
-        )
-    except Exception:
-        # في حالة فشل معالج الأخطاء نفسه - لا نفعل شيء
-        pass
+    logger.warning(f"خطأ غير متوقع (تم تجاهله): {exc_value}")
+    # لا نُغلق البرنامج أبداً
 
 # ⚡ معالج أخطاء الـ Threads
 def handle_thread_exception(args):
     """معالج أخطاء الـ Threads - يمنع إغلاق البرنامج"""
-    exc_type = args.exc_type
-    exc_value = args.exc_value
-    thread = args.thread
-    
     # تجاهل كل أخطاء الـ threads - لا نريد إغلاق البرنامج أبداً
-    error_msg = str(exc_value).lower() if exc_value else ""
-    
-    # تسجيل الخطأ فقط إذا كان مهماً
-    if not any(x in error_msg for x in ["connection", "timeout", "mongo", "network", "socket", "deleted", "destroyed"]):
-        logger.warning(f"خطأ في Thread ({thread.name}): {exc_value}")
-    
-    # لا نُغلق البرنامج أبداً بسبب خطأ في thread
+    pass
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception

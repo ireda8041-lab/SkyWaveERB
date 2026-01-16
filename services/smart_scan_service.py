@@ -50,7 +50,8 @@ class SmartScanService:
         self.model = None
         
         if not self.api_key:
-            logger.warning("⚠️ Gemini API Key is missing! Smart Scan will not work.")
+            # ⚡ تحذير صامت - لا نريد إزعاج المستخدم
+            pass  # Smart Scan غير متاح بدون API key
         else:
             self._configure_genai()
 

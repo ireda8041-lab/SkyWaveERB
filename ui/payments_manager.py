@@ -441,18 +441,30 @@ class NewPaymentDialog(QDialog):
 
     def _save_payment(self):
         """حفظ الدفعة"""
+        # ⚡ منع الضغط المزدوج - تعطيل الزر فوراً
+        if not self.save_btn.isEnabled():
+            return
+        self.save_btn.setEnabled(False)
+        self.save_btn.setText("جاري الحفظ...")
+        
         if not self.selected_project:
             QMessageBox.warning(self, "⚠️ تنبيه", "يرجى اختيار المشروع أولاً.")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
             return
 
         account = self.account_combo.currentData()
         if not account:
             QMessageBox.warning(self, "⚠️ تنبيه", "يرجى اختيار حساب الاستلام.")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
             return
 
         amount = self.amount_input.value()
         if amount <= 0:
             QMessageBox.warning(self, "⚠️ تنبيه", "يرجى إدخال مبلغ صحيح.")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
             return
 
         # تحذير إذا كان المبلغ أكبر من المتبقي
@@ -468,6 +480,8 @@ class NewPaymentDialog(QDialog):
                     QMessageBox.StandardButton.No
                 )
                 if reply == QMessageBox.StandardButton.No:
+                    self.save_btn.setEnabled(True)
+                    self.save_btn.setText("💾 تسجيل الدفعة")
                     return
         except Exception:
             pass
@@ -487,9 +501,17 @@ class NewPaymentDialog(QDialog):
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل تسجيل الدفعة.")
+                self.save_btn.setEnabled(True)
+                self.save_btn.setText("💾 تسجيل الدفعة")
 
         except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {e}")
+            error_msg = str(e)
+            if "مكررة" in error_msg or "duplicate" in error_msg.lower():
+                QMessageBox.warning(self, "⚠️ دفعة مكررة", f"يوجد دفعة بنفس البيانات:\n{error_msg}")
+            else:
+                QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {e}")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
 
 
 class PaymentEditorDialog(QDialog):
@@ -816,15 +838,12 @@ class PaymentsManagerTab(QWidget):
         """⚡ تحميل الدفعات في الخلفية لمنع التجميد"""
         safe_print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
 
-        from PyQt6.QtWidgets import QApplication
-
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
         self.payments_table.setUpdatesEnabled(False)
         self.payments_table.blockSignals(True)
         self.payments_table.setRowCount(0)
-        QApplication.processEvents()
 
         # دالة جلب البيانات
         def fetch_payments():
@@ -874,11 +893,10 @@ class PaymentsManagerTab(QWidget):
                 clients_cache = data['clients_cache']
 
                 total_sum = 0.0
-                batch_size = 15
 
+                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
+                self.payments_table.setRowCount(len(self.payments_list))
                 for i, payment in enumerate(self.payments_list):
-                    self.payments_table.insertRow(i)
-
                     num_item = create_centered_item(str(i + 1))
                     num_item.setData(Qt.ItemDataRole.UserRole, payment)
                     self.payments_table.setItem(i, 0, num_item)
@@ -935,9 +953,6 @@ class PaymentsManagerTab(QWidget):
                     self.payments_table.setRowHeight(i, 40)
                     total_sum += payment.amount
 
-                    if (i + 1) % batch_size == 0:
-                        QApplication.processEvents()
-
                 self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
                 safe_print(f"INFO: [PaymentsManager] ✅ تم تحميل {len(self.payments_list)} دفعة.")
 
@@ -948,7 +963,6 @@ class PaymentsManagerTab(QWidget):
             finally:
                 self.payments_table.blockSignals(False)
                 self.payments_table.setUpdatesEnabled(True)
-                QApplication.processEvents()
 
         def on_error(error_msg):
             safe_print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")

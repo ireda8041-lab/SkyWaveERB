@@ -759,6 +759,22 @@ class SyncManagerV3(QObject):
             logger.info(f"تم تحديد استراتيجية حل التعارضات: {strategy}")
         else:
             logger.warning(f"استراتيجية غير صحيحة: {strategy}")
+    
+    def stop(self):
+        """⚡ إيقاف مدير المزامنة وتنظيف الموارد"""
+        try:
+            self._is_syncing = False
+            logger.info("✅ تم إيقاف SyncManagerV3")
+        except Exception as e:
+            logger.warning(f"تحذير عند إيقاف SyncManagerV3: {e}")
+    
+    def stop(self):
+        """⚡ إيقاف المزامنة بأمان عند إغلاق التطبيق"""
+        try:
+            self._is_syncing = False
+            logger.info("✅ [SyncManagerV3] تم إيقاف المزامنة بأمان")
+        except Exception as e:
+            logger.warning(f"⚠️ [SyncManagerV3] خطأ عند الإيقاف: {e}")
 
 
 def create_sync_manager_v3(repository) -> SyncManagerV3:

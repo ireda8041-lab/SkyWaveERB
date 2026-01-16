@@ -202,7 +202,6 @@ class ServiceManagerTab(QWidget):
         self.services_table.setUpdatesEnabled(False)
         self.services_table.blockSignals(True)
         self.services_table.setRowCount(0)
-        QApplication.processEvents()
 
         # دالة جلب البيانات
         def fetch_services():
@@ -219,11 +218,10 @@ class ServiceManagerTab(QWidget):
         def on_data_loaded(services):
             try:
                 self.services_list = services
-                batch_size = 15
 
+                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
+                self.services_table.setRowCount(len(self.services_list))
                 for index, service in enumerate(self.services_list):
-                    self.services_table.insertRow(index)
-
                     self.services_table.setItem(index, 0, create_centered_item(service.name))
                     
                     # ⚡ الوصف (مختصر إذا كان طويل)
@@ -250,9 +248,6 @@ class ServiceManagerTab(QWidget):
 
                     self.services_table.setRowHeight(index, 40)
 
-                    if (index + 1) % batch_size == 0:
-                        QApplication.processEvents()
-
                 logger.info(f"[ServiceManager] ✅ تم تحميل {len(self.services_list)} خدمة")
                 self.update_buttons_state(False)
 
@@ -261,7 +256,6 @@ class ServiceManagerTab(QWidget):
             finally:
                 self.services_table.blockSignals(False)
                 self.services_table.setUpdatesEnabled(True)
-                QApplication.processEvents()
 
         def on_error(error_msg):
             logger.error(f"[ServiceManager] فشل تحميل الخدمات: {error_msg}")

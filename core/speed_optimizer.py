@@ -22,10 +22,10 @@ except ImportError:
         except UnicodeEncodeError:
             pass
 
-# ⚡ إعدادات الأداء
-DEFAULT_CACHE_SIZE = 1000
-DEFAULT_TTL_SECONDS = 60
-MAX_CACHE_MEMORY_MB = 50  # الحد الأقصى للذاكرة
+# ⚡ إعدادات الأداء - محسّنة للسرعة القصوى
+DEFAULT_CACHE_SIZE = 2000
+DEFAULT_TTL_SECONDS = 300  # 5 دقائق
+MAX_CACHE_MEMORY_MB = 100
 
 
 class LRUCache:
@@ -125,9 +125,9 @@ class LRUCache:
         }
 
 
-# ⚡ Cache عام للبيانات
-_data_cache = LRUCache(maxsize=500, ttl_seconds=60)  # 1 دقيقة
-_query_cache = LRUCache(maxsize=200, ttl_seconds=30)  # 30 ثانية
+# ⚡ Cache عام للبيانات - محسّن للسرعة
+_data_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # 5 دقائق
+_query_cache = LRUCache(maxsize=500, ttl_seconds=120)  # دقيقتين
 
 
 def cached(cache_key: str | None = None, ttl: int = 60):

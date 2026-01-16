@@ -424,11 +424,13 @@ class AdvancedSyncManagerV3(QObject):
         """إيقاف مدير المزامنة بأمان"""
         safe_print("INFO: [AdvancedSyncManager] Stopping...")
         try:
-            self.connection_checker.stop()
+            if self.connection_checker is not None:
+                self.connection_checker.stop()
         except Exception as e:
             safe_print(f"WARNING: [AdvancedSyncManager] Error stopping connection checker: {e}")
         try:
-            self.sync_worker.stop()
+            if self.sync_worker is not None:
+                self.sync_worker.stop()
         except Exception as e:
             safe_print(f"WARNING: [AdvancedSyncManager] Error stopping sync worker: {e}")
         safe_print("INFO: [AdvancedSyncManager] Stopped")
@@ -439,7 +441,11 @@ class AdvancedSyncManagerV3(QObject):
 
         self.stop()
 
-        # تنظيف العناصر القديمة
-        self.cleanup_completed_items()
+        # تنظيف العناصر القديمة - فقط إذا كان الـ repo متاح
+        try:
+            if self.repo and hasattr(self.repo, 'sqlite_cursor') and self.repo.sqlite_cursor:
+                self.cleanup_completed_items()
+        except Exception as e:
+            safe_print(f"WARNING: [AdvancedSyncManager] Cleanup skipped: {e}")
 
         safe_print("INFO: [AdvancedSyncManager] Shutdown complete")

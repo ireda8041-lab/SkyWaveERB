@@ -49,9 +49,9 @@ class ProjectProfitDialog(QDialog):
         self.project = project
         self.project_service = project_service
 
-        self.setWindowTitle(f"📊 تقرير ربحية مشروع: {project.name}")
-        self.resize(900, 600)
-        self.setMinimumSize(800, 550)
+        self.setWindowTitle(f"📊 معاينة ربحية المشروع: {project.name}")
+        self.resize(1100, 750)
+        self.setMinimumSize(950, 650)
 
         from ui.styles import setup_custom_title_bar
         setup_custom_title_bar(self)
@@ -111,18 +111,18 @@ class ProjectProfitDialog(QDialog):
 
         # المشروع
         self.project_label = QLabel(f"📌 <b>المشروع:</b> <span style='color:{COLORS['primary']};'>{self.project.name}</span>")
-        self.project_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        self.project_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         # العميل
         client_display = self.project.client_id or "غير محدد"
         self.client_label = QLabel(f"👤 <b>العميل:</b> {client_display}")
-        self.client_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        self.client_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         # الحالة
         status_text = self.project.status.value if hasattr(self.project.status, 'value') else str(self.project.status)
         status_color = "#10b981" if status_text == "نشط" else COLORS['text_secondary']
         self.status_label = QLabel(f"🏷️ <b>الحالة:</b> <span style='color:{status_color};'>{status_text}</span>")
-        self.status_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
+        self.status_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         info_layout.addWidget(self.project_label)
         info_layout.addStretch()
@@ -198,8 +198,8 @@ class ProjectProfitDialog(QDialog):
         pay_layout.setContentsMargins(10, 10, 10, 10)
         pay_layout.setSpacing(8)
 
-        pay_title = QLabel("💳 سجل الدفعات (الوارد)")
-        pay_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;")
+        pay_title = QLabel("💳 الدفعات المسجلة")
+        pay_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
         pay_layout.addWidget(pay_title)
 
         self.payments_table = QTableWidget()
@@ -222,8 +222,8 @@ class ProjectProfitDialog(QDialog):
         exp_layout.setContentsMargins(10, 10, 10, 10)
         exp_layout.setSpacing(8)
 
-        exp_title = QLabel("💸 سجل المصروفات (الصادر)")
-        exp_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;")
+        exp_title = QLabel("💸 المصروفات المرتبطة")
+        exp_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
         exp_layout.addWidget(exp_title)
 
         self.expenses_table = QTableWidget()
@@ -285,19 +285,19 @@ class ProjectProfitDialog(QDialog):
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(10, 8, 10, 8)
-        card_layout.setSpacing(3)
+        card_layout.setContentsMargins(14, 12, 14, 12)
+        card_layout.setSpacing(5)
 
         # العنوان مع الأيقونة
         header = QHBoxLayout()
-        header.setSpacing(4)
+        header.setSpacing(6)
 
         icon_lbl = QLabel(icon)
-        icon_lbl.setStyleSheet("font-size: 12px; background: transparent;")
+        icon_lbl.setStyleSheet("font-size: 16px; background: transparent;")
         header.addWidget(icon_lbl)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 10px; background: transparent;")
+        title_lbl.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-weight: bold; background: transparent;")
         header.addWidget(title_lbl)
         header.addStretch()
 
@@ -305,7 +305,7 @@ class ProjectProfitDialog(QDialog):
 
         value_lbl = QLabel("0.00")
         value_lbl.setObjectName(f"val_{key}")
-        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 18px; background: transparent;")
         card_layout.addWidget(value_lbl)
 
         return card
@@ -329,7 +329,7 @@ class ProjectProfitDialog(QDialog):
                 header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الحساب/الوصف - يتمدد
                 header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # ملاحظات/المبلغ
         table.verticalHeader().setVisible(False)
-        table.verticalHeader().setDefaultSectionSize(32)
+        table.verticalHeader().setDefaultSectionSize(38)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
 

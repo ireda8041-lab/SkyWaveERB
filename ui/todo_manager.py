@@ -1985,10 +1985,11 @@ class TodoManagerWidget(QWidget):
             # ترتيب المهام
             tasks = self._sort_tasks(tasks)
 
+            # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
+            self.tasks_table.setRowCount(len(tasks))
+
             # ملء الجدول
             for row, task in enumerate(tasks):
-                self.tasks_table.insertRow(row)
-
                 # عنوان المهمة
                 title_item = create_centered_item(task.title)
                 if task.status == TaskStatus.COMPLETED:
@@ -2015,9 +2016,6 @@ class TodoManagerWidget(QWidget):
                 # المشروع
                 project_name = self._projects_cache.get(task.related_project, task.related_project) if task.related_project else "-"
                 self.tasks_table.setItem(row, 5, create_centered_item(project_name))
-
-                if (row + 1) % 20 == 0:
-                    QApplication.processEvents()
 
             self.tasks_table.blockSignals(False)
             self.tasks_table.setUpdatesEnabled(True)

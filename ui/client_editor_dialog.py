@@ -41,6 +41,15 @@ except ImportError:
         except UnicodeEncodeError:
             pass
 
+# استيراد دوال الإشعارات
+try:
+    from ui.notification_system import notify_success, notify_error
+except ImportError:
+    def notify_success(msg, title=""):
+        safe_print(f"INFO: {title} - {msg}")
+    def notify_error(msg, title=""):
+        safe_print(f"ERROR: {title} - {msg}")
+
 
 class ClientEditorDialog(QDialog):
     """نافذة إضافة/تعديل عميل - تصميم متجاوب"""
@@ -388,6 +397,27 @@ class ClientEditorDialog(QDialog):
         self.status_checkbox.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px;")
         layout.addWidget(self.status_checkbox)
 
+        # ⚡ عميل VIP مميز
+        self.vip_checkbox = QCheckBox("⭐ عميل مميز VIP")
+        self.vip_checkbox.setChecked(False)
+        self.vip_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                color: #fbbf24;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: #fbbf24;
+                border: 2px solid #f59e0b;
+                border-radius: 4px;
+            }}
+        """)
+        layout.addWidget(self.vip_checkbox)
+
         layout.addStretch()
 
         scroll_area.setWidget(content_widget)
@@ -484,6 +514,10 @@ class ClientEditorDialog(QDialog):
 
         self.notes_input.setText(self.client_to_edit.client_notes or "")
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
+        
+        # ⚡ تحميل حالة VIP
+        is_vip = getattr(self.client_to_edit, 'is_vip', False)
+        self.vip_checkbox.setChecked(bool(is_vip))
 
     def _convert_image_to_base64(self, image_path: str) -> str:
         """تحويل صورة إلى base64 للحفظ في قاعدة البيانات - محسّن للأداء والجودة"""
@@ -605,6 +639,7 @@ class ClientEditorDialog(QDialog):
             "work_field": self.work_field_input.currentText(),
             "logo_path": logo_value,
             "client_notes": self.notes_input.toPlainText(),
+            "is_vip": self.vip_checkbox.isChecked(),  # ⚡ حالة VIP
         }
         
         # إضافة logo_data فقط إذا تم تحديده

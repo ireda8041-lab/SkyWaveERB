@@ -78,16 +78,24 @@ class AuthService:
             users_count = len(users)
 
             if users_count == 0:
+                # الحصول على كلمة المرور من الإعدادات الآمنة
+                try:
+                    from core.config import Config
+                    default_password = Config.get_default_admin_password()
+                except ImportError:
+                    import os
+                    default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'SkyWave@Admin2024!')
+                
                 # إنشاء مستخدم مدير افتراضي
                 safe_print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
                 success = self.create_user(
                     username="admin",
-                    password="admin123",
+                    password=default_password,
                     role=UserRole.ADMIN,
                     full_name="مدير النظام"
                 )
                 if success:
-                    safe_print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي (admin / admin123)")
+                    safe_print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي")
                     safe_print("WARNING: [AuthService] ⚠️ يرجى تغيير كلمة المرور الافتراضية فوراً!")
                 else:
                     safe_print("ERROR: [AuthService] فشل إنشاء المستخدم الافتراضي")

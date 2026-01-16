@@ -61,7 +61,7 @@ class AccountingService:
     # ⚡ Cache للشجرة المحاسبية
     _hierarchy_cache = None
     _hierarchy_cache_time = 0
-    _HIERARCHY_CACHE_TTL = 60  # 60 ثانية
+    _HIERARCHY_CACHE_TTL = 300  # ⚡ 5 دقائق بدلاً من 60 ثانية
 
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
@@ -343,6 +343,9 @@ class AccountingService:
                 debit_total = movements['debit']
                 credit_total = movements['credit']
 
+                # الرصيد المخزن في قاعدة البيانات
+                stored_balance = getattr(acc, 'balance', 0.0) or 0.0
+
                 # حساب الرصيد حسب طبيعة الحساب
                 # الأصول والمصروفات: مدين بطبيعته (الرصيد = مدين - دائن)
                 # الخصوم والإيرادات وحقوق الملكية: دائن بطبيعته (الرصيد = دائن - مدين)
@@ -353,10 +356,13 @@ class AccountingService:
                 else:
                     calculated_balance = credit_total - debit_total
 
-                # ⚡ استخدام الرصيد المخزن دائماً إذا لم توجد حركات
-                if debit_total == 0 and credit_total == 0:
-                    calculated_balance = getattr(acc, 'balance', 0.0) or 0.0
+                # ⚡ استخدام الرصيد المخزن دائماً (الأولوية للرصيد المخزن)
+                # لأن الدفعات تحدث الرصيد مباشرة بدون قيود محاسبية
+                if stored_balance != 0:
+                    calculated_balance = stored_balance
                     safe_print(f"DEBUG: {acc.code} ({acc.name}): استخدام الرصيد المخزن = {calculated_balance}")
+                elif debit_total > 0 or credit_total > 0:
+                    safe_print(f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}")
 
                 node['total'] = calculated_balance
 
@@ -377,8 +383,12 @@ class AccountingService:
                 elif code_len == 4 and acc.code.endswith('000'):
                     continue  # جذر نظام 4 أرقام (1000, 2000, ...)
 
-                # استنتاج الأب من الكود
-                parent_code = get_parent_code_from_code(acc.code)
+                # استنتاج الأب من الكود أو من parent_id المخزن
+                parent_code = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+                
+                # إذا لم يوجد parent_id، نحاول استنتاجه من الكود
+                if not parent_code:
+                    parent_code = get_parent_code_from_code(acc.code)
 
                 # التحقق من وجود الأب في الشجرة
                 if parent_code and parent_code in tree_map and parent_code != acc.code:
@@ -406,14 +416,14 @@ class AccountingService:
                 node['total'] = total
                 return float(total)
 
-            # حساب من الجذور (يدعم نظام 4 و 6 أرقام)
-            root_codes_to_calculate = [
-                '100000', '200000', '300000', '400000', '500000', '600000',  # 6 أرقام
-                '1000', '2000', '3000', '4000', '5000'  # 4 أرقام (للتوافق)
-            ]
-            for code in root_codes_to_calculate:
-                if code in tree_map:
-                    calculate_total(tree_map[code])
+            # ⚡ تحديد الجذور الفعلية (الحسابات التي ليس لها أب في الشجرة)
+            for code, node in tree_map.items():
+                acc = node['obj']
+                parent_id = getattr(acc, 'parent_id', None) or getattr(acc, 'parent_code', None)
+                # إذا لم يكن له أب، أو أبوه غير موجود في الشجرة، فهو جذر
+                if not parent_id or parent_id not in tree_map:
+                    calculate_total(node)
+                    safe_print(f"DEBUG: حساب جذر: {code} = {node['total']}")
 
             # طباعة ملخص للتأكد
             safe_print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")

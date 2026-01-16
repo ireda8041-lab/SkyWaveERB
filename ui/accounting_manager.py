@@ -55,7 +55,7 @@ try:
     EVENTS_AVAILABLE = True
 except ImportError:
     EVENTS_AVAILABLE = False
-    safe_print("WARNING: Global events not available")
+    # ⚡ تحذير صامت - لا نريد إزعاج المستخدم
 
 
 class AccountingManagerTab(QWidget):
@@ -370,23 +370,20 @@ class AccountingManagerTab(QWidget):
     def load_accounts_data(self):
         """⚡ تحميل الحسابات في الخلفية لمنع التجميد (مع حماية من التحديث المتكرر)"""
         import time
-        from PyQt6.QtWidgets import QApplication
         from core.data_loader import get_data_loader
 
-        # ⚡ حماية من التحديث المتكرر (الحد الأدنى 1 ثانية بين كل تحديث)
+        # ⚡ حماية من التحديث المتكرر (الحد الأدنى 3 ثواني بين كل تحديث)
         current_time = time.time()
         if self._is_loading:
             safe_print("WARNING: [AccManager] ⏳ تحميل جاري بالفعل - تم تجاهل الطلب")
             return
-        if (current_time - self._last_refresh_time) < 1.0:
+        if (current_time - self._last_refresh_time) < 3.0:
             safe_print("WARNING: [AccManager] ⏳ تحديث متكرر سريع - تم تجاهل الطلب")
             return
 
         self._is_loading = True
         self._last_refresh_time = current_time
         safe_print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
-
-        QApplication.processEvents()
 
         # دالة جلب البيانات (مع إجبار التحديث من قاعدة البيانات)
         def fetch_accounts():
@@ -574,7 +571,6 @@ class AccountingManagerTab(QWidget):
         safe_print(f"INFO: [AccManager] تم عرض {len(self.all_accounts_list)} حساب وضبط الأعمدة.")
 
         self.update_summary_labels(tree_map)
-        QApplication.processEvents()
 
     def _is_group_account(self, code: str, all_accounts) -> bool:
         """Check if account is a group (has children)"""

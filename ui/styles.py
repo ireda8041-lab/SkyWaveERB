@@ -486,6 +486,7 @@ QLineEdit {{
     min-height: 28px;
     color: #F8FAFC;
     font-size: 13px;
+    font-family: 'Segoe UI', 'Tahoma', sans-serif;
 }}
 
 QLineEdit:focus {{
@@ -502,6 +503,7 @@ QComboBox {{
     min-width: 150px;
     color: #F8FAFC;
     font-size: 14px;
+    font-family: 'Segoe UI', 'Tahoma', sans-serif;
 }}
 
 QComboBox:focus {{
@@ -659,6 +661,7 @@ QTextEdit {{
     border-radius: 4px;
     padding: 8px;
     color: {COLORS['text_primary']};
+    font-family: 'Segoe UI', 'Tahoma', sans-serif;
 }}
 
 QTextEdit:focus {{

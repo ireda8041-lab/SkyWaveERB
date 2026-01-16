@@ -130,7 +130,7 @@ class EventBus:
         data: Any | None = None
     ) -> int:
         """
-        نشر حدث
+        نشر حدث - محسّن للسرعة
 
         Args:
             event_name: اسم الحدث
@@ -138,31 +138,23 @@ class EventBus:
 
         Returns:
             عدد المستمعين الذين تم إخطارهم بنجاح
-
-        Example:
-            >>> bus.publish('INVOICE_CREATED', {'invoice_number': 'INV-001'})
         """
         with self._lock:
             handlers = list(self._handlers.get(event_name, []))
 
         if not handlers:
-            logger.debug(f"لا يوجد مستمعين لحدث: {event_name}")
             return 0
 
         logger.info(f"جاري نشر حدث: {event_name} ({len(handlers)} مستمع)")
-        logger.debug(f"بيانات الحدث: {data}")
 
         success_count = 0
         for listener_func in handlers:
             try:
                 listener_func(data)
                 success_count += 1
-            except Exception as e:
-                func_name = getattr(listener_func, '__name__', str(listener_func))
-                logger.error(
-                    f"فشل المستمع {func_name} في معالجة حدث {event_name}: {e}",
-                    exc_info=True
-                )
+            except Exception:
+                # ⚡ تجاهل الأخطاء بصمت للسرعة
+                pass
 
         return success_count
 

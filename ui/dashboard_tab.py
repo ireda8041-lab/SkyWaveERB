@@ -1056,10 +1056,7 @@ class DashboardTab(QWidget):
         """تحديث البيانات من المصدر الموحد"""
         safe_print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
 
-        from PyQt6.QtWidgets import QApplication
         from core.data_loader import get_data_loader
-
-        QApplication.processEvents()
 
         def fetch_data():
             try:

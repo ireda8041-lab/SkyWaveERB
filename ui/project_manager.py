@@ -1466,6 +1466,35 @@ class ProjectManagerTab(QWidget):
         self._setup_context_menu()
         
         table_layout.addWidget(self.projects_table)
+        
+        # === إضافة شريط ملخص الفواتير ===
+        summary_frame = QFrame()
+        summary_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['bg_medium']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+        """)
+        summary_layout = QHBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(10, 5, 10, 5)
+        summary_layout.setSpacing(20)
+        
+        # عدد الفواتير
+        self.invoices_count_label = QLabel("📄 عدد الفواتير: 0")
+        self.invoices_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        summary_layout.addWidget(self.invoices_count_label)
+        
+        summary_layout.addStretch()
+        
+        # إجمالي مبالغ الفواتير
+        self.invoices_total_label = QLabel("💰 إجمالي الفواتير: 0.00 جنيه")
+        self.invoices_total_label.setStyleSheet(f"color: #10b981; font-size: 12px; font-weight: bold;")
+        summary_layout.addWidget(self.invoices_total_label)
+        
+        table_layout.addWidget(summary_frame)
+        
         left_panel.addWidget(table_groupbox, 1)
         
         # إضافة الجزء الأيسر للـ splitter
@@ -1550,13 +1579,13 @@ class ProjectManagerTab(QWidget):
         preview_scroll.setWidget(self.preview_groupbox)
         self.main_splitter.addWidget(preview_scroll)
         
-        # تعيين النسب الافتراضية للـ splitter (80% للجدول، 20% للمعاينة)
-        self.main_splitter.setStretchFactor(0, 8)
-        self.main_splitter.setStretchFactor(1, 2)
+        # تعيين النسب الافتراضية للـ splitter (70% للجدول، 30% للمعاينة)
+        self.main_splitter.setStretchFactor(0, 7)
+        self.main_splitter.setStretchFactor(1, 3)
         
-        # تعيين الحد الأدنى للعرض
-        preview_scroll.setMinimumWidth(200)
-        preview_scroll.setMaximumWidth(350)
+        # تعيين الحد الأدنى للعرض - زيادة عرض المعاينة
+        preview_scroll.setMinimumWidth(280)
+        preview_scroll.setMaximumWidth(450)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_projects_data() - يتم استدعاؤها من MainWindow
@@ -1876,83 +1905,64 @@ class ProjectManagerTab(QWidget):
         self.preview_groupbox.setVisible(False)
 
     def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
-        """⚡ تحميل بيانات المعاينة في الخلفية"""
+        """⚡ تحميل بيانات المعاينة في الخلفية - محسّن للسرعة القصوى"""
         from core.data_loader import get_data_loader
         
         data_loader = get_data_loader()
         
-        # ⚡ 1. تحميل الأرقام الرئيسية (الربحية)
-        def fetch_profitability():
-            return self.project_service.get_project_profitability(project_name)
+        # ⚡ تحميل كل البيانات في طلب واحد (أسرع)
+        def fetch_all_data():
+            profit_data = self.project_service.get_project_profitability(project_name)
+            payments = self.project_service.get_payments_for_project(project_name)
+            expenses = self.project_service.get_expenses_for_project(project_name)
+            
+            # جلب المهام
+            tasks = []
+            try:
+                from ui.todo_manager import TaskService
+                task_service = TaskService()
+                tasks = task_service.get_tasks_by_project(str(project_id_for_tasks))
+            except Exception:
+                pass
+            
+            return {
+                'profit': profit_data,
+                'payments': payments,
+                'expenses': expenses,
+                'tasks': tasks
+            }
         
-        def on_profitability_loaded(profit_data):
-            if self.selected_project and self.selected_project.name == project_name:
-                self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
-                self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
-                self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
-        
-        data_loader.load_async(
-            operation_name=f"profitability_{project_name}",
-            load_function=fetch_profitability,
-            on_success=on_profitability_loaded,
-            use_thread_pool=True
-        )
-        
-        # ⚡ 2. تحميل الدفعات
-        def fetch_payments():
-            return self.project_service.get_payments_for_project(project_name)
-        
-        def on_payments_loaded(payments):
-            if self.selected_project and self.selected_project.name == project_name:
-                self._populate_payments_table(payments)
-        
-        data_loader.load_async(
-            operation_name=f"payments_{project_name}",
-            load_function=fetch_payments,
-            on_success=on_payments_loaded,
-            use_thread_pool=True
-        )
-        
-        # ⚡ 3. تحميل المصروفات
-        def fetch_expenses():
-            return self.project_service.get_expenses_for_project(project_name)
-        
-        def on_expenses_loaded(expenses):
-            if self.selected_project and self.selected_project.name == project_name:
-                self._populate_expenses_table(expenses)
+        def on_all_data_loaded(data):
+            # التحقق أن المشروع لا يزال محدداً
+            if not self.selected_project or self.selected_project.name != project_name:
+                return
+            
+            # تحديث الكروت
+            profit_data = data.get('profit', {})
+            self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
+            self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
+            self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
+            
+            # تحديث الجداول
+            self._populate_payments_table(data.get('payments', []))
+            self._populate_expenses_table(data.get('expenses', []))
+            self._populate_tasks_table(data.get('tasks', []))
         
         data_loader.load_async(
-            operation_name=f"expenses_{project_name}",
-            load_function=fetch_expenses,
-            on_success=on_expenses_loaded,
-            use_thread_pool=True
-        )
-        
-        # ⚡ 4. تحميل المهام
-        def fetch_tasks():
-            from ui.todo_manager import TaskService
-            task_service = TaskService()
-            return task_service.get_tasks_by_project(str(project_id_for_tasks))
-        
-        def on_tasks_loaded(tasks):
-            if self.selected_project and self.selected_project.name == project_name:
-                self._populate_tasks_table(tasks)
-        
-        data_loader.load_async(
-            operation_name=f"tasks_{project_name}",
-            load_function=fetch_tasks,
-            on_success=on_tasks_loaded,
+            operation_name=f"preview_{project_name}",
+            load_function=fetch_all_data,
+            on_success=on_all_data_loaded,
             use_thread_pool=True
         )
 
     def _populate_payments_table(self, payments):
         """⚡ ملء جدول الدفعات"""
         try:
-            self.preview_payments_table.setRowCount(0)
-            
             if payments and len(payments) > 0:
+                # ⚡ تعيين عدد الصفوف مرة واحدة
+                self.preview_payments_table.setRowCount(len(payments))
+                
                 for i, pay in enumerate(payments):
-                    self.preview_payments_table.insertRow(i)
                     # معالجة التاريخ بأمان
                     try:
                         if hasattr(pay.date, 'strftime'):
@@ -1963,20 +1973,7 @@ class ProjectManagerTab(QWidget):
                         date_str = "N/A"
                     
                     # عرض اسم الحساب بدلاً من ID
-                    account_name = "نقدي"  # افتراضي
-                    try:
-                        account = self.accounting_service.repo.get_account_by_code(pay.account_id)
-                        if account:
-                            account_name = account.name
-                        else:
-                            account = self.accounting_service.repo.get_account_by_id(pay.account_id)
-                            if account:
-                                account_name = account.name
-                            else:
-                                account_name = str(pay.account_id)
-                    except Exception as acc_err:
-                        safe_print(f"WARNING: فشل جلب اسم الحساب: {acc_err}")
-                        account_name = str(pay.account_id)
+                    account_name = str(pay.account_id) if pay.account_id else "نقدي"
                     
                     # ترتيب الأعمدة: [الحساب, المبلغ, التاريخ]
                     self.preview_payments_table.setItem(i, 0, QTableWidgetItem(account_name))
@@ -1984,7 +1981,7 @@ class ProjectManagerTab(QWidget):
                     self.preview_payments_table.setItem(i, 2, QTableWidgetItem(date_str))
             else:
                 # إضافة صف يوضح عدم وجود دفعات
-                self.preview_payments_table.insertRow(0)
+                self.preview_payments_table.setRowCount(1)
                 no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
                 no_data_item.setForeground(QColor("gray"))
                 self.preview_payments_table.setItem(0, 0, no_data_item)
@@ -1996,11 +1993,11 @@ class ProjectManagerTab(QWidget):
     def _populate_expenses_table(self, expenses):
         """⚡ ملء جدول المصروفات"""
         try:
-            self.preview_expenses_table.setRowCount(0)
-            
             if expenses and len(expenses) > 0:
+                # ⚡ تعيين عدد الصفوف مرة واحدة
+                self.preview_expenses_table.setRowCount(len(expenses))
+                
                 for i, exp in enumerate(expenses):
-                    self.preview_expenses_table.insertRow(i)
                     # معالجة التاريخ بأمان
                     try:
                         if hasattr(exp.date, 'strftime'):
@@ -2016,7 +2013,7 @@ class ProjectManagerTab(QWidget):
                     self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(date_str))
             else:
                 # إضافة صف يوضح عدم وجود مصروفات
-                self.preview_expenses_table.insertRow(0)
+                self.preview_expenses_table.setRowCount(1)
                 no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
                 no_data_item.setForeground(QColor("gray"))
                 self.preview_expenses_table.setItem(0, 0, no_data_item)
@@ -2026,14 +2023,13 @@ class ProjectManagerTab(QWidget):
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
 
     def _populate_tasks_table(self, tasks):
-        """⚡ ملء جدول المهام"""
+        """⚡ ملء جدول المهام - محسّن للسرعة"""
         try:
-            self.preview_tasks_table.setRowCount(0)
-            
             if tasks and len(tasks) > 0:
+                # ⚡ تعيين عدد الصفوف مرة واحدة
+                self.preview_tasks_table.setRowCount(len(tasks))
+                
                 for i, task in enumerate(tasks):
-                    self.preview_tasks_table.insertRow(i)
-                    
                     # عنوان المهمة
                     self.preview_tasks_table.setItem(i, 0, QTableWidgetItem(task.title))
                     
@@ -2063,7 +2059,7 @@ class ProjectManagerTab(QWidget):
                     due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
                     self.preview_tasks_table.setItem(i, 3, QTableWidgetItem(due_str))
             else:
-                self.preview_tasks_table.insertRow(0)
+                self.preview_tasks_table.setRowCount(1)
                 no_data_item = QTableWidgetItem("لا توجد مهام مرتبطة")
                 no_data_item.setForeground(QColor("gray"))
                 self.preview_tasks_table.setItem(0, 0, no_data_item)
@@ -2077,14 +2073,12 @@ class ProjectManagerTab(QWidget):
         safe_print("INFO: [ProjectManager] جاري تحميل بيانات المشاريع...")
         
         from core.data_loader import get_data_loader
-        from PyQt6.QtWidgets import QApplication
         
         # تحضير الجدول
         self.projects_table.setSortingEnabled(False)
         self.projects_table.setUpdatesEnabled(False)
         self.projects_table.blockSignals(True)
         self.projects_table.setRowCount(0)
-        QApplication.processEvents()
         
         # دالة جلب البيانات (تعمل في الخلفية)
         def fetch_projects():
@@ -2111,11 +2105,9 @@ class ProjectManagerTab(QWidget):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     return item
                 
-                # تحميل البيانات على دفعات
-                batch_size = 15
+                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
+                self.projects_table.setRowCount(len(self.projects_list))
                 for row, project in enumerate(self.projects_list):
-                    self.projects_table.insertRow(row)
-                    
                     # ⚡ جلب رقم الفاتورة مباشرة من المشروع
                     invoice_number = getattr(project, 'invoice_number', None) or ""
                     
@@ -2124,18 +2116,17 @@ class ProjectManagerTab(QWidget):
                     self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
                     self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
                     self.projects_table.setItem(row, 4, create_centered_item(self._format_date(project.start_date)))
-                    
-                    # معالجة الأحداث كل batch_size صف
-                    if (row + 1) % batch_size == 0:
-                        QApplication.processEvents()
                 
                 # إعادة تفعيل الجدول
                 self.projects_table.blockSignals(False)
                 self.projects_table.setUpdatesEnabled(True)
                 self.projects_table.setSortingEnabled(True)
-                QApplication.processEvents()
                 
                 self.on_project_selection_changed()
+                
+                # ⚡ تحديث ملخص الفواتير
+                self._update_invoices_summary()
+                
                 safe_print(f"INFO: [ProjectManager] ✅ تم تحميل {len(projects)} مشروع")
                 
             except Exception as e:
@@ -2170,6 +2161,26 @@ class ProjectManagerTab(QWidget):
         if hasattr(self.project_service, 'invalidate_cache'):
             self.project_service.invalidate_cache()
         self.load_projects_data()
+
+    def _update_invoices_summary(self):
+        """⚡ تحديث ملخص الفواتير (العدد والإجمالي)"""
+        try:
+            invoices_count = len(self.projects_list) if hasattr(self, 'projects_list') else 0
+            invoices_total = 0.0
+            
+            # حساب إجمالي مبالغ الفواتير من المشاريع
+            for project in self.projects_list:
+                invoices_total += getattr(project, 'total_amount', 0) or 0
+            
+            # تحديث الـ labels
+            if hasattr(self, 'invoices_count_label'):
+                self.invoices_count_label.setText(f"📄 عدد الفواتير: {invoices_count}")
+            if hasattr(self, 'invoices_total_label'):
+                self.invoices_total_label.setText(f"💰 إجمالي الفواتير: {invoices_total:,.2f} جنيه")
+                
+            safe_print(f"INFO: [ProjectManager] ملخص الفواتير: {invoices_count} فاتورة بإجمالي {invoices_total:,.2f}")
+        except Exception as e:
+            safe_print(f"ERROR: [ProjectManager] فشل تحديث ملخص الفواتير: {e}")
 
     def _load_project_tasks(self, project_id: str):
         """تحميل المهام المرتبطة بالمشروع (متزامن - للاستخدام بعد إضافة مهمة)"""

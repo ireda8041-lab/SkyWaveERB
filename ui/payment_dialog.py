@@ -355,11 +355,19 @@ class PaymentDialog(QDialog):
         self.save_btn.setEnabled(is_valid)
 
     def save_payment(self):
+        # ⚡ منع الضغط المزدوج - تعطيل الزر فوراً
+        if not self.save_btn.isEnabled():
+            return
+        self.save_btn.setEnabled(False)
+        self.save_btn.setText("جاري الحفظ...")
+        
         selected_account = self.account_combo.currentData()
         amount = to_decimal(self.amount_input.value())
 
         if not selected_account or amount <= 0:
             QMessageBox.warning(self, "⚠️ تحقق من البيانات", "يرجى اختيار الحساب وإدخال مبلغ صحيح.")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
             return
 
         # تحذير إذا كان المبلغ أكبر من المتبقي
@@ -372,6 +380,8 @@ class PaymentDialog(QDialog):
                 QMessageBox.StandardButton.No
             )
             if reply == QMessageBox.StandardButton.No:
+                self.save_btn.setEnabled(True)
+                self.save_btn.setText("💾 تسجيل الدفعة")
                 return
 
         try:
@@ -387,6 +397,8 @@ class PaymentDialog(QDialog):
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل تسجيل الدفعة.")
+                self.save_btn.setEnabled(True)
+                self.save_btn.setText("💾 تسجيل الدفعة")
 
         except Exception as exc:
             error_msg = str(exc)
@@ -394,6 +406,8 @@ class PaymentDialog(QDialog):
                 QMessageBox.warning(self, "⚠️ دفعة مكررة", f"يوجد دفعة بنفس البيانات:\n{error_msg}")
             else:
                 QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {exc}")
+            self.save_btn.setEnabled(True)
+            self.save_btn.setText("💾 تسجيل الدفعة")
 
     def select_receipt_image(self):
         """فتح نافذة اختيار ملف صورة الإيصال"""

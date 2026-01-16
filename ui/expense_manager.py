@@ -183,7 +183,6 @@ class ExpenseManagerTab(QWidget):
         self.expenses_table.setUpdatesEnabled(False)
         self.expenses_table.blockSignals(True)
         self.expenses_table.setRowCount(0)
-        QApplication.processEvents()
 
         # دالة جلب البيانات
         def fetch_expenses():
@@ -198,11 +197,10 @@ class ExpenseManagerTab(QWidget):
             try:
                 self.expenses_list = expenses
                 total_sum = 0.0
-                batch_size = 15
 
+                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
+                self.expenses_table.setRowCount(len(self.expenses_list))
                 for i, exp in enumerate(self.expenses_list):
-                    self.expenses_table.insertRow(i)
-
                     num_item = create_centered_item(str(i + 1))
                     num_item.setData(Qt.ItemDataRole.UserRole, exp)
                     self.expenses_table.setItem(i, 0, num_item)
@@ -219,9 +217,6 @@ class ExpenseManagerTab(QWidget):
 
                     total_sum += exp.amount
 
-                    if (i + 1) % batch_size == 0:
-                        QApplication.processEvents()
-
                 self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
                 safe_print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
 
@@ -230,7 +225,6 @@ class ExpenseManagerTab(QWidget):
             finally:
                 self.expenses_table.blockSignals(False)
                 self.expenses_table.setUpdatesEnabled(True)
-                QApplication.processEvents()
 
         def on_error(error_msg):
             safe_print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")

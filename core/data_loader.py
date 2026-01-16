@@ -97,28 +97,22 @@ class DataLoaderRunnable(QRunnable):
 
 class BackgroundDataLoader(QObject):
     """
-    مدير تحميل البيانات في الخلفية
-    يوفر واجهة موحدة لتحميل البيانات بدون تجميد الواجهة
+    مدير تحميل البيانات في الخلفية - محسّن للسرعة القصوى
     """
 
     # إشارات عامة
-    loading_started = pyqtSignal(str)  # اسم العملية
-    loading_finished = pyqtSignal(str, object)  # اسم العملية + البيانات
-    loading_error = pyqtSignal(str, str)  # اسم العملية + رسالة الخطأ
+    loading_started = pyqtSignal(str)
+    loading_finished = pyqtSignal(str, object)
+    loading_error = pyqtSignal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._active_workers = {}
         self._thread_pool = QThreadPool.globalInstance()
-        # ⚡ تحديد عدد الـ threads المتاحة (أقل = أقل استهلاك للموارد)
+        # ⚡ استخدام كل الـ CPU cores للسرعة القصوى
         import os
         cpu_count = os.cpu_count() or 4
-        optimal_threads = min(cpu_count, 4)  # حد أقصى 4 threads
-        self._thread_pool.setMaxThreadCount(optimal_threads)
-        
-        # ⚡ قائمة انتظار للعمليات ذات الأولوية المنخفضة
-        self._pending_operations: list[tuple] = []
-        self._is_busy = False
+        self._thread_pool.setMaxThreadCount(cpu_count)
 
     def load_async(
         self,
@@ -130,70 +124,25 @@ class BackgroundDataLoader(QObject):
         *args,
         **kwargs
     ):
-        """
-        تحميل البيانات بشكل غير متزامن
-
-        Args:
-            operation_name: اسم العملية (للتتبع)
-            load_function: دالة التحميل
-            on_success: callback عند النجاح
-            on_error: callback عند الفشل
-            use_thread_pool: استخدام ThreadPool (أسرع) أو QThread (أكثر تحكم)
-        """
-        safe_print(f"INFO: [DataLoader] ⚡ بدء تحميل: {operation_name}")
-        self.loading_started.emit(operation_name)
-
+        """تحميل البيانات بشكل غير متزامن - محسّن للسرعة"""
         # إلغاء أي عملية سابقة بنفس الاسم
         self.cancel_operation(operation_name)
 
-        if use_thread_pool:
-            # استخدام QThreadPool (أخف وأسرع)
-            runnable = DataLoaderRunnable(load_function, *args, **kwargs)
+        # استخدام QThreadPool دائماً (أسرع)
+        runnable = DataLoaderRunnable(load_function, *args, **kwargs)
 
-            def handle_success(data):
-                safe_print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
-                self.loading_finished.emit(operation_name, data)
-                if on_success:
-                    on_success(data)
+        def handle_success(data):
+            if on_success:
+                on_success(data)
 
-            def handle_error(error_msg):
-                safe_print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
-                self.loading_error.emit(operation_name, error_msg)
-                if on_error:
-                    on_error(error_msg)
+        def handle_error(error_msg):
+            if on_error:
+                on_error(error_msg)
 
-            runnable.signals.finished.connect(handle_success)
-            runnable.signals.error.connect(handle_error)
+        runnable.signals.finished.connect(handle_success)
+        runnable.signals.error.connect(handle_error)
 
-            self._thread_pool.start(runnable)
-
-        else:
-            # استخدام QThread (أكثر تحكم)
-            worker = DataLoaderWorker(load_function, *args, **kwargs)
-
-            def handle_success(data):
-                safe_print(f"INFO: [DataLoader] ✅ اكتمل تحميل: {operation_name}")
-                self.loading_finished.emit(operation_name, data)
-                if on_success:
-                    on_success(data)
-                # تنظيف
-                if operation_name in self._active_workers:
-                    del self._active_workers[operation_name]
-
-            def handle_error(error_msg):
-                safe_print(f"ERROR: [DataLoader] ❌ فشل تحميل: {operation_name} - {error_msg}")
-                self.loading_error.emit(operation_name, error_msg)
-                if on_error:
-                    on_error(error_msg)
-                # تنظيف
-                if operation_name in self._active_workers:
-                    del self._active_workers[operation_name]
-
-            worker.finished.connect(handle_success)
-            worker.error.connect(handle_error)
-
-            self._active_workers[operation_name] = worker
-            worker.start()
+        self._thread_pool.start(runnable)
 
     def cancel_operation(self, operation_name: str):
         """إلغاء عملية تحميل"""
@@ -201,9 +150,8 @@ class BackgroundDataLoader(QObject):
             worker = self._active_workers[operation_name]
             worker.cancel()
             worker.quit()
-            worker.wait(1000)  # انتظار ثانية كحد أقصى
+            worker.wait(500)
             del self._active_workers[operation_name]
-            safe_print(f"INFO: [DataLoader] تم إلغاء: {operation_name}")
 
     def cancel_all(self):
         """إلغاء كل العمليات"""

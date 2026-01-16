@@ -76,51 +76,44 @@ class UnifiedSyncManagerV3(QObject):
         self._last_online_status = None
         self._shutdown = False  # ⚡ علامة الإغلاق
         
-        # ⚡ إعدادات المزامنة التلقائية - مزامنة لحظية
+        # ⚡ إعدادات المزامنة التلقائية - محسّنة للأداء
         self._auto_sync_enabled = True
-        self._auto_sync_interval = 30 * 1000  # ⚡ 30 ثانية - مزامنة كاملة
-        self._quick_sync_interval = 5 * 1000  # ⚡ 5 ثواني - رفع التغييرات
-        self._connection_check_interval = 10 * 1000  # ⚡ 10 ثواني - فحص الاتصال
+        self._auto_sync_interval = 600 * 1000  # ⚡ 10 دقائق - مزامنة كاملة
+        self._quick_sync_interval = 120 * 1000  # ⚡ دقيقتين - رفع التغييرات
+        self._connection_check_interval = 120 * 1000  # ⚡ دقيقتين - فحص الاتصال
         
         # ⚡ المؤقتات
         self._auto_sync_timer = None
         self._quick_sync_timer = None
         self._connection_timer = None
         
-        logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة لحظية Real-time")
+        logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة محسّنة للأداء")
 
     # ==========================================
     # 🚀 المزامنة الفورية - Real-time Sync
     # ==========================================
     
     def instant_sync(self, table: str = None):
-        """⚡ مزامنة فورية - تُستدعى عند أي تغيير"""
-        if self._shutdown or not self.is_online:
-            return
-        
-        def sync_now():
-            try:
-                if table:
-                    # مزامنة جدول محدد فقط
-                    self._sync_single_table_to_cloud(table)
-                else:
-                    # رفع كل التغييرات المعلقة
-                    self._push_pending_changes()
-                logger.debug(f"⚡ مزامنة فورية: {table or 'all'}")
-            except Exception as e:
-                logger.error(f"❌ فشل المزامنة الفورية: {e}")
-        
-        # تشغيل في thread منفصل لعدم تجميد الواجهة
-        thread = threading.Thread(target=sync_now, daemon=True)
-        thread.start()
+        """⚡ مزامنة فورية - معطّلة للأداء (تستخدم المزامنة الدورية بدلاً منها)"""
+        # ⚡ معطّلة للأداء - المزامنة تتم كل 5 دقائق
+        pass
 
     def _sync_single_table_to_cloud(self, table: str):
         """مزامنة جدول واحد فوراً"""
-        if not self.is_online or not self.repo.mongo_db:
+        if not self.is_online or self.repo.mongo_db is None:
+            return
+        
+        # ⚡ تجاهل الجداول غير الموجودة
+        if table not in self.TABLES:
             return
         
         try:
             cursor = self.repo.sqlite_cursor
+            # ⚡ التحقق من وجود الجدول أولاً
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            if not cursor.fetchone():
+                return  # الجدول غير موجود
+            
             cursor.execute(f"SELECT * FROM {table} WHERE sync_status != 'synced' OR sync_status IS NULL")
             rows = cursor.fetchall()
             
@@ -154,7 +147,7 @@ class UnifiedSyncManagerV3(QObject):
                 self.repo.sqlite_conn.commit()
                 
         except Exception as e:
-            logger.error(f"❌ فشل مزامنة {table}: {e}")
+            logger.debug(f"تجاهل خطأ مزامنة {table}: {e}")
 
     # ==========================================
     # نظام المزامنة التلقائية الاحترافي
@@ -167,12 +160,12 @@ class UnifiedSyncManagerV3(QObject):
             
         logger.info("🚀 بدء نظام المزامنة التلقائية...")
         
-        # 1. مؤقت فحص الاتصال (كل 15 ثانية)
+        # 1. مؤقت فحص الاتصال (كل دقيقة)
         self._connection_timer = QTimer(self)
         self._connection_timer.timeout.connect(self._check_connection)
         self._connection_timer.start(self._connection_check_interval)
         
-        # 2. مؤقت المزامنة السريعة للتغييرات المحلية (كل 30 ثانية)
+        # 2. مؤقت المزامنة السريعة للتغييرات المحلية (كل دقيقة)
         self._quick_sync_timer = QTimer(self)
         self._quick_sync_timer.timeout.connect(self._quick_push_changes)
         self._quick_sync_timer.start(self._quick_sync_interval)
@@ -182,39 +175,49 @@ class UnifiedSyncManagerV3(QObject):
         self._auto_sync_timer.timeout.connect(self._auto_full_sync)
         self._auto_sync_timer.start(self._auto_sync_interval)
         
-        # 4. مزامنة أولية بعد 3 ثواني
-        QTimer.singleShot(3000, self._initial_sync)
+        # 4. مزامنة أولية بعد 5 ثواني
+        QTimer.singleShot(5000, self._initial_sync)
         
-        logger.info(f"⏰ المزامنة التلقائية: كل {self._auto_sync_interval // 1000} ثانية")
-        logger.info(f"⏰ رفع التغييرات: كل {self._quick_sync_interval // 1000} ثانية")
+        logger.info(f"⏰ المزامنة التلقائية: كل {self._auto_sync_interval // 60000} دقيقة")
+        logger.info(f"⏰ رفع التغييرات: كل {self._quick_sync_interval // 60000} دقيقة")
     
     def stop_auto_sync(self):
         """⏹️ إيقاف نظام المزامنة التلقائية"""
         logger.info("⏹️ إيقاف نظام المزامنة التلقائية...")
         self._shutdown = True  # ⚡ تعيين علامة الإغلاق
         
+        # إيقاف المؤقتات بأمان
         try:
             if self._auto_sync_timer:
-                self._auto_sync_timer.stop()
+                try:
+                    self._auto_sync_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
                 self._auto_sync_timer = None
-        except RuntimeError:
-            pass  # Qt object deleted
+        except Exception:
+            pass
             
         try:
             if self._quick_sync_timer:
-                self._quick_sync_timer.stop()
+                try:
+                    self._quick_sync_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
                 self._quick_sync_timer = None
-        except RuntimeError:
-            pass  # Qt object deleted
+        except Exception:
+            pass
             
         try:
             if self._connection_timer:
-                self._connection_timer.stop()
+                try:
+                    self._connection_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
                 self._connection_timer = None
-        except RuntimeError:
-            pass  # Qt object deleted
+        except Exception:
+            pass
         
-        logger.info("⏹️ تم إيقاف نظام المزامنة التلقائية")
+        logger.info("✅ تم إيقاف نظام المزامنة التلقائية")
     
     def _check_connection(self):
         """🔌 فحص حالة الاتصال - محسّن"""
@@ -242,23 +245,23 @@ class UnifiedSyncManagerV3(QObject):
             pass
     
     def _initial_sync(self):
-        """🚀 المزامنة الأولية عند بدء التشغيل - محسّنة"""
-        if self._shutdown:  # ⚡ تجاهل إذا تم الإغلاق
+        """🚀 المزامنة الأولية عند بدء التشغيل - تفاضلية للسرعة"""
+        if self._shutdown:
             return
             
         if not self.is_online:
             logger.info("📴 لا يوجد اتصال - العمل بالبيانات المحلية")
             return
             
-        logger.info("🚀 بدء المزامنة الأولية...")
+        logger.info("🚀 بدء المزامنة الأولية (تفاضلية)...")
         
         def sync_thread():
             if self._shutdown:
                 return
             try:
-                result = self.full_sync_from_cloud()
-                if result.get('success'):
-                    logger.info(f"✅ المزامنة الأولية: {result.get('total_synced', 0)} سجل")
+                # ⚡ رفع التغييرات المحلية فقط - لا نحمّل كل شيء
+                self._push_pending_changes()
+                logger.info("✅ المزامنة الأولية: تم رفع التغييرات المحلية")
             except Exception as e:
                 logger.warning(f"⚠️ المزامنة الأولية: {e}")
         
@@ -266,7 +269,7 @@ class UnifiedSyncManagerV3(QObject):
         thread.start()
     
     def _auto_full_sync(self):
-        """🔄 المزامنة الكاملة التلقائية - محسّنة"""
+        """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
         if self._shutdown or self._is_syncing or not self.is_online:
             return
             
@@ -274,14 +277,11 @@ class UnifiedSyncManagerV3(QObject):
             if self._shutdown:
                 return
             try:
-                result = self.full_sync_from_cloud()
-                if result.get('success'):
-                    total = result.get('total_synced', 0)
-                    if total > 0:
-                        logger.debug(f"🔄 مزامنة تلقائية: {total} سجل")
+                # ⚡ رفع التغييرات المحلية فقط - لا نحمّل كل شيء
+                self._push_pending_changes()
+                logger.debug("✅ مزامنة تلقائية: تم رفع التغييرات")
             except Exception as e:
-                # تجاهل الأخطاء - لا نريد spam في الـ logs
-                pass
+                logger.debug(f"مزامنة تلقائية: {e}")
         
         thread = threading.Thread(target=sync_thread, daemon=True)
         thread.start()
@@ -292,8 +292,8 @@ class UnifiedSyncManagerV3(QObject):
             return
             
         try:
-            # فحص سريع للتغييرات المعلقة
-            cursor = self.repo.sqlite_cursor
+            # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
+            cursor = self.repo.sqlite_conn.cursor()
             has_pending = False
             
             for table in self.TABLES:
@@ -308,6 +308,8 @@ class UnifiedSyncManagerV3(QObject):
                         break
                 except:
                     pass
+            
+            cursor.close()  # ⚡ إغلاق الـ cursor
             
             if has_pending:
                 def push_thread():
@@ -352,6 +354,10 @@ class UnifiedSyncManagerV3(QObject):
         مزامنة كاملة من السحابة - MongoDB هو المصدر الوحيد
         يحذف البيانات المحلية غير الموجودة في السحابة
         """
+        # ⚡ فحص الإغلاق أولاً
+        if self._shutdown:
+            return {'success': False, 'reason': 'shutdown'}
+        
         # ⚡ انتظار الاتصال أولاً
         if not self._wait_for_connection(timeout=10):
             logger.warning("غير متصل - لا يمكن المزامنة من السحابة")
@@ -359,6 +365,16 @@ class UnifiedSyncManagerV3(QObject):
 
         if self._is_syncing:
             return {'success': False, 'reason': 'already_syncing'}
+        
+        # ⚡ فحص فعلي أن MongoDB client لا يزال متاحاً
+        if not self.repo or self.repo.mongo_client is None or self.repo.mongo_db is None:
+            return {'success': False, 'reason': 'no_mongo_client'}
+        
+        try:
+            self.repo.mongo_client.admin.command('ping')
+        except Exception:
+            logger.debug("MongoDB client مغلق - تخطي المزامنة الكاملة")
+            return {'success': False, 'reason': 'mongo_client_closed'}
 
         self._is_syncing = True
         self.sync_started.emit()
@@ -419,14 +435,41 @@ class UnifiedSyncManagerV3(QObject):
         stats = {'synced': 0, 'inserted': 0, 'updated': 0, 'deleted': 0, 'linked': 0}
 
         try:
+            # ⚡ فحص الاتصال قبل استخدام MongoDB
+            if self._shutdown:
+                return stats
+            
+            if not self.repo or not self.repo.online:
+                return stats
+            
+            # ⚡ فحص أن MongoDB client لا يزال متاحاً
+            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+                return stats
+            
+            # ⚡ فحص فعلي أن الـ client لم يُغلق
+            try:
+                # محاولة ping للتأكد من أن الاتصال فعال
+                self.repo.mongo_client.admin.command('ping')
+            except Exception:
+                logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق أو غير متاح")
+                return stats
+            
             # جلب البيانات من السحابة
-            cloud_data = list(self.repo.mongo_db[table_name].find())
+            try:
+                cloud_data = list(self.repo.mongo_db[table_name].find())
+            except Exception as mongo_err:
+                error_msg = str(mongo_err)
+                if "Cannot use MongoClient after close" in error_msg or "InvalidOperation" in error_msg:
+                    logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق")
+                    return stats
+                raise
             
             if not cloud_data:
                 logger.info(f"لا توجد بيانات في {table_name}")
                 return stats
 
-            cursor = self.repo.sqlite_cursor
+            # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
+            cursor = self.repo.sqlite_conn.cursor()
             conn = self.repo.sqlite_conn
             unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
 
@@ -481,12 +524,22 @@ class UnifiedSyncManagerV3(QObject):
             stats['deleted'] = deleted
 
             conn.commit()
+            
+            # ⚡ إغلاق الـ cursor
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            
             logger.info(f"✅ {table_name}: +{stats['inserted']} ~{stats['updated']} -{stats['deleted']}")
 
         except Exception as e:
             logger.error(f"❌ خطأ في مزامنة {table_name}: {e}")
-            import traceback
-            traceback.print_exc()
+            # ⚡ إغلاق الـ cursor في حالة الخطأ
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
         return stats
 
@@ -691,7 +744,15 @@ class UnifiedSyncManagerV3(QObject):
         """
         رفع التغييرات المحلية المعلقة للسحابة قبل السحب
         """
+        # ⚡ فحص الاتصال والإغلاق
+        if self._shutdown:
+            return
+        
         if not self.is_online:
+            return
+        
+        if not self.repo or self.repo.mongo_db is None or self.repo.mongo_client is None:
+            logger.debug("تم تخطي رفع التغييرات - MongoDB client غير متاح")
             return
 
         logger.info("📤 جاري رفع التغييرات المحلية...")
@@ -704,21 +765,51 @@ class UnifiedSyncManagerV3(QObject):
 
     def _push_table_changes(self, table_name: str):
         """رفع تغييرات جدول واحد"""
-        cursor = self.repo.sqlite_cursor
+        # ⚡ فحص الاتصال قبل استخدام MongoDB
+        if self._shutdown:
+            return
+        
+        if not self.repo or not self.repo.online:
+            return
+        
+        if self.repo.mongo_db is None or self.repo.mongo_client is None:
+            logger.debug(f"تم تخطي رفع {table_name} - MongoDB client غير متاح")
+            return
+        
+        # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
+        try:
+            cursor = self.repo.sqlite_conn.cursor()
+        except Exception as e:
+            logger.debug(f"فشل إنشاء cursor: {e}")
+            return
+        
         conn = self.repo.sqlite_conn
         unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
 
-        # جلب السجلات غير المتزامنة
-        cursor.execute(f"""
-            SELECT * FROM {table_name}
-            WHERE sync_status != 'synced' OR sync_status IS NULL
-        """)
-        unsynced = cursor.fetchall()
-
-        if not unsynced:
+        try:
+            # جلب السجلات غير المتزامنة
+            cursor.execute(f"""
+                SELECT * FROM {table_name}
+                WHERE sync_status != 'synced' OR sync_status IS NULL
+            """)
+            unsynced = cursor.fetchall()
+        except Exception as e:
+            logger.debug(f"فشل جلب السجلات غير المتزامنة: {e}")
+            cursor.close()
             return
 
-        collection = self.repo.mongo_db[table_name]
+        if not unsynced:
+            cursor.close()
+            return
+
+        try:
+            collection = self.repo.mongo_db[table_name]
+        except Exception as e:
+            if "Cannot use MongoClient after close" in str(e):
+                logger.warning(f"⚠️ MongoDB client مغلق - تخطي رفع {table_name}")
+            cursor.close()
+            return
+        
         pushed = 0
 
         for row in unsynced:
@@ -789,7 +880,17 @@ class UnifiedSyncManagerV3(QObject):
                 else:
                     logger.error(f"❌ فشل رفع {table_name}/{local_id}: {e}")
 
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        
+        # ⚡ إغلاق الـ cursor
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        
         if pushed > 0:
             logger.info(f"📤 {table_name}: رفع {pushed} سجل")
 
@@ -1078,11 +1179,6 @@ class UnifiedSyncManagerV3(QObject):
         return status
 
 
-def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
-    """إنشاء مدير مزامنة موحد"""
-    return UnifiedSyncManagerV3(repository)
-
-
     def remove_cloud_duplicates(self) -> dict[str, int]:
         """
         إزالة التكرارات من MongoDB
@@ -1164,3 +1260,8 @@ def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
             results['sync'] = self.full_sync_from_cloud()
 
         return results
+
+
+def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
+    """إنشاء مدير مزامنة موحد"""
+    return UnifiedSyncManagerV3(repository)

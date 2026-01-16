@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self.project_check_timer = QTimer()
         self.project_check_timer.timeout.connect(self._check_project_due_dates_background)
         self.project_check_timer.start(86400000)  # 24 ساعة
+        self.project_check_timer.start(86400000)  # 24 ساعة
 
         # ⚡ فحص أولي في الخلفية بعد 10 ثواني
         QTimer.singleShot(10000, self._check_project_due_dates_background)
@@ -349,15 +350,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self._load_initial_data_safely)
 
     def _create_all_tabs(self):
-        """⚡ إنشاء كل التابات مرة واحدة (بدون تحميل بيانات)"""
-        from PyQt6.QtWidgets import QApplication
-
+        """⚡ إنشاء كل التابات مرة واحدة (بدون تحميل بيانات) - محسّن للسرعة"""
         safe_print("INFO: [MainWindow] ⚡ إنشاء كل التابات...")
 
-        # 1. Dashboard
+        # 1. Dashboard - التاب الأول فقط يُنشأ فوراً
         self.dashboard_tab = DashboardTab(self.accounting_service)
         self.tabs.addTab(self.dashboard_tab, "🏠 الصفحة الرئيسية")
-        QApplication.processEvents()
 
         # 2. Projects
         self.projects_tab = ProjectManagerTab(
@@ -369,18 +367,16 @@ class MainWindow(QMainWindow):
             template_service=self.template_service,
         )
         self.tabs.addTab(self.projects_tab, "🚀 المشاريع")
-        QApplication.processEvents()
 
-        # 3. Expenses (كان 4 سابقاً)
+        # 3. Expenses
         self.expense_tab = ExpenseManagerTab(
             self.expense_service,
             self.accounting_service,
             self.project_service,
         )
         self.tabs.addTab(self.expense_tab, "💳 المصروفات")
-        QApplication.processEvents()
 
-        # 5. Payments
+        # 4. Payments
         self.payments_tab = PaymentsManagerTab(
             self.project_service,
             self.accounting_service,
@@ -388,28 +384,24 @@ class MainWindow(QMainWindow):
             current_user=self.current_user,
         )
         self.tabs.addTab(self.payments_tab, "💰 الدفعات")
-        QApplication.processEvents()
 
-        # 6. Clients
+        # 5. Clients
         self.clients_tab = ClientManagerTab(self.client_service)
         self.tabs.addTab(self.clients_tab, "👤 العملاء")
-        QApplication.processEvents()
 
-        # 7. Services
+        # 6. Services
         self.services_tab = ServiceManagerTab(self.service_service)
         self.tabs.addTab(self.services_tab, "🛠️ الخدمات والباقات")
-        QApplication.processEvents()
 
-        # 8. Accounting
+        # 7. Accounting
         self.accounting_tab = AccountingManagerTab(
             self.expense_service,
             self.accounting_service,
             self.project_service,
         )
         self.tabs.addTab(self.accounting_tab, "📊 المحاسبة")
-        QApplication.processEvents()
 
-        # 9. Todo
+        # 8. Todo
         from ui.todo_manager import TaskService, TodoManagerWidget
         TaskService._repository = self.accounting_service.repo
         TaskService._instance = None
@@ -419,32 +411,28 @@ class MainWindow(QMainWindow):
             client_service=self.client_service
         )
         self.tabs.addTab(self.todo_tab, "📋 المهام")
-        QApplication.processEvents()
 
-        # 10. Settings
+        # 9. Settings
         self.settings_tab = SettingsTab(self.settings_service, repository=self.accounting_service.repo, current_user=self.current_user)
         self.tabs.addTab(self.settings_tab, "🔧 الإعدادات")
-        QApplication.processEvents()
 
         safe_print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
         
-        # ⚡ تطبيق محاذاة النص لليمين على كل الحقول في كل التابات
-        from ui.styles import apply_rtl_alignment_to_all_fields
-        for i in range(self.tabs.count()):
-            tab_widget = self.tabs.widget(i)
-            if tab_widget:
-                apply_rtl_alignment_to_all_fields(tab_widget)
-        safe_print("INFO: [MainWindow] ⚡ تم تطبيق محاذاة RTL على كل الحقول")
+        # ⚡ تطبيق محاذاة RTL في الخلفية بعد ثانية
+        def apply_rtl_later():
+            from ui.styles import apply_rtl_alignment_to_all_fields
+            for i in range(self.tabs.count()):
+                tab_widget = self.tabs.widget(i)
+                if tab_widget:
+                    apply_rtl_alignment_to_all_fields(tab_widget)
+            safe_print("INFO: [MainWindow] ⚡ تم تطبيق محاذاة RTL على كل الحقول")
+        QTimer.singleShot(1000, apply_rtl_later)
 
     def on_tab_changed(self, index):
-        """⚡ تحميل بيانات التاب عند التنقل - محسّن لمنع التجميد"""
+        """⚡ تحميل بيانات التاب عند التنقل - محسّن للسرعة"""
         try:
             tab_name = self.tabs.tabText(index)
             safe_print(f"INFO: [MainWindow] تم اختيار التاب: {tab_name}")
-
-            # ⚡ معالجة الأحداث فوراً لإظهار التاب
-            from PyQt6.QtWidgets import QApplication
-            QApplication.processEvents()
 
             # ⚡ تحميل البيانات فقط إذا لم تكن محملة
             if not self._tab_data_loaded.get(tab_name, False):
@@ -570,47 +558,35 @@ class MainWindow(QMainWindow):
 
     def _update_tab_ui(self, tab_name: str, data: dict):
         """تحديث واجهة التاب بعد تحميل البيانات (يعمل على main thread)"""
-        from PyQt6.QtWidgets import QApplication
-
         try:
             if tab_name == "🏠 الصفحة الرئيسية":
                 if hasattr(self, 'dashboard_tab'):
                     self.dashboard_tab.refresh_data()
             elif tab_name == "🚀 المشاريع":
                 if hasattr(self, 'projects_tab'):
-                    QApplication.processEvents()
                     self.projects_tab.load_projects_data()
             elif tab_name == "💳 المصروفات":
                 if hasattr(self, 'expense_tab'):
-                    QApplication.processEvents()
                     self.expense_tab.load_expenses_data()
             elif tab_name == "💰 الدفعات":
                 if hasattr(self, 'payments_tab'):
-                    QApplication.processEvents()
                     self.payments_tab.load_payments_data()
             elif tab_name == "👤 العملاء":
                 if hasattr(self, 'clients_tab'):
-                    QApplication.processEvents()
                     self.clients_tab.load_clients_data()
             elif tab_name == "🛠️ الخدمات والباقات":
                 if hasattr(self, 'services_tab'):
-                    QApplication.processEvents()
                     self.services_tab.load_services_data()
             elif tab_name == "📊 المحاسبة":
                 if hasattr(self, 'accounting_tab'):
-                    QApplication.processEvents()
                     self.accounting_tab.load_accounts_data()
             elif tab_name == "📋 المهام":
                 if hasattr(self, 'todo_tab'):
-                    QApplication.processEvents()
                     self.todo_tab.load_tasks()
             elif tab_name == "🔧 الإعدادات":
                 if hasattr(self, 'settings_tab'):
-                    QApplication.processEvents()
                     self.settings_tab.load_settings_data()
                     self.settings_tab.load_users()
-
-            QApplication.processEvents()
 
         except Exception as e:
             safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
