@@ -11,12 +11,14 @@ from datetime import datetime
 # صيغة الإصدار: YY.MM.DD (السنة.الشهر.اليوم)
 # يتم تحديثه تلقائياً عند كل تحديث
 
+
 def _get_today_version() -> str:
     """توليد رقم الإصدار من تاريخ اليوم"""
     now = datetime.now()
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
-CURRENT_VERSION = "1.3.10"  # الإصدار الثابت - إصلاح مشكلة google.generativeai
+
+CURRENT_VERSION = "1.3.11"  # الإصدار الثابت - تحسينات وإصلاحات
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 
@@ -26,7 +28,7 @@ UPDATE_CHECK_URL = "https://raw.githubusercontent.com/ireda8041-lab/SkyWaveERB/m
 # ==================== إعدادات التحديث التلقائي ====================
 AUTO_UPDATE_ENABLED = True
 AUTO_UPDATE_INTERVAL_HOURS = 24  # التحقق كل 24 ساعة
-AUTO_UPDATE_ON_STARTUP = True   # التحقق عند بدء التشغيل
+AUTO_UPDATE_ON_STARTUP = True  # التحقق عند بدء التشغيل
 
 
 def get_version_info() -> dict:
@@ -91,9 +93,9 @@ def update_version_file():
         "changelog": [
             f"تحديث {parse_version_date(CURRENT_VERSION)}",
             "تحسينات في الأداء والسرعة",
-            "إصلاح الأخطاء"
+            "إصلاح الأخطاء",
         ],
-        "release_date": datetime.now().strftime("%Y-%m-%d")
+        "release_date": datetime.now().strftime("%Y-%m-%d"),
     }
 
     try:

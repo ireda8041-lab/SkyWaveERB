@@ -1,8 +1,8 @@
 {
-  "version": "1.3.10",
-  "version_name": "Hotfix - Smart Scan Import Fix",
-  "release_date": "2026-01-16",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.10/SkyWaveERP-Setup-1.3.10.exe",
+  "version": "1.3.11",
+  "version_name": "Release - تحسينات وإصلاحات",
+  "release_date": "2026-01-17",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.11/SkyWaveERP-Setup-1.3.11.exe",
   "changelog": [
     "🔧 إصلاح مشكلة google.generativeai عند التشغيل",
     "⚡ استيراد آمن للمكتبات الاختيارية",
@@ -10,6 +10,6 @@
   ],
   "min_version": "1.0.0",
   "mandatory": true,
-  "notes_ar": "إصلاح عاجل - البرنامج كان لا يفتح بسبب مكتبة ناقصة",
-  "notes_en": "Hotfix - App was not opening due to missing library"
+  "notes_ar": "تحسينات وإصلاحات عامة",
+  "notes_en": "General improvements and fixes"
 }
