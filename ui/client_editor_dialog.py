@@ -12,8 +12,6 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -43,7 +41,7 @@ except ImportError:
 
 # استيراد دوال الإشعارات
 try:
-    from ui.notification_system import notify_success, notify_error
+    from ui.notification_system import notify_error, notify_success
 except ImportError:
     def notify_success(msg, title=""):
         safe_print(f"INFO: {title} - {msg}")
@@ -165,7 +163,7 @@ class ClientEditorDialog(QDialog):
                 font-size: 11px;
             }}
         """
-        
+
         label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
 
         # === البيانات الأساسية ===
@@ -181,7 +179,7 @@ class ClientEditorDialog(QDialog):
         # صف الشركة والنوع
         row1 = QHBoxLayout()
         row1.setSpacing(8)
-        
+
         company_cont = QVBoxLayout()
         company_cont.setSpacing(2)
         company_label = QLabel("الشركة")
@@ -192,7 +190,7 @@ class ClientEditorDialog(QDialog):
         self.company_input.setPlaceholderText("اختياري")
         company_cont.addWidget(self.company_input)
         row1.addLayout(company_cont, 2)
-        
+
         type_cont = QVBoxLayout()
         type_cont.setSpacing(2)
         type_label = QLabel("النوع")
@@ -203,13 +201,13 @@ class ClientEditorDialog(QDialog):
         self.client_type_combo.addItems(["فرد", "شركة"])
         type_cont.addWidget(self.client_type_combo)
         row1.addLayout(type_cont, 1)
-        
+
         layout.addLayout(row1)
 
         # صف الهاتف والبريد
         row2 = QHBoxLayout()
         row2.setSpacing(8)
-        
+
         phone_cont = QVBoxLayout()
         phone_cont.setSpacing(2)
         phone_label = QLabel("📱 الهاتف")
@@ -219,7 +217,7 @@ class ClientEditorDialog(QDialog):
         self.phone_input.setStyleSheet(field_style)
         phone_cont.addWidget(self.phone_input)
         row2.addLayout(phone_cont, 1)
-        
+
         email_cont = QVBoxLayout()
         email_cont.setSpacing(2)
         email_label = QLabel("📧 البريد")
@@ -229,13 +227,13 @@ class ClientEditorDialog(QDialog):
         self.email_input.setStyleSheet(field_style)
         email_cont.addWidget(self.email_input)
         row2.addLayout(email_cont, 1)
-        
+
         layout.addLayout(row2)
 
         # صف العنوان والدولة
         row3 = QHBoxLayout()
         row3.setSpacing(8)
-        
+
         address_cont = QVBoxLayout()
         address_cont.setSpacing(2)
         address_label = QLabel("📍 العنوان")
@@ -245,7 +243,7 @@ class ClientEditorDialog(QDialog):
         self.address_input.setStyleSheet(field_style)
         address_cont.addWidget(self.address_input)
         row3.addLayout(address_cont, 2)
-        
+
         country_cont = QVBoxLayout()
         country_cont.setSpacing(2)
         country_label = QLabel("🌍 الدولة")
@@ -256,19 +254,19 @@ class ClientEditorDialog(QDialog):
         self.country_input.setPlaceholderText("EGY")
         country_cont.addWidget(self.country_input)
         row3.addLayout(country_cont, 1)
-        
+
         layout.addLayout(row3)
 
         # صف مجال العمل والرقم الضريبي
         row4 = QHBoxLayout()
         row4.setSpacing(8)
-        
+
         work_cont = QVBoxLayout()
         work_cont.setSpacing(2)
         work_label = QLabel("مجال العمل")
         work_label.setStyleSheet(label_style)
         work_cont.addWidget(work_label)
-        
+
         # SmartFilterComboBox مع فلترة ذكية
         self.work_field_input = SmartFilterComboBox()
         self.work_field_input.setStyleSheet(f"""
@@ -304,17 +302,17 @@ class ClientEditorDialog(QDialog):
                 padding: 4px;
             }}
         """)
-        
+
         # تحميل مجالات العمل (الافتراضية + المخصصة)
         self.work_field_input.addItem("")  # خيار فارغ
         business_fields = custom_fields.get_all_business_fields()
         for field in business_fields:
             self.work_field_input.addItem(field)
         self.work_field_input.lineEdit().setPlaceholderText("اكتب للبحث أو أدخل مجال جديد...")
-        
+
         work_cont.addWidget(self.work_field_input)
         row4.addLayout(work_cont, 1)
-        
+
         vat_cont = QVBoxLayout()
         vat_cont.setSpacing(2)
         vat_label = QLabel("الرقم الضريبي")
@@ -325,14 +323,14 @@ class ClientEditorDialog(QDialog):
         self.vat_input.setPlaceholderText("اختياري")
         vat_cont.addWidget(self.vat_input)
         row4.addLayout(vat_cont, 1)
-        
+
         layout.addLayout(row4)
 
         # اللوجو
         logo_label = QLabel("🖼️ صورة/لوجو")
         logo_label.setStyleSheet(label_style)
         layout.addWidget(logo_label)
-        
+
         logo_layout = QHBoxLayout()
         logo_layout.setSpacing(8)
         self.logo_path_label = QLabel("لم يتم اختيار صورة")
@@ -340,7 +338,7 @@ class ClientEditorDialog(QDialog):
         self.logo_path_label.setWordWrap(True)
         self.logo_path_label.setMaximumHeight(40)  # ⚡ منع التمدد الزائد
         self.logo_path_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
-        
+
         # زرار اختيار الصورة
         select_logo_btn = QPushButton("اختيار...")
         select_logo_btn.setStyleSheet(f"""
@@ -357,24 +355,24 @@ class ClientEditorDialog(QDialog):
             }}
         """)
         select_logo_btn.clicked.connect(self.select_logo_file)
-        
+
         # زرار حذف الصورة
         self.delete_logo_btn = QPushButton("🗑️ حذف")
-        self.delete_logo_btn.setStyleSheet(f"""
-            QPushButton {{
+        self.delete_logo_btn.setStyleSheet("""
+            QPushButton {
                 background-color: #dc2626;
                 color: white;
                 border: none;
                 border-radius: 4px;
                 padding: 5px 12px;
                 font-size: 10px;
-            }}
-            QPushButton:hover {{
+            }
+            QPushButton:hover {
                 background-color: #b91c1c;
-            }}
+            }
         """)
         self.delete_logo_btn.clicked.connect(self.delete_logo)
-        
+
         logo_layout.addWidget(self.logo_path_label, 1)
         logo_layout.addWidget(select_logo_btn)
         logo_layout.addWidget(self.delete_logo_btn)
@@ -384,7 +382,7 @@ class ClientEditorDialog(QDialog):
         notes_label = QLabel("📝 ملاحظات")
         notes_label.setStyleSheet(label_style)
         layout.addWidget(notes_label)
-        
+
         self.notes_input = QTextEdit()
         self.notes_input.setStyleSheet(field_style)
         self.notes_input.setPlaceholderText("ملاحظات إضافية...")
@@ -400,21 +398,21 @@ class ClientEditorDialog(QDialog):
         # ⚡ عميل VIP مميز
         self.vip_checkbox = QCheckBox("⭐ عميل مميز VIP")
         self.vip_checkbox.setChecked(False)
-        self.vip_checkbox.setStyleSheet(f"""
-            QCheckBox {{
+        self.vip_checkbox.setStyleSheet("""
+            QCheckBox {
                 color: #fbbf24;
                 font-size: 12px;
                 font-weight: bold;
-            }}
-            QCheckBox::indicator {{
+            }
+            QCheckBox::indicator {
                 width: 18px;
                 height: 18px;
-            }}
-            QCheckBox::indicator:checked {{
+            }
+            QCheckBox::indicator:checked {
                 background-color: #fbbf24;
                 border: 2px solid #f59e0b;
                 border-radius: 4px;
-            }}
+            }
         """)
         layout.addWidget(self.vip_checkbox)
 
@@ -466,19 +464,19 @@ class ClientEditorDialog(QDialog):
     def delete_logo(self):
         """حذف صورة العميل"""
         from ui.styles import COLORS
-        
+
         # إعادة تعيين الـ label
         self.logo_path_label.setText("لم يتم اختيار صورة")
         self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px; font-style: italic;")
-        
+
         # ⚡ تعيين flag للحذف الصريح
         self._logo_deleted = True
-        
+
         # مسح بيانات الصورة من العميل الحالي (لو موجود)
         if self.is_editing and self.client_to_edit:
             self.client_to_edit.logo_data = None
             self.client_to_edit.logo_path = None
-        
+
         safe_print("INFO: 🗑️ تم تحديد صورة العميل للحذف")
 
     def load_client_data(self):
@@ -514,7 +512,7 @@ class ClientEditorDialog(QDialog):
 
         self.notes_input.setText(self.client_to_edit.client_notes or "")
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
-        
+
         # ⚡ تحميل حالة VIP
         is_vip = getattr(self.client_to_edit, 'is_vip', False)
         self.vip_checkbox.setChecked(bool(is_vip))
@@ -552,37 +550,35 @@ class ClientEditorDialog(QDialog):
             # ⚡ ضغط ذكي - JPEG للصور الكبيرة، PNG للصور الصغيرة
             buffer = QBuffer()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            
+
             # تجربة JPEG أولاً (أصغر حجماً)
             pixmap.save(buffer, "JPEG", 85)  # جودة 85% - توازن جيد
             jpeg_size = buffer.size()
-            
+
             # إعادة تعيين البافر
             buffer.close()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)
-            
+
             # تجربة PNG
             pixmap.save(buffer, "PNG", 100)
             png_size = buffer.size()
-            
+
             # اختيار الأصغر حجماً
             if jpeg_size < png_size * 0.7:  # JPEG أصغر بـ 30% على الأقل
                 buffer.close()
                 buffer.open(QIODevice.OpenModeFlag.WriteOnly)
                 pixmap.save(buffer, "JPEG", 85)
                 format_used = "JPEG"
-                final_size = jpeg_size
             else:
                 format_used = "PNG"
-                final_size = png_size
-            
+
             img_data = buffer.data().data()
             buffer.close()
 
             # التحقق من الحجم النهائي
             size_kb = len(img_data) / 1024
             safe_print(f"INFO: 📷 حجم الصورة النهائي: {size_kb:.1f} KB ({format_used})")
-            
+
             # تحذير إذا كانت الصورة كبيرة جداً
             if size_kb > 500:
                 safe_print(f"WARNING: 📷 الصورة كبيرة ({size_kb:.1f} KB) - قد تؤثر على الأداء")
@@ -603,7 +599,7 @@ class ClientEditorDialog(QDialog):
 
         logo_value = ""
         logo_data = None  # None = لم يتم تحديد (سيتم الاحتفاظ بالقديم)
-        
+
         # ⚡ التحقق من حالة الصورة باستخدام flag الحذف
         if self._logo_deleted:
             # تم حذف الصورة صراحة بالضغط على زر الحذف
@@ -641,17 +637,17 @@ class ClientEditorDialog(QDialog):
             "client_notes": self.notes_input.toPlainText(),
             "is_vip": self.vip_checkbox.isChecked(),  # ⚡ حالة VIP
         }
-        
+
         # إضافة logo_data فقط إذا تم تحديده
         if logo_data is not None:
             result["logo_data"] = logo_data
-        
+
         return result
 
     def save_client(self):
         """يحفظ (أو يعدل) العميل عبر الخدمة"""
         client_data = self.get_form_data()
-        
+
         # ⚡ تسجيل بيانات الصورة
         safe_print(f"DEBUG: [save_client] logo_path = {client_data.get('logo_path', '')}")
         safe_print(f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}")
@@ -665,12 +661,12 @@ class ClientEditorDialog(QDialog):
             work_field = client_data.get("work_field", "")
             if work_field and work_field.strip():
                 custom_fields.add_value("business_fields", work_field)
-            
+
             if self.is_editing:
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
                 safe_print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 self.client_service.update_client(client_id, client_data)
-                
+
                 # 🔔 إشعار محسّن للتحديث
                 if client_data.get('logo_data') and client_data['logo_data'] != "__DELETE__":
                     notify_success(
@@ -687,13 +683,13 @@ class ClientEditorDialog(QDialog):
                         f"تم تحديث العميل '{client_data['name']}'",
                         "✅ تحديث عميل"
                     )
-                    
+
                 QMessageBox.information(self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح.")
             else:
                 safe_print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
                 new_client_schema = schemas.Client(**client_data)
                 self.client_service.create_client(new_client_schema)
-                
+
                 # 🔔 إشعار محسّن للإضافة
                 if client_data.get('logo_data') and client_data['logo_data']:
                     notify_success(
@@ -705,7 +701,7 @@ class ClientEditorDialog(QDialog):
                         f"تم إضافة العميل '{client_data['name']}'",
                         "✅ عميل جديد"
                     )
-                    
+
                 QMessageBox.information(self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح.")
 
             self.accept()

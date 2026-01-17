@@ -7,7 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+# ⚡ استيراد آمن لـ jinja2
+try:
+    from jinja2 import Environment, FileSystemLoader, select_autoescape
+    JINJA2_AVAILABLE = True
+except ImportError:
+    JINJA2_AVAILABLE = False
+    Environment = None
+    FileSystemLoader = None
+    select_autoescape = None
 
 # استيراد دالة الطباعة الآمنة
 try:

@@ -11,6 +11,17 @@ import sys
 from datetime import datetime
 from typing import Any
 
+# استيراد دالة الطباعة الآمنة أولاً
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            # فشل الطباعة بسبب الترميز
+            pass
+
 try:
     # Arabic text support
     import arabic_reshaper  # noqa: F401
@@ -121,16 +132,16 @@ class PDFGenerator:
         """تسجيل خط Cairo العربي"""
         try:
             import sys
-            
+
             # تحديد مسار خط Cairo
             if getattr(sys, 'frozen', False):
                 base_path = sys._MEIPASS
             else:
                 base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            
+
             # مسار خط Cairo
             cairo_font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
-            
+
             if os.path.exists(cairo_font_path):
                 try:
                     pdfmetrics.registerFont(TTFont('CairoFont', cairo_font_path))

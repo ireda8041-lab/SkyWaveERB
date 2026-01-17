@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 """
 Property-based tests for Enhanced Dashboard data models.
 Uses hypothesis library for property-based testing.
 
 Feature: enhanced-dashboard
 """
-import pytest
-from hypothesis import given, strategies as st, settings, HealthCheck
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
-from core.schemas import KPIData, CashFlowEntry
+from core.schemas import CashFlowEntry, KPIData
 
 
 class TestKPIDataProperties:
@@ -52,7 +51,7 @@ class TestKPIDataProperties:
         - If current == previous, trend direction SHALL be "neutral"
         """
         kpi = KPIData(name="test", current_value=current, previous_value=previous)
-        
+
         if current > previous:
             assert kpi.trend_direction == "up", (
                 f"Expected 'up' for current={current} > previous={previous}, got '{kpi.trend_direction}'"
@@ -103,7 +102,7 @@ class TestCashFlowEntryProperties:
         the net flow SHALL equal I - O.
         """
         from datetime import datetime
-        
+
         entry = CashFlowEntry(
             date=datetime.now(),
             inflow=inflow,
@@ -142,20 +141,20 @@ class TestCashFlowAggregationProperties:
         the aggregation function SHALL group entries by date and sum amounts within each group.
         """
         from datetime import datetime, timedelta
-        from services.accounting_service import AccountingService
-        
+
+
         # Ensure lists have same length
         min_len = min(len(amounts), len(days_offsets))
         amounts = amounts[:min_len]
         days_offsets = days_offsets[:min_len]
-        
+
         # Create test data
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
             for amount, offset in zip(amounts, days_offsets)
         ]
-        
+
         # Create a mock service to test the aggregation method
         # We'll test the aggregation logic directly
         aggregated = {}
@@ -164,15 +163,15 @@ class TestCashFlowAggregationProperties:
             if period_key not in aggregated:
                 aggregated[period_key] = 0.0
             aggregated[period_key] += amount
-        
+
         # Verify: sum of all aggregated values equals sum of all input amounts
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
-        
+
         assert abs(total_aggregated - total_input) < 0.01, (
             f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
         )
-        
+
         # Verify: each period contains correct sum
         for date_val, amount in data:
             period_key = date_val.strftime("%Y-%m-%d")
@@ -201,19 +200,19 @@ class TestCashFlowAggregationProperties:
         the aggregation function SHALL group entries by month and sum amounts within each group.
         """
         from datetime import datetime, timedelta
-        
+
         # Ensure lists have same length
         min_len = min(len(amounts), len(days_offsets))
         amounts = amounts[:min_len]
         days_offsets = days_offsets[:min_len]
-        
+
         # Create test data
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
             for amount, offset in zip(amounts, days_offsets)
         ]
-        
+
         # Aggregate by month
         aggregated = {}
         for date_val, amount in data:
@@ -221,11 +220,11 @@ class TestCashFlowAggregationProperties:
             if period_key not in aggregated:
                 aggregated[period_key] = 0.0
             aggregated[period_key] += amount
-        
+
         # Verify: sum of all aggregated values equals sum of all input amounts
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
-        
+
         assert abs(total_aggregated - total_input) < 0.01, (
             f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
         )
@@ -253,19 +252,19 @@ class TestCashFlowAggregationProperties:
         the aggregation function SHALL group entries by ISO week and sum amounts within each group.
         """
         from datetime import datetime, timedelta
-        
+
         # Ensure lists have same length
         min_len = min(len(amounts), len(days_offsets))
         amounts = amounts[:min_len]
         days_offsets = days_offsets[:min_len]
-        
+
         # Create test data
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
             for amount, offset in zip(amounts, days_offsets)
         ]
-        
+
         # Aggregate by week
         aggregated = {}
         for date_val, amount in data:
@@ -274,11 +273,11 @@ class TestCashFlowAggregationProperties:
             if period_key not in aggregated:
                 aggregated[period_key] = 0.0
             aggregated[period_key] += amount
-        
+
         # Verify: sum of all aggregated values equals sum of all input amounts
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
-        
+
         assert abs(total_aggregated - total_input) < 0.01, (
             f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
         )
@@ -308,30 +307,30 @@ class TestDateRangeFilteringProperties:
         the filtered results SHALL contain only records where start_date <= record.date <= end_date.
         """
         from datetime import datetime, timedelta
-        
+
         # Create base date and date range
         base_date = datetime(2024, 1, 1)
         start_date = base_date + timedelta(days=range_start_offset)
         end_date = start_date + timedelta(days=range_length)
-        
+
         # Create test records with dates
         records = [
             {"date": base_date + timedelta(days=offset), "value": i}
             for i, offset in enumerate(days_offsets)
         ]
-        
+
         # Filter records by date range
         filtered = [
             r for r in records
             if r["date"] and start_date <= r["date"] <= end_date
         ]
-        
+
         # Verify: all filtered records are within the date range
         for record in filtered:
             assert start_date <= record["date"] <= end_date, (
                 f"Record date {record['date']} should be within range [{start_date}, {end_date}]"
             )
-        
+
         # Verify: no records outside the range are included
         for record in records:
             if record not in filtered:
@@ -359,30 +358,30 @@ class TestDateRangeFilteringProperties:
         For any date range, all records within the range SHALL be included in the filtered results.
         """
         from datetime import datetime, timedelta
-        
+
         # Create base date and date range
         base_date = datetime(2024, 1, 1)
         start_date = base_date + timedelta(days=range_start_offset)
         end_date = start_date + timedelta(days=range_length)
-        
+
         # Create test records with dates
         records = [
             {"date": base_date + timedelta(days=offset), "value": i}
             for i, offset in enumerate(days_offsets)
         ]
-        
+
         # Filter records by date range
         filtered = [
             r for r in records
             if r["date"] and start_date <= r["date"] <= end_date
         ]
-        
+
         # Count records that should be in range
         expected_count = sum(
             1 for r in records
             if start_date <= r["date"] <= end_date
         )
-        
+
         # Verify: filtered count matches expected count
         assert len(filtered) == expected_count, (
             f"Expected {expected_count} records in range, got {len(filtered)}"
@@ -402,12 +401,12 @@ class TestDateRangeFilteringProperties:
         Records exactly on the boundary dates (start_date and end_date) SHALL be included.
         """
         from datetime import datetime, timedelta
-        
+
         # Create base date and date range
         base_date = datetime(2024, 1, 1)
         start_date = base_date + timedelta(days=range_start_offset)
         end_date = start_date + timedelta(days=range_length)
-        
+
         # Create records exactly on boundaries
         records = [
             {"date": start_date, "value": "start_boundary"},
@@ -415,18 +414,18 @@ class TestDateRangeFilteringProperties:
             {"date": start_date - timedelta(days=1), "value": "before_start"},
             {"date": end_date + timedelta(days=1), "value": "after_end"},
         ]
-        
+
         # Filter records by date range
         filtered = [
             r for r in records
             if r["date"] and start_date <= r["date"] <= end_date
         ]
-        
+
         # Verify: boundary records are included
         filtered_values = [r["value"] for r in filtered]
         assert "start_boundary" in filtered_values, "Record on start_date should be included"
         assert "end_boundary" in filtered_values, "Record on end_date should be included"
-        
+
         # Verify: records outside boundaries are excluded
         assert "before_start" not in filtered_values, "Record before start_date should be excluded"
         assert "after_end" not in filtered_values, "Record after end_date should be excluded"
@@ -451,7 +450,7 @@ class TestKPIDataConsistencyProperties:
         that exactly match the input values.
         """
         kpi = KPIData(name="test_kpi", current_value=current, previous_value=previous)
-        
+
         # Verify the values are stored correctly
         assert kpi.current_value == current, (
             f"Current value mismatch: expected {current}, got {kpi.current_value}"
@@ -481,10 +480,10 @@ class TestKPIDataConsistencyProperties:
         For any valid name and values, the KPI data SHALL preserve all input data.
         """
         kpi = KPIData(name=name, current_value=current, previous_value=previous)
-        
+
         assert kpi.name == name, f"Name not preserved: expected '{name}', got '{kpi.name}'"
-        assert kpi.current_value == current, f"Current value not preserved"
-        assert kpi.previous_value == previous, f"Previous value not preserved"
+        assert kpi.current_value == current, "Current value not preserved"
+        assert kpi.previous_value == previous, "Previous value not preserved"
 
 
 from core.schemas import DashboardSettings
@@ -500,8 +499,8 @@ class TestSettingsPersistenceProperties:
         selected_period=st.sampled_from(["today", "this_week", "this_month", "this_year", "custom"])
     )
     def test_settings_persistence_round_trip(
-        self, 
-        auto_refresh_enabled: bool, 
+        self,
+        auto_refresh_enabled: bool,
         auto_refresh_interval: int,
         selected_period: str
     ):
@@ -519,7 +518,7 @@ class TestSettingsPersistenceProperties:
             auto_refresh_interval=auto_refresh_interval,
             selected_period=selected_period
         )
-        
+
         # Simulate round-trip by creating a new object with same values
         restored = DashboardSettings(
             auto_refresh_enabled=original.auto_refresh_enabled,
@@ -528,7 +527,7 @@ class TestSettingsPersistenceProperties:
             custom_start_date=original.custom_start_date,
             custom_end_date=original.custom_end_date
         )
-        
+
         # Verify all values are preserved
         assert restored.auto_refresh_enabled == original.auto_refresh_enabled, (
             f"auto_refresh_enabled mismatch: {restored.auto_refresh_enabled} != {original.auto_refresh_enabled}"
@@ -560,18 +559,18 @@ class TestSettingsPersistenceProperties:
         For any valid DashboardSettings with custom dates, all values SHALL be preserved.
         """
         from datetime import datetime, timedelta
-        
+
         base_date = datetime(2024, 1, 1)
         custom_start = base_date + timedelta(days=days_offset_start)
         custom_end = base_date + timedelta(days=days_offset_start + days_offset_end)
-        
+
         # Create settings with custom dates
         original = DashboardSettings(
             selected_period=selected_period,
             custom_start_date=custom_start if selected_period == "custom" else None,
             custom_end_date=custom_end if selected_period == "custom" else None
         )
-        
+
         # Simulate round-trip
         restored = DashboardSettings(
             auto_refresh_enabled=original.auto_refresh_enabled,
@@ -580,7 +579,7 @@ class TestSettingsPersistenceProperties:
             custom_start_date=original.custom_start_date,
             custom_end_date=original.custom_end_date
         )
-        
+
         # Verify
         assert restored.selected_period == original.selected_period
         assert restored.custom_start_date == original.custom_start_date
@@ -604,21 +603,20 @@ class TestSettingsPersistenceProperties:
         For any valid DashboardSettings, JSON serialization and deserialization
         SHALL produce an equivalent object.
         """
-        import json
-        
+
         # Create settings
         original = DashboardSettings(
             auto_refresh_enabled=auto_refresh_enabled,
             auto_refresh_interval=auto_refresh_interval,
             selected_period="this_month"
         )
-        
+
         # Serialize to JSON
         json_str = original.model_dump_json()
-        
+
         # Deserialize from JSON
         restored = DashboardSettings.model_validate_json(json_str)
-        
+
         # Verify
         assert restored.auto_refresh_enabled == original.auto_refresh_enabled
         assert restored.auto_refresh_interval == original.auto_refresh_interval

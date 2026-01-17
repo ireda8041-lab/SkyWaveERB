@@ -7,8 +7,6 @@
 
 import os
 import sys
-import gc
-import traceback
 
 # ⚡ تحسين الأداء على Windows
 if os.name == 'nt':
@@ -48,13 +46,13 @@ logger.info(f"⚡ {APP_NAME} v{CURRENT_VERSION}")
 # --- 1. استيراد "القلب" ---
 # Advanced Sync
 from core.advanced_sync_manager import AdvancedSyncManagerV3
-from core.unified_sync import UnifiedSyncManagerV3
-from core.sync_manager_v3 import SyncManagerV3
 
 # Authentication
 from core.auth_models import AuthService
 from core.event_bus import EventBus
 from core.repository import Repository
+from core.sync_manager_v3 import SyncManagerV3
+from core.unified_sync import UnifiedSyncManagerV3
 
 # --- 2. استيراد "الأقسام" (العقل) ---
 from services.accounting_service import AccountingService
@@ -86,7 +84,7 @@ class SkyWaveERPApp:
 
         # --- 1. تجهيز "القلب" ---
         self.repository = Repository()
-        
+
         # ✅ صيانة قاعدة البيانات التلقائية (في الخلفية لتسريع البدء)
         def run_maintenance_background():
             try:
@@ -94,7 +92,7 @@ class SkyWaveERPApp:
                 run_maintenance()
             except Exception as e:
                 logger.warning(f"[MainApp] تحذير: فشلت الصيانة التلقائية: {e}")
-        
+
         import threading
         maintenance_thread = threading.Thread(target=run_maintenance_background, daemon=True)
         maintenance_thread.start()
@@ -106,11 +104,11 @@ class SkyWaveERPApp:
 
         # 🔥 نظام المزامنة V3 - للتوافق مع الواجهة
         self.sync_manager = SyncManagerV3(self.repository)
-        
+
         # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
         from core.signals import app_signals
         app_signals.set_sync_manager(self.unified_sync)
-        
+
         # ⚡ مزامنة إعدادات الشركة من السحابة (في الخلفية)
         def sync_settings_background():
             try:
@@ -120,7 +118,7 @@ class SkyWaveERPApp:
                     self.settings_service.sync_settings_from_cloud(self.repository)
             except Exception as e:
                 logger.debug(f"[MainApp] فشل مزامنة الإعدادات: {e}")
-        
+
         settings_thread = threading.Thread(target=sync_settings_background, daemon=True)
         settings_thread.start()
 
@@ -199,7 +197,7 @@ class SkyWaveERPApp:
             smart_scan_api_key = smart_scan_settings.get("gemini_api_key")
         else:
             smart_scan_api_key = self.settings_service.get_setting("gemini_api_key")
-        
+
         if not smart_scan_api_key:
             # محاولة قراءة من ملف الإعدادات المحلي
             try:
@@ -209,7 +207,7 @@ class SkyWaveERPApp:
                     smart_scan_api_key = local_settings.get("smart_scan", {}).get("gemini_api_key")
             except Exception:
                 pass
-        
+
         self.smart_scan_service = SmartScanService(api_key=smart_scan_api_key)
         if self.smart_scan_service.is_available():
             logger.info("✅ Smart Scan Service (AI) Initialized.")
@@ -242,7 +240,7 @@ class SkyWaveERPApp:
             os.environ['QT_QPA_PLATFORM'] = 'windows:darkmode=2'
 
         app = QApplication(sys.argv)
-        
+
         # === معالجة أخطاء Qt ===
         def qt_message_handler(mode, context, message):
             """معالج رسائل Qt لتجنب الأخطاء المزعجة"""
@@ -256,7 +254,7 @@ class SkyWaveERPApp:
                 logger.error(f"Qt Critical: {message}")
             elif mode == 2:  # QtWarningMsg
                 logger.warning(f"Qt Warning: {message}")
-        
+
         from PyQt6.QtCore import qInstallMessageHandler
         qInstallMessageHandler(qt_message_handler)
 
@@ -476,36 +474,36 @@ class SkyWaveERPApp:
             """بدء نظام المزامنة التلقائية الاحترافي"""
             try:
                 logger.info("[MainApp] 🚀 بدء نظام المزامنة التلقائية...")
-                
+
                 # تشغيل نظام المزامنة التلقائية
                 self.unified_sync.start_auto_sync()
-                
+
                 # ربط إشارة اكتمال المزامنة بتحديث الواجهة
                 self.unified_sync.sync_completed.connect(
                     lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
                 )
-                
+
             except Exception as e:
                 logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة التلقائية: {e}")
-        
+
         # 🔄 تفعيل نظام المزامنة الفورية (Real-time Sync)
         def start_realtime_sync():
             """بدء نظام المزامنة الفورية"""
             try:
                 logger.info("[MainApp] 🔄 بدء نظام المزامنة الفورية...")
-                
+
                 # إعداد نظام المزامنة الفورية
                 from core.realtime_sync import setup_realtime_sync
                 realtime_manager = setup_realtime_sync(self.repository)
-                
+
                 if realtime_manager:
                     logger.info("[MainApp] ✅ تم تفعيل نظام المزامنة الفورية بنجاح")
                     # حفظ المرجع لإغلاقه لاحقاً
                     self.realtime_manager = realtime_manager
-                
+
             except Exception as e:
                 logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: {e}")
-        
+
         # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
         QTimer.singleShot(15000, start_auto_sync_system)  # ⚡ 15 ثانية بدلاً من 10
         # ⚡ المزامنة الفورية معطّلة للاستقرار
@@ -514,7 +512,7 @@ class SkyWaveERPApp:
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
-        
+
         # ⚡ صيانة دورية كل ساعة
         self._setup_periodic_maintenance()
 
@@ -554,7 +552,7 @@ class SkyWaveERPApp:
 
         except Exception as e:
             logger.warning(f"[MainApp] فشل تفعيل التحديث التلقائي: {e}")
-    
+
     def _setup_periodic_maintenance(self):
         """تفعيل الصيانة الدورية - معطّلة للاستقرار"""
         # ⚡ معطّلة - تسبب تجميد البرنامج
@@ -566,7 +564,7 @@ class SkyWaveERPApp:
         if hasattr(self, '_cleanup_done') and self._cleanup_done:
             return
         self._cleanup_done = True
-        
+
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
         # إيقاف نظام المزامنة الفورية
@@ -655,7 +653,7 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
 
     # تجاهل كل الأخطاء غير الحرجة - لا نريد إغلاق البرنامج أبداً
     error_msg = str(exc_value).lower() if exc_value else ""
-    
+
     # قائمة الأخطاء التي يجب تجاهلها
     ignore_patterns = [
         "deleted", "c/c++ object", "wrapped c/c++", "runtime", "qobject", "destroyed", "invalid",
@@ -664,7 +662,7 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         "database is locked", "disk i/o error", "busy", "closed database", "closed cursor",
         "truth value", "bool()", "nonetype", "attributeerror"
     ]
-    
+
     if any(x in error_msg for x in ignore_patterns):
         logger.debug(f"تجاهل خطأ: {exc_value}")
         return
@@ -683,6 +681,7 @@ sys.excepthook = handle_uncaught_exception
 
 # ⚡ تفعيل معالج أخطاء الـ Threads (Python 3.8+)
 import threading
+
 threading.excepthook = handle_thread_exception
 
 # --- نقطة الانطلاق ---
@@ -713,14 +712,14 @@ if __name__ == "__main__":
             NotificationManager.shutdown()
         except Exception:
             pass
-        
+
         # إغلاق نظام المزامنة الفورية
         try:
             from core.realtime_sync import shutdown_realtime_sync
             shutdown_realtime_sync()
         except Exception:
             pass
-            
+
         logger.info("="*80)
         logger.info("إغلاق التطبيق")
         logger.info("="*80)

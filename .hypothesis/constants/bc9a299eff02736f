@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\config.py
+# hypothesis_version: 6.148.3
+
+['#', '.env', '1', '=', 'DEBUG_MODE', 'False', 'GEMINI_API_KEY', 'INFO', 'LOCALAPPDATA', 'LOG_LEVEL', 'MONGO_DB_NAME', 'MONGO_URI', 'SECRET_KEY', 'SkyWave@Admin2024!', 'SkyWaveERP', 'frozen', 'skywave_erp_db', 'skywave_local.db', 'true', 'utf-8', 'yes', '~/.local/share']

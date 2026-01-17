@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\write_concern.py
+# hypothesis_version: 6.148.3
+
+[', ', 'WriteConcern({})', '__acknowledged', '__document', '__server_default', 'fsync', 'j', 'w', 'wtimeout']

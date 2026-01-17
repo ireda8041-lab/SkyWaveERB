@@ -7,7 +7,6 @@
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -33,14 +32,14 @@ def _get_project_root() -> Path:
 def _load_env_file():
     """تحميل ملف .env إذا كان موجوداً"""
     env_path = _get_project_root() / ".env"
-    
+
     if not env_path.exists():
         # محاولة البحث في المجلد الحالي
         env_path = Path(".env")
-    
+
     if env_path.exists():
         try:
-            with open(env_path, 'r', encoding='utf-8') as f:
+            with open(env_path, encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
                     # تجاهل التعليقات والأسطر الفارغة
@@ -62,7 +61,7 @@ _load_env_file()
 
 class Config:
     """إعدادات التطبيق المركزية"""
-    
+
     # === إعدادات قاعدة البيانات ===
     @staticmethod
     def get_mongo_uri() -> str:
@@ -73,18 +72,27 @@ class Config:
             # قيمة افتراضية للتطوير المحلي فقط
             uri = "mongodb://localhost:27017/skywave_erp_db"
         return uri
-    
+
     @staticmethod
     def get_db_name() -> str:
         """الحصول على اسم قاعدة البيانات"""
         return os.environ.get('MONGO_DB_NAME', 'skywave_erp_db')
-    
+
     @staticmethod
     def get_local_db_path() -> str:
         """الحصول على مسار قاعدة البيانات المحلية"""
-        project_dir = _get_project_root()
-        return str(project_dir / "skywave_local.db")
-    
+        # استخدام AppData للبيانات (أفضل ممارسة)
+        if getattr(sys, 'frozen', False):
+            # عند التشغيل كـ EXE، استخدم AppData
+            appdata = Path(os.environ.get('LOCALAPPDATA', os.path.expanduser('~/.local/share')))
+            db_dir = appdata / 'SkyWaveERP'
+            db_dir.mkdir(parents=True, exist_ok=True)
+            return str(db_dir / "skywave_local.db")
+        else:
+            # عند التطوير، استخدم مجلد المشروع
+            project_dir = _get_project_root()
+            return str(project_dir / "skywave_local.db")
+
     # === إعدادات الأمان ===
     @staticmethod
     def get_default_admin_password() -> str:
@@ -95,7 +103,7 @@ class Config:
             password = "SkyWave@Admin2024!"
             safe_print("WARNING: [Config] ⚠️ استخدام كلمة مرور افتراضية - يرجى تغييرها!")
         return password
-    
+
     @staticmethod
     def get_secret_key() -> str:
         """الحصول على المفتاح السري"""
@@ -105,24 +113,24 @@ class Config:
             # توليد مفتاح عشوائي إذا لم يكن محدداً
             key = secrets.token_hex(32)
         return key
-    
+
     # === إعدادات Smart Scan ===
     @staticmethod
-    def get_gemini_api_key() -> Optional[str]:
+    def get_gemini_api_key() -> str | None:
         """الحصول على مفتاح Gemini API"""
         return os.environ.get('GEMINI_API_KEY')
-    
+
     # === إعدادات التطبيق ===
     @staticmethod
     def is_debug_mode() -> bool:
         """هل وضع التصحيح مفعّل؟"""
         return os.environ.get('DEBUG_MODE', 'False').lower() in ('true', '1', 'yes')
-    
+
     @staticmethod
     def get_log_level() -> str:
         """الحصول على مستوى التسجيل"""
         return os.environ.get('LOG_LEVEL', 'INFO')
-    
+
     @staticmethod
     def get_project_root() -> Path:
         """الحصول على مسار المشروع"""

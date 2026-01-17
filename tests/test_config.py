@@ -66,15 +66,14 @@ class TestConfig(unittest.TestCase):
         """اختبار تجاوز القيم من متغيرات البيئة"""
         # حفظ القيمة الأصلية
         original = os.environ.get('MONGO_DB_NAME')
-        
+
         # تعيين قيمة جديدة
         os.environ['MONGO_DB_NAME'] = 'test_db'
-        
-        from core.config import Config
+
         # إعادة تحميل للحصول على القيمة الجديدة
         db_name = os.environ.get('MONGO_DB_NAME', 'skywave_erp_db')
         self.assertEqual(db_name, 'test_db')
-        
+
         # استعادة القيمة الأصلية
         if original:
             os.environ['MONGO_DB_NAME'] = original
@@ -91,10 +90,10 @@ class TestSecurityConfig(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'core', 'repository.py'
         )
-        
-        with open(repo_path, 'r', encoding='utf-8') as f:
+
+        with open(repo_path, encoding='utf-8') as f:
             content = f.read()
-        
+
         # التأكد من عدم وجود كلمات مرور مكشوفة
         self.assertNotIn('SkywavePassword', content)
         self.assertNotIn('147.79.66.116', content)
@@ -106,10 +105,10 @@ class TestSecurityConfig(unittest.TestCase):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'skywave_settings.json'
         )
-        
-        with open(settings_path, 'r', encoding='utf-8') as f:
+
+        with open(settings_path, encoding='utf-8') as f:
             settings = json.load(f)
-        
+
         # التأكد من أن مفتاح API فارغ
         api_key = settings.get('smart_scan', {}).get('gemini_api_key', '')
         self.assertEqual(api_key, '')

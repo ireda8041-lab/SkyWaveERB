@@ -26,11 +26,11 @@ class TemplateSettings(QWidget):
 
     def __init__(self, settings_service, parent=None):
         super().__init__(parent)
-        
+
         # 📱 تصميم متجاوب
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         self.settings_service = settings_service
 
         # إنشاء خدمة القوالب

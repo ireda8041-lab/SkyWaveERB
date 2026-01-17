@@ -2,10 +2,9 @@
 
 import os
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QDialog,
     QGroupBox,
@@ -23,7 +22,7 @@ from PyQt6.QtWidgets import (
 from core import schemas
 from services.client_service import ClientService
 from ui.client_editor_dialog import ClientEditorDialog
-from ui.styles import BUTTON_STYLES, get_cairo_font, TABLE_STYLE_DARK, create_centered_item
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -161,7 +160,7 @@ class ClientManagerTab(QWidget):
 
         # إضافة دبل كليك للتعديل
         self.clients_table.itemDoubleClicked.connect(self.open_editor_for_selected)
-        
+
         # إضافة قائمة السياق (كليك يمين)
         self._setup_context_menu()
 
@@ -175,7 +174,7 @@ class ClientManagerTab(QWidget):
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
         from core.context_menu import ContextMenuManager
-        
+
         ContextMenuManager.setup_table_context_menu(
             table=self.clients_table,
             on_view=self.open_editor_for_selected,
@@ -303,7 +302,7 @@ class ClientManagerTab(QWidget):
         from core.context_menu import is_right_click_active
         if is_right_click_active():
             return
-        
+
         selected_rows = self.clients_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()
@@ -412,17 +411,16 @@ class ClientManagerTab(QWidget):
         """ملء جدول العملاء بالبيانات - محسّن للسرعة مع تمييز VIP"""
 
         # ⚡ تحميل البيانات على دفعات أكبر للسرعة
-        batch_size = 25
         total_clients = len(self.clients_list)
-        
+
         # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
         self.clients_table.setRowCount(total_clients)
-        
+
         # ⚡ ألوان VIP الذهبية
         VIP_BG_COLOR = QColor("#2d2a1a")  # خلفية ذهبية داكنة
         VIP_TEXT_COLOR = QColor("#fbbf24")  # نص ذهبي
         VIP_BORDER_COLOR = QColor("#f59e0b")  # حدود ذهبية
-        
+
         for index, client in enumerate(self.clients_list):
             # ⚡ التحقق من حالة VIP
             is_vip = getattr(client, 'is_vip', False)
@@ -441,7 +439,7 @@ class ClientManagerTab(QWidget):
             logo_layout.setContentsMargins(0, 0, 0, 0)
             logo_layout.setSpacing(0)
             logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            
+
             # إنشاء الـ label - في المنتصف تماماً
             logo_label = QLabel()
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -454,7 +452,7 @@ class ClientManagerTab(QWidget):
                     padding: 0;
                 }
             """)
-            
+
             pixmap = None
             has_logo = False
 
@@ -469,7 +467,8 @@ class ClientManagerTab(QWidget):
                     pixmap = QPixmap()
                     if pixmap.loadFromData(img_bytes):
                         has_logo = True
-                except:
+                except Exception:
+                    # فشل تحميل الصورة من البيانات
                     pixmap = None
 
             # محاولة تحميل من المسار المحلي
@@ -478,18 +477,19 @@ class ClientManagerTab(QWidget):
                     pixmap = QPixmap(client.logo_path)
                     if not pixmap.isNull():
                         has_logo = True
-                except:
+                except Exception:
+                    # فشل تحميل الصورة من الملف
                     pixmap = None
 
             # عرض الصورة الدائرية
             if has_logo and pixmap and not pixmap.isNull():
-                from PyQt6.QtGui import QPainter, QBrush, QPainterPath
                 from PyQt6.QtCore import QRectF
-                
+                from PyQt6.QtGui import QPainter, QPainterPath
+
                 # تصغير الصورة
                 size = 40
                 scaled = pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-                
+
                 # قص لتكون مربعة
                 if scaled.width() > size:
                     x = (scaled.width() - size) // 2
@@ -497,19 +497,19 @@ class ClientManagerTab(QWidget):
                 if scaled.height() > size:
                     y = (scaled.height() - size) // 2
                     scaled = scaled.copy(0, y, size, size)
-                
+
                 # إنشاء صورة دائرية
                 circular = QPixmap(size, size)
                 circular.fill(Qt.GlobalColor.transparent)
-                
+
                 painter = QPainter(circular)
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                
+
                 path = QPainterPath()
                 path.addEllipse(QRectF(0, 0, size, size))
                 painter.setClipPath(path)
                 painter.drawPixmap(0, 0, scaled)
-                
+
                 # ⚡ إضافة حدود ذهبية لـ VIP
                 if is_vip:
                     from PyQt6.QtGui import QPen
@@ -518,14 +518,14 @@ class ClientManagerTab(QWidget):
                     painter.setPen(pen)
                     painter.setBrush(Qt.BrushStyle.NoBrush)
                     painter.drawEllipse(1, 1, size-2, size-2)
-                
+
                 painter.end()
-                
+
                 logo_label.setPixmap(circular)
             else:
                 # أيقونة افتراضية - دائرة ملونة مع الحرف الأول
                 first_char = (client.name[0] if client.name else "?")
-                
+
                 # ⚡ لون ذهبي لـ VIP
                 if is_vip:
                     bg = "#f59e0b"  # ذهبي
@@ -533,34 +533,34 @@ class ClientManagerTab(QWidget):
                     colors = ["#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EF4444", "#EC4899", "#06B6D4"]
                     color_idx = sum(ord(c) for c in (client.name or "A")) % len(colors)
                     bg = colors[color_idx]
-                
+
                 # رسم الدائرة مع الحرف
-                from PyQt6.QtGui import QPainter, QFont, QPen
                 from PyQt6.QtCore import QRectF
-                
+                from PyQt6.QtGui import QFont, QPainter, QPen
+
                 size = 40
                 avatar = QPixmap(size, size)
                 avatar.fill(Qt.GlobalColor.transparent)
-                
+
                 painter = QPainter(avatar)
                 painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-                
+
                 # رسم الدائرة الملونة
                 painter.setBrush(QColor(bg))
                 painter.setPen(QPen(Qt.GlobalColor.transparent))
                 painter.drawEllipse(0, 0, size, size)
-                
+
                 # رسم الحرف
                 painter.setPen(QPen(QColor("white")))
                 font = QFont("Cairo", 16, QFont.Weight.Bold)
                 painter.setFont(font)
                 painter.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, first_char)
                 painter.end()
-                
+
                 logo_label.setPixmap(avatar)
 
             logo_layout.addWidget(logo_label)
-            
+
             # ⚡ إضافة item فارغ للتحكم في الـ background
             empty_item = QTableWidgetItem()
             if is_vip:
@@ -578,17 +578,17 @@ class ClientManagerTab(QWidget):
                 name_item.setFont(get_cairo_font(11, bold=True))
                 name_item.setBackground(VIP_BG_COLOR)
             self.clients_table.setItem(index, 1, name_item)
-            
+
             # ⚡ باقي الأعمدة مع تلوين VIP
             company_item = create_centered_item(client.company_name or "")
             phone_item = create_centered_item(client.phone or "")
             email_item = create_centered_item(client.email or "")
-            
+
             if is_vip:
                 company_item.setBackground(VIP_BG_COLOR)
                 phone_item.setBackground(VIP_BG_COLOR)
                 email_item.setBackground(VIP_BG_COLOR)
-            
+
             self.clients_table.setItem(index, 2, company_item)
             self.clients_table.setItem(index, 3, phone_item)
             self.clients_table.setItem(index, 4, email_item)
@@ -666,7 +666,7 @@ class ClientManagerTab(QWidget):
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("⚠️ تأكيد الحذف")
-        msg.setText(f"هل أنت متأكد من حذف العميل؟")
+        msg.setText("هل أنت متأكد من حذف العميل؟")
         msg.setInformativeText(
             f"العميل: {self.selected_client.name}\n"
             f"الشركة: {self.selected_client.company_name or 'غير محدد'}\n\n"
@@ -676,7 +676,7 @@ class ClientManagerTab(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         msg.setDefaultButton(QMessageBox.StandardButton.No)
-        
+
         # تخصيص الأزرار
         yes_button = msg.button(QMessageBox.StandardButton.Yes)
         yes_button.setText("نعم، احذف")
@@ -693,21 +693,21 @@ class ClientManagerTab(QWidget):
                 safe_print(f"DEBUG: [delete_selected_client] _mongo_id: {getattr(self.selected_client, '_mongo_id', None)}")
                 safe_print(f"DEBUG: [delete_selected_client] id: {self.selected_client.id}")
                 safe_print(f"DEBUG: [delete_selected_client] client_id المستخدم: {client_id}")
-                
+
                 result = self.client_service.delete_client(client_id)
                 safe_print(f"DEBUG: [delete_selected_client] نتيجة الحذف: {result}")
-                
+
                 # رسالة نجاح
                 QMessageBox.information(
                     self,
                     "✅ تم الحذف",
                     f"تم حذف العميل '{self.selected_client.name}' بنجاح"
                 )
-                
+
                 # تحديث الجدول
                 self.selected_client = None
                 self.load_clients_data()
-                
+
             except Exception as e:
                 QMessageBox.critical(
                     self,

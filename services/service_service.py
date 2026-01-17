@@ -148,7 +148,7 @@ class ServiceService:
             # جلب اسم الخدمة قبل الحذف
             existing_service = self.repo.get_service_by_id(service_id)
             service_name = existing_service.name if existing_service else f"خدمة #{service_id}"
-            
+
             success = self.repo.delete_service_permanently(service_id)
             if success:
                 # ⚡ إرسال إشارة التحديث

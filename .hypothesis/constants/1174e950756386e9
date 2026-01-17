@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\_client_bulk_shared.py
+# hypothesis_version: 6.148.3
+
+['Transaction numbers', 'code', 'errmsg', 'error', 'idx', 'nDeleted', 'nInserted', 'nMatched', 'nModified', 'nUpserted', 'op', 'writeConcernErrors', 'writeErrors']

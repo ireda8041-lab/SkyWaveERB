@@ -5,7 +5,6 @@
 """
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QDialog,
     QFrame,
@@ -26,7 +25,7 @@ class ShortcutsHelpDialog(QDialog):
         super().__init__(parent)
         self.shortcuts_manager = shortcuts_manager
         self._setup_ui()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
@@ -43,7 +42,8 @@ class ShortcutsHelpDialog(QDialog):
         try:
             from ui.styles import setup_custom_title_bar
             setup_custom_title_bar(self)
-        except:
+        except (ImportError, AttributeError):
+            # فشل تطبيق شريط العنوان المخصص
             pass
 
         # الخلفية

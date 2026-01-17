@@ -4,16 +4,11 @@
 # === CORE GUI FRAMEWORK ===
 PyQt6>=6.5.0
 PyQt6-WebEngine>=6.5.0
-weasyprint>=60.0
 
 # === DATABASE & DATA HANDLING ===
 pymongo>=4.5.0
 dnspython>=2.4.0
 pydantic>=2.4.0
-
-# === SMART INVOICE MANAGER (Removed) ===
-# selenium>=4.15.0
-# webdriver-manager>=4.0.0
 
 # === TEMPLATE ENGINE ===
 Jinja2>=3.1.2
@@ -23,6 +18,10 @@ reportlab>=4.0.0
 arabic-reshaper>=3.0.0
 python-bidi>=0.4.2
 Pillow>=10.0.0
+weasyprint>=60.0
+
+# === CHARTS ===
+matplotlib>=3.7.0
 
 # === DATA EXPORT ===
 pandas>=2.0.0
@@ -31,54 +30,12 @@ openpyxl>=3.1.0
 # === UTILITIES ===
 python-dateutil>=2.8.2
 requests>=2.31.0
-google-genai>=1.0.0  # Google Gemini AI SDK for Smart Scan Service
 
-# === CLIPBOARD & AUTOMATION (Removed) ===
-# pyperclip>=1.8.2
-# pyautogui>=0.9.54
+# === AI (Optional) ===
+# google-generativeai>=0.3.0  # Google Gemini AI SDK for Smart Scan Service (optional)
 
 # === LOGGING & MONITORING ===
 colorlog>=6.7.0
 
 # === BUILD TOOLS ===
 pyinstaller>=5.13.0
-
-# === TESTING FRAMEWORK ===
-pytest>=7.4.0
-pytest-cov>=4.1.0
-pytest-asyncio>=0.21.0
-pytest-mock>=3.11.0
-pytest-xdist>=3.3.0
-pytest-html>=4.0.0
-pytest-timeout>=2.2.0
-coverage>=7.3.0
-hypothesis>=6.90.0
-
-# === CODE QUALITY ===
-flake8>=6.1.0
-black>=23.9.0
-mypy>=1.5.0
-isort>=5.12.0
-pylint>=3.0.0
-
-# === SECURITY SCANNING ===
-bandit>=1.7.0
-safety>=2.3.0
-
-# === PERFORMANCE PROFILING ===
-memory-profiler>=0.61.0
-line-profiler>=4.1.0
-
-# === LOAD TESTING ===
-locust>=2.20.0
-
-# === DOCUMENTATION ===
-sphinx>=7.2.0
-sphinx-rtd-theme>=2.0.0
-
-# === DEPRECATED/REMOVED LIBRARIES ===
-# The following libraries are NO LONGER USED in the new architecture:
-# - pdfkit (replaced by Chrome PDF generation)
-# - wkhtmltopdf (replaced by Chrome PDF generation)
-# - pyautogui (replaced by Selenium automation)
-# - pywhatkit (replaced by Selenium WhatsApp Web automation)

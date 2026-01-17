@@ -42,11 +42,11 @@ class UserPermissionsDialog(QDialog):
 
         self.setWindowTitle(f"صلاحيات المستخدم: {user.username}")
         self.setModal(True)
-        
+
         # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(600)
         self.setMinimumHeight(500)
-        
+
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -57,14 +57,13 @@ class UserPermissionsDialog(QDialog):
 
         self.init_ui()
         self.load_current_permissions()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
-        from ui.styles import RESPONSIVE_GROUPBOX_STYLE
 
         # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)

@@ -32,7 +32,7 @@ class LoginWindow(QDialog):
         self.setWindowOpacity(0.0)
 
         self.setWindowTitle("Sky Wave ERP - تسجيل الدخول")
-        
+
         # 📱 تصميم متجاوب - حساب الحجم بناءً على الشاشة
         screen = QApplication.primaryScreen()
         if screen:
@@ -43,7 +43,7 @@ class LoginWindow(QDialog):
             self.setFixedSize(width, height)
         else:
             self.setFixedSize(520, 850)
-        
+
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         # ⚡ إزالة WA_TranslucentBackground للسرعة
 

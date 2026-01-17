@@ -1,6 +1,6 @@
-﻿import json
+﻿import base64
+import json
 import os
-import base64
 from typing import Any
 
 # استيراد دالة الطباعة الآمنة
@@ -46,19 +46,19 @@ class SettingsService:
         # دمج الإعدادات من الملف المحلي (مثل smart_scan)
         self._merge_local_settings()
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
-    
+
     def _merge_local_settings(self):
         """دمج الإعدادات من ملف المشروع المحلي (مثل smart_scan)"""
         try:
             if os.path.exists(_LOCAL_SETTINGS_FILE):
                 with open(_LOCAL_SETTINGS_FILE, encoding="utf-8") as f:
                     local_settings = json.load(f)
-                
+
                 # دمج smart_scan إذا لم يكن موجوداً في الإعدادات الرئيسية
                 if "smart_scan" in local_settings and "smart_scan" not in self.settings:
                     self.settings["smart_scan"] = local_settings["smart_scan"]
                     safe_print("INFO: [SettingsService] تم دمج إعدادات smart_scan من الملف المحلي")
-                
+
                 # دمج أي إعدادات أخرى غير موجودة
                 for key, value in local_settings.items():
                     if key not in self.settings:
@@ -107,7 +107,7 @@ class SettingsService:
     # ==========================================
     # ⚡ دوال اللوجو - للمزامنة بين الأجهزة
     # ==========================================
-    
+
     def save_logo_from_file(self, file_path: str) -> bool:
         """
         حفظ اللوجو من ملف كـ Base64
@@ -116,34 +116,34 @@ class SettingsService:
         try:
             if not file_path or not os.path.exists(file_path):
                 return False
-            
+
             with open(file_path, 'rb') as f:
                 logo_bytes = f.read()
-            
+
             # تحويل لـ Base64
             logo_base64 = base64.b64encode(logo_bytes).decode('utf-8')
-            
+
             # حفظ في الإعدادات
             self.settings['company_logo_data'] = logo_base64
             self.settings['company_logo_path'] = file_path  # للعرض المحلي
             self.save_settings(self.settings)
-            
+
             safe_print(f"INFO: [SettingsService] تم حفظ اللوجو ({len(logo_base64)} حرف)")
             return True
-            
+
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل حفظ اللوجو: {e}")
             return False
-    
+
     def get_logo_as_pixmap(self):
         """
         الحصول على اللوجو كـ QPixmap
         يحاول أولاً من Base64، ثم من المسار المحلي
         """
         try:
-            from PyQt6.QtGui import QPixmap
             from PyQt6.QtCore import QByteArray
-            
+            from PyQt6.QtGui import QPixmap
+
             # أولاً: محاولة تحميل من Base64 (للمزامنة)
             logo_data = self.settings.get('company_logo_data', '')
             if logo_data:
@@ -155,20 +155,20 @@ class SettingsService:
                         return pixmap
                 except Exception as e:
                     safe_print(f"WARNING: [SettingsService] فشل تحميل اللوجو من Base64: {e}")
-            
+
             # ثانياً: محاولة تحميل من المسار المحلي
             logo_path = self.settings.get('company_logo_path', '')
             if logo_path and os.path.exists(logo_path):
                 pixmap = QPixmap(logo_path)
                 if not pixmap.isNull():
                     return pixmap
-            
+
             return None
-            
+
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل تحميل اللوجو: {e}")
             return None
-    
+
     def clear_logo(self):
         """مسح اللوجو"""
         self.settings['company_logo_data'] = ''
@@ -179,55 +179,55 @@ class SettingsService:
     # ==========================================
     # ⚡ مزامنة الإعدادات مع MongoDB
     # ==========================================
-    
+
     def sync_settings_to_cloud(self, repository) -> bool:
         """رفع الإعدادات للسحابة"""
         try:
             if not repository or not repository.online or repository.mongo_db is None:
                 return False
-            
+
             # حفظ الإعدادات في مجموعة system_settings
             collection = repository.mongo_db['system_settings']
-            
+
             # استخدام upsert لتحديث أو إنشاء
             collection.update_one(
                 {'_id': 'company_settings'},
                 {'$set': self.settings},
                 upsert=True
             )
-            
+
             safe_print("INFO: [SettingsService] ✅ تم رفع الإعدادات للسحابة")
             return True
-            
+
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل رفع الإعدادات للسحابة: {e}")
             return False
-    
+
     def sync_settings_from_cloud(self, repository) -> bool:
         """تحميل الإعدادات من السحابة"""
         try:
             if not repository or not repository.online or repository.mongo_db is None:
                 return False
-            
+
             collection = repository.mongo_db['system_settings']
             cloud_settings = collection.find_one({'_id': 'company_settings'})
-            
+
             if cloud_settings:
                 # إزالة _id من الإعدادات
                 cloud_settings.pop('_id', None)
-                
+
                 # دمج الإعدادات (السحابة تأخذ الأولوية)
                 for key, value in cloud_settings.items():
                     self.settings[key] = value
-                
+
                 # حفظ محلياً
                 self.save_settings(self.settings)
-                
+
                 safe_print("INFO: [SettingsService] ✅ تم تحميل الإعدادات من السحابة")
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل تحميل الإعدادات من السحابة: {e}")
             return False

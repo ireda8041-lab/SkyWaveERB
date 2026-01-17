@@ -4,8 +4,7 @@
 ⚡ محسّن: إضافة دفعة جديدة، تصفية، تصدير، تكامل محاسبي كامل
 """
 
-from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 
 from PyQt6.QtCore import QDate, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
@@ -14,18 +13,16 @@ from PyQt6.QtWidgets import (
     QDateEdit,
     QDialog,
     QFormLayout,
-    QGroupBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QFrame,
 )
 
 from core import schemas
@@ -33,8 +30,8 @@ from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.project_service import ProjectService
 from ui.custom_spinbox import CustomSpinBox
-from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
 from ui.smart_combobox import SmartFilterComboBox
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -80,7 +77,7 @@ class NewPaymentDialog(QDialog):
         self.setWindowTitle("💰 إضافة دفعة جديدة")
         self.setMinimumWidth(550)
         self.setMinimumHeight(500)
-        
+
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -105,7 +102,7 @@ class NewPaymentDialog(QDialog):
     def _setup_ui(self):
         """إعداد الواجهة - تصميم احترافي"""
         from ui.styles import COLORS, get_arrow_url
-        
+
         layout = QVBoxLayout()
         layout.setSpacing(10)
         layout.setContentsMargins(14, 14, 14, 14)
@@ -143,7 +140,7 @@ class NewPaymentDialog(QDialog):
                 font-size: 11px;
             }}
         """
-        
+
         label_style = f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;"
 
         # === قسم المشروع ===
@@ -185,7 +182,7 @@ class NewPaymentDialog(QDialog):
         acc_label = QLabel("💳 الحساب المستلم")
         acc_label.setStyleSheet(label_style)
         layout.addWidget(acc_label)
-        
+
         # SmartFilterComboBox مع فلترة ذكية
         self.account_combo = SmartFilterComboBox()
         self.account_combo.setStyleSheet(field_style)
@@ -195,7 +192,7 @@ class NewPaymentDialog(QDialog):
         # === صف المبلغ والتاريخ ===
         row1 = QHBoxLayout()
         row1.setSpacing(10)
-        
+
         # المبلغ
         amount_container = QVBoxLayout()
         amount_container.setSpacing(3)
@@ -207,7 +204,7 @@ class NewPaymentDialog(QDialog):
         self.amount_input.valueChanged.connect(self._validate_payment)
         amount_container.addWidget(self.amount_input)
         row1.addLayout(amount_container, 1)
-        
+
         # التاريخ
         date_container = QVBoxLayout()
         date_container.setSpacing(3)
@@ -220,20 +217,20 @@ class NewPaymentDialog(QDialog):
         self.date_input.setDisplayFormat("yyyy-MM-dd")
         date_container.addWidget(self.date_input)
         row1.addLayout(date_container, 1)
-        
+
         layout.addLayout(row1)
 
         # === الملاحظات ===
         notes_label = QLabel("📝 ملاحظات")
         notes_label.setStyleSheet(label_style)
         layout.addWidget(notes_label)
-        
+
         self.notes_input = QTextEdit()
         self.notes_input.setStyleSheet(field_style)
         self.notes_input.setPlaceholderText("ملاحظات اختيارية...")
         self.notes_input.setFixedHeight(55)
         layout.addWidget(self.notes_input)
-        
+
         # طريقة الدفع (مخفي - للاستخدام الداخلي)
         self.method_label = QLabel("")
         self.method_label.setVisible(False)
@@ -411,7 +408,7 @@ class NewPaymentDialog(QDialog):
             return "Bank Transfer"
         elif "شيك" in name or "check" in name:
             return "Check"
-        
+
         # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
         if code in ["1103", "111000"] or code.startswith("1110"):
             return "Vodafone Cash"
@@ -421,7 +418,7 @@ class NewPaymentDialog(QDialog):
             return "Cash"
         elif code.startswith("1102") or code.startswith("1112"):
             return "Bank Transfer"
-            
+
         return "Other"
 
     def _validate_payment(self):
@@ -446,7 +443,7 @@ class NewPaymentDialog(QDialog):
             return
         self.save_btn.setEnabled(False)
         self.save_btn.setText("جاري الحفظ...")
-        
+
         if not self.selected_project:
             QMessageBox.warning(self, "⚠️ تنبيه", "يرجى اختيار المشروع أولاً.")
             self.save_btn.setEnabled(True)
@@ -536,7 +533,7 @@ class PaymentEditorDialog(QDialog):
         self.setWindowTitle(f"تعديل دفعة - {payment.project_id}")
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
-        
+
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -767,7 +764,7 @@ class PaymentsManagerTab(QWidget):
         self.toolbar.addButton(self.edit_button)
         self.toolbar.addButton(self.delete_button)
         self.toolbar.addButton(self.refresh_button)
-        
+
         layout.addWidget(self.toolbar)
 
         # جدول الدفعات
@@ -806,7 +803,7 @@ class PaymentsManagerTab(QWidget):
 
         # ربط الدبل كليك
         self.payments_table.itemDoubleClicked.connect(self.open_edit_dialog)
-        
+
         # إضافة قائمة السياق (كليك يمين)
         self._setup_context_menu()
 
@@ -825,7 +822,7 @@ class PaymentsManagerTab(QWidget):
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
         from core.context_menu import ContextMenuManager
-        
+
         ContextMenuManager.setup_table_context_menu(
             table=self.payments_table,
             on_view=self.open_edit_dialog,
@@ -871,7 +868,7 @@ class PaymentsManagerTab(QWidget):
                         clients_cache[c.name.strip()] = c
 
                 safe_print(f"DEBUG: [PaymentsManager] تم تحميل {len(clients)} عميل في الـ cache")
-                
+
                 return {
                     'payments': payments,
                     'accounts_cache': accounts_cache,
@@ -890,7 +887,7 @@ class PaymentsManagerTab(QWidget):
                 self.payments_list = data['payments']
                 accounts_cache = data['accounts_cache']
                 projects_cache = data['projects_cache']
-                clients_cache = data['clients_cache']
+                data['clients_cache']
 
                 total_sum = 0.0
 
@@ -915,7 +912,7 @@ class PaymentsManagerTab(QWidget):
                     # 1. أولاً: استخدام client_id من الدفعة مباشرة (الأولوية الأعلى)
                     if payment.client_id and payment.client_id.strip():
                         client_name = payment.client_id.strip()
-                    
+
                     # 2. ثانياً: البحث في المشروع
                     if client_name == "عميل غير محدد" and payment.project_id:
                         if payment.project_id in projects_cache:
@@ -1070,7 +1067,7 @@ class PaymentsManagerTab(QWidget):
             return "Bank Transfer"
         elif "شيك" in account_name or "check" in account_name:
             return "Check"
-        
+
         # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
         if code in ["1103", "111000"] or code.startswith("1110"):
             return "Vodafone Cash"

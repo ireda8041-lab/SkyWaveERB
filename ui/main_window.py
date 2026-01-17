@@ -3,7 +3,13 @@
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import QMainWindow, QMessageBox, QTabWidget, QVBoxLayout, QWidget, QFrame, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import (
+    QMainWindow,
+    QMessageBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.keyboard_shortcuts import KeyboardShortcutManager  # (الجديد) مدير الاختصارات
 from core.sync_manager_v3 import SyncManagerV3  # (الجديد) مدير المزامنة المحسن
@@ -24,13 +30,13 @@ from ui.client_manager import ClientManagerTab
 # (استيراد التابات الجديدة)
 from ui.dashboard_tab import DashboardTab
 from ui.expense_manager import ExpenseManagerTab  # (التاب الجديد بتاع المصروفات)
+
 # تم حذف نظام الإشعارات
 from ui.payments_manager import PaymentsManagerTab  # (الجديد) تاب الدفعات
 from ui.project_manager import ProjectManagerTab
 from ui.service_manager import ServiceManagerTab
 from ui.settings_tab import SettingsTab
 from ui.shortcuts_help_dialog import ShortcutsHelpDialog  # (الجديد) نافذة مساعدة الاختصارات
-from ui.styles import COLORS  # ألوان التطبيق
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -47,7 +53,7 @@ class MainWindow(QMainWindow):
     """
     (معدلة) الشاشة الرئيسية (بتابات المحاسبة والمصروفات الجديدة)
     """
-    
+
     # إشارات للمزامنة
     sync_completed = pyqtSignal(dict)
 
@@ -122,13 +128,13 @@ class MainWindow(QMainWindow):
         # تعيين حجم النافذة بنسبة 90% من حجم الشاشة (أكثر راحة)
         window_width = int(screen_width * 0.9)
         window_height = int(screen_height * 0.9)
-        
+
         # توسيط النافذة في الشاشة
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
-        
+
         self.setGeometry(x, y, window_width, window_height)
-        
+
         # يمكن للمستخدم تكبير النافذة إذا أراد
         # self.showMaximized()  # معطل افتراضياً لراحة أكبر
 
@@ -140,7 +146,7 @@ class MainWindow(QMainWindow):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تم إزالة الهيدر - زر المزامنة موجود في الـ Status Bar
-        
+
         # ربط signal اكتمال المزامنة
         self.sync_completed.connect(self._on_full_sync_completed)
 
@@ -161,7 +167,7 @@ class MainWindow(QMainWindow):
 
         # --- 1. إنشاء الـ Tab Widget ---
         self.tabs = QTabWidget()
-        
+
         # ⚡ جعل التابات تتمدد لتملأ العرض تلقائياً
         self.tabs.tabBar().setExpanding(True)
         self.tabs.setUsesScrollButtons(False)  # إيقاف أزرار التمرير لأن التابات تتمدد
@@ -180,7 +186,7 @@ class MainWindow(QMainWindow):
             }
 
             QTabBar {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, 
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 #0D3461, stop:1 #052045);
                 qproperty-drawBase: 0;
                 border-bottom: 1px solid #1E3A5F;
@@ -209,7 +215,7 @@ class MainWindow(QMainWindow):
                     stop:0 #0A6CF1, stop:1 #0550B8);
                 border-right: 1px solid #0A6CF1;
             }
-            
+
             QTabBar::tab:first {
                 border-left: none;
             }
@@ -217,12 +223,12 @@ class MainWindow(QMainWindow):
             QTabBar::tab:last {
                 border-right: none;
             }
-            
+
             /* أزرار التمرير للتابات */
             QTabBar::scroller {
                 width: 35px;
             }
-            
+
             QTabBar QToolButton {
                 background-color: #0D3461;
                 border: 1px solid #1E3A5F;
@@ -231,7 +237,7 @@ class MainWindow(QMainWindow):
                 padding: 5px;
                 font-size: 14px;
             }
-            
+
             QTabBar QToolButton:hover {
                 background-color: #0A6CF1;
             }
@@ -291,7 +297,7 @@ class MainWindow(QMainWindow):
 
         # ربط زرار المزامنة اللحظية
         self.status_bar.sync_indicator.sync_requested.connect(self._on_instant_sync)
-        
+
         # ربط زر المزامنة الكاملة
         self.status_bar.full_sync_requested.connect(self._on_full_sync_clicked)
 
@@ -300,7 +306,7 @@ class MainWindow(QMainWindow):
         central_layout = QVBoxLayout(central_widget)
         central_layout.setContentsMargins(5, 5, 5, 5)
         central_layout.setSpacing(0)
-        
+
         # إضافة الـ tabs
         central_layout.addWidget(self.tabs, 1)
 
@@ -317,7 +323,7 @@ class MainWindow(QMainWindow):
         qt_status_bar = QStatusBar()
         qt_status_bar.setFixedHeight(60)  # تطابق مع ارتفاع StatusBarWidget
         qt_status_bar.setSizeGripEnabled(False)  # إزالة المقبض
-        
+
         # إضافة StatusBarWidget بحيث يملأ العرض كاملاً
         self.status_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         qt_status_bar.addPermanentWidget(self.status_bar, 1)
@@ -326,7 +332,7 @@ class MainWindow(QMainWindow):
         # ✅ التأكد من أن الشريط السفلي دائمًا مرئي
         self.status_bar.setVisible(True)
         qt_status_bar.setVisible(True)
-        
+
         # ✅ إزالة الحواف والهوامش لجعل البار كامل
         qt_status_bar.setContentsMargins(0, 0, 0, 0)
         qt_status_bar.layout().setContentsMargins(0, 0, 0, 0)
@@ -417,7 +423,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_tab, "🔧 الإعدادات")
 
         safe_print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
-        
+
         # ⚡ تطبيق محاذاة RTL في الخلفية بعد ثانية
         def apply_rtl_later():
             from ui.styles import apply_rtl_alignment_to_all_fields
@@ -780,14 +786,14 @@ class MainWindow(QMainWindow):
 
                 # استخدام UnifiedSyncManagerV3 مباشرة
                 from core.unified_sync import UnifiedSyncManagerV3
-                
+
                 # الحصول على repository
                 repo = None
                 if self.sync_manager and hasattr(self.sync_manager, 'repo'):
                     repo = self.sync_manager.repo
                 elif self.sync_manager and hasattr(self.sync_manager, 'repository'):
                     repo = self.sync_manager.repository
-                
+
                 if repo:
                     unified_sync = UnifiedSyncManagerV3(repo)
                     result = unified_sync.full_sync_from_cloud()
@@ -804,7 +810,8 @@ class MainWindow(QMainWindow):
                     safe_print(f"WARNING: فشل في إرسال signal: {signal_error}")
                     try:
                         self._on_full_sync_completed(result)
-                    except:
+                    except Exception:
+                        # فشل معالجة نتيجة المزامنة
                         pass
 
             except Exception as e:
@@ -813,7 +820,8 @@ class MainWindow(QMainWindow):
                 traceback.print_exc()
                 try:
                     self.sync_completed.emit({'success': False, 'error': str(e)})
-                except:
+                except Exception:
+                    # فشل إرسال إشارة الخطأ
                     pass
 
         # تشغيل المزامنة في الخلفية
@@ -845,7 +853,7 @@ class MainWindow(QMainWindow):
             else:
                 error = result.get('error', 'خطأ غير معروف')
                 reason = result.get('reason', '')
-                
+
                 if reason == 'offline':
                     msg = "لا يوجد اتصال بالإنترنت"
                 elif reason == 'already_syncing':
@@ -919,7 +927,7 @@ class MainWindow(QMainWindow):
 
         # اختصارات المساعدة
         self.shortcuts_manager.show_help.connect(self._on_show_help)
-        
+
         # اختصارات إضافية
         self.shortcuts_manager.full_sync.connect(self._on_full_sync_clicked)
         self.shortcuts_manager.delete_selected.connect(self._on_delete_selected)
@@ -1019,7 +1027,7 @@ class MainWindow(QMainWindow):
     def _on_copy_selected(self):
         """معالج اختصار نسخ المحدد"""
         current_tab = self.tabs.currentWidget()
-        from PyQt6.QtWidgets import QTableWidget, QApplication
+        from PyQt6.QtWidgets import QApplication, QTableWidget
         tables = current_tab.findChildren(QTableWidget)
         for table in tables:
             if table.isVisible() and table.selectedItems():

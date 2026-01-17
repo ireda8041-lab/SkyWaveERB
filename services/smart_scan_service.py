@@ -8,11 +8,11 @@
 - يدعم العربية والإنجليزية
 """
 
-import os
 import json
 import logging
-from typing import Dict, Any
+import os
 from datetime import datetime
+from typing import Any
 
 # ⚡ استيراد آمن للمكتبات الاختيارية
 try:
@@ -46,30 +46,30 @@ logger.setLevel(logging.INFO)
 class SmartScanService:
     """
     خدمة المسح الذكي للفواتير باستخدام Google Gemini AI 🧠
-    
+
     تحول صور الفواتير إلى بيانات مهيكلة (JSON) جاهزة للإدخال.
     """
 
     def __init__(self, api_key: str = None):
         """
         تهيئة الخدمة
-        
+
         Args:
             api_key: مفتاح Gemini API (اختياري، يمكن استخدام متغير البيئة)
         """
         # يفضل وضع المفتاح في متغيرات البيئة، أو تمريره هنا
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.model = None
-        
+
         # ⚡ فحص توفر المكتبات أولاً
         if not GENAI_AVAILABLE:
             logger.warning("⚠️ google.generativeai غير متاح - Smart Scan معطل")
             return
-        
+
         if not PIL_AVAILABLE:
             logger.warning("⚠️ PIL غير متاح - Smart Scan معطل")
             return
-        
+
         if not self.api_key:
             # ⚡ تحذير صامت - لا نريد إزعاج المستخدم
             pass  # Smart Scan غير متاح بدون API key
@@ -96,13 +96,13 @@ class SmartScanService:
     SUPPORTED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
     SUPPORTED_PDF_FORMAT = '.pdf'
 
-    def scan_invoice_image(self, image_path: str) -> Dict[str, Any]:
+    def scan_invoice_image(self, image_path: str) -> dict[str, Any]:
         """
         تحليل صورة أو PDF الفاتورة واستخراج البيانات.
-        
+
         Args:
             image_path: مسار صورة أو PDF الفاتورة
-            
+
         Returns:
             Dictionary containing:
             - merchant_name (str)
@@ -120,13 +120,13 @@ class SmartScanService:
 
         try:
             logger.info(f"🔍 Scanning invoice: {image_path}...")
-            
+
             # تحديد نوع الملف
             file_ext = os.path.splitext(image_path)[1].lower()
-            
+
             # بناء الطلب
             prompt = self._build_prompt()
-            
+
             if file_ext == self.SUPPORTED_PDF_FORMAT:
                 # معالجة PDF
                 content = self._process_pdf(image_path, prompt)
@@ -152,7 +152,7 @@ class SmartScanService:
     def _build_prompt(self) -> str:
         """بناء الطلب للذكاء الاصطناعي"""
         current_year = datetime.now().year
-        
+
         return f"""You are an expert AI Data Entry Clerk.
 Analyze this invoice/receipt document and extract the data into a strict JSON format.
 
@@ -183,23 +183,23 @@ Translate any Arabic text to English keys but keep Arabic values if needed."""
     def _process_pdf(self, pdf_path: str, prompt: str) -> list:
         """معالجة ملف PDF وإرساله لـ Gemini"""
         import base64
-        
+
         # قراءة الملف كـ bytes
         with open(pdf_path, 'rb') as f:
             pdf_data = f.read()
-        
+
         # تحويل لـ base64
         pdf_base64 = base64.b64encode(pdf_data).decode('utf-8')
-        
+
         # إنشاء محتوى الملف لـ Gemini
         pdf_part = {
             "mime_type": "application/pdf",
             "data": pdf_base64
         }
-        
+
         return [prompt, pdf_part]
 
-    def _clean_json_response(self, text: str) -> Dict:
+    def _clean_json_response(self, text: str) -> dict:
         """تنظيف الرد من أي شوائب (مثل علامات Markdown)"""
         try:
             # إزالة علامات الكود إذا وجدت
@@ -215,7 +215,7 @@ Translate any Arabic text to English keys but keep Arabic values if needed."""
 if __name__ == "__main__":
     import sys
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    
+
     # ⚠️ استبدل هذا بمفتاحك الحقيقي للتجربة
     TEST_API_KEY = os.getenv("GEMINI_API_KEY", "ضع_مفتاح_API_هنا")
 
@@ -232,6 +232,6 @@ if __name__ == "__main__":
         safe_print(json.dumps(result, indent=4, ensure_ascii=False))
     else:
         safe_print(f"⚠️ Please place an image named '{test_img}' to test.")
-        safe_print(f"\n📋 Service Status:")
+        safe_print("\n📋 Service Status:")
         safe_print(f"   - Available: {service.is_available()}")
         safe_print(f"   - API Key Set: {bool(service.api_key)}")

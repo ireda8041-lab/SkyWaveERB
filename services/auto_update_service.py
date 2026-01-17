@@ -122,7 +122,7 @@ class AutoUpdateService(QObject):
                     pass
         except Exception as e:
             logger.debug(f"تحذير عند إيقاف المؤقت: {e}")
-        
+
         if self._checker_thread and self._checker_thread.isRunning():
             self._checker_thread.quit()
             self._checker_thread.wait()

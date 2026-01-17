@@ -1,18 +1,15 @@
 ﻿"""الملف: ui/service_manager.py"""
 
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QGroupBox,
-    QHBoxLayout,
     QHeaderView,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -144,7 +141,7 @@ class ServiceManagerTab(QWidget):
 
         # إضافة دبل كليك للتعديل
         self.services_table.itemDoubleClicked.connect(self.open_editor_for_selected)
-        
+
         # ⚡ إضافة قائمة السياق (كليك يمين)
         self._setup_context_menu()
 
@@ -154,15 +151,15 @@ class ServiceManagerTab(QWidget):
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_services_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
-        
+
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
         from ui.styles import apply_rtl_alignment_to_all_fields
         apply_rtl_alignment_to_all_fields(self)
-    
+
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
         from core.context_menu import ContextMenuManager
-        
+
         ContextMenuManager.setup_table_context_menu(
             table=self.services_table,
             on_view=self.open_editor_for_selected,
@@ -179,7 +176,7 @@ class ServiceManagerTab(QWidget):
         from core.context_menu import is_right_click_active
         if is_right_click_active():
             return
-        
+
         selected_rows = self.services_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()
@@ -194,7 +191,6 @@ class ServiceManagerTab(QWidget):
         """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
 
-        from PyQt6.QtWidgets import QApplication
 
         from core.data_loader import get_data_loader
 
@@ -223,7 +219,7 @@ class ServiceManagerTab(QWidget):
                 self.services_table.setRowCount(len(self.services_list))
                 for index, service in enumerate(self.services_list):
                     self.services_table.setItem(index, 0, create_centered_item(service.name))
-                    
+
                     # ⚡ الوصف (مختصر إذا كان طويل)
                     description = service.description or ""
                     description = description.strip()
@@ -235,7 +231,7 @@ class ServiceManagerTab(QWidget):
                         desc_item = create_centered_item("-")
                         desc_item.setForeground(QColor("#666666"))
                     self.services_table.setItem(index, 1, desc_item)
-                    
+
                     self.services_table.setItem(index, 2, create_centered_item(service.category or ""))
                     self.services_table.setItem(index, 3, create_centered_item(f"{service.default_price:,.2f}"))
 

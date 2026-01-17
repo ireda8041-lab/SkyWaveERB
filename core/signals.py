@@ -24,7 +24,7 @@ class AppSignals(QObject):
     services_changed = pyqtSignal()
     payments_changed = pyqtSignal()
     tasks_changed = pyqtSignal()
-    
+
     # إشارات جديدة لجميع الأقسام
     invoices_changed = pyqtSignal()
     quotes_changed = pyqtSignal()
@@ -35,7 +35,7 @@ class AppSignals(QObject):
     system_changed = pyqtSignal()  # النظام والإعدادات
     files_changed = pyqtSignal()  # الملفات والمرفقات
     notifications_changed = pyqtSignal()  # الإشعارات
-    
+
     # إشارات محددة
     journal_entry_created = pyqtSignal(str)
     accounting_changed = pyqtSignal()
@@ -44,13 +44,13 @@ class AppSignals(QObject):
     sync_completed = pyqtSignal(dict)
     sync_failed = pyqtSignal(str)
     realtime_sync_status = pyqtSignal(bool)  # حالة المزامنة الفورية
-    
+
     # 🔔 إشارات الإشعارات التفصيلية
     operation_completed = pyqtSignal(str, str, str)  # (action, entity_type, entity_name)
 
     # ⚡ مرجع لمدير المزامنة (يُعيّن من main.py)
     _sync_manager = None
-    
+
     @classmethod
     def set_sync_manager(cls, sync_manager):
         """تعيين مدير المزامنة للمزامنة الفورية"""
@@ -60,14 +60,14 @@ class AppSignals(QObject):
         """إرسال إشارة تحديث البيانات - محسّن للسرعة"""
         # ⚡ إرسال الإشارة العامة فقط - بدون إشارات متعددة
         self.data_changed.emit(data_type)
-        
+
         # ⚡ المزامنة الفورية معطّلة للسرعة
         # المزامنة تتم كل 5 دقائق تلقائياً
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""
         self.journal_entry_created.emit(entry_id)
-    
+
     def emit_operation(self, action: str, entity_type: str, entity_name: str):
         """
         إرسال إشارة عملية مكتملة
@@ -76,7 +76,7 @@ class AppSignals(QObject):
         entity_name: اسم العنصر
         """
         self.operation_completed.emit(action, entity_type, entity_name)
-    
+
     def emit_realtime_sync_status(self, is_connected: bool):
         """إرسال إشارة حالة المزامنة الفورية"""
         self.realtime_sync_status.emit(is_connected)

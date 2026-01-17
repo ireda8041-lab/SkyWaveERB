@@ -5,10 +5,8 @@
 
 from typing import Any
 
-from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -158,7 +156,7 @@ class ServiceEditorDialog(QDialog):
         cat_label = QLabel("📂 الفئة")
         cat_label.setStyleSheet(label_style)
         cat_cont.addWidget(cat_label)
-        
+
         # SmartFilterComboBox مع فلترة ذكية
         self.category_input = SmartFilterComboBox()
         self.category_input.setMinimumWidth(150)
@@ -202,12 +200,12 @@ class ServiceEditorDialog(QDialog):
                 padding: 3px 6px;
             }}
         """)
-        
+
         # ⚡ تحميل الفئات الموجودة
         self._load_existing_categories()
-        
+
         self.category_input.lineEdit().setPlaceholderText("اكتب للبحث أو أضف فئة جديدة...")
-        
+
         cat_cont.addWidget(self.category_input)
         row1.addLayout(cat_cont, 1)
 
@@ -295,7 +293,7 @@ class ServiceEditorDialog(QDialog):
         if self.is_editing:
             self.load_service_data()
             self.save_button.setText("💾 حفظ")
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
@@ -305,17 +303,17 @@ class ServiceEditorDialog(QDialog):
         try:
             services = self.service_service.get_all_services()
             categories = set()
-            
+
             for service in services:
                 if service.category and service.category.strip():
                     categories.add(service.category.strip())
-            
+
             # ترتيب الفئات أبجدياً وإضافتها
             sorted_categories = sorted(categories)
             self.category_input.addItem("")  # خيار فارغ
             for cat in sorted_categories:
                 self.category_input.addItem(cat)
-                
+
         except Exception as e:
             safe_print(f"WARNING: [ServiceEditorDialog] فشل تحميل الفئات: {e}")
 
@@ -323,7 +321,7 @@ class ServiceEditorDialog(QDialog):
         self.name_input.setText(self.service_to_edit.name)
         self.description_input.setText(self.service_to_edit.description or "")
         self.price_input.setValue(self.service_to_edit.default_price)
-        
+
         # ⚡ تعيين الفئة في ComboBox
         category = self.service_to_edit.category or ""
         index = self.category_input.findText(category)
@@ -331,7 +329,7 @@ class ServiceEditorDialog(QDialog):
             self.category_input.setCurrentIndex(index)
         else:
             self.category_input.setCurrentText(category)
-        
+
         self.status_checkbox.setChecked(
             self.service_to_edit.status == schemas.ServiceStatus.ACTIVE
         )

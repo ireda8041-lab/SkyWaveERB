@@ -154,11 +154,11 @@ class CurrencyEditorDialog(QDialog):
         self.fetcher = None
 
         self.setWindowTitle("تعديل العملة" if self.is_editing else "إضافة عملة جديدة")
-        
+
         # تصميم متجاوب - حد أدنى فقط
         self.setMinimumWidth(450)
         self.setMinimumHeight(400)
-        
+
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -171,7 +171,7 @@ class CurrencyEditorDialog(QDialog):
 
         if self.is_editing:
             self.load_currency_data()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)

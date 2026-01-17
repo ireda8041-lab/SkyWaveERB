@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """اختبار الأرصدة"""
+from core.event_bus import EventBus
 from core.repository import Repository
 from services.accounting_service import AccountingService
-from core.event_bus import EventBus
 
 repo = Repository()
 bus = EventBus()

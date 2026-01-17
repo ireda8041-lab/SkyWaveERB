@@ -12,15 +12,14 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from PyQt6.QtCore import QDate, Qt, QTime, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QCursor, QFont
+from PyQt6.QtCore import QDate, Qt, QTime, QTimer
+from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
-    QFormLayout,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -42,8 +41,14 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item, get_arrow_url
 from ui.smart_combobox import SmartFilterComboBox
+from ui.styles import (
+    BUTTON_STYLES,
+    COLORS,
+    TABLE_STYLE_DARK,
+    create_centered_item,
+    get_arrow_url,
+)
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -360,7 +365,7 @@ class TaskService:
         # تحويل القيم الفارغة إلى None لتجنب مشاكل FOREIGN KEY
         related_project = task.related_project if task.related_project else None
         related_client = task.related_client if task.related_client else None
-        
+
         return {
             'id': task.id,
             'title': task.title,
@@ -669,7 +674,7 @@ class TaskSettingsDialog(QDialog):
                 height: 10px;
             }}
         """
-        
+
         radio_style = f"color: {COLORS['text_primary']}; font-size: 11px; padding: 4px;"
         checkbox_style = f"color: {COLORS['text_primary']}; font-size: 11px;"
         label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
@@ -1048,7 +1053,7 @@ class TaskEditorDialog(QDialog):
                 font-size: 11px;
             }}
         """
-        
+
         label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
         checkbox_style = f"color: {COLORS['text_primary']}; font-size: 11px;"
 
@@ -1105,7 +1110,7 @@ class TaskEditorDialog(QDialog):
         # صف الأولوية والفئة
         row1 = QHBoxLayout()
         row1.setSpacing(8)
-        
+
         priority_cont = QVBoxLayout()
         priority_cont.setSpacing(2)
         priority_label = QLabel("⚡ الأولوية")
@@ -1119,7 +1124,7 @@ class TaskEditorDialog(QDialog):
         self.priority_combo.setCurrentIndex(1)
         priority_cont.addWidget(self.priority_combo)
         row1.addLayout(priority_cont, 1)
-        
+
         category_cont = QVBoxLayout()
         category_cont.setSpacing(2)
         category_label = QLabel("📁 الفئة")
@@ -1131,13 +1136,13 @@ class TaskEditorDialog(QDialog):
             self.category_combo.addItem(category.value, category)
         category_cont.addWidget(self.category_combo)
         row1.addLayout(category_cont, 1)
-        
+
         layout.addLayout(row1)
 
         # صف التاريخ والوقت
         row2 = QHBoxLayout()
         row2.setSpacing(8)
-        
+
         date_cont = QVBoxLayout()
         date_cont.setSpacing(2)
         date_label = QLabel("📅 تاريخ الاستحقاق")
@@ -1149,7 +1154,7 @@ class TaskEditorDialog(QDialog):
         self.due_date_input.setStyleSheet(field_style)
         date_cont.addWidget(self.due_date_input)
         row2.addLayout(date_cont, 1)
-        
+
         time_cont = QVBoxLayout()
         time_cont.setSpacing(2)
         time_label = QLabel("⏰ الوقت")
@@ -1160,7 +1165,7 @@ class TaskEditorDialog(QDialog):
         self.due_time_input.setStyleSheet(field_style)
         time_cont.addWidget(self.due_time_input)
         row2.addLayout(time_cont, 1)
-        
+
         layout.addLayout(row2)
 
         # الحالة (للتعديل فقط)
@@ -1178,7 +1183,7 @@ class TaskEditorDialog(QDialog):
         # صف المشروع والعميل
         row3 = QHBoxLayout()
         row3.setSpacing(8)
-        
+
         project_cont = QVBoxLayout()
         project_cont.setSpacing(2)
         project_label = QLabel("📁 المشروع")
@@ -1192,7 +1197,7 @@ class TaskEditorDialog(QDialog):
             self.project_combo.addItem(project_name, project_id)
         project_cont.addWidget(self.project_combo)
         row3.addLayout(project_cont, 1)
-        
+
         client_cont = QVBoxLayout()
         client_cont.setSpacing(2)
         client_label = QLabel("👤 العميل")
@@ -1206,7 +1211,7 @@ class TaskEditorDialog(QDialog):
             self.client_combo.addItem(client_name, client_id)
         client_cont.addWidget(self.client_combo)
         row3.addLayout(client_cont, 1)
-        
+
         layout.addLayout(row3)
 
         # التذكير
@@ -1387,10 +1392,10 @@ class TodoManagerWidget(QWidget):
 
     def __init__(self, parent=None, project_service=None, client_service=None):
         super().__init__(parent)
-        
+
         # 📱 تصميم متجاوب
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         self.task_service = TaskService()
         self.project_service = project_service
         self.client_service = client_service
@@ -1458,7 +1463,7 @@ class TodoManagerWidget(QWidget):
     def init_ui(self):
         """تهيئة الواجهة الرئيسية - تصميم متوافق مع ProjectManagerTab"""
         from PyQt6.QtWidgets import QSizePolicy
-        
+
         main_layout = QHBoxLayout()
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(10, 10, 10, 10)
@@ -1602,7 +1607,7 @@ class TodoManagerWidget(QWidget):
 
         # === الجزء الأيمن (لوحة المعاينة والإحصائيات) ===
         from PyQt6.QtWidgets import QSizePolicy
-        
+
         self.preview_groupbox = QGroupBox("📊 معاينة المهمة والإحصائيات")
         self.preview_groupbox.setMinimumWidth(280)
         # ⚡ إزالة setMaximumWidth للتجاوب التلقائي
@@ -1697,9 +1702,9 @@ class TodoManagerWidget(QWidget):
 
         self.task_title_label = QLabel("اختر مهمة لعرض التفاصيل")
         self.task_title_label.setStyleSheet(f"""
-            color: {COLORS['text_primary']}; 
-            font-size: 14px; 
-            font-weight: bold; 
+            color: {COLORS['text_primary']};
+            font-size: 14px;
+            font-weight: bold;
             padding: 8px;
             background: {COLORS['bg_light']};
             border-radius: 6px;
@@ -1709,8 +1714,8 @@ class TodoManagerWidget(QWidget):
 
         self.task_description_label = QLabel("")
         self.task_description_label.setStyleSheet(f"""
-            color: {COLORS['text_secondary']}; 
-            font-size: 12px; 
+            color: {COLORS['text_secondary']};
+            font-size: 12px;
             padding: 8px;
             background: {COLORS['bg_medium']};
             border-radius: 6px;
@@ -1804,7 +1809,7 @@ class TodoManagerWidget(QWidget):
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
         """إنشاء بطاقة إحصائية احترافية مع تأثيرات بصرية"""
         from PyQt6.QtWidgets import QSizePolicy
-        
+
         card = QFrame()
         card.setFixedHeight(80)
         card.setMinimumWidth(95)
@@ -1833,9 +1838,9 @@ class TodoManagerWidget(QWidget):
         value_label = QLabel(value)
         value_label.setObjectName("value_label")
         value_label.setStyleSheet(f"""
-            color: {color}; 
-            font-size: 26px; 
-            font-weight: bold; 
+            color: {color};
+            font-size: 26px;
+            font-weight: bold;
             background: transparent;
         """)
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1844,9 +1849,9 @@ class TodoManagerWidget(QWidget):
         # العنوان تحت القيمة
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
-            color: {COLORS['text_secondary']}; 
-            font-size: 11px; 
-            font-weight: 500; 
+            color: {COLORS['text_secondary']};
+            font-size: 11px;
+            font-weight: 500;
             background: transparent;
         """)
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1866,7 +1871,7 @@ class TodoManagerWidget(QWidget):
         from core.context_menu import is_right_click_active
         if is_right_click_active():
             return
-        
+
         selected_rows = self.tasks_table.selectedIndexes()
         if selected_rows:
             row = selected_rows[0].row()
@@ -1953,7 +1958,6 @@ class TodoManagerWidget(QWidget):
             return
 
         self._is_loading = True
-        from PyQt6.QtWidgets import QApplication
 
         try:
             self.tasks_table.setSortingEnabled(False)
@@ -2281,8 +2285,8 @@ class TodoManagerWidget(QWidget):
 
     def _on_table_context_menu(self, pos):
         """عرض قائمة السياق عند الضغط بالزر الأيمن"""
-        from PyQt6.QtWidgets import QMenu
         from PyQt6.QtGui import QAction
+        from PyQt6.QtWidgets import QMenu
 
         item = self.tasks_table.itemAt(pos)
         if not item:
@@ -2447,6 +2451,7 @@ class TodoManagerWidget(QWidget):
 # للاختبار المستقل
 if __name__ == "__main__":
     import sys
+
     from PyQt6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)

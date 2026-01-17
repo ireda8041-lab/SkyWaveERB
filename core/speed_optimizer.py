@@ -7,7 +7,6 @@
 import functools
 import threading
 import time
-import weakref
 from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
@@ -55,7 +54,7 @@ class LRUCache:
         with self._lock:
             # ⚡ تنظيف دوري
             self._maybe_cleanup()
-            
+
             if key not in self._cache:
                 self._misses += 1
                 return None
@@ -71,13 +70,13 @@ class LRUCache:
             self._cache.move_to_end(key)
             self._hits += 1
             return self._cache[key]
-    
+
     def _maybe_cleanup(self):
         """⚡ تنظيف دوري للعناصر المنتهية الصلاحية"""
         now = time.time()
         if now - self._last_cleanup < self._cleanup_interval:
             return
-        
+
         self._last_cleanup = now
         expired_keys = [
             k for k, t in self._timestamps.items()

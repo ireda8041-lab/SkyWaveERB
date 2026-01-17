@@ -83,7 +83,7 @@ class ExpenseEditorDialog(QDialog):
         all_accounts = self.accounting_service.repo.get_all_accounts()
         self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('11')]
         self.projects_list = self.project_service.get_all_projects()
-        
+
         # جلب فئات المصروفات من المصروفات السابقة
         self.expense_categories = self.expense_service.get_expense_categories()
         # إضافة فئات افتراضية إذا لم توجد فئات
@@ -115,7 +115,7 @@ class ExpenseEditorDialog(QDialog):
 
     def init_ui(self):
         from ui.styles import BUTTON_STYLES, COLORS, get_arrow_url
-        
+
         # التخطيط الرئيسي
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -188,14 +188,14 @@ class ExpenseEditorDialog(QDialog):
                 border-color: {COLORS['primary']};
             }}
         """
-        
+
         label_style = f"color: {COLORS['text_secondary']}; font-size: 10px;"
 
         # === المشروع ===
         project_label = QLabel("📁 المشروع")
         project_label.setStyleSheet(label_style)
         content_layout.addWidget(project_label)
-        
+
         # SmartFilterComboBox مع فلترة ذكية
         self.project_combo = SmartFilterComboBox()
         self.project_combo.setStyleSheet(field_style)
@@ -207,7 +207,7 @@ class ExpenseEditorDialog(QDialog):
         # === صف الحسابات ===
         row1 = QHBoxLayout()
         row1.setSpacing(8)
-        
+
         # من حساب
         pay_container = QVBoxLayout()
         pay_container.setSpacing(2)
@@ -222,7 +222,7 @@ class ExpenseEditorDialog(QDialog):
         self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث...")
         pay_container.addWidget(self.account_combo)
         row1.addLayout(pay_container, 1)
-        
+
         # إلى حساب (فئة)
         cat_container = QVBoxLayout()
         cat_container.setSpacing(2)
@@ -240,13 +240,13 @@ class ExpenseEditorDialog(QDialog):
         self.category_combo.setCurrentIndex(-1)  # لا يوجد اختيار افتراضي
         cat_container.addWidget(self.category_combo)
         row1.addLayout(cat_container, 1)
-        
+
         content_layout.addLayout(row1)
 
         # === صف المبلغ والعملة والتاريخ ===
         row2 = QHBoxLayout()
         row2.setSpacing(8)
-        
+
         # المبلغ
         amount_container = QVBoxLayout()
         amount_container.setSpacing(2)
@@ -258,7 +258,7 @@ class ExpenseEditorDialog(QDialog):
         self.amount_input.valueChanged.connect(self._validate_amount)
         amount_container.addWidget(self.amount_input)
         row2.addLayout(amount_container, 2)
-        
+
         # العملة
         curr_container = QVBoxLayout()
         curr_container.setSpacing(2)
@@ -269,13 +269,13 @@ class ExpenseEditorDialog(QDialog):
         self.currency_combo.setStyleSheet(field_style)
         currencies_data = self._get_currencies_from_db()
         # الجنيه المصري دائماً أولاً (index 0) بسبب _get_currencies_from_db
-        for idx, (code, name, symbol, rate) in enumerate(currencies_data):
+        for _idx, (code, name, symbol, rate) in enumerate(currencies_data):
             self.currency_combo.addItem(f"{symbol} {name}", userData={"code": code, "rate": rate})
         # تعيين الجنيه المصري كعملة افتراضية (أول عنصر)
         self.currency_combo.setCurrentIndex(0)
         curr_container.addWidget(self.currency_combo)
         row2.addLayout(curr_container, 1)
-        
+
         # التاريخ
         date_container = QVBoxLayout()
         date_container.setSpacing(2)
@@ -288,14 +288,14 @@ class ExpenseEditorDialog(QDialog):
         self.date_input.setDisplayFormat("yyyy-MM-dd")
         date_container.addWidget(self.date_input)
         row2.addLayout(date_container, 1)
-        
+
         content_layout.addLayout(row2)
 
         # === الوصف ===
         desc_label = QLabel("📝 الوصف")
         desc_label.setStyleSheet(label_style)
         content_layout.addWidget(desc_label)
-        
+
         self.description_input = QTextEdit()
         self.description_input.setStyleSheet(field_style)
         self.description_input.setPlaceholderText("وصف المصروف...")

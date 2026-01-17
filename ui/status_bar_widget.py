@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -42,7 +41,7 @@ class SyncIndicator(QWidget):
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
         from ui.styles import COLORS
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
@@ -58,7 +57,7 @@ class SyncIndicator(QWidget):
         self.status_text.setFont(get_cairo_font(10))
         self.status_text.setStyleSheet(f"color: {COLORS['text_secondary']}; background: transparent; border: none;")
         layout.addWidget(self.status_text)
-        
+
         self.setStyleSheet("background: transparent; border: none;")
         self.setMaximumHeight(26)
 
@@ -216,7 +215,7 @@ class StatusBarWidget(QWidget):
         # 1. LEFT SIDE - مؤشر المزامنة (احترافي)
         self.sync_indicator = SyncIndicator()
         layout.addWidget(self.sync_indicator)
-        
+
         # زر المزامنة الكاملة
         self.full_sync_btn = QPushButton("🔄 مزامنة")
         self.full_sync_btn.setFixedSize(80, 26)
@@ -248,7 +247,7 @@ class StatusBarWidget(QWidget):
         user_layout = QHBoxLayout(user_container)
         user_layout.setContentsMargins(8, 2, 8, 2)
         user_layout.setSpacing(7)
-        
+
         # اسم المستخدم بدون أيقونة
         self.user_label = QLabel("مستخدم")
         self.user_label.setFont(get_cairo_font(12, bold=True))
@@ -258,12 +257,12 @@ class StatusBarWidget(QWidget):
             padding: 2px 6px;
         """)
         user_layout.addWidget(self.user_label)
-        
-        user_container.setStyleSheet(f"""
-            QWidget {{
+
+        user_container.setStyleSheet("""
+            QWidget {
                 background-color: transparent;
                 border: none;
-            }}
+            }
         """)
         layout.addWidget(user_container)
 
@@ -296,7 +295,7 @@ class StatusBarWidget(QWidget):
         layout.addWidget(self.system_info)
 
         self.setLayout(layout)
-    
+
     def _create_separator(self):
         """إنشاء فاصل احترافي"""
         from ui.styles import COLORS
@@ -329,7 +328,7 @@ class StatusBarWidget(QWidget):
 
         # ✅ منع الإخفاء والحذف
         self.setVisible(True)
-        
+
         # ✅ إزالة الحواف لجعل البار يملأ العرض كاملاً
         self.setContentsMargins(0, 0, 0, 0)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
@@ -411,25 +410,24 @@ class StatusBarWidget(QWidget):
             if is_active:
                 # إضافة مؤشر المزامنة الفورية
                 if not hasattr(self, 'realtime_indicator'):
-                    from ui.styles import COLORS
                     self.realtime_indicator = QLabel("🔄 مزامنة فورية")
                     self.realtime_indicator.setFont(get_cairo_font(10))
-                    self.realtime_indicator.setStyleSheet(f"""
-                        QLabel {{
+                    self.realtime_indicator.setStyleSheet("""
+                        QLabel {
                             color: #10B981;
                             background: rgba(16, 185, 129, 0.1);
                             border: 1px solid rgba(16, 185, 129, 0.3);
                             border-radius: 12px;
                             padding: 4px 8px;
                             font-weight: bold;
-                        }}
+                        }
                     """)
                     self.realtime_indicator.setToolTip("المزامنة الفورية نشطة - التحديثات تظهر فوراً على جميع الأجهزة")
-                    
+
                     # إضافة المؤشر بجانب مؤشر المزامنة العادي
                     layout = self.layout()
                     layout.insertWidget(2, self.realtime_indicator)
-                
+
                 self.realtime_indicator.setVisible(True)
             else:
                 # إخفاء مؤشر المزامنة الفورية

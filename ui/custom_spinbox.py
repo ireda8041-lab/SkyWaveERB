@@ -14,7 +14,7 @@ class CustomSpinBox(QWidget):
 
     def __init__(self, parent=None, decimals=2, minimum=0.0, maximum=999999999.99):
         super().__init__(parent)
-        
+
         # ⚡ إجبار الـ widget على LTR لضمان ترتيب ثابت
         self.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
 
@@ -74,7 +74,7 @@ class CustomSpinBox(QWidget):
                 background: #0958d9;
             }
         """
-        
+
         button_style_down = """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,

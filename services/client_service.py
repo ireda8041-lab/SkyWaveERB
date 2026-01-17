@@ -96,7 +96,7 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
-            
+
             # 🔔 إشعار مخصص (يُرسل لجميع الأجهزة)
             if hasattr(client_data, 'logo_data') and client_data.logo_data:
                 from ui.notification_system import notify_success
@@ -107,7 +107,7 @@ class ClientService:
                 )
             else:
                 notify_operation('created', 'client', created_client.name)
-            
+
             logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
             return created_client
         except Exception as e:
@@ -141,7 +141,7 @@ class ClientService:
                     # المستخدم يريد حذف الصورة صراحة
                     new_data['logo_data'] = ""
                     new_data['logo_path'] = ""
-                    logger.info(f"[ClientService] 🗑️ حذف logo_data")
+                    logger.info("[ClientService] 🗑️ حذف logo_data")
                 elif new_data['logo_data']:
                     # صورة جديدة
                     logger.info(f"[ClientService] 📷 تحديث logo_data ({len(new_data['logo_data'])} حرف)")
@@ -161,7 +161,7 @@ class ClientService:
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed('clients')
-            
+
             # 🔔 إشعار مخصص حسب نوع التحديث (يُرسل لجميع الأجهزة)
             if 'logo_data' in new_data and new_data.get('logo_data') and new_data['logo_data'] != "__DELETE__":
                 # تم تحديث الصورة
@@ -243,8 +243,8 @@ class ClientService:
                 self.invalidate_cache()  # ⚡ إبطال الـ cache
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('clients')
-                # 🔔 إشعار
-                notify_operation('deleted', 'client', client_id)
+                # 🔔 إشعار - تحويل client_id لـ string
+                notify_operation('deleted', 'client', str(client_id))
                 logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:

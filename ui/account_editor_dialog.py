@@ -82,7 +82,7 @@ class AccountEditorDialog(QDialog):
         """)
 
         self.init_ui()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
@@ -335,16 +335,16 @@ class AccountEditorDialog(QDialog):
         """التحقق مما إذا كان الحساب من أحفاد حساب آخر (منع الحلقات الدائرية)"""
         if not potential_child_code or not ancestor_code:
             return False
-        
+
         # منع الحلقات اللانهائية
         if visited is None:
             visited = set()
-        
+
         if potential_child_code in visited:
             return False  # اكتشفنا حلقة دائرية، نوقف البحث
-        
+
         visited.add(potential_child_code)
-        
+
         # البحث في الشجرة - هل potential_child_code هو ابن لـ ancestor_code؟
         for acc in self.all_accounts:
             if acc.code == potential_child_code:

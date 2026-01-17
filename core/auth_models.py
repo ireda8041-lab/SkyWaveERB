@@ -85,7 +85,7 @@ class AuthService:
                 except ImportError:
                     import os
                     default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'SkyWave@Admin2024!')
-                
+
                 # إنشاء مستخدم مدير افتراضي
                 safe_print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
                 success = self.create_user(

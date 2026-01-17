@@ -16,14 +16,13 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from services.template_service import TemplateService
-from ui.styles import get_cairo_font, TABLE_STYLE_DARK, create_centered_item
+from ui.styles import TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 
 class TemplateEditorDialog(QDialog):
@@ -37,7 +36,7 @@ class TemplateEditorDialog(QDialog):
 
         if template_data:
             self.load_template_data()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
@@ -49,11 +48,11 @@ class TemplateEditorDialog(QDialog):
         self.resize(800, 600)
         self.setMinimumWidth(700)
         self.setMinimumHeight(500)
-        
+
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         # تطبيق شريط العنوان المخصص
         try:
             from ui.styles import setup_custom_title_bar
@@ -313,11 +312,11 @@ class TemplateManager(QWidget):
     def __init__(self, template_service: TemplateService, parent=None):
         super().__init__(parent)
         self.template_service = template_service
-        
+
         # 📱 تصميم متجاوب
         from PyQt6.QtWidgets import QSizePolicy
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         self.setup_ui()
         self.load_templates()
 
@@ -429,7 +428,7 @@ class TemplateManager(QWidget):
         from core.context_menu import is_right_click_active
         if is_right_click_active():
             return
-        
+
         selected_rows = self.templates_table.selectionModel().selectedRows()
         has_selection = len(selected_rows) > 0
 

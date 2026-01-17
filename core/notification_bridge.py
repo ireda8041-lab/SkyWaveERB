@@ -11,16 +11,17 @@ except ImportError:
     def safe_print(msg):
         try:
             print(msg)
-        except:
+        except UnicodeEncodeError:
+            # فشل الطباعة بسبب الترميز
             pass
 
 
 class NotificationBridge:
     """جسر يربط إشارات التطبيق بنظام الإشعارات"""
-    
+
     _instance = None
     _connected = False
-    
+
     # ترجمة أنواع العناصر
     ENTITY_NAMES = {
         'project': 'مشروع',
@@ -48,7 +49,7 @@ class NotificationBridge:
         'loans': 'السلف',
         'salaries': 'المرتبات',
     }
-    
+
     # ترجمة العمليات
     ACTION_NAMES = {
         'created': 'تم إضافة',
@@ -60,7 +61,7 @@ class NotificationBridge:
         'restored': 'تم استعادة',
         'printed': 'تم طباعة',
     }
-    
+
     # أيقونات العمليات
     ACTION_ICONS = {
         'created': '✅',
@@ -72,64 +73,64 @@ class NotificationBridge:
         'restored': '♻️',
         'printed': '🖨️',
     }
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     @classmethod
     def connect(cls):
         """ربط الإشارات بالإشعارات"""
         if cls._connected:
             return
-        
+
         bridge = cls()
-        
+
         # ربط إشارة العمليات التفصيلية
         app_signals.operation_completed.connect(bridge._on_operation)
-        
+
         # ربط إشارات المزامنة
         app_signals.sync_completed.connect(bridge._on_sync_completed)
         app_signals.sync_failed.connect(bridge._on_sync_failed)
-        
+
         cls._connected = True
         safe_print("INFO: [NotificationBridge] Connected to app signals")
-    
+
     def _on_operation(self, action: str, entity_type: str, entity_name: str):
         """معالجة إشارة عملية"""
         try:
             from ui.notification_system import notify_success, notify_warning
-            
+
             # بناء الرسالة
             action_text = self.ACTION_NAMES.get(action, action)
             entity_text = self.ENTITY_NAMES.get(entity_type, entity_type)
             icon = self.ACTION_ICONS.get(action, '📌')
-            
+
             message = f"{entity_name}"
             title = f"{icon} {action_text} {entity_text}"
-            
+
             # إرسال الإشعار
             if action == 'deleted':
                 notify_warning(message, title)
             else:
                 notify_success(message, title)
-                
+
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
-    
+
     def _on_sync_completed(self, results: dict):
         """معالجة اكتمال المزامنة"""
         try:
             from ui.notification_system import notify_info
-            
+
             synced = results.get('synced', 0)
             if synced > 0:
                 notify_info(f"تم رفع {synced} عملية", "🔄 مزامنة", sync=False)
-                
+
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] Sync notification failed: {e}")
-    
+
     def _on_sync_failed(self, error: str):
         """معالجة فشل المزامنة"""
         try:
@@ -149,12 +150,12 @@ def setup_notification_bridge():
 def notify_operation(action: str, entity_type: str, entity_name: str):
     """
     إرسال إشعار عملية
-    
+
     Args:
         action: created, updated, deleted, paid, synced, archived, restored, printed
         entity_type: project, client, expense, payment, account, service, task
         entity_name: اسم العنصر
-    
+
     Example:
         notify_operation('created', 'project', 'مشروع SEO - شركة ABC')
         notify_operation('paid', 'payment', '5000 ج.م')

@@ -1,9 +1,12 @@
 
-import pytest
 from unittest.mock import MagicMock
-from core.repository import Repository
-from core.event_bus import EventBus
+
+import pytest
+
 from core import schemas
+from core.event_bus import EventBus
+from core.repository import Repository
+
 
 @pytest.fixture
 def mock_repo():

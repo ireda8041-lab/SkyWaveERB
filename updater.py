@@ -17,24 +17,34 @@ from datetime import datetime
 # Fix for PyInstaller windowed mode - redirect stdin/stdout/stderr to devnull
 # This prevents "RuntimeError: lost sys.stdin" when running without console
 if sys.stdin is None:
-    sys.stdin = open(os.devnull, 'r')
+    sys.stdin = open(os.devnull)
 if sys.stdout is None:
-    sys.stdout = open(os.devnull, 'w')
+    sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, "w")
 
 try:
     from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
-    from PyQt6.QtGui import QFont, QColor, QFontDatabase
+    from PyQt6.QtGui import QFont, QFontDatabase
     from PyQt6.QtWidgets import (
-        QApplication, QFrame, QHBoxLayout, QLabel, QMainWindow,
-        QProgressBar, QPushButton, QVBoxLayout, QWidget, QTextEdit
+        QApplication,
+        QFrame,
+        QHBoxLayout,
+        QLabel,
+        QMainWindow,
+        QProgressBar,
+        QPushButton,
+        QTextEdit,
+        QVBoxLayout,
+        QWidget,
     )
+
     HAS_GUI = True
 except ImportError:
     HAS_GUI = False
 
 APP_NAME = "Sky Wave ERP"
+
 
 # تحميل خط Cairo
 def get_cairo_font(size=13, bold=False):
@@ -44,14 +54,15 @@ def get_cairo_font(size=13, bold=False):
         font.setWeight(QFont.Weight.Bold)
     return font
 
+
 def load_cairo_font():
     """تحميل خط Cairo من الملف"""
     try:
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
-        
+
         font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
         if os.path.exists(font_path):
             font_id = QFontDatabase.addApplicationFont(font_path)
@@ -62,6 +73,7 @@ def load_cairo_font():
     except Exception:
         pass
     return "Cairo"
+
 
 class UpdateSignals(QObject):
     progress = pyqtSignal(int)
@@ -77,26 +89,26 @@ class UpdateManager:
         self.cancelled = False
         self.last_downloaded = 0
         self.last_time = time.time()
-    
+
     def emit_status(self, text):
         if self.signals:
             self.signals.status.emit(text)
-    
+
     def emit_detail(self, text):
         if self.signals:
             self.signals.detail.emit(text)
-    
+
     def emit_progress(self, value):
         if self.signals:
             self.signals.progress.emit(value)
-    
+
     def emit_speed(self, text):
         if self.signals:
             self.signals.speed.emit(text)
-    
+
     def cancel(self):
         self.cancelled = True
-    
+
     def calculate_speed(self, downloaded):
         current_time = time.time()
         time_diff = current_time - self.last_time
@@ -111,16 +123,16 @@ class UpdateManager:
                 return f"{speed / 1024:.1f} KB/s"
             return f"{speed:.0f} B/s"
         return ""
-    
+
     def download_file(self, url, dest_path):
         try:
             self.emit_status("Downloading...")
-            request = urllib.request.Request(url, headers={'User-Agent': 'SkyWaveERP-Updater/2.0'})
+            request = urllib.request.Request(url, headers={"User-Agent": "SkyWaveERP-Updater/2.0"})
             with urllib.request.urlopen(request, timeout=60) as response:
-                total_size = int(response.headers.get('content-length', 0))
+                total_size = int(response.headers.get("content-length", 0))
                 downloaded = 0
                 block_size = 8192
-                with open(dest_path, 'wb') as f:
+                with open(dest_path, "wb") as f:
                     while True:
                         if self.cancelled:
                             return False
@@ -143,7 +155,6 @@ class UpdateManager:
             self.emit_detail(f"Error: {str(e)}")
             return False
 
-    
     def create_backup(self, app_folder):
         try:
             self.emit_status("Creating backup...")
@@ -151,7 +162,12 @@ class UpdateManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = os.path.join(backup_dir, f"backup_{timestamp}")
             os.makedirs(backup_path, exist_ok=True)
-            files = ["skywave_local.db", "skywave_settings.json", "sync_config.json", "custom_fields.json"]
+            files = [
+                "skywave_local.db",
+                "skywave_settings.json",
+                "sync_config.json",
+                "custom_fields.json",
+            ]
             for filename in files:
                 src = os.path.join(app_folder, filename)
                 if os.path.exists(src):
@@ -161,7 +177,7 @@ class UpdateManager:
         except Exception as e:
             self.emit_detail(f"Backup warning: {str(e)}")
             return ""
-    
+
     def wait_for_app_close(self, timeout=30):
         self.emit_status("Waiting for app to close...")
         start = time.time()
@@ -169,17 +185,22 @@ class UpdateManager:
             if self.cancelled:
                 return False
             try:
-                result = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq SkyWaveERP.exe'],
-                    capture_output=True, text=True, shell=True)
-                if 'skywaveerp' not in result.stdout.lower():
+                result = subprocess.run(
+                    ["tasklist", "/FI", "IMAGENAME eq SkyWaveERP.exe"],
+                    capture_output=True,
+                    text=True,
+                    shell=True,
+                )
+                if "skywaveerp" not in result.stdout.lower():
                     return True
-            except:
+            except Exception:
+                # فشل فحص العملية - نفترض أنها مغلقة
                 return True
             remaining = int(timeout - (time.time() - start))
             self.emit_detail(f"Waiting {remaining}s...")
             time.sleep(1)
         return False
-    
+
     def run_installer(self, setup_path, silent=False):
         try:
             self.emit_status("Starting installer...")
@@ -188,48 +209,54 @@ class UpdateManager:
                 return False
             args = [setup_path]
             if silent:
-                args.append('/SILENT')
+                args.append("/SILENT")
             subprocess.Popen(args, shell=False)
             return True
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
             return False
-    
+
     def run_installer_and_wait(self, setup_path, signals=None):
         """Run installer in VERYSILENT mode and wait for completion"""
         try:
             if not os.path.exists(setup_path):
                 self.emit_detail(f"File not found: {setup_path}")
                 return False
-            
+
             # Use VERYSILENT to hide the installer window completely
             # /SUPPRESSMSGBOXES suppresses message boxes
             # /NORESTART prevents automatic restart
-            args = [setup_path, '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CLOSEAPPLICATIONS']
-            
+            args = [
+                setup_path,
+                "/VERYSILENT",
+                "/SUPPRESSMSGBOXES",
+                "/NORESTART",
+                "/CLOSEAPPLICATIONS",
+            ]
+
             self.emit_detail("Running silent installation...")
             self.emit_status("Installing... Please wait")
-            
+
             # Run and wait for completion
             process = subprocess.Popen(args, shell=False)
-            
+
             # Monitor the process
             start_time = time.time()
             while process.poll() is None:
                 if self.cancelled:
                     process.terminate()
                     return False
-                
+
                 elapsed = int(time.time() - start_time)
                 self.emit_detail(f"Installing... ({elapsed}s)")
                 time.sleep(1)
-                
+
                 # Timeout after 5 minutes
                 if elapsed > 300:
                     self.emit_detail("Installation timeout!")
                     process.terminate()
                     return False
-            
+
             # Check exit code
             exit_code = process.returncode
             if exit_code == 0:
@@ -238,13 +265,14 @@ class UpdateManager:
             else:
                 self.emit_detail(f"Installer exited with code: {exit_code}")
                 return False
-                
+
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
             return False
 
 
 if HAS_GUI:
+
     class UpdaterWindow(QMainWindow):
         def __init__(self, setup_path=None, app_folder=None, download_url=None, version_info=None):
             super().__init__()
@@ -263,7 +291,7 @@ if HAS_GUI:
             self.setFixedSize(520, 400)
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-            
+
             central = QWidget()
             central.setStyleSheet("background: transparent;")
             self.setCentralWidget(central)
@@ -280,7 +308,7 @@ if HAS_GUI:
                     border-radius: 30px;
                 }
             """)
-            
+
             frame_layout = QVBoxLayout(main_frame)
             frame_layout.setContentsMargins(35, 25, 35, 25)
             frame_layout.setSpacing(12)
@@ -290,13 +318,13 @@ if HAS_GUI:
             title_bar.setStyleSheet("background: transparent; border: none;")
             title_layout = QHBoxLayout(title_bar)
             title_layout.setContentsMargins(0, 0, 0, 0)
-            
+
             title = QLabel("Sky Wave ERP")
             title.setFont(get_cairo_font(20, bold=True))
             title.setStyleSheet("color: #0A6CF1; background: transparent; border: none;")
             title_layout.addWidget(title)
             title_layout.addStretch()
-            
+
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(32, 32)
             close_btn.setStyleSheet("""
@@ -309,7 +337,7 @@ if HAS_GUI:
 
             # Version info
             if self.version_info:
-                ver = self.version_info.get('version', '?')
+                ver = self.version_info.get("version", "?")
                 ver_label = QLabel(f"New Version: {ver}")
                 ver_label.setFont(get_cairo_font(12))
                 ver_label.setStyleSheet("color: #10B981; background: transparent; border: none;")
@@ -356,14 +384,18 @@ if HAS_GUI:
 
             # Details
             details_frame = QFrame()
-            details_frame.setStyleSheet("background: rgba(0, 26, 58, 0.6); border: none; border-radius: 18px;")
+            details_frame.setStyleSheet(
+                "background: rgba(0, 26, 58, 0.6); border: none; border-radius: 18px;"
+            )
             details_frame.setFixedHeight(100)
             details_layout = QVBoxLayout(details_frame)
             details_layout.setContentsMargins(15, 12, 15, 12)
-            
+
             self.details_text = QTextEdit()
             self.details_text.setReadOnly(True)
-            self.details_text.setStyleSheet("background: transparent; border: none; color: #90CAF9; font-size: 11px;")
+            self.details_text.setStyleSheet(
+                "background: transparent; border: none; color: #90CAF9; font-size: 11px;"
+            )
             details_layout.addWidget(self.details_text)
             frame_layout.addWidget(details_frame)
 
@@ -379,7 +411,7 @@ if HAS_GUI:
                 QPushButton:hover { background: #EF4444; color: white; }
             """)
             self.cancel_btn.clicked.connect(self._on_cancel)
-            
+
             btn_layout = QHBoxLayout()
             btn_layout.addStretch()
             btn_layout.addWidget(self.cancel_btn)
@@ -388,7 +420,6 @@ if HAS_GUI:
 
             layout.addWidget(main_frame)
             self._center_window()
-
 
         def _center_window(self):
             screen = QApplication.primaryScreen()
@@ -421,7 +452,9 @@ if HAS_GUI:
         def _on_finished(self, success, message):
             if success:
                 self.status_label.setText("✓ " + message)
-                self.status_label.setStyleSheet("color: #10B981; background: transparent; border: none;")
+                self.status_label.setStyleSheet(
+                    "color: #10B981; background: transparent; border: none;"
+                )
                 self.cancel_btn.setText("Close")
                 self.cancel_btn.setStyleSheet("""
                     QPushButton { background: rgba(16, 185, 129, 0.2); border: none; border-radius: 20px; color: #10B981; font-weight: bold; }
@@ -430,7 +463,9 @@ if HAS_GUI:
                 # Don't auto-close - let _restart_app handle it
             else:
                 self.status_label.setText("✗ " + message)
-                self.status_label.setStyleSheet("color: #EF4444; background: transparent; border: none;")
+                self.status_label.setStyleSheet(
+                    "color: #EF4444; background: transparent; border: none;"
+                )
                 self.cancel_btn.setText("Close")
 
         def _on_cancel(self):
@@ -440,19 +475,18 @@ if HAS_GUI:
         def _start_update(self):
             threading.Thread(target=self._run_update, daemon=True).start()
 
-
         def _run_update(self):
             try:
                 self.signals.progress.emit(5)
                 self.update_manager.wait_for_app_close(timeout=10)
                 self.signals.progress.emit(10)
-                
+
                 # Backup
                 backup = self.update_manager.create_backup(self.app_folder)
                 if backup:
                     self.signals.detail.emit(f"Backup: {backup}")
                 self.signals.progress.emit(20)
-                
+
                 # Download if needed
                 if self.download_url and not self.setup_path:
                     temp_dir = tempfile.gettempdir()
@@ -462,36 +496,36 @@ if HAS_GUI:
                             return
                         self.signals.finished.emit(False, "Download failed")
                         return
-                
+
                 self.signals.progress.emit(80)
-                
+
                 # Verify
                 if not self.setup_path or not os.path.exists(self.setup_path):
                     self.signals.finished.emit(False, "Setup file not found")
                     return
-                
+
                 if os.path.getsize(self.setup_path) < 1000:
                     self.signals.finished.emit(False, "Setup file is corrupted")
                     return
-                
+
                 self.signals.progress.emit(90)
                 self.signals.status.emit("Installing update...")
                 self.signals.detail.emit("Starting silent installation...")
-                
+
                 # Run installer in SILENT mode and WAIT for it to complete
                 if not self.update_manager.run_installer_and_wait(self.setup_path, self.signals):
                     self.signals.finished.emit(False, "Installation failed")
                     return
-                
+
                 self.signals.progress.emit(100)
                 self.signals.finished.emit(True, "Update completed! Restarting...")
-                
+
                 # Restart the app after successful update
                 QTimer.singleShot(2000, self._restart_app)
-                
+
             except Exception as e:
                 self.signals.finished.emit(False, str(e))
-        
+
         def _restart_app(self):
             """Restart Sky Wave ERP after update"""
             try:
@@ -509,38 +543,38 @@ def run_console_updater(setup_path=None, app_folder=None, download_url=None):
     print("=" * 50)
     print(f"  {APP_NAME} Updater v2.0")
     print("=" * 50)
-    
+
     manager = UpdateManager()
-    
+
     print("\nWaiting for app to close...")
     time.sleep(3)
-    
+
     if app_folder:
         backup = manager.create_backup(app_folder)
         if backup:
             print(f"Backup created: {backup}")
-    
+
     if download_url and not setup_path:
-        print(f"\nDownloading update...")
+        print("\nDownloading update...")
         temp_dir = tempfile.gettempdir()
         setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
         if not manager.download_file(download_url, setup_path):
             print("Download failed!")
             time.sleep(3)
             return
-    
+
     if not setup_path or not os.path.exists(setup_path):
         print("Setup file not found!")
         time.sleep(3)
         return
-    
+
     print("\nStarting installer...")
     if manager.run_installer(setup_path):
         print("Installer started successfully!")
     else:
         print("Failed to start installer!")
         time.sleep(3)
-    
+
     time.sleep(2)
 
 
@@ -549,7 +583,7 @@ def main():
     setup_path = None
     download_url = None
     version_info = {}
-    
+
     args = sys.argv[1:]
     if len(args) >= 2:
         app_folder = args[0]
@@ -559,18 +593,19 @@ def main():
             download_url = args[0]
         else:
             setup_path = args[0]
-    
+
     # Read version info
     try:
         vf = os.path.join(app_folder or os.getcwd(), "version.json")
         if os.path.exists(vf):
-            with open(vf, 'r', encoding='utf-8') as f:
+            with open(vf, encoding="utf-8") as f:
                 version_info = json.load(f)
                 if not download_url:
-                    download_url = version_info.get('url')
-    except:
+                    download_url = version_info.get("url")
+    except Exception:
+        # فشل قراءة معلومات الإصدار
         pass
-    
+
     if HAS_GUI:
         app = QApplication(sys.argv)
         app.setStyle("Fusion")
@@ -589,8 +624,10 @@ if __name__ == "__main__":
         try:
             print(f"Fatal error: {e}")
             import traceback
+
             traceback.print_exc()
-        except:
+        except Exception:
+            # فشل طباعة الخطأ
             pass
         time.sleep(5)
         sys.exit(1)

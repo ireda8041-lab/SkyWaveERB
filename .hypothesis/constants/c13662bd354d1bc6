@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\ssl_context.py
+# hypothesis_version: 6.148.3
+
+['HAS_SNI', 'OP_NO_COMPRESSION', 'OP_NO_RENEGOTIATION', 'OP_NO_SSLv2', 'OP_NO_SSLv3', 'PROTOCOL_TLS_CLIENT']

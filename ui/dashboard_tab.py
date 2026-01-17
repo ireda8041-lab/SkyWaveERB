@@ -4,31 +4,52 @@
 مصدر بيانات موحد + دعم كامل للعربية
 """
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize
-from PyQt6.QtWidgets import (
-    QFrame, QHBoxLayout, QHeaderView, QLabel,
-    QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget, QDateEdit, QButtonGroup, QGridLayout,
-    QScrollArea, QSplitter
-)
-from PyQt6.QtCore import QDate
-
-from datetime import datetime, timedelta
 import json
 import os
+from datetime import datetime, timedelta
 
-from ui.styles import get_cairo_font, TABLE_STYLE_DARK, create_centered_item
+from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtWidgets import (
+    QButtonGroup,
+    QDateEdit,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
-# مكتبات الرسم البياني
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+from ui.styles import TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
-# مكتبات معالجة النص العربي
-import arabic_reshaper
-from bidi.algorithm import get_display
+# ⚡ استيراد آمن لمكتبات الرسم البياني
+try:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    FigureCanvas = None
+    Figure = None
+    MATPLOTLIB_AVAILABLE = False
 
+# ⚡ استيراد آمن لمكتبات معالجة النص العربي
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+    ARABIC_RESHAPER_AVAILABLE = True
+except ImportError:
+    arabic_reshaper = None
+    get_display = None
+    ARABIC_RESHAPER_AVAILABLE = False
+
+from core.schemas import DashboardSettings, KPIData
 from services.accounting_service import AccountingService
-from core.schemas import KPIData, DashboardSettings
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -45,6 +66,8 @@ def fix_text(text: str) -> str:
     """دالة لإصلاح النص العربي في الرسوم البيانية"""
     if not text:
         return ""
+    if not ARABIC_RESHAPER_AVAILABLE:
+        return text
     try:
         reshaped_text = arabic_reshaper.reshape(text)
         return get_display(reshaped_text)
@@ -59,12 +82,12 @@ class StatCard(QFrame):
         super().__init__()
         self.color_hex = color_hex
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        
+
         # 📱 تجاوب: حد أدنى وأقصى للحجم
         self.setMinimumHeight(90)
         self.setMinimumWidth(180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        
+
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: #1e293b;
@@ -127,7 +150,7 @@ class EnhancedKPICard(QFrame):
     """
     بطاقة KPI محسّنة مع مؤشر الاتجاه
     تعرض القيمة الحالية مع نسبة التغير واتجاه التغير (سهم أخضر/أحمر)
-    
+
     Requirements: 1.1, 1.4, 1.5, 1.6, 1.7
     """
 
@@ -150,14 +173,14 @@ class EnhancedKPICard(QFrame):
         self.color_hex = color_hex
         self._current_value = 0.0
         self._previous_value = None
-        
+
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        
+
         # 📱 تجاوب: حد أدنى وأقصى للحجم
         self.setMinimumHeight(110)
         self.setMinimumWidth(200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        
+
         self._apply_styles()
         self._init_ui()
 
@@ -244,17 +267,17 @@ class EnhancedKPICard(QFrame):
     def set_value(self, value: float, previous_value: float = None) -> None:
         """
         تحديث قيمة المؤشر مع حساب التغير
-        
+
         Args:
             value: القيمة الحالية
             previous_value: القيمة السابقة لحساب نسبة التغير
         """
         self._current_value = value
         self._previous_value = previous_value
-        
+
         # تحديث القيمة المعروضة
         self.lbl_value.setText(f"{value:,.2f} EGP")
-        
+
         # حساب وعرض الاتجاه
         percentage, direction = self._calculate_trend(value, previous_value)
         self._update_trend_display(percentage, direction)
@@ -262,15 +285,15 @@ class EnhancedKPICard(QFrame):
     def _calculate_trend(self, current: float, previous: float) -> tuple[float, str]:
         """
         حساب نسبة التغير واتجاهه
-        
+
         Returns:
             (percentage_change, direction: "up" | "down" | "neutral")
         """
         if previous is None or previous == 0:
             return 0.0, "neutral"
-        
+
         percentage = ((current - previous) / previous) * 100
-        
+
         if current > previous:
             return percentage, "up"
         elif current < previous:
@@ -288,14 +311,14 @@ class EnhancedKPICard(QFrame):
         else:
             self.lbl_trend.setObjectName("TrendNeutral")
             self.lbl_trend.setText("━ 0.0%")
-        
+
         # إعادة تطبيق الأنماط لتحديث اللون
         self._apply_styles()
 
     def get_kpi_data(self) -> KPIData:
         """
         الحصول على بيانات KPI كـ KPIData object
-        
+
         Returns:
             KPIData object مع القيم الحالية
         """
@@ -316,10 +339,22 @@ class EnhancedKPICard(QFrame):
         return self._previous_value
 
 
-class FinancialChart(FigureCanvas):
+# ⚡ إنشاء كلاس أساسي للرسوم البيانية
+if MATPLOTLIB_AVAILABLE and FigureCanvas is not None:
+    _ChartBase = FigureCanvas
+else:
+    _ChartBase = QWidget  # استخدام QWidget كبديل
+
+
+class FinancialChart(_ChartBase):
     """رسم بياني يدعم العربية بالكامل"""
 
     def __init__(self, parent=None, width: int = 5, height: int = 4, dpi: int = 100):
+        if not MATPLOTLIB_AVAILABLE:
+            super().__init__(parent)
+            self.setMinimumSize(width * 80, height * 80)
+            return
+
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
@@ -328,6 +363,9 @@ class FinancialChart(FigureCanvas):
 
     def plot_data(self, sales: float, expenses: float, profit: float):
         """رسم البيانات مع دعم العربية"""
+        if not MATPLOTLIB_AVAILABLE:
+            return
+
         self.axes.clear()
 
         # البيانات مع إصلاح النص العربي
@@ -369,21 +407,26 @@ class FinancialChart(FigureCanvas):
         self.draw()
 
 
-class CashFlowChart(FigureCanvas):
+class CashFlowChart(_ChartBase):
     """
     مخطط التدفق النقدي
     يعرض التدفقات الداخلة (أخضر) والخارجة (أحمر) وصافي التدفق عبر الزمن
-    
+
     Requirements: 2.1, 2.4, 2.5, 2.7
     """
 
     def __init__(self, parent: QWidget = None, width: int = 6, height: int = 4, dpi: int = 100):
+        if not MATPLOTLIB_AVAILABLE:
+            super().__init__(parent)
+            self.setMinimumSize(width * 80, height * 80)
+            return
+
         self.fig = Figure(figsize=(width, height), dpi=dpi)
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
         self.fig.patch.set_facecolor('#1e293b')
-        
+
         # ألوان المخطط
         self.inflow_color = '#10b981'   # أخضر للدفعات الداخلة
         self.outflow_color = '#ef4444'  # أحمر للمصروفات
@@ -397,54 +440,54 @@ class CashFlowChart(FigureCanvas):
     ) -> None:
         """
         رسم مخطط التدفق النقدي
-        
+
         Args:
             inflows: قائمة الدفعات الداخلة (التاريخ، المبلغ)
             outflows: قائمة المصروفات (التاريخ، المبلغ)
             period: الفترة الزمنية للتجميع ("daily", "weekly", "monthly")
-            
+
         Requirements: 2.1, 2.4, 2.5, 2.7
         """
         self.axes.clear()
-        
+
         # تجميع البيانات حسب الفترة
         aggregated_inflows = self._aggregate_by_period(inflows, period)
         aggregated_outflows = self._aggregate_by_period(outflows, period)
-        
+
         # الحصول على جميع الفترات
         all_periods = sorted(set(aggregated_inflows.keys()) | set(aggregated_outflows.keys()))
-        
+
         if not all_periods:
             self._draw_empty_chart()
             return
-        
+
         # تحضير البيانات للرسم
         inflow_values = [aggregated_inflows.get(p, 0.0) for p in all_periods]
         outflow_values = [aggregated_outflows.get(p, 0.0) for p in all_periods]
         net_values = [aggregated_inflows.get(p, 0.0) - aggregated_outflows.get(p, 0.0) for p in all_periods]
-        
+
         # إصلاح النصوص العربية للتسميات
         x_labels = [fix_text(self._format_period_label(p, period)) for p in all_periods]
         x_positions = range(len(all_periods))
-        
+
         # رسم الخطوط
-        self.axes.plot(x_positions, inflow_values, 
-                      color=self.inflow_color, marker='o', linewidth=2, 
+        self.axes.plot(x_positions, inflow_values,
+                      color=self.inflow_color, marker='o', linewidth=2,
                       label=fix_text('الدفعات الداخلة'), markersize=6)
-        self.axes.plot(x_positions, outflow_values, 
-                      color=self.outflow_color, marker='s', linewidth=2, 
+        self.axes.plot(x_positions, outflow_values,
+                      color=self.outflow_color, marker='s', linewidth=2,
                       label=fix_text('المصروفات'), markersize=6)
-        self.axes.plot(x_positions, net_values, 
+        self.axes.plot(x_positions, net_values,
                       color=self.net_color, marker='^', linewidth=2, linestyle='--',
                       label=fix_text('صافي التدفق'), markersize=6)
-        
+
         # تنسيق المحاور
         self._style_axes(x_positions, x_labels)
-        
+
         # إضافة الأسطورة
         self.axes.legend(loc='upper left', facecolor='#1e293b', edgecolor='#475569',
                         labelcolor='white', fontsize=9)
-        
+
         self.fig.tight_layout(pad=1.5)
         self.draw()
 
@@ -455,23 +498,23 @@ class CashFlowChart(FigureCanvas):
     ) -> dict[str, float]:
         """
         تجميع البيانات حسب الفترة الزمنية
-        
+
         Args:
             data: قائمة من (التاريخ/الفترة، المبلغ)
             period: الفترة الزمنية ("daily", "weekly", "monthly")
-            
+
         Returns:
             dict مع المفتاح = الفترة والقيمة = المجموع
-            
+
         Requirements: 2.2
         """
         aggregated: dict[str, float] = {}
-        
+
         for period_key, amount in data:
             if period_key not in aggregated:
                 aggregated[period_key] = 0.0
             aggregated[period_key] += amount
-        
+
         return aggregated
 
     def _format_period_label(self, period_key: str, period_type: str) -> str:
@@ -512,15 +555,15 @@ class CashFlowChart(FigureCanvas):
         self.axes.spines['left'].set_color('#475569')
         self.axes.spines['top'].set_visible(False)
         self.axes.spines['right'].set_visible(False)
-        
+
         # تسميات المحور X
         self.axes.set_xticks(list(x_positions))
         self.axes.set_xticklabels(x_labels, ha='right')
-        
+
         # خطوط الشبكة
         self.axes.grid(axis='y', linestyle='--', alpha=0.2, color='#475569')
         self.axes.set_axisbelow(True)
-        
+
         # خط الصفر
         self.axes.axhline(y=0, color='#475569', linestyle='-', linewidth=0.5)
 
@@ -542,13 +585,13 @@ class PeriodSelector(QFrame):
     """
     أداة اختيار الفترة الزمنية
     توفر أزرار لاختيار فترات محددة مسبقاً أو فترة مخصصة
-    
+
     Requirements: 4.1, 4.3, 4.4
     """
-    
+
     # Signal يُرسل عند تغيير الفترة
     period_changed = pyqtSignal(str, object, object)  # (period_type, start_date, end_date)
-    
+
     PERIODS = {
         "today": "اليوم",
         "this_week": "هذا الأسبوع",
@@ -556,7 +599,7 @@ class PeriodSelector(QFrame):
         "this_year": "هذا العام",
         "custom": "فترة مخصصة"
     }
-    
+
     SETTINGS_FILE = "skywave_settings.json"
 
     def __init__(self, parent: QWidget = None):
@@ -564,7 +607,7 @@ class PeriodSelector(QFrame):
         self._current_period = "this_month"
         self._custom_start = None
         self._custom_end = None
-        
+
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setStyleSheet("""
             QFrame {
@@ -608,7 +651,7 @@ class PeriodSelector(QFrame):
                 border: none;
             }
         """)
-        
+
         self._init_ui()
         self.load_selection()
 
@@ -617,12 +660,12 @@ class PeriodSelector(QFrame):
         layout = QHBoxLayout()
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
-        
+
         # أزرار الفترات
         self.period_buttons = {}
         self.button_group = QButtonGroup(self)
         self.button_group.setExclusive(True)
-        
+
         for period_key, period_label in self.PERIODS.items():
             btn = QPushButton(period_label)
             btn.setCheckable(True)
@@ -631,47 +674,47 @@ class PeriodSelector(QFrame):
             self.period_buttons[period_key] = btn
             self.button_group.addButton(btn)
             layout.addWidget(btn)
-        
+
         # فاصل
         layout.addSpacing(10)
-        
+
         # حقول التاريخ المخصص
         self.lbl_from = QLabel("من:")
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
         self.date_from.setDate(QDate.currentDate().addMonths(-1))
         self.date_from.dateChanged.connect(self._on_custom_date_changed)
-        
+
         self.lbl_to = QLabel("إلى:")
         self.date_to = QDateEdit()
         self.date_to.setCalendarPopup(True)
         self.date_to.setDate(QDate.currentDate())
         self.date_to.dateChanged.connect(self._on_custom_date_changed)
-        
+
         layout.addWidget(self.lbl_from)
         layout.addWidget(self.date_from)
         layout.addWidget(self.lbl_to)
         layout.addWidget(self.date_to)
-        
+
         layout.addStretch()
         self.setLayout(layout)
-        
+
         # إخفاء حقول التاريخ المخصص افتراضياً
         self._toggle_custom_dates(False)
-        
+
         # تحديد الزر الافتراضي
         self.period_buttons["this_month"].setChecked(True)
 
     def _on_period_clicked(self, period_key: str):
         """معالج النقر على زر الفترة"""
         self._current_period = period_key
-        
+
         # إظهار/إخفاء حقول التاريخ المخصص
         self._toggle_custom_dates(period_key == "custom")
-        
+
         # حفظ الاختيار
         self.save_selection()
-        
+
         # إرسال Signal بالفترة الجديدة
         start_date, end_date = self.get_date_range()
         self.period_changed.emit(period_key, start_date, end_date)
@@ -681,10 +724,10 @@ class PeriodSelector(QFrame):
         if self._current_period == "custom":
             self._custom_start = self.date_from.date().toPyDate()
             self._custom_end = self.date_to.date().toPyDate()
-            
+
             # حفظ الاختيار
             self.save_selection()
-            
+
             # إرسال Signal
             start_date, end_date = self.get_date_range()
             self.period_changed.emit("custom", start_date, end_date)
@@ -699,22 +742,22 @@ class PeriodSelector(QFrame):
     def get_date_range(self) -> tuple[datetime, datetime]:
         """
         الحصول على نطاق التاريخ المحدد
-        
+
         Returns:
             tuple من (start_date, end_date)
         """
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         if self._current_period == "today":
             return today, today.replace(hour=23, minute=59, second=59)
-        
+
         elif self._current_period == "this_week":
             # بداية الأسبوع (السبت في التقويم العربي)
             days_since_saturday = (today.weekday() + 2) % 7
             start = today - timedelta(days=days_since_saturday)
             end = start + timedelta(days=6, hours=23, minutes=59, seconds=59)
             return start, end
-        
+
         elif self._current_period == "this_month":
             start = today.replace(day=1)
             # نهاية الشهر
@@ -723,12 +766,12 @@ class PeriodSelector(QFrame):
             else:
                 end = today.replace(month=today.month + 1, day=1) - timedelta(seconds=1)
             return start, end
-        
+
         elif self._current_period == "this_year":
             start = today.replace(month=1, day=1)
             end = today.replace(month=12, day=31, hour=23, minute=59, second=59)
             return start, end
-        
+
         elif self._current_period == "custom":
             if self._custom_start and self._custom_end:
                 start = datetime.combine(self._custom_start, datetime.min.time())
@@ -736,7 +779,7 @@ class PeriodSelector(QFrame):
                 return start, end
             # fallback to this month
             return self.get_date_range()
-        
+
         # Default: this month
         return self.get_date_range()
 
@@ -745,22 +788,22 @@ class PeriodSelector(QFrame):
         try:
             settings = {}
             if os.path.exists(self.SETTINGS_FILE):
-                with open(self.SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                with open(self.SETTINGS_FILE, encoding='utf-8') as f:
                     settings = json.load(f)
-            
+
             # تحديث إعدادات لوحة التحكم
             dashboard_settings = settings.get('dashboard', {})
             dashboard_settings['selected_period'] = self._current_period
-            
+
             if self._current_period == "custom" and self._custom_start and self._custom_end:
                 dashboard_settings['custom_start_date'] = self._custom_start.isoformat() if hasattr(self._custom_start, 'isoformat') else str(self._custom_start)
                 dashboard_settings['custom_end_date'] = self._custom_end.isoformat() if hasattr(self._custom_end, 'isoformat') else str(self._custom_end)
-            
+
             settings['dashboard'] = dashboard_settings
-            
+
             with open(self.SETTINGS_FILE, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
-                
+
         except Exception as e:
             safe_print(f"WARNING: [PeriodSelector] فشل حفظ الإعدادات: {e}")
 
@@ -769,27 +812,27 @@ class PeriodSelector(QFrame):
         try:
             if not os.path.exists(self.SETTINGS_FILE):
                 return
-            
-            with open(self.SETTINGS_FILE, 'r', encoding='utf-8') as f:
+
+            with open(self.SETTINGS_FILE, encoding='utf-8') as f:
                 settings = json.load(f)
-            
+
             dashboard_settings = settings.get('dashboard', {})
             saved_period = dashboard_settings.get('selected_period', 'this_month')
-            
+
             if saved_period in self.PERIODS:
                 self._current_period = saved_period
-                
+
                 # تحديث الزر المحدد
                 if saved_period in self.period_buttons:
                     self.period_buttons[saved_period].setChecked(True)
-                
+
                 # تحميل التواريخ المخصصة
                 if saved_period == "custom":
                     self._toggle_custom_dates(True)
-                    
+
                     custom_start = dashboard_settings.get('custom_start_date')
                     custom_end = dashboard_settings.get('custom_end_date')
-                    
+
                     if custom_start:
                         try:
                             from datetime import date
@@ -798,7 +841,7 @@ class PeriodSelector(QFrame):
                             self.date_from.setDate(QDate(self._custom_start.year, self._custom_start.month, self._custom_start.day))
                         except (ValueError, AttributeError):
                             pass
-                    
+
                     if custom_end:
                         try:
                             from datetime import date
@@ -807,14 +850,14 @@ class PeriodSelector(QFrame):
                             self.date_to.setDate(QDate(self._custom_end.year, self._custom_end.month, self._custom_end.day))
                         except (ValueError, AttributeError):
                             pass
-                            
+
         except Exception as e:
             safe_print(f"WARNING: [PeriodSelector] فشل تحميل الإعدادات: {e}")
 
     def get_settings(self) -> DashboardSettings:
         """
         الحصول على إعدادات لوحة التحكم كـ DashboardSettings object
-        
+
         Returns:
             DashboardSettings object
         """
@@ -828,7 +871,7 @@ class PeriodSelector(QFrame):
     def set_period(self, period_key: str) -> None:
         """
         تعيين الفترة برمجياً
-        
+
         Args:
             period_key: مفتاح الفترة (today, this_week, this_month, this_year, custom)
         """
@@ -842,12 +885,12 @@ class FlowLayout(QVBoxLayout):
     Layout تلقائي يرتب العناصر حسب المساحة المتاحة
     يتحول من صف واحد لعدة صفوف تلقائياً
     """
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._items = []
         self._rows = []
-        
+
     def addFlowWidget(self, widget):
         """إضافة widget للـ flow"""
         self._items.append(widget)
@@ -859,7 +902,7 @@ class DashboardTab(QWidget):
     def __init__(self, accounting_service: AccountingService, parent=None):
         super().__init__(parent)
         self.accounting_service = accounting_service
-        
+
         # سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -874,11 +917,11 @@ class DashboardTab(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        
+
         # الـ widget الرئيسي داخل الـ scroll
         content_widget = QWidget()
         content_widget.setStyleSheet("background: transparent;")
-        
+
         main_layout = QVBoxLayout(content_widget)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -922,11 +965,11 @@ class DashboardTab(QWidget):
         self.card_expenses = StatCard("المصروفات", "0.00 EGP", "💸", "#ef4444")
 
         self.stat_cards = [self.card_sales, self.card_collected, self.card_receivables, self.card_expenses]
-        
+
         # ترتيب أولي (سيتم تحديثه في resizeEvent)
         for i, card in enumerate(self.stat_cards):
             self.cards_grid.addWidget(card, 0, i)
-        
+
         main_layout.addWidget(self.cards_container)
 
         # === 3. القسم السفلي - Splitter للتحكم التلقائي ===
@@ -1011,9 +1054,9 @@ class DashboardTab(QWidget):
         self.bottom_splitter.setStretchFactor(1, 2)
 
         main_layout.addWidget(self.bottom_splitter, 1)
-        
+
         scroll.setWidget(content_widget)
-        
+
         # Layout الرئيسي للـ widget
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
@@ -1028,7 +1071,7 @@ class DashboardTab(QWidget):
     def _rearrange_cards(self):
         """ترتيب الكروت تلقائياً حسب المساحة المتاحة"""
         width = self.width()
-        
+
         # حساب عدد الأعمدة المناسب
         if width < 500:
             cols = 1
@@ -1036,7 +1079,7 @@ class DashboardTab(QWidget):
             cols = 2
         else:
             cols = 4
-        
+
         # إعادة ترتيب الكروت
         for i, card in enumerate(self.stat_cards):
             row = i // cols
@@ -1046,7 +1089,7 @@ class DashboardTab(QWidget):
     def _rearrange_bottom_section(self):
         """تغيير اتجاه القسم السفلي حسب العرض"""
         width = self.width()
-        
+
         if width < 700:
             self.bottom_splitter.setOrientation(Qt.Orientation.Vertical)
         else:

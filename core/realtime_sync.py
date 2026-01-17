@@ -7,11 +7,18 @@
 
 import time
 from datetime import datetime
-from typing import Dict, Any, Optional
-from threading import Thread, Event
+from threading import Event
+from typing import Any
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from pymongo.errors import PyMongoError
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+
+# ⚡ استيراد آمن لـ pymongo
+try:
+    from pymongo.errors import PyMongoError
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    PyMongoError = Exception
+    PYMONGO_AVAILABLE = False
 
 try:
     from core.safe_print import safe_print
@@ -19,24 +26,25 @@ except ImportError:
     def safe_print(msg):
         try:
             print(msg)
-        except:
+        except UnicodeEncodeError:
+            # فشل الطباعة بسبب الترميز
             pass
 
 
 class RealtimeSync(QObject):
     """نظام المزامنة الفورية"""
-    
+
     # إشارات التحديث الفوري
     data_updated = pyqtSignal(str, dict)  # (collection_name, change_data)
     connection_status_changed = pyqtSignal(bool)  # (is_connected)
-    
+
     def __init__(self, repository, parent=None):
         super().__init__(parent)
         self.repo = repository
         self.is_running = False
         self.watch_threads = {}
         self.stop_event = Event()
-        
+
         # المجموعات المراد مراقبتها - الأساسية فقط لتجنب البطء
         self.collections_to_watch = [
             'projects',
@@ -47,69 +55,69 @@ class RealtimeSync(QObject):
             'accounts',
             'notifications',
         ]
-        
+
         # تايمر للتحقق من الاتصال
         self.connection_timer = QTimer()
         self.connection_timer.timeout.connect(self._check_connection)
         self.connection_timer.start(120000)  # كل دقيقتين
-        
+
         self.last_connection_status = False
         self._enabled = True  # للتحكم في تشغيل/إيقاف المزامنة
         self._is_shutting_down = False  # علامة للإغلاق الآمن
-    
+
     def start(self):
         """بدء المزامنة الفورية - معطّل للاستقرار"""
         # ⚡ المزامنة الفورية معطّلة بشكل دائم - تسبب عدم استقرار
         # نظام المزامنة الموحد (unified_sync) يقوم بالمهمة بشكل أفضل
         safe_print("INFO: [RealtimeSync] المزامنة الفورية معطّلة - استخدم نظام المزامنة الموحد")
         return
-    
+
     def stop(self):
         """إيقاف المزامنة الفورية"""
         if not self.is_running:
             return
-        
+
         safe_print("INFO: [RealtimeSync] إيقاف المزامنة الفورية...")
         self._is_shutting_down = True
         self.is_running = False
         self._enabled = False
         self.stop_event.set()
-        
+
         # إيقاف التايمر بأمان
         try:
             if self.connection_timer:
                 self.connection_timer.stop()
         except (RuntimeError, AttributeError):
             pass
-        
+
         # انتظار انتهاء جميع الـ threads مع timeout قصير
-        for collection_name, thread in list(self.watch_threads.items()):
+        for _collection_name, thread in list(self.watch_threads.items()):
             try:
                 if thread and thread.is_alive():
                     thread.join(timeout=1)  # timeout قصير لتجنب التعليق
             except Exception:
                 pass
-        
+
         self.watch_threads.clear()
         safe_print("INFO: [RealtimeSync] تم إيقاف المزامنة الفورية")
-    
+
     def _watch_collection(self, collection_name: str):
         """مراقبة مجموعة واحدة للتغييرات - محسّنة ومحمية"""
         retry_count = 0
         max_retries = 3
-        
+
         while not self.stop_event.is_set() and retry_count < max_retries and self._enabled and not self._is_shutting_down:
             try:
                 if not self.repo or not self.repo.online or self.repo.mongo_db is None:
                     time.sleep(5)
                     continue
-                
+
                 # التحقق من الإغلاق قبل إنشاء الاتصال
                 if self.stop_event.is_set() or self._is_shutting_down:
                     break
-                    
+
                 collection = self.repo.mongo_db[collection_name]
-                
+
                 # إنشاء Change Stream مع timeout
                 try:
                     with collection.watch(
@@ -118,11 +126,11 @@ class RealtimeSync(QObject):
                     ) as stream:
                         safe_print(f"INFO: [RealtimeSync] بدء مراقبة {collection_name}")
                         retry_count = 0  # إعادة تعيين عداد المحاولات
-                        
+
                         for change in stream:
                             if self.stop_event.is_set() or not self._enabled or self._is_shutting_down:
                                 break
-                            
+
                             try:
                                 self._handle_change(collection_name, change)
                             except Exception as e:
@@ -131,7 +139,7 @@ class RealtimeSync(QObject):
                     if self._is_shutting_down:
                         break
                     raise stream_error
-                            
+
             except PyMongoError as e:
                 if self._is_shutting_down:
                     break
@@ -146,17 +154,17 @@ class RealtimeSync(QObject):
                 safe_print(f"WARNING: [RealtimeSync] خطأ عام في {collection_name} (محاولة {retry_count}): {e}")
                 if retry_count < max_retries and not self._is_shutting_down:
                     time.sleep(10)
-                    
+
         safe_print(f"INFO: [RealtimeSync] انتهت مراقبة {collection_name}")
-    
-    def _handle_change(self, collection_name: str, change: Dict[str, Any]):
+
+    def _handle_change(self, collection_name: str, change: dict[str, Any]):
         """معالجة تغيير في المجموعة - محمية من الأخطاء"""
         try:
             operation_type = change.get('operationType')
             document_id = change.get('documentKey', {}).get('_id')
-            
+
             safe_print(f"INFO: [RealtimeSync] تغيير في {collection_name}: {operation_type} - {document_id}")
-            
+
             # إرسال إشارة التحديث
             change_data = {
                 'operation': operation_type,
@@ -164,23 +172,23 @@ class RealtimeSync(QObject):
                 'full_document': change.get('fullDocument'),
                 'timestamp': datetime.now().isoformat()
             }
-            
+
             # ⚡ إرسال الإشارة بشكل آمن
             try:
                 self.data_updated.emit(collection_name, change_data)
             except RuntimeError:
                 # Qt object deleted
                 pass
-            
+
         except Exception as e:
             # لا نُسقط البرنامج أبداً بسبب خطأ هنا
             safe_print(f"WARNING: [RealtimeSync] فشل معالجة التغيير: {e}")
-    
+
     def _check_connection(self):
         """فحص حالة الاتصال - محسّن ومحمي"""
         if not self._enabled or self._is_shutting_down:
             return
-            
+
         try:
             is_connected = False
             if self.repo and self.repo.online and self.repo.mongo_db is not None:
@@ -190,7 +198,7 @@ class RealtimeSync(QObject):
                     is_connected = True
                 except Exception:
                     is_connected = False
-            
+
             if is_connected != self.last_connection_status:
                 self.last_connection_status = is_connected
                 try:
@@ -198,45 +206,45 @@ class RealtimeSync(QObject):
                 except (RuntimeError, AttributeError):
                     # تجاهل أخطاء Qt
                     pass
-                
+
                 if is_connected:
                     safe_print("INFO: [RealtimeSync] ✅ الاتصال متاح")
                     if not self.is_running and self._enabled and not self._is_shutting_down:
                         self.start()
                 else:
                     safe_print("WARNING: [RealtimeSync] ❌ فقدان الاتصال")
-                        
-        except Exception as e:
+
+        except Exception:
             # تجاهل الأخطاء - لا نريد crash
             pass
 
 
 class RealtimeDataManager(QObject):
     """مدير البيانات الفورية - يربط التحديثات بالواجهة"""
-    
+
     def __init__(self, repository, parent=None):
         super().__init__(parent)
         self.repo = repository
         self.realtime_sync = RealtimeSync(repository, self)
-        
+
         # ربط الإشارات
         self.realtime_sync.data_updated.connect(self._on_data_updated)
         self.realtime_sync.connection_status_changed.connect(self._on_connection_changed)
-    
+
     def start(self):
         """بدء المدير"""
         self.realtime_sync.start()
-    
+
     def stop(self):
         """إيقاف المدير"""
         self.realtime_sync.stop()
-    
-    def _on_data_updated(self, collection_name: str, change_data: Dict[str, Any]):
+
+    def _on_data_updated(self, collection_name: str, change_data: dict[str, Any]):
         """معالجة تحديث البيانات - محمية من الأخطاء"""
         try:
             # إرسال إشارة تحديث للواجهة
             from core.signals import app_signals
-            
+
             # تحديد نوع البيانات المتغيرة - الأساسية فقط
             data_type_map = {
                 'projects': 'projects',
@@ -247,40 +255,40 @@ class RealtimeDataManager(QObject):
                 'accounts': 'accounting',
                 'notifications': 'notifications',
             }
-            
+
             data_type = data_type_map.get(collection_name, collection_name)
-            
+
             safe_print(f"INFO: [RealtimeDataManager] إرسال إشارة تحديث: {data_type} ({collection_name})")
-            
+
             # ⚡ إرسال الإشارة بشكل آمن
             try:
                 app_signals.emit_data_changed(data_type)
             except RuntimeError:
                 # Qt object deleted - تجاهل
                 return
-            
+
             # إشعارات مخصصة لكل قسم
             operation = change_data.get('operation', '')
             if operation in ['insert', 'update', 'delete']:
                 self._send_section_notification(collection_name, operation, change_data)
-                
+
         except Exception as e:
             # لا نُسقط البرنامج أبداً
             safe_print(f"WARNING: [RealtimeDataManager] فشل معالجة التحديث: {e}")
-    
+
     def _send_section_notification(self, collection_name: str, operation: str, change_data: dict):
         """إرسال إشعارات مخصصة لكل قسم"""
         try:
             from ui.notification_system import notify_info, notify_success, notify_warning
-            
+
             operation_text = {
                 'insert': 'إضافة',
-                'update': 'تعديل', 
+                'update': 'تعديل',
                 'delete': 'حذف'
             }.get(operation, operation)
-            
+
             document = change_data.get('full_document', {})
-            
+
             # إشعارات مخصصة حسب القسم
             if collection_name == 'clients':
                 client_name = document.get('name', 'عميل')
@@ -296,7 +304,7 @@ class RealtimeDataManager(QObject):
                         "👥 إدارة العملاء",
                         sync=False
                     )
-                    
+
             elif collection_name == 'projects':
                 project_name = document.get('name', 'مشروع')
                 notify_info(
@@ -304,7 +312,7 @@ class RealtimeDataManager(QObject):
                     "📋 إدارة المشاريع",
                     sync=False
                 )
-                
+
             elif collection_name == 'services':
                 service_name = document.get('name', 'خدمة')
                 notify_info(
@@ -312,7 +320,7 @@ class RealtimeDataManager(QObject):
                     "🛠️ إدارة الخدمات",
                     sync=False
                 )
-                
+
             elif collection_name == 'payments':
                 amount = document.get('amount', 0)
                 notify_success(
@@ -320,7 +328,7 @@ class RealtimeDataManager(QObject):
                     "💳 إدارة المدفوعات",
                     sync=False
                 )
-                
+
             elif collection_name == 'expenses':
                 category = document.get('category', 'مصروف')
                 amount = document.get('amount', 0)
@@ -329,49 +337,49 @@ class RealtimeDataManager(QObject):
                     "💸 إدارة المصروفات",
                     sync=False
                 )
-                
+
             elif collection_name in ['accounts', 'journal_entries']:
                 notify_info(
                     f"تم {operation_text} بيانات محاسبية",
                     "📊 المحاسبة",
                     sync=False
                 )
-                
+
             elif collection_name in ['employees', 'departments', 'attendance', 'payroll']:
                 notify_info(
                     f"تم {operation_text} بيانات الموارد البشرية",
                     "👨‍💼 الموارد البشرية",
                     sync=False
                 )
-                
+
             elif collection_name in ['inventory_items', 'stock_movements', 'suppliers']:
                 notify_info(
                     f"تم {operation_text} بيانات المخزون",
                     "📦 إدارة المخزون",
                     sync=False
                 )
-                
+
             elif collection_name in ['tasks', 'reminders', 'calendar_events']:
                 notify_info(
                     f"تم {operation_text} مهمة أو تذكير",
                     "✅ المهام والتذكيرات",
                     sync=False
                 )
-                
+
             elif collection_name in ['reports', 'dashboards', 'analytics_data']:
                 notify_info(
                     f"تم {operation_text} تقرير أو تحليل",
                     "📈 التقارير والتحليلات",
                     sync=False
                 )
-                
+
             elif collection_name in ['users', 'user_permissions', 'system_settings']:
                 notify_warning(
                     f"تم {operation_text} إعدادات النظام",
                     "⚙️ إعدادات النظام",
                     sync=False
                 )
-                
+
             else:
                 # إشعار عام للمجموعات الأخرى
                 section_names = {
@@ -381,26 +389,26 @@ class RealtimeDataManager(QObject):
                     'file_attachments': '📎 المرفقات',
                     'document_templates': '📋 القوالب'
                 }
-                
+
                 section_name = section_names.get(collection_name, f"📁 {collection_name}")
                 notify_info(
                     f"تم {operation_text} بيانات",
                     section_name,
                     sync=False
                 )
-                
+
         except Exception as e:
             safe_print(f"ERROR: [RealtimeDataManager] فشل معالجة التحديث: {e}")
-    
+
     def _on_connection_changed(self, is_connected: bool):
         """معالجة تغيير حالة الاتصال"""
         try:
-            from ui.notification_system import notify_success, notify_warning
             from core.signals import app_signals
-            
+            from ui.notification_system import notify_success, notify_warning
+
             # إرسال إشارة حالة المزامنة
             app_signals.emit_realtime_sync_status(is_connected)
-            
+
             if is_connected:
                 notify_success(
                     "تم الاتصال بالخادم - المزامنة الفورية نشطة لجميع الأقسام",
@@ -415,32 +423,32 @@ class RealtimeDataManager(QObject):
                     sync=False
                 )
                 safe_print("WARNING: [RealtimeDataManager] ❌ المزامنة الفورية متوقفة")
-                
+
         except Exception as e:
             safe_print(f"ERROR: [RealtimeDataManager] فشل معالجة تغيير الاتصال: {e}")
 
 
 # متغير عام للمدير
-_realtime_manager: Optional[RealtimeDataManager] = None
+_realtime_manager: RealtimeDataManager | None = None
 
-def get_realtime_manager() -> Optional[RealtimeDataManager]:
+def get_realtime_manager() -> RealtimeDataManager | None:
     """الحصول على مدير المزامنة الفورية"""
     return _realtime_manager
 
 def setup_realtime_sync(repository):
     """إعداد نظام المزامنة الفورية"""
     global _realtime_manager
-    
+
     try:
         if _realtime_manager:
             _realtime_manager.stop()
-        
+
         _realtime_manager = RealtimeDataManager(repository)
         _realtime_manager.start()
-        
+
         safe_print("INFO: [RealtimeSync] ✅ تم إعداد نظام المزامنة الفورية")
         return _realtime_manager
-        
+
     except Exception as e:
         safe_print(f"ERROR: [RealtimeSync] فشل إعداد المزامنة الفورية: {e}")
         return None
@@ -448,7 +456,7 @@ def setup_realtime_sync(repository):
 def shutdown_realtime_sync():
     """إغلاق نظام المزامنة الفورية"""
     global _realtime_manager
-    
+
     if _realtime_manager:
         _realtime_manager.stop()
         _realtime_manager = None

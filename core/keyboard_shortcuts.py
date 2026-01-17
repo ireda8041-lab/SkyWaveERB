@@ -136,7 +136,7 @@ class KeyboardShortcutManager(QObject):
                 'description': 'الانتقال إلى الإعدادات',
                 'action': lambda: self._switch_tab(6)
             },
-            
+
             # اختصارات إضافية
             'new_payment': {
                 'key': 'Ctrl+P',

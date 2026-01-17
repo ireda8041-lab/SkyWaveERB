@@ -8,7 +8,14 @@ import sys
 from datetime import datetime
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader
+# ⚡ استيراد آمن لـ jinja2
+try:
+    from jinja2 import Environment, FileSystemLoader
+    JINJA2_AVAILABLE = True
+except ImportError:
+    JINJA2_AVAILABLE = False
+    Environment = None
+    FileSystemLoader = None
 
 from core import schemas
 from core.base_service import BaseService
@@ -750,7 +757,7 @@ class TemplateService(BaseService):
             if use_pdf:
                 # ⚡ توليد PDF سريع
                 pdf_path = os.path.join(str(exports_dir), f"{filename}.pdf")
-                
+
                 # حذف الملف القديم
                 if os.path.exists(pdf_path):
                     try:
@@ -786,11 +793,11 @@ class TemplateService(BaseService):
             import traceback
             traceback.print_exc()
             return False
-    
+
     def _generate_pdf_fast(self, html_content: str, exports_dir: str, filename: str) -> str | None:
         """⚡ توليد PDF سريع - يجرب عدة طرق"""
         pdf_path = os.path.join(exports_dir, f"{filename}.pdf")
-        
+
         # ⚡ محاولة 1: WeasyPrint (الأسرع)
         try:
             from weasyprint import CSS, HTML
@@ -806,7 +813,7 @@ class TemplateService(BaseService):
             safe_print("INFO: [TemplateService] WeasyPrint غير متوفر")
         except Exception as e:
             safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
-        
+
         # ⚡ محاولة 2: pdfkit (wkhtmltopdf)
         try:
             import pdfkit
@@ -829,13 +836,13 @@ class TemplateService(BaseService):
             safe_print("INFO: [TemplateService] pdfkit غير متوفر")
         except Exception as e:
             safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
-        
+
         # ⚡ محاولة 3: PyQt6 WebEngine (أبطأ لكن موجود)
         try:
             return self._generate_pdf_with_qt(html_content, pdf_path)
         except Exception as e:
             safe_print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
-        
+
         return None
 
     def _sanitize_filename(self, name: str) -> str:

@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\bson\typings.py
+# hypothesis_version: 6.148.3
+
+['RawBSONDocument', '_DocumentType', '_DocumentTypeArg', 'array', 'mmap']

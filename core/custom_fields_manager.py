@@ -5,7 +5,6 @@ Custom Fields Manager - Save and retrieve custom values
 
 import json
 import os
-from typing import List, Set
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -20,16 +19,16 @@ except ImportError:
 
 class CustomFieldsManager:
     """مدير الحقول المخصصة - Singleton"""
-    
+
     _instance = None
     _file_path = "custom_fields.json"
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
-    
+
     def __init__(self):
         if self._initialized:
             return
@@ -43,19 +42,19 @@ class CustomFieldsManager:
             "cities": [],               # المدن
         }
         self._load()
-    
+
     def _load(self):
         """تحميل البيانات من الملف"""
         try:
             if os.path.exists(self._file_path):
-                with open(self._file_path, 'r', encoding='utf-8') as f:
+                with open(self._file_path, encoding='utf-8') as f:
                     loaded = json.load(f)
                     for key in self._data:
                         if key in loaded:
                             self._data[key] = loaded[key]
         except Exception as e:
             safe_print(f"WARNING: [CustomFieldsManager] فشل تحميل البيانات: {e}")
-    
+
     def _save(self):
         """حفظ البيانات في الملف"""
         try:
@@ -63,27 +62,27 @@ class CustomFieldsManager:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)
         except Exception as e:
             safe_print(f"ERROR: [CustomFieldsManager] فشل حفظ البيانات: {e}")
-    
+
     def add_value(self, field_name: str, value: str) -> bool:
         """إضافة قيمة جديدة لحقل معين"""
         if not value or not value.strip():
             return False
-        
+
         value = value.strip()
-        
+
         if field_name not in self._data:
             self._data[field_name] = []
-        
+
         if value not in self._data[field_name]:
             self._data[field_name].append(value)
             self._save()
             return True
         return False
-    
-    def get_values(self, field_name: str) -> List[str]:
+
+    def get_values(self, field_name: str) -> list[str]:
         """الحصول على القيم المخصصة لحقل معين"""
         return self._data.get(field_name, [])
-    
+
     def remove_value(self, field_name: str, value: str) -> bool:
         """حذف قيمة من حقل معين"""
         if field_name in self._data and value in self._data[field_name]:
@@ -91,8 +90,8 @@ class CustomFieldsManager:
             self._save()
             return True
         return False
-    
-    def get_all_business_fields(self) -> List[str]:
+
+    def get_all_business_fields(self) -> list[str]:
         """الحصول على جميع مجالات العمل (الافتراضية + المخصصة)"""
         default_fields = [
             # === التجارة ===
@@ -131,7 +130,7 @@ class CustomFieldsManager:
             # === أخرى ===
             "خدمات عامة", "صيانة", "تنظيف", "أمن وحراسة", "أخرى",
         ]
-        
+
         # دمج المجالات الافتراضية مع المخصصة
         custom = self.get_values("business_fields")
         all_fields = list(dict.fromkeys(default_fields + custom))  # إزالة التكرار مع الحفاظ على الترتيب

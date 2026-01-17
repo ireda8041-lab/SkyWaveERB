@@ -8,13 +8,11 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDialog,
-    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -24,7 +22,7 @@ from services.accounting_service import AccountingService
 from services.expense_service import ExpenseService
 from services.project_service import ProjectService
 from ui.expense_editor_dialog import ExpenseEditorDialog
-from ui.styles import BUTTON_STYLES, get_cairo_font, create_centered_item
+from ui.styles import BUTTON_STYLES, create_centered_item, get_cairo_font
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -67,7 +65,7 @@ class ExpenseManagerTab(QWidget):
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
-        
+
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
         from ui.styles import apply_rtl_alignment_to_all_fields
         apply_rtl_alignment_to_all_fields(self)
@@ -108,7 +106,7 @@ class ExpenseManagerTab(QWidget):
         self.toolbar.addButton(self.edit_button)
         self.toolbar.addButton(self.delete_button)
         self.toolbar.addButton(self.refresh_button)
-        
+
         layout.addWidget(self.toolbar)
 
         # جدول المصروفات
@@ -147,10 +145,10 @@ class ExpenseManagerTab(QWidget):
         from ui.styles import TABLE_STYLE_DARK, fix_table_rtl
         self.expenses_table.setStyleSheet(TABLE_STYLE_DARK)
         fix_table_rtl(self.expenses_table)
-        
+
         # إضافة قائمة السياق (كليك يمين)
         self._setup_context_menu()
-        
+
         layout.addWidget(self.expenses_table)
 
         # إجمالي المصروفات
@@ -162,7 +160,7 @@ class ExpenseManagerTab(QWidget):
     def _setup_context_menu(self):
         """إعداد قائمة السياق (كليك يمين) للجدول"""
         from core.context_menu import ContextMenuManager
-        
+
         ContextMenuManager.setup_table_context_menu(
             table=self.expenses_table,
             on_view=self.open_edit_dialog,
@@ -175,7 +173,6 @@ class ExpenseManagerTab(QWidget):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
         safe_print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
 
-        from PyQt6.QtWidgets import QApplication
 
         from core.data_loader import get_data_loader
 

@@ -4,7 +4,6 @@
 """
 
 import re
-import sys
 
 # ⚡ التحكم في مستوى الطباعة للسرعة
 # False = طباعة الأخطاء فقط (سريع)
@@ -25,7 +24,7 @@ def safe_print(msg: str) -> None:
         first_part = msg[:30].upper()
         if 'INFO:' in first_part or 'DEBUG:' in first_part or 'INFO ' in first_part or 'DEBUG ' in first_part:
             return
-    
+
     try:
         print(msg)
     except UnicodeEncodeError:

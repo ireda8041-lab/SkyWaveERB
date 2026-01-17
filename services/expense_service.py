@@ -53,12 +53,12 @@ class ExpenseService:
         """
         self.repo = repository
         self.bus = event_bus
-        
+
         # ⚡ Cache للمصروفات
         self._cache_time: float = 0
         self._cached_expenses: list[schemas.Expense] | None = None
         self._cache_ttl = 30  # 30 ثانية
-        
+
         logger.info("⚡ قسم المصروفات (ExpenseService) جاهز")
 
     def invalidate_cache(self):
@@ -132,7 +132,7 @@ class ExpenseService:
 
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed('expenses')
-            
+
             # 🔔 إشعار
             notify_operation('created', 'expense', f"{expense_data.amount:,.0f} ج.م - {expense_data.category}")
 
@@ -196,8 +196,8 @@ class ExpenseService:
                 self.bus.publish('EXPENSE_DELETED', {'id': expense_id})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
-                # 🔔 إشعار
-                notify_operation('deleted', 'expense', expense_id)
+                # 🔔 إشعار - تحويل expense_id لـ string
+                notify_operation('deleted', 'expense', str(expense_id))
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:

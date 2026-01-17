@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -58,13 +57,13 @@ class ProjectProfitDialog(QDialog):
 
         self._init_ui()
         self.load_profit_data()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)
 
     def _init_ui(self):
-        from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, create_centered_item
+        from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(0)
@@ -152,7 +151,7 @@ class ProjectProfitDialog(QDialog):
 
         # === شريط التقدم ===
         progress_frame = QFrame()
-        progress_frame.setStyleSheet(f"background-color: transparent;")
+        progress_frame.setStyleSheet("background-color: transparent;")
         progress_layout = QVBoxLayout(progress_frame)
         progress_layout.setContentsMargins(0, 5, 0, 5)
         progress_layout.setSpacing(4)
@@ -313,10 +312,10 @@ class ProjectProfitDialog(QDialog):
     def _setup_table(self, table: QTableWidget):
         """إعداد الجدول"""
         from ui.styles import fix_table_rtl
-        
+
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         fix_table_rtl(table)
-        
+
         header = table.horizontalHeader()
         if header:
             # تخصيص الأعمدة حسب نوع الجدول
@@ -438,7 +437,7 @@ class ProjectProfitDialog(QDialog):
         """تغيير اتجاه الـ splitter حسب عرض النافذة"""
         super().resizeEvent(event)
         width = self.width()
-        
+
         if hasattr(self, 'tables_splitter'):
             if width < 700:
                 if self.tables_splitter.orientation() != Qt.Orientation.Vertical:

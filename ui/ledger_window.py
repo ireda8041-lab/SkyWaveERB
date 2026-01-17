@@ -5,7 +5,7 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtCore import QDate
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QDateEdit,
@@ -17,12 +17,11 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
 )
 
 from core import schemas
-from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, get_cairo_font, create_centered_item
+from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -48,13 +47,13 @@ class LedgerWindow(QDialog):
         self.accounting_service = accounting_service
 
         self.setWindowTitle(f"كشف حساب: {account.name} ({account.code})")
-        
+
         # 📱 تجاوب: حجم متجاوب مع الشاشة
         from PyQt6.QtWidgets import QApplication, QSizePolicy
         self.setMinimumWidth(800)
         self.setMinimumHeight(500)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        
+
         # حجم متجاوب مع الشاشة
         screen = QApplication.primaryScreen()
         if screen:
@@ -493,7 +492,7 @@ class LedgerWindow(QDialog):
         """طباعة كشف الحساب"""
         try:
             from PyQt6.QtCore import QRect, Qt
-            from PyQt6.QtGui import QFont, QPageLayout, QPainter
+            from PyQt6.QtGui import QPageLayout, QPainter
             from PyQt6.QtPrintSupport import QPrintDialog, QPrinter
 
             # إنشاء الطابعة

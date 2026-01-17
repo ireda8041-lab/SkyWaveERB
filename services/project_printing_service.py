@@ -9,8 +9,26 @@ import os
 from datetime import datetime
 from typing import Any
 
-from PIL import Image
-from PIL.Image import Image as PILImage
+# استيراد دالة الطباعة الآمنة أولاً
+try:
+    from core.safe_print import safe_print
+except ImportError:
+    def safe_print(msg):
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            # فشل الطباعة بسبب الترميز
+            pass
+
+# ⚡ استيراد آمن لـ PIL
+try:
+    from PIL import Image
+    from PIL.Image import Image as PILImage
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    Image = None
+    PILImage = None
 
 try:
     # Arabic text support
@@ -30,16 +48,6 @@ except ImportError as e:
 
 from core import schemas
 from core.resource_utils import get_resource_path
-
-# استيراد دالة الطباعة الآمنة
-try:
-    from core.safe_print import safe_print
-except ImportError:
-    def safe_print(msg):
-        try:
-            print(msg)
-        except UnicodeEncodeError:
-            pass
 
 
 class ProjectInvoiceGenerator:
@@ -470,17 +478,17 @@ class ProjectPrinter:
         self.width, self.height = A4
 
         # تسجيل خط Cairo العربي
-        import sys
         import os
-        
+        import sys
+
         # تحديد مسار خط Cairo
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
+
         font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
-        
+
         try:
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont

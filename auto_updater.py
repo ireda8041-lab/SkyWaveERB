@@ -22,19 +22,19 @@ def check_for_updates() -> tuple[bool, str, str, list]:
     try:
         response = requests.get(UPDATE_CHECK_URL, timeout=10)
         response.raise_for_status()
-        
+
         data = response.json()
         remote_version = data.get("version", "")
         download_url = data.get("url", "")
         changelog = data.get("changelog", [])
-        
+
         if remote_version and compare_versions(remote_version, CURRENT_VERSION) > 0:
             logger.info(f"🆕 تحديث جديد متاح: v{remote_version}")
             return True, remote_version, download_url, changelog
         else:
             logger.debug(f"✅ الإصدار الحالي ({CURRENT_VERSION}) هو الأحدث")
             return False, CURRENT_VERSION, "", []
-            
+
     except requests.Timeout:
         logger.warning("⏱️ انتهت مهلة التحقق من التحديثات")
         return False, CURRENT_VERSION, "", []

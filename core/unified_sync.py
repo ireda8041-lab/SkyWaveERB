@@ -75,24 +75,24 @@ class UnifiedSyncManagerV3(QObject):
         self._max_retries = 3
         self._last_online_status = None
         self._shutdown = False  # ⚡ علامة الإغلاق
-        
+
         # ⚡ إعدادات المزامنة التلقائية - محسّنة للأداء
         self._auto_sync_enabled = True
         self._auto_sync_interval = 600 * 1000  # ⚡ 10 دقائق - مزامنة كاملة
         self._quick_sync_interval = 120 * 1000  # ⚡ دقيقتين - رفع التغييرات
         self._connection_check_interval = 120 * 1000  # ⚡ دقيقتين - فحص الاتصال
-        
+
         # ⚡ المؤقتات
         self._auto_sync_timer = None
         self._quick_sync_timer = None
         self._connection_timer = None
-        
+
         logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة محسّنة للأداء")
 
     # ==========================================
     # 🚀 المزامنة الفورية - Real-time Sync
     # ==========================================
-    
+
     def instant_sync(self, table: str = None):
         """⚡ مزامنة فورية - معطّلة للأداء (تستخدم المزامنة الدورية بدلاً منها)"""
         # ⚡ معطّلة للأداء - المزامنة تتم كل 5 دقائق
@@ -102,34 +102,34 @@ class UnifiedSyncManagerV3(QObject):
         """مزامنة جدول واحد فوراً"""
         if not self.is_online or self.repo.mongo_db is None:
             return
-        
+
         # ⚡ تجاهل الجداول غير الموجودة
         if table not in self.TABLES:
             return
-        
+
         try:
             cursor = self.repo.sqlite_cursor
             # ⚡ التحقق من وجود الجدول أولاً
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
             if not cursor.fetchone():
                 return  # الجدول غير موجود
-            
+
             cursor.execute(f"SELECT * FROM {table} WHERE sync_status != 'synced' OR sync_status IS NULL")
             rows = cursor.fetchall()
-            
+
             if not rows:
                 return
-            
+
             columns = [desc[0] for desc in cursor.description]
             collection = self.repo.mongo_db[table]
-            
+
             for row in rows:
-                record = dict(zip(columns, row))
+                record = dict(zip(columns, row, strict=False))
                 mongo_id = record.get('_mongo_id')
-                
+
                 # تنظيف البيانات
                 clean_record = {k: v for k, v in record.items() if k not in ['id', 'sync_status', 'last_synced']}
-                
+
                 if mongo_id:
                     # تحديث
                     from bson import ObjectId
@@ -141,51 +141,51 @@ class UnifiedSyncManagerV3(QObject):
                     cursor.execute(f"UPDATE {table} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
                                    (str(result.inserted_id), record.get('id')))
                     self.repo.sqlite_conn.commit()
-                
+
                 # تحديث حالة المزامنة
                 cursor.execute(f"UPDATE {table} SET sync_status = 'synced' WHERE id = ?", (record.get('id'),))
                 self.repo.sqlite_conn.commit()
-                
+
         except Exception as e:
             logger.debug(f"تجاهل خطأ مزامنة {table}: {e}")
 
     # ==========================================
     # نظام المزامنة التلقائية الاحترافي
     # ==========================================
-    
+
     def start_auto_sync(self):
         """🚀 بدء نظام المزامنة التلقائية"""
         if not self._auto_sync_enabled:
             return
-            
+
         logger.info("🚀 بدء نظام المزامنة التلقائية...")
-        
+
         # 1. مؤقت فحص الاتصال (كل دقيقة)
         self._connection_timer = QTimer(self)
         self._connection_timer.timeout.connect(self._check_connection)
         self._connection_timer.start(self._connection_check_interval)
-        
+
         # 2. مؤقت المزامنة السريعة للتغييرات المحلية (كل دقيقة)
         self._quick_sync_timer = QTimer(self)
         self._quick_sync_timer.timeout.connect(self._quick_push_changes)
         self._quick_sync_timer.start(self._quick_sync_interval)
-        
+
         # 3. مؤقت المزامنة الكاملة (كل 5 دقائق)
         self._auto_sync_timer = QTimer(self)
         self._auto_sync_timer.timeout.connect(self._auto_full_sync)
         self._auto_sync_timer.start(self._auto_sync_interval)
-        
+
         # 4. مزامنة أولية بعد 5 ثواني
         QTimer.singleShot(5000, self._initial_sync)
-        
+
         logger.info(f"⏰ المزامنة التلقائية: كل {self._auto_sync_interval // 60000} دقيقة")
         logger.info(f"⏰ رفع التغييرات: كل {self._quick_sync_interval // 60000} دقيقة")
-    
+
     def stop_auto_sync(self):
         """⏹️ إيقاف نظام المزامنة التلقائية"""
         logger.info("⏹️ إيقاف نظام المزامنة التلقائية...")
         self._shutdown = True  # ⚡ تعيين علامة الإغلاق
-        
+
         # إيقاف المؤقتات بأمان
         try:
             if self._auto_sync_timer:
@@ -196,7 +196,7 @@ class UnifiedSyncManagerV3(QObject):
                 self._auto_sync_timer = None
         except Exception:
             pass
-            
+
         try:
             if self._quick_sync_timer:
                 try:
@@ -206,7 +206,7 @@ class UnifiedSyncManagerV3(QObject):
                 self._quick_sync_timer = None
         except Exception:
             pass
-            
+
         try:
             if self._connection_timer:
                 try:
@@ -216,17 +216,17 @@ class UnifiedSyncManagerV3(QObject):
                 self._connection_timer = None
         except Exception:
             pass
-        
+
         logger.info("✅ تم إيقاف نظام المزامنة التلقائية")
-    
+
     def _check_connection(self):
         """🔌 فحص حالة الاتصال - محسّن"""
         if self._shutdown:  # ⚡ تجاهل إذا تم الإغلاق
             return
-            
+
         try:
             current_status = self.is_online
-            
+
             # إرسال إشارة عند تغيير الحالة فقط
             if current_status != self._last_online_status:
                 self._last_online_status = current_status
@@ -234,27 +234,27 @@ class UnifiedSyncManagerV3(QObject):
                     self.connection_changed.emit(current_status)
                 except RuntimeError:
                     return  # Qt object deleted
-                
+
                 if current_status:
                     logger.info("🟢 تم استعادة الاتصال")
                     # لا نعمل مزامنة فورية - ننتظر الدورة التالية
                 else:
                     logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
-        except Exception as e:
+        except Exception:
             # تجاهل الأخطاء
             pass
-    
+
     def _initial_sync(self):
         """🚀 المزامنة الأولية عند بدء التشغيل - تفاضلية للسرعة"""
         if self._shutdown:
             return
-            
+
         if not self.is_online:
             logger.info("📴 لا يوجد اتصال - العمل بالبيانات المحلية")
             return
-            
+
         logger.info("🚀 بدء المزامنة الأولية (تفاضلية)...")
-        
+
         def sync_thread():
             if self._shutdown:
                 return
@@ -264,15 +264,15 @@ class UnifiedSyncManagerV3(QObject):
                 logger.info("✅ المزامنة الأولية: تم رفع التغييرات المحلية")
             except Exception as e:
                 logger.warning(f"⚠️ المزامنة الأولية: {e}")
-        
+
         thread = threading.Thread(target=sync_thread, daemon=True)
         thread.start()
-    
+
     def _auto_full_sync(self):
         """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
         if self._shutdown or self._is_syncing or not self.is_online:
             return
-            
+
         def sync_thread():
             if self._shutdown:
                 return
@@ -282,20 +282,20 @@ class UnifiedSyncManagerV3(QObject):
                 logger.debug("✅ مزامنة تلقائية: تم رفع التغييرات")
             except Exception as e:
                 logger.debug(f"مزامنة تلقائية: {e}")
-        
+
         thread = threading.Thread(target=sync_thread, daemon=True)
         thread.start()
-    
+
     def _quick_push_changes(self):
         """⚡ رفع التغييرات المحلية بسرعة"""
         if self._shutdown or self._is_syncing or not self.is_online:
             return
-            
+
         try:
             # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
             cursor = self.repo.sqlite_conn.cursor()
             has_pending = False
-            
+
             for table in self.TABLES:
                 try:
                     cursor.execute(f"""
@@ -306,11 +306,12 @@ class UnifiedSyncManagerV3(QObject):
                     if count > 0:
                         has_pending = True
                         break
-                except:
+                except Exception:
+                    # فشل فحص العنصر
                     pass
-            
+
             cursor.close()  # ⚡ إغلاق الـ cursor
-            
+
             if has_pending:
                 def push_thread():
                     if self._shutdown:
@@ -321,13 +322,13 @@ class UnifiedSyncManagerV3(QObject):
                         logger.debug("⚡ تم رفع التغييرات المحلية")
                     except Exception as e:
                         logger.error(f"❌ فشل رفع التغييرات: {e}")
-                
+
                 thread = threading.Thread(target=push_thread, daemon=True)
                 thread.start()
-                
+
         except Exception as e:
             logger.debug(f"خطأ في فحص التغييرات: {e}")
-    
+
     def set_auto_sync_interval(self, minutes: int):
         """⏰ تغيير فترة المزامنة التلقائية"""
         self._auto_sync_interval = minutes * 60 * 1000
@@ -357,7 +358,7 @@ class UnifiedSyncManagerV3(QObject):
         # ⚡ فحص الإغلاق أولاً
         if self._shutdown:
             return {'success': False, 'reason': 'shutdown'}
-        
+
         # ⚡ انتظار الاتصال أولاً
         if not self._wait_for_connection(timeout=10):
             logger.warning("غير متصل - لا يمكن المزامنة من السحابة")
@@ -365,11 +366,11 @@ class UnifiedSyncManagerV3(QObject):
 
         if self._is_syncing:
             return {'success': False, 'reason': 'already_syncing'}
-        
+
         # ⚡ فحص فعلي أن MongoDB client لا يزال متاحاً
         if not self.repo or self.repo.mongo_client is None or self.repo.mongo_db is None:
             return {'success': False, 'reason': 'no_mongo_client'}
-        
+
         try:
             self.repo.mongo_client.admin.command('ping')
         except Exception:
@@ -407,7 +408,7 @@ class UnifiedSyncManagerV3(QObject):
 
             logger.info(f"✅ اكتملت المزامنة: {results['total_synced']} سجل")
             self.sync_completed.emit(results)
-            
+
             # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
             try:
                 from core.signals import app_signals
@@ -438,14 +439,14 @@ class UnifiedSyncManagerV3(QObject):
             # ⚡ فحص الاتصال قبل استخدام MongoDB
             if self._shutdown:
                 return stats
-            
+
             if not self.repo or not self.repo.online:
                 return stats
-            
+
             # ⚡ فحص أن MongoDB client لا يزال متاحاً
             if self.repo.mongo_db is None or self.repo.mongo_client is None:
                 return stats
-            
+
             # ⚡ فحص فعلي أن الـ client لم يُغلق
             try:
                 # محاولة ping للتأكد من أن الاتصال فعال
@@ -453,7 +454,7 @@ class UnifiedSyncManagerV3(QObject):
             except Exception:
                 logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق أو غير متاح")
                 return stats
-            
+
             # جلب البيانات من السحابة
             try:
                 cloud_data = list(self.repo.mongo_db[table_name].find())
@@ -463,7 +464,7 @@ class UnifiedSyncManagerV3(QObject):
                     logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق")
                     return stats
                 raise
-            
+
             if not cloud_data:
                 logger.info(f"لا توجد بيانات في {table_name}")
                 return stats
@@ -499,7 +500,7 @@ class UnifiedSyncManagerV3(QObject):
 
                 # تصفية الحقول
                 filtered = {k: v for k, v in item_data.items() if k in table_columns}
-                
+
                 # ⚡ تسجيل لو logo_data موجود
                 if table_name == 'clients' and 'logo_data' in item_data and item_data['logo_data']:
                     if 'logo_data' in filtered:
@@ -524,13 +525,13 @@ class UnifiedSyncManagerV3(QObject):
             stats['deleted'] = deleted
 
             conn.commit()
-            
+
             # ⚡ إغلاق الـ cursor
             try:
                 cursor.close()
             except Exception:
                 pass
-            
+
             logger.info(f"✅ {table_name}: +{stats['inserted']} ~{stats['updated']} -{stats['deleted']}")
 
         except Exception as e:
@@ -672,11 +673,11 @@ class UnifiedSyncManagerV3(QObject):
             date = data.get('date', '')
             amount = data.get('amount', 0)
             date_short = str(date)[:10] if date else ''
-            
+
             if project_id and amount:
                 try:
                     cursor.execute(
-                        """SELECT id FROM payments 
+                        """SELECT id FROM payments
                            WHERE project_id = ? AND amount = ? AND date LIKE ?""",
                         (project_id, amount, f"{date_short}%")
                     )
@@ -691,7 +692,7 @@ class UnifiedSyncManagerV3(QObject):
 
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
-        
+
         try:
             cursor.execute(
                 f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
@@ -704,7 +705,7 @@ class UnifiedSyncManagerV3(QObject):
                 unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
                 unique_value = data.get(unique_field)
                 mongo_id = data.get('_mongo_id')
-                
+
                 if unique_value:
                     try:
                         # تحديث السجل الموجود
@@ -719,7 +720,7 @@ class UnifiedSyncManagerV3(QObject):
                             return
                     except Exception:
                         pass
-                
+
                 # محاولة البحث بـ mongo_id
                 if mongo_id:
                     try:
@@ -733,7 +734,7 @@ class UnifiedSyncManagerV3(QObject):
                             return
                     except Exception:
                         pass
-                
+
                 # تجاهل الخطأ إذا فشل كل شيء
                 logger.debug(f"تجاهل سجل مكرر في {table_name}")
             else:
@@ -747,10 +748,10 @@ class UnifiedSyncManagerV3(QObject):
         # ⚡ فحص الاتصال والإغلاق
         if self._shutdown:
             return
-        
+
         if not self.is_online:
             return
-        
+
         if not self.repo or self.repo.mongo_db is None or self.repo.mongo_client is None:
             logger.debug("تم تخطي رفع التغييرات - MongoDB client غير متاح")
             return
@@ -768,21 +769,21 @@ class UnifiedSyncManagerV3(QObject):
         # ⚡ فحص الاتصال قبل استخدام MongoDB
         if self._shutdown:
             return
-        
+
         if not self.repo or not self.repo.online:
             return
-        
+
         if self.repo.mongo_db is None or self.repo.mongo_client is None:
             logger.debug(f"تم تخطي رفع {table_name} - MongoDB client غير متاح")
             return
-        
+
         # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
         try:
             cursor = self.repo.sqlite_conn.cursor()
         except Exception as e:
             logger.debug(f"فشل إنشاء cursor: {e}")
             return
-        
+
         conn = self.repo.sqlite_conn
         unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
 
@@ -809,7 +810,7 @@ class UnifiedSyncManagerV3(QObject):
                 logger.warning(f"⚠️ MongoDB client مغلق - تخطي رفع {table_name}")
             cursor.close()
             return
-        
+
         pushed = 0
 
         for row in unsynced:
@@ -832,14 +833,14 @@ class UnifiedSyncManagerV3(QObject):
                 else:
                     # ⚡ فحص التكرار قبل الإدراج - معالجة خاصة للدفعات
                     existing = None
-                    
+
                     if table_name == 'payments':
                         # البحث بـ (project_id + date + amount)
                         project_id = row_dict.get('project_id')
                         date = row_dict.get('date', '')
                         amount = row_dict.get('amount', 0)
                         date_short = str(date)[:10] if date else ''
-                        
+
                         if project_id and amount:
                             existing = collection.find_one({
                                 'project_id': project_id,
@@ -884,13 +885,13 @@ class UnifiedSyncManagerV3(QObject):
             conn.commit()
         except Exception:
             pass
-        
+
         # ⚡ إغلاق الـ cursor
         try:
             cursor.close()
         except Exception:
             pass
-        
+
         if pushed > 0:
             logger.info(f"📤 {table_name}: رفع {pushed} سجل")
 
@@ -904,7 +905,7 @@ class UnifiedSyncManagerV3(QObject):
         # إذا كان logo_data فارغ و logo_path موجود = لا نريد الكتابة فوق السحابة
         logo_data_value = clean.get('logo_data', None)
         logo_path_value = clean.get('logo_path', None)
-        
+
         if 'logo_data' in clean:
             if logo_data_value:
                 # صورة جديدة - رفعها للسحابة
@@ -917,7 +918,7 @@ class UnifiedSyncManagerV3(QObject):
                 # logo_data فارغ لكن logo_path موجود = لا نريد الكتابة فوق السحابة
                 del clean['logo_data']
                 logger.debug("📷 تم تجاهل logo_data الفارغ (لن يتم الكتابة فوق السحابة)")
-        
+
         if 'logo_path' in clean and not clean['logo_path']:
             # إذا كان logo_path فارغ، نرسل قيمة فارغة صريحة
             clean['logo_path'] = ""
@@ -954,7 +955,7 @@ class UnifiedSyncManagerV3(QObject):
             # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
             logger.info("📤 جاري رفع المستخدمين المحليين إلى السحابة...")
             cursor.execute("""
-                SELECT * FROM users 
+                SELECT * FROM users
                 WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
                    OR _mongo_id IS NULL
             """)
@@ -1086,7 +1087,7 @@ class UnifiedSyncManagerV3(QObject):
         for table in tables:
             try:
                 unique_field = self.UNIQUE_FIELDS.get(table, 'name')
-                
+
                 # البحث عن التكرارات
                 cursor.execute(f"""
                     SELECT {unique_field}, COUNT(*) as cnt, MIN(id) as keep_id

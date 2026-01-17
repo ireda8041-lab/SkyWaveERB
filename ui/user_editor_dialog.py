@@ -85,7 +85,7 @@ class UserEditorDialog(QDialog):
 
         if self.is_editing:
             self.populate_fields()
-        
+
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
         setup_auto_responsive_dialog(self)

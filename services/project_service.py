@@ -425,7 +425,7 @@ class ProjectService:
             # ⚡ إبطال الـ cache وإرسال إشارة التحديث
             self.invalidate_cache()
             app_signals.emit_data_changed('projects')
-            
+
             # 🔔 إشعار
             notify_operation('created', 'project', created_project.name)
 
@@ -498,7 +498,7 @@ class ProjectService:
             self.invalidate_cache()
             self.bus.publish('PROJECT_EDITED', {"project": saved_project})
             app_signals.emit_data_changed('projects')
-            
+
             # 🔔 إشعار
             notify_operation('updated', 'project', project_name)
 
@@ -516,31 +516,31 @@ class ProjectService:
         try:
             # جلب المشروع بالاسم (get_project_by_number تبحث بالاسم)
             project = self.repo.get_project_by_number(project_id)
-            
+
             if not project:
                 safe_print(f"WARNING: [ProjectService] المشروع غير موجود: {project_id}")
                 return False
-            
+
             project_name = project.name
-            
+
             # حذف المشروع من قاعدة البيانات
             success = self.repo.delete_project(project_name)
-            
+
             if success:
                 # إبطال الـ cache
                 self.invalidate_cache()
-                
+
                 # إرسال إشارة التحديث
                 self.bus.publish('PROJECT_DELETED', {"project_name": project_name})
                 app_signals.emit_data_changed('projects')
-                
+
                 # 🔔 إشعار
                 notify_operation('deleted', 'project', project_name)
-                
+
                 safe_print(f"SUCCESS: [ProjectService] ✅ تم حذف المشروع {project_name}")
-            
+
             return success
-            
+
         except Exception as e:
             safe_print(f"ERROR: [ProjectService] فشل حذف المشروع: {e}")
             return False
@@ -598,7 +598,7 @@ class ProjectService:
                 account_id=account_id,
                 method=payment_method,
             )
-            
+
             safe_print(f"DEBUG: [ProjectService] بيانات الدفعة: project_id={payment_data.project_id}, client_id={payment_data.client_id}")
 
             # ⚡ إنشاء الدفعة في قاعدة البيانات (مع فحص التكرار)
@@ -609,7 +609,7 @@ class ProjectService:
             safe_print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECEIVED...")
             subscribers = self.bus.get_subscriber_count('PAYMENT_RECEIVED')
             safe_print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECEIVED: {subscribers}")
-            
+
             result = self.bus.publish('PAYMENT_RECEIVED', {
                 "payment": created_payment,
                 "project": project
@@ -626,7 +626,7 @@ class ProjectService:
                 app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
             except Exception as sig_err:
                 safe_print(f"WARNING: [ProjectService] فشل إرسال إشارات التحديث: {sig_err}")
-            
+
             # 🔔 إشعار (مع حماية من الأخطاء)
             try:
                 notify_operation('paid', 'payment', f"{amount:,.0f} ج.م - {project.name}")
@@ -664,7 +664,7 @@ class ProjectService:
                 return "Bank Transfer"
             elif "شيك" in name or "check" in name:
                 return "Check"
-            
+
             # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
             # نظام 4 أرقام: 1103 = Vodafone, 1104 = InstaPay, 1101 = Cash, 1102 = Bank
             # نظام 6 أرقام: 111000 = Vodafone Cash, 111001 = V/F, 111101 = Cash
@@ -676,7 +676,7 @@ class ProjectService:
                 return "Cash"
             elif code.startswith("1102") or code.startswith("1112"):
                 return "Bank Transfer"
-                
+
         except Exception as e:
             safe_print(f"WARNING: [ProjectService] فشل تحديد طريقة الدفع: {e}")
 
@@ -721,10 +721,10 @@ class ProjectService:
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
                 app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
-                
+
                 # 🔔 إشعار
                 notify_operation('updated', 'payment', f"{payment_data.amount:,.0f} ج.م")
-                
+
                 safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل الدفعة وتحديث حالة المشروع {project_name}")
 
             return result
@@ -769,10 +769,10 @@ class ProjectService:
                 app_signals.emit_data_changed('projects')
                 app_signals.emit_data_changed('payments')
                 app_signals.emit_data_changed('accounting')  # 🔔 تحديث المحاسبة
-                
+
                 # 🔔 إشعار
                 notify_operation('deleted', 'payment', f"{payment.amount:,.0f} ج.م")
-                
+
                 safe_print(f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}")
 
             return result

@@ -58,7 +58,7 @@ class ConnectionChecker(QThread):
         # ⚡ معطّل - يسبب تجميد البرنامج
         safe_print("INFO: [ConnectionChecker] معطّل للاستقرار")
         return
-        
+
         while self.is_running:
             try:
                 # محاولة الاتصال بـ Google DNS
@@ -109,7 +109,7 @@ class SyncWorker(QThread):
         # ⚡ معطّل - نظام المزامنة الموحد يقوم بالمهمة
         safe_print("INFO: [SyncWorker] معطّل للاستقرار - استخدم نظام المزامنة الموحد")
         return
-        
+
         while self.is_running:
             if self.is_online:
                 self.perform_sync()
