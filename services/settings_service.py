@@ -1,4 +1,4 @@
-﻿import base64
+import base64
 import json
 import os
 from typing import Any
@@ -43,23 +43,15 @@ class SettingsService:
 
     def __init__(self):
         self.settings = self.load_settings()
-        # دمج الإعدادات من الملف المحلي (مثل smart_scan)
         self._merge_local_settings()
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
 
     def _merge_local_settings(self):
-        """دمج الإعدادات من ملف المشروع المحلي (مثل smart_scan)"""
         try:
             if os.path.exists(_LOCAL_SETTINGS_FILE):
                 with open(_LOCAL_SETTINGS_FILE, encoding="utf-8") as f:
                     local_settings = json.load(f)
-
-                # دمج smart_scan إذا لم يكن موجوداً في الإعدادات الرئيسية
-                if "smart_scan" in local_settings and "smart_scan" not in self.settings:
-                    self.settings["smart_scan"] = local_settings["smart_scan"]
-                    safe_print("INFO: [SettingsService] تم دمج إعدادات smart_scan من الملف المحلي")
-
-                # دمج أي إعدادات أخرى غير موجودة
+                
                 for key, value in local_settings.items():
                     if key not in self.settings:
                         self.settings[key] = value

@@ -447,3 +447,108 @@ def print_performance_stats():
     safe_print(f"📊 Query Cache: {cache.get_stats()}")
     safe_print(f"💾 Memory: {memory.get_memory_usage()}")
     safe_print("="*60 + "\n")
+
+
+# ==================== Main Performance Optimizer Class ====================
+
+class PerformanceOptimizer:
+    """
+    ⚡ الفئة الرئيسية لمحسّن الأداء
+    تجمع كل مكونات التحسين في مكان واحد
+    """
+
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if hasattr(self, '_initialized'):
+            return
+        self._initialized = True
+
+        # تهيئة المكونات
+        self.connection_pool = SQLiteConnectionPool()
+        self.query_cache = SmartQueryCache()
+        self.memory_manager = MemoryManager()
+        self.batch_processor = BatchProcessor()
+
+        logger.info("⚡ [PerformanceOptimizer] تم تهيئة محسّن الأداء")
+
+    def get_connection(self):
+        """الحصول على اتصال محسّن"""
+        return self.connection_pool.get_connection()
+
+    def cache_query(self, key: str, value: Any, table: str = None, ttl: int = 60):
+        """تخزين استعلام في الـ cache"""
+        self.query_cache.set(key, value, table, ttl)
+
+    def get_cached_query(self, key: str):
+        """جلب استعلام من الـ cache"""
+        return self.query_cache.get(key)
+
+    def invalidate_table_cache(self, table: str):
+        """إبطال cache جدول معين"""
+        self.query_cache.invalidate_table(table)
+
+    def cleanup_memory(self):
+        """تنظيف الذاكرة"""
+        return self.memory_manager.cleanup()
+
+    def get_stats(self) -> dict:
+        """الحصول على إحصائيات الأداء"""
+        return {
+            "cache": self.query_cache.get_stats(),
+            "memory": self.memory_manager.get_memory_usage(),
+            "connections": {
+                "active": self.connection_pool._active_connections,
+                "pool_size": self.connection_pool.pool_size
+            }
+        }
+
+    def print_stats(self):
+        """طباعة إحصائيات الأداء"""
+        stats = self.get_stats()
+        safe_print("\n" + "="*60)
+        safe_print("⚡ إحصائيات محسّن الأداء - Sky Wave ERP")
+        safe_print("="*60)
+        safe_print(f"📊 Query Cache: {stats['cache']}")
+        safe_print(f"💾 Memory: {stats['memory']}")
+        safe_print(f"🔗 Connections: {stats['connections']}")
+        safe_print("="*60 + "\n")
+
+
+# ==================== Global Instance ====================
+
+# إنشاء instance عام للاستخدام
+_optimizer = None
+
+def get_performance_optimizer() -> PerformanceOptimizer:
+    """الحصول على instance من PerformanceOptimizer"""
+    global _optimizer
+    if _optimizer is None:
+        _optimizer = PerformanceOptimizer()
+    return _optimizer
+
+
+# تصدير الفئات والدوال المهمة
+__all__ = [
+    'PerformanceOptimizer',
+    'SQLiteConnectionPool',
+    'SmartQueryCache',
+    'BatchProcessor',
+    'MemoryManager',
+    'cached_query',
+    'batch_operation',
+    'measure_time',
+    'get_performance_optimizer',
+    'get_query_cache',
+    'get_memory_manager',
+    'invalidate_all_caches',
+    'print_performance_stats'
+]

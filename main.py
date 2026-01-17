@@ -65,7 +65,6 @@ from services.printing_service import PrintingService
 from services.project_service import ProjectService
 from services.service_service import ServiceService
 from services.settings_service import SettingsService
-from services.smart_scan_service import SmartScanService
 from ui.login_window import LoginWindow
 
 # --- 3. استيراد "الواجهة" ---
@@ -189,29 +188,6 @@ class SkyWaveERPApp:
 
         # Advanced Sync Manager
         self.advanced_sync_manager = AdvancedSyncManagerV3(repository=self.repository)
-
-        # 🧠 Smart Scan Service (AI Invoice Scanner)
-        # محاولة قراءة المفتاح من smart_scan أولاً
-        smart_scan_settings = self.settings_service.get_setting("smart_scan")
-        if smart_scan_settings and isinstance(smart_scan_settings, dict):
-            smart_scan_api_key = smart_scan_settings.get("gemini_api_key")
-        else:
-            smart_scan_api_key = self.settings_service.get_setting("gemini_api_key")
-
-        if not smart_scan_api_key:
-            # محاولة قراءة من ملف الإعدادات المحلي
-            try:
-                import json
-                with open("skywave_settings.json", encoding="utf-8") as f:
-                    local_settings = json.load(f)
-                    smart_scan_api_key = local_settings.get("smart_scan", {}).get("gemini_api_key")
-            except Exception:
-                pass
-
-        self.smart_scan_service = SmartScanService(api_key=smart_scan_api_key)
-        if self.smart_scan_service.is_available():
-            logger.info("✅ Smart Scan Service (AI) Initialized.")
-        # ⚡ لا نعرض تحذير إذا لم يكن متاحاً - ميزة اختيارية
 
         # ⚡ التحقق من التحديثات في Background (لا يعطل البرنامج)
         def check_updates_background():
@@ -436,7 +412,6 @@ class SkyWaveERPApp:
             printing_service=self.printing_service,
             export_service=self.export_service,
             advanced_sync_manager=self.advanced_sync_manager,
-            smart_scan_service=self.smart_scan_service,
             sync_manager=self.sync_manager  # 🔥 نظام المزامنة الجديد
         )
 

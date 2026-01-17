@@ -109,7 +109,7 @@ class TestSecurityConfig(unittest.TestCase):
         with open(settings_path, encoding='utf-8') as f:
             settings = json.load(f)
 
-        # التأكد من أن مفتاح API فارغ
+        # التأكد من عدم وجود مفتاح API حساس في الإعدادات
         api_key = settings.get('smart_scan', {}).get('gemini_api_key', '')
         self.assertEqual(api_key, '')
 
