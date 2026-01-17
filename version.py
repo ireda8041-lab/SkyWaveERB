@@ -18,7 +18,7 @@ def _get_today_version() -> str:
     return f"{now.year % 100}.{now.month:02d}.{now.day:02d}"
 
 
-CURRENT_VERSION = "1.3.11"  # الإصدار الثابت - تحسينات وإصلاحات
+CURRENT_VERSION = "1.3.12"  # الإصدار الثابت - تحسينات وإصلاحات
 APP_NAME = "Sky Wave ERP"
 APP_AUTHOR = "Sky Wave Team"
 

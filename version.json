@@ -1,8 +1,8 @@
 {
-  "version": "1.3.11",
-  "version_name": "Release - تحسينات وإصلاحات",
+  "version": "1.3.12",
+  "version_name": "Release 1.3.12 - إزالة Smart Scan وتحسينات",
   "release_date": "2026-01-17",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.11/SkyWaveERP-Setup-1.3.11.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.12/SkyWaveERP-Setup-1.3.12.exe",
   "changelog": [
     "🔧 إصلاح مشكلة google.generativeai عند التشغيل",
     "⚡ استيراد آمن للمكتبات الاختيارية",
