@@ -71,6 +71,9 @@ Name: "quicklaunchicon"; Description: "إنشاء اختصار في شريط ا�
 ; نسخ كل محتويات مجلد dist\SkyWaveERP (باستثناء ملفات قاعدة البيانات)
 Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.db,*.db-shm,*.db-wal,*.log"
 
+; نسخ قاعدة البيانات الأولية فقط إذا لم تكن موجودة (أول تثبيت)
+Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist
+
 ; نسخ الأيقونة
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 

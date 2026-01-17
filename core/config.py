@@ -12,6 +12,7 @@ from pathlib import Path
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -21,7 +22,7 @@ except ImportError:
 
 def _get_project_root() -> Path:
     """الحصول على مسار المشروع الجذري"""
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # التطبيق يعمل كـ EXE
         return Path(sys.executable).parent
     else:
@@ -39,12 +40,12 @@ def _load_env_file():
 
     if env_path.exists():
         try:
-            with open(env_path, encoding='utf-8') as f:
+            with open(env_path, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     # تجاهل التعليقات والأسطر الفارغة
-                    if line and not line.startswith('#') and '=' in line:
-                        key, value = line.split('=', 1)
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
                         key = key.strip()
                         value = value.strip()
                         # لا نكتب فوق المتغيرات الموجودة
@@ -66,7 +67,7 @@ class Config:
     @staticmethod
     def get_mongo_uri() -> str:
         """الحصول على رابط MongoDB من متغيرات البيئة"""
-        uri = os.environ.get('MONGO_URI')
+        uri = os.environ.get("MONGO_URI")
         if not uri:
             safe_print("WARNING: [Config] MONGO_URI غير محدد - استخدام القيمة الافتراضية")
             # قيمة افتراضية للتطوير المحلي فقط
@@ -76,18 +77,28 @@ class Config:
     @staticmethod
     def get_db_name() -> str:
         """الحصول على اسم قاعدة البيانات"""
-        return os.environ.get('MONGO_DB_NAME', 'skywave_erp_db')
+        return os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
 
     @staticmethod
     def get_local_db_path() -> str:
         """الحصول على مسار قاعدة البيانات المحلية"""
-        # استخدام AppData للبيانات (أفضل ممارسة)
-        if getattr(sys, 'frozen', False):
-            # عند التشغيل كـ EXE، استخدم AppData
-            appdata = Path(os.environ.get('LOCALAPPDATA', os.path.expanduser('~/.local/share')))
-            db_dir = appdata / 'SkyWaveERP'
-            db_dir.mkdir(parents=True, exist_ok=True)
-            return str(db_dir / "skywave_local.db")
+        if getattr(sys, "frozen", False):
+            # عند التشغيل كـ EXE، ابحث في مجلد البرنامج أولاً
+            exe_dir = Path(sys.executable).parent
+
+            # 1. ابحث في نفس مجلد الـ EXE
+            db_in_exe_dir = exe_dir / "skywave_local.db"
+            if db_in_exe_dir.exists():
+                return str(db_in_exe_dir)
+
+            # 2. ابحث في مجلد _internal
+            db_in_internal = exe_dir / "_internal" / "skywave_local.db"
+            if db_in_internal.exists():
+                return str(db_in_internal)
+
+            # 3. لو مش موجود، استخدم مجلد البرنامج (وليس AppData)
+            # هذا يضمن أن البيانات تبقى مع البرنامج
+            return str(db_in_exe_dir)
         else:
             # عند التطوير، استخدم مجلد المشروع
             project_dir = _get_project_root()
@@ -97,7 +108,7 @@ class Config:
     @staticmethod
     def get_default_admin_password() -> str:
         """الحصول على كلمة المرور الافتراضية للمدير"""
-        password = os.environ.get('DEFAULT_ADMIN_PASSWORD')
+        password = os.environ.get("DEFAULT_ADMIN_PASSWORD")
         if not password:
             # كلمة مرور افتراضية أقوى
             password = "SkyWave@Admin2024!"
@@ -108,7 +119,8 @@ class Config:
     def get_secret_key() -> str:
         """الحصول على المفتاح السري"""
         import secrets
-        key = os.environ.get('SECRET_KEY')
+
+        key = os.environ.get("SECRET_KEY")
         if not key:
             # توليد مفتاح عشوائي إذا لم يكن محدداً
             key = secrets.token_hex(32)
@@ -118,18 +130,18 @@ class Config:
     @staticmethod
     def get_gemini_api_key() -> str | None:
         """الحصول على مفتاح Gemini API"""
-        return os.environ.get('GEMINI_API_KEY')
+        return os.environ.get("GEMINI_API_KEY")
 
     # === إعدادات التطبيق ===
     @staticmethod
     def is_debug_mode() -> bool:
         """هل وضع التصحيح مفعّل؟"""
-        return os.environ.get('DEBUG_MODE', 'False').lower() in ('true', '1', 'yes')
+        return os.environ.get("DEBUG_MODE", "False").lower() in ("true", "1", "yes")
 
     @staticmethod
     def get_log_level() -> str:
         """الحصول على مستوى التسجيل"""
-        return os.environ.get('LOG_LEVEL', 'INFO')
+        return os.environ.get("LOG_LEVEL", "INFO")
 
     @staticmethod
     def get_project_root() -> Path:
