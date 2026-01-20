@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 نظام إدارة المهام الاحترافي - Sky Wave ERP
 Professional TODO Management System
@@ -257,7 +257,7 @@ class TaskService:
         return cls._instance
 
     def __init__(self, repository=None):
-        if repository:
+        if repository is not None:
             self._repository = repository
             TaskService._repository = repository
         elif TaskService._repository:

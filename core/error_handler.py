@@ -1,4 +1,4 @@
-﻿# الملف: core/error_handler.py
+# الملف: core/error_handler.py
 # نظام معالجة الأخطاء المركزي
 
 import logging

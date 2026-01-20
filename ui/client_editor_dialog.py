@@ -1,4 +1,4 @@
-﻿# الملف: ui/client_editor_dialog.py
+# الملف: ui/client_editor_dialog.py
 """
 نافذة إضافة/تعديل العملاء - تصميم متجاوب (Responsive)
 """

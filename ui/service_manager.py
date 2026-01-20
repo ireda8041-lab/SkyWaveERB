@@ -1,4 +1,4 @@
-﻿"""الملف: ui/service_manager.py"""
+"""الملف: ui/service_manager.py"""
 
 
 from PyQt6.QtGui import QColor

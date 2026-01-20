@@ -85,7 +85,7 @@ class RealtimeSync(QObject):
 
         # إيقاف التايمر بأمان
         try:
-            if self.connection_timer:
+            if self.connection_timer is not None:
                 self.connection_timer.stop()
         except (RuntimeError, AttributeError):
             pass
@@ -108,7 +108,7 @@ class RealtimeSync(QObject):
 
         while not self.stop_event.is_set() and retry_count < max_retries and self._enabled and not self._is_shutting_down:
             try:
-                if not self.repo or not self.repo.online or self.repo.mongo_db is None:
+                if self.repo is None or not self.repo.online or self.repo is not None is not None is not None.mongo_db is None:
                     time.sleep(5)
                     continue
 
@@ -191,7 +191,7 @@ class RealtimeSync(QObject):
 
         try:
             is_connected = False
-            if self.repo and self.repo.online and self.repo.mongo_db is not None:
+            if self.repo and self.repo is not None is not None is not None.online and self.repo is not None is not None is not None.mongo_db is not None:
                 try:
                     # فحص سريع بدون blocking
                     self.repo.mongo_db.admin.command('ping', maxTimeMS=2000)

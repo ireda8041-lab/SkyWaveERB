@@ -1,4 +1,4 @@
-﻿# الملف: ui/styles.py
+# الملف: ui/styles.py
 """
 ملف الأنماط الموحدة لكل الأزرار والعناصر في التطبيق
 SkyWave Brand Identity Colors

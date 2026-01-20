@@ -1,4 +1,4 @@
-﻿# الملف: ui/main_window.py
+# الملف: ui/main_window.py
 
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
@@ -770,15 +770,25 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # التحقق من الاتصال
+        # التحقق من الاتصال - محاولة الاتصال أولاً
         if not self.sync_manager.is_online:
-            QMessageBox.warning(
-                self,
-                "غير متصل",
-                "لا يوجد اتصال بالإنترنت.\n"
-                "يرجى التحقق من الاتصال والمحاولة مرة أخرى."
-            )
-            return
+            # محاولة إعادة الاتصال
+            try:
+                if self.sync_manager.repo is not None and self.sync_manager.repo.mongo_client is not None:
+                    self.sync_manager.repo.mongo_client.admin.command('ping')
+                    self.sync_manager.repo.online = True
+                    logger.info("✅ تم استعادة الاتصال بـ MongoDB")
+            except Exception:
+                QMessageBox.warning(
+                    self,
+                    "غير متصل",
+                    "لا يوجد اتصال بـ MongoDB.\n"
+                    "يرجى التحقق من:\n"
+                    "1. اتصال الإنترنت\n"
+                    "2. إعدادات MongoDB في ملف .env\n"
+                    "3. أن خادم MongoDB يعمل"
+                )
+                return
 
         # تعطيل الزر أثناء المزامنة
         if hasattr(self, 'status_bar') and hasattr(self.status_bar, 'full_sync_btn'):
@@ -797,15 +807,15 @@ class MainWindow(QMainWindow):
 
                 # الحصول على repository
                 repo = None
-                if self.sync_manager and hasattr(self.sync_manager, 'repo'):
+                if self.sync_manager is not None and hasattr(self.sync_manager, 'repo'):
                     repo = self.sync_manager.repo
-                elif self.sync_manager and hasattr(self.sync_manager, 'repository'):
+                elif self.sync_manager is not None and hasattr(self.sync_manager, 'repository'):
                     repo = self.sync_manager.repository
 
-                if repo:
+                if repo is not None:
                     unified_sync = UnifiedSyncManagerV3(repo)
                     result = unified_sync.full_sync_from_cloud()
-                elif self.sync_manager:
+                elif self.sync_manager is not None:
                     # fallback للنظام القديم
                     result = self.sync_manager.safe_sync_all()
                 else:

@@ -264,7 +264,7 @@ def enhance_mongodb_connection_checks():
             if not self.is_online:
                 return False
             
-            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+            if self.repo.mongo_db is None or self.repo is not None.mongo_client is None:
                 logger.warning("MongoDB client أو database غير متوفر")
                 return False
             

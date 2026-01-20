@@ -1,4 +1,4 @@
-﻿# الملف: core/repository.py
+# الملف: core/repository.py
 """
 ⚡ المخزن الذكي - Sky Wave ERP
 محسّن للسرعة القصوى مع نظام Cache ذكي
@@ -223,7 +223,7 @@ class Repository:
             safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
 
     def _start_mongo_connection(self):
-        """⚡ الاتصال بـ MongoDB في Background Thread - محسّن للسرعة"""
+        """⚡ الاتصال بـ MongoDB في Background Thread - محسّن ومحاول"""
         # ⚡ فحص توفر pymongo أولاً
         if not PYMONGO_AVAILABLE or pymongo is None:
             safe_print("INFO: pymongo غير متاح - العمل بالبيانات المحلية فقط")
@@ -235,33 +235,48 @@ class Repository:
         self._mongo_connecting = True
 
         def connect_mongo():
-            try:
-                self.mongo_client = pymongo.MongoClient(
-                    MONGO_URI,
-                    serverSelectionTimeoutMS=2000,  # ⚡ 2 ثواني للاتصال - أسرع
-                    connectTimeoutMS=2000,
-                    socketTimeoutMS=5000,  # ⚡ 5 ثواني للعمليات
-                    retryWrites=True,
-                    retryReads=True,
-                    maxPoolSize=3,  # ⚡ تقليل عدد الاتصالات للأداء
-                    minPoolSize=1,
-                    maxIdleTimeMS=60000,  # ⚡ إغلاق الاتصالات الخاملة بعد دقيقة
-                    waitQueueTimeoutMS=3000,  # ⚡ timeout للانتظار في الطابور
-                )
-                self.mongo_client.server_info()
-                self.mongo_db = self.mongo_client[DB_NAME]
-                self.online = True
-                safe_print("INFO: ✅ متصل بـ MongoDB (Background)")
-            except Exception:
-                # ⚡ صامت - العمل بالبيانات المحلية
-                self.online = False
-            finally:
-                self._mongo_connecting = False
+            max_retries = 3
+            retry_delay = 2  # ثانيتين بين كل محاولة
+            
+            for attempt in range(max_retries):
+                try:
+                    safe_print(f"INFO: محاولة الاتصال بـ MongoDB ({attempt + 1}/{max_retries})...")
+                    
+                    self.mongo_client = pymongo.MongoClient(
+                        MONGO_URI,
+                        serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال
+                        connectTimeoutMS=5000,
+                        socketTimeoutMS=10000,  # ⚡ 10 ثواني للعمليات
+                        retryWrites=True,
+                        retryReads=True,
+                        maxPoolSize=5,
+                        minPoolSize=1,
+                        maxIdleTimeMS=60000,
+                        waitQueueTimeoutMS=5000,
+                    )
+                    
+                    # اختبار الاتصال
+                    self.mongo_client.server_info()
+                    self.mongo_db = self.mongo_client[DB_NAME]
+                    self.online = True
+                    safe_print("INFO: ✅ متصل بـ MongoDB بنجاح!")
+                    break  # نجح الاتصال
+                    
+                except Exception as e:
+                    safe_print(f"WARNING: فشلت محاولة {attempt + 1}: {e}")
+                    if attempt < max_retries - 1:
+                        safe_print(f"INFO: إعادة المحاولة بعد {retry_delay} ثانية...")
+                        time.sleep(retry_delay)
+                    else:
+                        safe_print("WARNING: فشل الاتصال بـ MongoDB - العمل بالبيانات المحلية")
+                        self.online = False
+            
+            self._mongo_connecting = False
 
         # تشغيل الاتصال في thread منفصل
-        # استخدام QTimer بدلاً من daemon thread
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(1000, connect_mongo)  # تأخير ثانية واحدة
+        import threading
+        thread = threading.Thread(target=connect_mongo, daemon=True)
+        thread.start()
 
     def _init_local_db(self):
         """دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي فقط إذا لم تكن موجودة."""
@@ -4311,8 +4326,8 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
             return None
 
-        # --- 2. تحديث MongoDB ---
-        if self.online:
+        # --- 2. تحديث MongoDB (اختياري - لا يعطل البرنامج) ---
+        if self.online and self.mongo_db is not None:
             try:
                 update_dict = project_data.model_dump(exclude={"_mongo_id", "id", "created_at"})
                 update_dict["status"] = project_data.status.value
@@ -4327,7 +4342,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
-                safe_print(f"ERROR: [Repo] فشل تحديث المشروع (Mongo): {e}")
+                safe_print(f"WARNING: [Repo] تخطي تحديث MongoDB: {e}")
 
         # ⚡ إبطال الـ cache بعد تحديث المشروع
         if CACHE_ENABLED and hasattr(self, '_projects_cache'):
@@ -4356,20 +4371,19 @@ class Repository:
                 f"INFO: [Repo] وجدنا المشروع: {project_name}, mongo_id={mongo_id}, local_id={local_id}"
             )
 
-            # 1. حذف من SQLite
+            # 1. حذف من SQLite (الأساسي)
             self.sqlite_cursor.execute("DELETE FROM projects WHERE name = ?", (project_name,))
             self.sqlite_conn.commit()
             safe_print("INFO: [Repo] تم حذف المشروع من SQLite")
 
-            # 2. حذف من MongoDB
-            if self.online and mongo_id:
+            # 2. حذف من MongoDB (اختياري - لا يعطل البرنامج)
+            if self.online and mongo_id and self.mongo_db is not None:
                 try:
                     from bson import ObjectId
-
                     self.mongo_db.projects.delete_one({"_id": ObjectId(mongo_id)})
                     safe_print("INFO: [Repo] تم حذف المشروع من MongoDB")
                 except Exception as e:
-                    safe_print(f"WARNING: [Repo] فشل حذف المشروع من MongoDB: {e}")
+                    safe_print(f"WARNING: [Repo] تخطي حذف MongoDB: {e}")
 
             # 3. حذف الدفعات المرتبطة
             try:
@@ -5647,5 +5661,5 @@ class Repository:
 if __name__ == "__main__":
     safe_print("--- بدء اختبار الـ Repository ---")
     repo = Repository()
-    safe_print(f"حالة الاتصال: {'أونلاين' if repo.is_online() else 'أوفلاين'}")
+    safe_print(f"حالة الاتصال: {'أونلاين' if repo.is_online() is not None and repo.is_online() else 'أوفلاين'}")
     safe_print("--- انتهاء الاختبار ---")

@@ -1,4 +1,4 @@
-﻿# الملف: core/event_bus.py
+# الملف: core/event_bus.py
 """
 نظام ناقل الأحداث (Event Bus)
 يوفر نمط Publish-Subscribe للتواصل بين مكونات التطبيق

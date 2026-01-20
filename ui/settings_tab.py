@@ -1,4 +1,4 @@
-﻿# الملف: ui/settings_tab.py
+# الملف: ui/settings_tab.py
 """
 تاب الإعدادات المتقدمة - يشمل:
 - إدارة الحسابات
@@ -845,7 +845,7 @@ class SettingsTab(QWidget):
 
         try:
             currencies = []
-            if self.repository:
+            if self.repository is not None:
                 currencies = self.repository.get_all_currencies()
                 if not currencies:
                     self.repository.init_default_currencies()
@@ -893,7 +893,7 @@ class SettingsTab(QWidget):
             result = dialog.get_result()
             if result:
                 # حفظ العملة في قاعدة البيانات
-                if self.repository:
+                if self.repository is not None:
                     success = self.repository.save_currency(result)
                     if success:
                         self.load_currencies()  # إعادة تحميل الجدول
@@ -948,7 +948,7 @@ class SettingsTab(QWidget):
             result = dialog.get_result()
             if result:
                 # حفظ التعديلات في قاعدة البيانات
-                if self.repository:
+                if self.repository is not None:
                     success = self.repository.save_currency(result)
                     if success:
                         self.load_currencies()  # إعادة تحميل الجدول
@@ -997,7 +997,7 @@ class SettingsTab(QWidget):
 
         if reply == QMessageBox.StandardButton.Yes:
             # حذف من قاعدة البيانات
-            if self.repository:
+            if self.repository is not None:
                 success = self.repository.delete_currency(code)
                 if success:
                     self.load_currencies()  # إعادة تحميل الجدول
@@ -1269,7 +1269,7 @@ class SettingsTab(QWidget):
     def load_db_stats(self):
         """تحميل إحصائيات قاعدة البيانات - محسّن بدون تحميل كل البيانات"""
         try:
-            if self.repository:
+            if self.repository is not None:
                 # ⚡ استخدام COUNT بدلاً من جلب كل البيانات
                 try:
                     cursor = self.repository.sqlite_cursor
@@ -1306,7 +1306,7 @@ class SettingsTab(QWidget):
                             journal_count + projects_count)
 
                     # حالة الاتصال
-                    connection_status = "✅ متصل" if self.repository.online else "⚠️ غير متصل"
+                    connection_status = "✅ متصل" if self.repository.online is not None and self.repository.online else "⚠️ غير متصل"
 
                     stats_text = f"""
 📊 إحصائيات قاعدة البيانات:
@@ -1974,7 +1974,7 @@ class SettingsTab(QWidget):
 
     def on_update_error(self, error_message):
         """عند حدوث خطأ في الفحص - عرض تحذير بسيط بدلاً من رسالة خطأ"""
-        # Handle 404 and connection errors gracefully
+        # Handle 404 and connection is not None errors gracefully
         if "404" in error_message or "فشل الاتصال" in error_message:
             self.update_status_label.setText(
                 "⚠️ لا توجد تحديثات متاحة حالياً\n\n"

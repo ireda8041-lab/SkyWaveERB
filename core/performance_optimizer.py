@@ -1,4 +1,4 @@
-﻿# الملف: core/performance_optimizer.py
+# الملف: core/performance_optimizer.py
 """
 ⚡ محسّن الأداء الشامل - Sky Wave ERP
 ================================

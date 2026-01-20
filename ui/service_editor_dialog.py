@@ -1,4 +1,4 @@
-﻿# الملف: ui/service_editor_dialog.py
+# الملف: ui/service_editor_dialog.py
 """
 نافذة تحرير الخدمات - تصميم محسن ومتجاوب
 """

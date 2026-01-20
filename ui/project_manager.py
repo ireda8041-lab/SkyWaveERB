@@ -1,4 +1,4 @@
-﻿import os
+import os
 from datetime import datetime
 
 from PyQt6.QtCore import QDate, Qt

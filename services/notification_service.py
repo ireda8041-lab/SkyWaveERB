@@ -149,7 +149,7 @@ class NotificationService:
                 notification.id = cursor.lastrowid
 
                 # محاولة الحفظ في MongoDB
-                if self.repo.online:
+                if self.repo.online is not None and self.repo.online:
                     try:
                         notification_dict = notification.model_dump(exclude={'_mongo_id'})
                         result = self.repo.mongo_db.notifications.insert_one(notification_dict)
@@ -304,7 +304,7 @@ class NotificationService:
                 self.repo.sqlite_conn.commit()
 
                 # محاولة التحديث في MongoDB
-                if self.repo.online:
+                if self.repo.online is not None and self.repo.online:
                     try:
                         cursor.execute("SELECT _mongo_id FROM notifications WHERE id = ?", (notification_id,))
                         row = cursor.fetchone()
@@ -348,7 +348,7 @@ class NotificationService:
                 cursor.close()
 
             # محاولة التحديث في MongoDB
-            if self.repo.online:
+            if self.repo.online is not None and self.repo.online:
                 try:
                     self.repo.mongo_db.notifications.update_many(
                         {'is_read': False},
@@ -388,7 +388,7 @@ class NotificationService:
                 cursor.close()
 
             # محاولة الحذف من MongoDB
-            if self.repo.online and row and row['_mongo_id']:
+            if self.repo.online is not None and self.repo.online and row and row['_mongo_id']:
                 try:
                     from bson import ObjectId
                     self.repo.mongo_db.notifications.delete_one(
@@ -430,7 +430,7 @@ class NotificationService:
                 cursor.close()
 
             # محاولة الحذف من MongoDB
-            if self.repo.online:
+            if self.repo.online is not None and self.repo.online:
                 try:
                     self.repo.mongo_db.notifications.delete_many({
                         'created_at': {'$lt': cutoff_date},

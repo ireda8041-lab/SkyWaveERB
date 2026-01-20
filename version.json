@@ -1,20 +1,17 @@
 {
-  "version": "2.0.0",
-  "version_name": "Sky Wave ERP v2.0.0",
+  "version": "2.0.1",
+  "version_name": "Sky Wave ERP v2.0.1",
   "release_date": "2026-01-20",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.0.0/SkyWaveERP-Setup-2.0.0.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.0.1/SkyWaveERP-Setup-2.0.1.exe",
   "changelog": [
-    "🎉 إصدار جديد كامل مع تحسينات شاملة",
-    "⚡ تحسين الأداء والسرعة بشكل كبير",
-    "🔧 إصلاح جميع المشاكل المعروفة",
-    "🎨 واجهة محسّنة وأكثر استقراراً",
-    "🔄 نظام مزامنة محسّن ومستقر",
-    "🔐 تحسينات أمنية",
-    "📊 تقارير محسّنة",
-    "🖨️ نظام طباعة محسّن"
+    "� إصلاح مشكلة Database bool() الحرجة",
+    "✅ تحسين استقرار النظام",
+    "⚡ تحسين أداء المزامنة",
+    "� إصلاح أخطاء برمجية في Repository",
+    "� تحسينات أمنية إضافية"
   ],
   "min_version": "1.0.0",
-  "mandatory": false,
-  "notes_ar": "إصدار جديد كامل مع تحسينات شاملة في الأداء والاستقرار. يُنصح بالتحديث للحصول على أفضل تجربة.",
-  "notes_en": "Major new release with comprehensive improvements in performance and stability. Update recommended for the best experience."
+  "mandatory": true,
+  "notes_ar": "تحديث حرج لإصلاح مشكلة Database bool(). يُنصح بالتحديث فوراً لتجنب الأخطاء.",
+  "notes_en": "Critical update to fix Database bool() issue. Immediate update recommended to avoid errors."
 }

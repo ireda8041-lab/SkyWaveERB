@@ -1,4 +1,4 @@
-﻿# الملف: services/accounting_service.py
+# الملف: services/accounting_service.py
 
 from datetime import datetime, timedelta
 from typing import Any

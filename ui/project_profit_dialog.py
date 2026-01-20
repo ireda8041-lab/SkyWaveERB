@@ -1,4 +1,4 @@
-﻿# الملف: ui/project_profit_dialog.py
+# الملف: ui/project_profit_dialog.py
 """
 تقرير ربحية مشروع - تصميم محسن واحترافي
 """

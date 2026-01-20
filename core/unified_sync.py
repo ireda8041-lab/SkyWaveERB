@@ -1,4 +1,4 @@
-﻿# الملف: core/unified_sync.py
+# الملف: core/unified_sync.py
 """
 🔄 نظام المزامنة الموحد - MongoDB First
 MongoDB هو المصدر الرئيسي، SQLite نسخة محلية للـ offline فقط
@@ -76,11 +76,11 @@ class UnifiedSyncManagerV3(QObject):
         self._last_online_status = None
         self._shutdown = False  # ⚡ علامة الإغلاق
 
-        # ⚡ إعدادات المزامنة التلقائية - محسّنة للأداء
-        self._auto_sync_enabled = True
-        self._auto_sync_interval = 600 * 1000  # ⚡ 10 دقائق - مزامنة كاملة
-        self._quick_sync_interval = 120 * 1000  # ⚡ دقيقتين - رفع التغييرات
-        self._connection_check_interval = 120 * 1000  # ⚡ دقيقتين - فحص الاتصال
+        # ⚡ إعدادات المزامنة التلقائية - مفعّلة للمزامنة بين الأجهزة
+        self._auto_sync_enabled = True  # ⚡ مفعّلة للمزامنة
+        self._auto_sync_interval = 300 * 1000  # ⚡ 5 دقائق - مزامنة كاملة
+        self._quick_sync_interval = 60 * 1000  # ⚡ دقيقة - رفع التغييرات
+        self._connection_check_interval = 30 * 1000  # ⚡ 30 ثانية - فحص الاتصال
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -100,7 +100,7 @@ class UnifiedSyncManagerV3(QObject):
 
     def _sync_single_table_to_cloud(self, table: str):
         """مزامنة جدول واحد فوراً"""
-        if not self.is_online or self.repo.mongo_db is None:
+        if not self.is_online or self.repo is not None is not None is not None is None or self.repo is not None is not None is not None.mongo_db is None:
             return
 
         # ⚡ تجاهل الجداول غير الموجودة
@@ -226,7 +226,7 @@ class UnifiedSyncManagerV3(QObject):
 
         try:
             # ⚡ فحص أن MongoDB client لا يزال متاحاً قبل الاستخدام
-            if not self.repo or self.repo.mongo_client is None or self.repo.mongo_db is None:
+            if self.repo is None or self.repo is not None is not None is not None.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
                 current_status = False
             else:
                 try:
@@ -353,11 +353,11 @@ class UnifiedSyncManagerV3(QObject):
     @property
     def is_online(self) -> bool:
         """التحقق من الاتصال مع فحص حالة MongoDB client"""
-        if not self.repo:
+        if self.repo is None:
             return False
         
         # ⚡ فحص أن MongoDB client متاح ولم يُغلق
-        if not self.repo.mongo_client or not self.repo.mongo_db:
+        if self.repo.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
             return False
             
         try:
@@ -394,7 +394,7 @@ class UnifiedSyncManagerV3(QObject):
             return {'success': False, 'reason': 'already_syncing'}
 
         # ⚡ فحص فعلي أن MongoDB client لا يزال متاحاً
-        if not self.repo or self.repo.mongo_client is None or self.repo.mongo_db is None:
+        if self.repo is None or self.repo is not None is not None is not None.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
             return {'success': False, 'reason': 'no_mongo_client'}
 
         try:
@@ -466,11 +466,11 @@ class UnifiedSyncManagerV3(QObject):
             if self._shutdown:
                 return stats
 
-            if not self.repo or not self.repo.online:
+            if self.repo is None or not self.repo.online:
                 return stats
 
             # ⚡ فحص أن MongoDB client لا يزال متاحاً
-            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+            if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
                 return stats
 
             # ⚡ فحص فعلي أن الـ client لم يُغلق
@@ -779,7 +779,7 @@ class UnifiedSyncManagerV3(QObject):
         if not self.is_online:
             return
 
-        if not self.repo or self.repo.mongo_db is None or self.repo.mongo_client is None:
+        if self.repo is None or self.repo is not None is not None is not None.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
             logger.debug("تم تخطي رفع التغييرات - MongoDB client غير متاح")
             return
 
@@ -797,10 +797,10 @@ class UnifiedSyncManagerV3(QObject):
         if self._shutdown:
             return
 
-        if not self.repo or not self.repo.online:
+        if self.repo is None or not self.repo.online:
             return
 
-        if self.repo.mongo_db is None or self.repo.mongo_client is None:
+        if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
             logger.debug(f"تم تخطي رفع {table_name} - MongoDB client غير متاح")
             return
 
@@ -1302,7 +1302,7 @@ def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
             if not self.is_online:
                 return False
             
-            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+            if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
                 logger.warning("MongoDB client أو database غير متوفر")
                 return False
             

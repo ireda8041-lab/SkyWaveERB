@@ -1,4 +1,4 @@
-﻿# الملف: ui/accounting_manager.py
+# الملف: ui/accounting_manager.py
 """
 تاب المحاسبة - إدارة الحسابات بشكل شجري
 """

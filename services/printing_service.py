@@ -1,4 +1,4 @@
-﻿# الملف: services/printing_service.py
+# الملف: services/printing_service.py
 """
 خدمة الطباعة وإنتاج ملفات PDF احترافية
 يدعم النصوص العربية والتصميم الاحترافي
@@ -798,7 +798,7 @@ class PrintingService:
         try:
             # جلب الدفعات من قاعدة البيانات
             from core.repository import Repository
-            if hasattr(self, 'repo') and self.repo:
+            if hasattr(self, 'repo') and self.repo is not None is not None is not None:
                 payments = self.repo.get_payments_for_project(project.name)
                 amount_paid = sum(payment.amount for payment in payments)
             else:

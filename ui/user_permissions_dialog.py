@@ -1,4 +1,4 @@
-﻿# الملف: ui/user_permissions_dialog.py
+# الملف: ui/user_permissions_dialog.py
 """
 نافذة تحرير صلاحيات المستخدم المخصصة
 """

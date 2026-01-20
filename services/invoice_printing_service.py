@@ -1,4 +1,4 @@
-﻿# الملف: services/invoice_printing_service.py
+# الملف: services/invoice_printing_service.py
 # خدمة طباعة الفواتير باستخدام القالب الحديث (Modern Blue Design)
 
 import os

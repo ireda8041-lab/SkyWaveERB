@@ -1,4 +1,4 @@
-﻿# الملف: ui/expense_editor_dialog.py
+# الملف: ui/expense_editor_dialog.py
 """
 نافذة إضافة/تعديل المصروفات - تصميم محسن
 """

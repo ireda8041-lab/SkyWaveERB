@@ -1,4 +1,4 @@
-﻿"""
+"""
 مدير الحقول المخصصة - لحفظ واسترجاع القيم المخصصة
 Custom Fields Manager - Save and retrieve custom values
 """

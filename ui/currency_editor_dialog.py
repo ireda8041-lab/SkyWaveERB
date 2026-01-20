@@ -1,4 +1,4 @@
-﻿# الملف: ui/currency_editor_dialog.py
+# الملف: ui/currency_editor_dialog.py
 """
 نافذة تعديل العملة مع جلب أسعار الصرف الحقيقية من الإنترنت
 """

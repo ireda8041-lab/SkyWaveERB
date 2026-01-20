@@ -1,4 +1,4 @@
-﻿# الملف: ui/expense_manager.py
+# الملف: ui/expense_manager.py
 """
 تاب إدارة المصروفات - يستخدم dialog للإضافة والتعديل
 """

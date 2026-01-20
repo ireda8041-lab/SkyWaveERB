@@ -1,0 +1,1082 @@
+{
+  "timestamp": 1768938886.6546361,
+  "duration_seconds": 6.10478663444519,
+  "tests_total": 10,
+  "tests_passed": 8,
+  "tests_failed": 2,
+  "files_tested": 124,
+  "errors_count": 74,
+  "warnings_count": 17,
+  "info_count": 61,
+  "errors": [
+    {
+      "level": "ERROR",
+      "message": "فشل فحص الاستيرادات: cannot load library 'libgobject-2.0-0': error 0x7e.  Additionally, ctypes.util.find_library() did not manage to locate a library called 'libgobject-2.0-0'",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9553738
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "absolute_zero_errors_audit.py",
+      "line": 228,
+      "timestamp": 1768938883.9754977
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "absolute_zero_errors_audit.py",
+      "line": 230,
+      "timestamp": 1768938883.9757118
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "check_project.py",
+      "line": 34,
+      "timestamp": 1768938883.9797437
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "comprehensive_system_test.py",
+      "line": 141,
+      "timestamp": 1768938883.983539
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "comprehensive_system_test.py",
+      "line": 149,
+      "timestamp": 1768938883.9837058
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "comprehensive_zero_error_audit.py",
+      "line": 87,
+      "timestamp": 1768938883.9852207
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "debug_table_issue.py",
+      "line": 105,
+      "timestamp": 1768938883.9917524
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "final_ultra_focused_audit.py",
+      "line": 195,
+      "timestamp": 1768938883.9969697
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "final_ultra_focused_audit.py",
+      "line": 197,
+      "timestamp": 1768938883.9971004
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام except عام (خطير)",
+      "file": "fix_performance_issues.py",
+      "line": 195,
+      "timestamp": 1768938884.0038545
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام except عام (خطير)",
+      "file": "fix_performance_issues.py",
+      "line": 285,
+      "timestamp": 1768938884.004064
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "main.py",
+      "line": 372,
+      "timestamp": 1768938884.0129116
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "main.py",
+      "line": 515,
+      "timestamp": 1768938884.0131671
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "main.py",
+      "line": 626,
+      "timestamp": 1768938884.0133276
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ultimate_professional_audit.py",
+      "line": 250,
+      "timestamp": 1768938884.0162392
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام eval (خطير أمنياً)",
+      "file": "ultimate_zero_errors_test.py",
+      "line": 243,
+      "timestamp": 1768938884.0178905
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ultimate_zero_errors_test.py",
+      "line": 244,
+      "timestamp": 1768938884.0184329
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "ultimate_zero_errors_test.py",
+      "line": 135,
+      "timestamp": 1768938884.018831
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "ultimate_zero_errors_test.py",
+      "line": 438,
+      "timestamp": 1768938884.019234
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "ultra_comprehensive_audit.py",
+      "line": 250,
+      "timestamp": 1768938884.0222144
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام __import__ ديناميكي",
+      "file": "ultra_comprehensive_audit.py",
+      "line": 252,
+      "timestamp": 1768938884.0223255
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "updater.py",
+      "line": 614,
+      "timestamp": 1768938884.0251312
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "core\\context_menu.py",
+      "line": 209,
+      "timestamp": 1768938884.033706
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "core\\error_handler.py",
+      "line": 165,
+      "timestamp": 1768938884.039232
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "core\\error_handler.py",
+      "line": 212,
+      "timestamp": 1768938884.039388
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "core\\error_handler.py",
+      "line": 237,
+      "timestamp": 1768938884.0395203
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "services\\invoice_printing_service.py",
+      "line": 415,
+      "timestamp": 1768938884.1175787
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "services\\template_service.py",
+      "line": 926,
+      "timestamp": 1768938884.138153
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\accounting_manager.py",
+      "line": 645,
+      "timestamp": 1768938884.1488369
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\accounting_manager.py",
+      "line": 659,
+      "timestamp": 1768938884.1489735
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\accounting_manager.py",
+      "line": 1123,
+      "timestamp": 1768938884.1494768
+    },
+    {
+      "level": "ERROR",
+      "message": "الوصول إلى locals",
+      "file": "ui\\accounting_manager.py",
+      "line": 1005,
+      "timestamp": 1768938884.1517398
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\client_manager.py",
+      "line": 650,
+      "timestamp": 1768938884.1591196
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\client_manager.py",
+      "line": 686,
+      "timestamp": 1768938884.159274
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\expense_manager.py",
+      "line": 271,
+      "timestamp": 1768938884.1709604
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\expense_manager.py",
+      "line": 288,
+      "timestamp": 1768938884.171098
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\ledger_window.py",
+      "line": 507,
+      "timestamp": 1768938884.1733522
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\main_window.py",
+      "line": 1011,
+      "timestamp": 1768938884.1789908
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\payments_manager.py",
+      "line": 1050,
+      "timestamp": 1768938884.1874044
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\payments_manager.py",
+      "line": 1109,
+      "timestamp": 1768938884.1876357
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 1074,
+      "timestamp": 1768938884.1974144
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 1102,
+      "timestamp": 1768938884.1975617
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 1165,
+      "timestamp": 1768938884.197748
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 1828,
+      "timestamp": 1768938884.198332
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 1846,
+      "timestamp": 1768938884.1984599
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 2413,
+      "timestamp": 1768938884.1990364
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 2453,
+      "timestamp": 1768938884.1992521
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 2534,
+      "timestamp": 1768938884.1994035
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\project_manager.py",
+      "line": 2555,
+      "timestamp": 1768938884.1995053
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\service_manager.py",
+      "line": 285,
+      "timestamp": 1768938884.2107592
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام except عام (خطير)",
+      "file": "ui\\settings_tab.py",
+      "line": 1301,
+      "timestamp": 1768938884.2134197
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\settings_tab.py",
+      "line": 892,
+      "timestamp": 1768938884.2159739
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\settings_tab.py",
+      "line": 947,
+      "timestamp": 1768938884.2161572
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\settings_tab.py",
+      "line": 1608,
+      "timestamp": 1768938884.2167344
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\settings_tab.py",
+      "line": 1649,
+      "timestamp": 1768938884.2169414
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\settings_tab.py",
+      "line": 1687,
+      "timestamp": 1768938884.217079
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\template_manager.py",
+      "line": 452,
+      "timestamp": 1768938884.2374241
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\template_manager.py",
+      "line": 463,
+      "timestamp": 1768938884.237599
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\template_settings.py",
+      "line": 261,
+      "timestamp": 1768938884.2396386
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\todo_manager.py",
+      "line": 2141,
+      "timestamp": 1768938884.2458804
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\todo_manager.py",
+      "line": 2165,
+      "timestamp": 1768938884.2460804
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\todo_manager.py",
+      "line": 2258,
+      "timestamp": 1768938884.2462358
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\todo_manager.py",
+      "line": 2393,
+      "timestamp": 1768938884.2464106
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\todo_manager.py",
+      "line": 2471,
+      "timestamp": 1768938884.2465463
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 291,
+      "timestamp": 1768938884.2550838
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 309,
+      "timestamp": 1768938884.2552865
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 449,
+      "timestamp": 1768938884.255477
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 526,
+      "timestamp": 1768938884.2556562
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 541,
+      "timestamp": 1768938884.2557557
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 675,
+      "timestamp": 1768938884.2559373
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 1094,
+      "timestamp": 1768938884.2563498
+    },
+    {
+      "level": "ERROR",
+      "message": "استخدام exec (خطير أمنياً)",
+      "file": "ui\\unified_hr_manager.py",
+      "line": 1134,
+      "timestamp": 1768938884.2564652
+    },
+    {
+      "level": "ERROR",
+      "message": "وجد 72 مشكلة حرجة في الكود",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938884.2654223
+    }
+  ],
+  "warnings": [
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\accounting_service.py",
+      "line": 29,
+      "timestamp": 1768938884.737786
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\client_service.py",
+      "line": 39,
+      "timestamp": 1768938884.7607312
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\expense_service.py",
+      "line": 35,
+      "timestamp": 1768938884.7642934
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\hr_service.py",
+      "line": 22,
+      "timestamp": 1768938884.782902
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\invoice_service.py",
+      "line": 14,
+      "timestamp": 1768938884.7980933
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\project_service.py",
+      "line": 26,
+      "timestamp": 1768938884.8622992
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_operation",
+      "file": "services\\service_service.py",
+      "line": 15,
+      "timestamp": 1768938884.8690524
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: test_repository_instantiation",
+      "file": "tests\\test_repository.py",
+      "line": 10,
+      "timestamp": 1768938884.9056325
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_success",
+      "file": "ui\\accounting_manager.py",
+      "line": 47,
+      "timestamp": 1768938884.9162529
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_error",
+      "file": "ui\\accounting_manager.py",
+      "line": 50,
+      "timestamp": 1768938884.9164221
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_warning",
+      "file": "ui\\accounting_manager.py",
+      "line": 53,
+      "timestamp": 1768938884.9165366
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_info",
+      "file": "ui\\accounting_manager.py",
+      "line": 56,
+      "timestamp": 1768938884.9166179
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_success",
+      "file": "ui\\project_manager.py",
+      "line": 55,
+      "timestamp": 1768938885.0951993
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_error",
+      "file": "ui\\project_manager.py",
+      "line": 56,
+      "timestamp": 1768938885.095424
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_warning",
+      "file": "ui\\project_manager.py",
+      "line": 57,
+      "timestamp": 1768938885.095517
+    },
+    {
+      "level": "WARNING",
+      "message": "دالة فارغة: notify_info",
+      "file": "ui\\project_manager.py",
+      "line": 58,
+      "timestamp": 1768938885.095642
+    },
+    {
+      "level": "WARNING",
+      "message": "وجد 16 دالة فارغة",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938885.3242614
+    }
+  ],
+  "info": [
+    {
+      "level": "INFO",
+      "message": "تم اكتشاف 124 ملف Python",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938881.39114
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جميع 124 ملف صحيحة نحوياً",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.3665135
+    },
+    {
+      "level": "INFO",
+      "message": "✅ PyQt6 متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.389676
+    },
+    {
+      "level": "INFO",
+      "message": "✅ PyQt6-WebEngine متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.6185658
+    },
+    {
+      "level": "INFO",
+      "message": "✅ pymongo متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.8329666
+    },
+    {
+      "level": "INFO",
+      "message": "✅ pydantic متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.8637266
+    },
+    {
+      "level": "INFO",
+      "message": "✅ Jinja2 متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.8916485
+    },
+    {
+      "level": "INFO",
+      "message": "✅ reportlab متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938882.8931267
+    },
+    {
+      "level": "INFO",
+      "message": "✅ pandas متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.2460437
+    },
+    {
+      "level": "INFO",
+      "message": "✅ openpyxl متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.6538198
+    },
+    {
+      "level": "INFO",
+      "message": "✅ Pillow متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.6540053
+    },
+    {
+      "level": "INFO",
+      "message": "✅ matplotlib متوفر",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.7650206
+    },
+    {
+      "level": "INFO",
+      "message": "✅ الملف الرئيسي سليم (34,027 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9652934
+    },
+    {
+      "level": "INFO",
+      "message": "✅ ملف الإصدار سليم (814 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9654238
+    },
+    {
+      "level": "INFO",
+      "message": "✅ ملف التبعيات سليم (706 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9655387
+    },
+    {
+      "level": "INFO",
+      "message": "✅ مخزن البيانات سليم (253,592 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9656549
+    },
+    {
+      "level": "INFO",
+      "message": "✅ ملف التكوين سليم (5,252 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9657676
+    },
+    {
+      "level": "INFO",
+      "message": "✅ نماذج البيانات سليم (24,412 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.965878
+    },
+    {
+      "level": "INFO",
+      "message": "✅ النافذة الرئيسية سليم (58,665 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.965991
+    },
+    {
+      "level": "INFO",
+      "message": "✅ نافذة تسجيل الدخول سليم (10,857 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9661024
+    },
+    {
+      "level": "INFO",
+      "message": "✅ خدمة المحاسبة سليم (167,706 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9662144
+    },
+    {
+      "level": "INFO",
+      "message": "✅ خدمة المشاريع سليم (48,815 بايت)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9663258
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول clients موجود (19 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.969551
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول projects موجود (34 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9698434
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول services موجود (10 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9699836
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول invoices موجود (21 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9701338
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول expenses موجود (12 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9702778
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول accounts موجود (13 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.970419
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول journal_entries موجود (14 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9705644
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول payments موجود (11 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9706979
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول users موجود (13 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9708316
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول employees موجود (18 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9709735
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول employee_loans موجود (16 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9711115
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول employee_salaries موجود (23 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.971265
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول employee_attendance موجود (13 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.971397
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول employee_leaves موجود (15 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9715328
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول tasks موجود (20 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9716766
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول notifications موجود (14 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.971851
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول currencies موجود (11 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9719858
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول sync_queue موجود (16 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9721322
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول project_milestones موجود (11 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9722579
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول invoice_numbers موجود (4 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.9723692
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جدول loan_payments موجود (11 عمود)",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.97251
+    },
+    {
+      "level": "INFO",
+      "message": "✅ يوجد 54 index في قاعدة البيانات",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938883.97269
+    },
+    {
+      "level": "INFO",
+      "message": "وجد 62 تعليق يحتاج مراجعة",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938884.2655854
+    },
+    {
+      "level": "INFO",
+      "message": "✅ تم فحص 1839 دالة و 203 كلاس",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938885.3240826
+    },
+    {
+      "level": "INFO",
+      "message": "✅ تم تحليل 124 وحدة للاستيرادات",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.381856
+    },
+    {
+      "level": "INFO",
+      "message": "✅ version: 2.0.1",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.3830383
+    },
+    {
+      "level": "INFO",
+      "message": "✅ version_name: Sky Wave ERP v2.0.1",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.3831155
+    },
+    {
+      "level": "INFO",
+      "message": "✅ release_date: 2026-01-20",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.3831918
+    },
+    {
+      "level": "INFO",
+      "message": "✅ changelog: ['� إصلاح مشكلة Database bool() الحرجة', '✅ تحسين استقرار النظام', '⚡ تحسين أداء المزامنة', '� إصلاح أخطاء برمجية في Repository', '� تحسينات أمنية إضافية']",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.3832774
+    },
+    {
+      "level": "INFO",
+      "message": "✅ requirements.txt يحتوي على 38 تبعية",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.3835628
+    },
+    {
+      "level": "INFO",
+      "message": "✅ ملف .env.example موجود",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.38368
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد core.repository نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.524281
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد core.config نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.5244813
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد core.schemas نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.52456
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد core.logger نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.5246363
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد services.accounting_service نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.5273325
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد services.project_service نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.651787
+    },
+    {
+      "level": "INFO",
+      "message": "✅ استيراد services.client_service نجح",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.652548
+    },
+    {
+      "level": "INFO",
+      "message": "✅ جميع 124 ملف قابلة للقراءة",
+      "file": null,
+      "line": null,
+      "timestamp": 1768938886.6540523
+    }
+  ],
+  "status": "FAIL"
+}

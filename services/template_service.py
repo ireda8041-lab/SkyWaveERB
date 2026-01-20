@@ -1,4 +1,4 @@
-﻿# الملف: services/template_service.py
+# الملف: services/template_service.py
 """
 خدمة قوالب الفواتير - إدارة وإنتاج قوالب HTML للفواتير
 """
@@ -485,7 +485,7 @@ class TemplateService(BaseService):
 
                         # حاول حفظ رقم الفاتورة في قاعدة البيانات
                         try:
-                            if self.repo:
+                            if self.repo is not None:
                                 cursor = self.repo.get_cursor()
                                 try:
                                     cursor.execute(

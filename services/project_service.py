@@ -1,4 +1,4 @@
-﻿# الملف: services/project_service.py
+# الملف: services/project_service.py
 
 import time
 from datetime import datetime
@@ -586,7 +586,7 @@ class ProjectService:
                 safe_print(f"WARNING: [ProjectService] المشروع {project.name} ليس له client_id!")
                 # محاولة جلب client_id من قاعدة البيانات
                 db_project = self.repo.get_project_by_number(project.name)
-                if db_project and db_project.client_id:
+                if db_project is not None and db_project.client_id:
                     client_id = db_project.client_id
                     safe_print(f"INFO: [ProjectService] تم جلب client_id من قاعدة البيانات: {client_id}")
 

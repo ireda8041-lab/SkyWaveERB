@@ -1,4 +1,4 @@
-﻿# الملف: services/export_service.py
+# الملف: services/export_service.py
 """
 خدمة التصدير - تصدير البيانات إلى Excel, CSV, PDF
 """

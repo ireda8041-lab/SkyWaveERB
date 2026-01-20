@@ -1,4 +1,4 @@
-﻿# الملف: ui/client_manager.py
+# الملف: ui/client_manager.py
 
 import os
 

@@ -280,7 +280,7 @@ class NotificationSyncWorker(QThread):
         safe_print(f"INFO: [NotificationSync] Worker started for device {DEVICE_ID}")
         while self.is_running:
             try:
-                if self.repo and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None) is not None:
+                if self.repo is not None and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None) is not None:
                     self._check_new_notifications()
             except Exception as e:
                 safe_print(f"WARNING: [NotificationSync] {e}")
@@ -289,7 +289,7 @@ class NotificationSyncWorker(QThread):
 
     def _check_new_notifications(self):
         try:
-            if not self.repo or self.repo.mongo_db is None:
+            if self.repo is None or self.repo is not None is not None is not None.mongo_db is None:
                 return
 
             collection = self.repo.mongo_db.notifications
@@ -448,7 +448,7 @@ class NotificationManager(QObject):
         manager._update_positions()
         notification.show_notification()
 
-        if sync and manager._repo and manager._repo.online:
+        if sync and manager._repo is not None and manager._repo.online:
             try:
                 manager._repo.mongo_db.notifications.insert_one({
                     "message": message,

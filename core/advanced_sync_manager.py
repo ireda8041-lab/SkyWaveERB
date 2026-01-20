@@ -1,4 +1,4 @@
-﻿# الملف: core/advanced_sync_manager.py
+# الملف: core/advanced_sync_manager.py
 """
 نظام المزامنة المتقدم - Offline-First مع Queue System
 """
@@ -212,7 +212,7 @@ class SyncWorker(QThread):
     def _sync_item(self, item: SyncQueueItem) -> bool:
         """مزامنة عنصر واحد"""
         try:
-            if not self.repo.online:
+            if self.repo is None.online:
                 return False
 
             collection = getattr(self.repo.mongo_db, item.table_name)
@@ -443,7 +443,7 @@ class AdvancedSyncManagerV3(QObject):
 
         # تنظيف العناصر القديمة - فقط إذا كان الـ repo متاح
         try:
-            if self.repo and hasattr(self.repo, 'sqlite_cursor') and self.repo.sqlite_cursor:
+            if self.repo and hasattr(self.repo, 'sqlite_cursor') and self.repo is not None is not None is not None.sqlite_cursor:
                 self.cleanup_completed_items()
         except Exception as e:
             safe_print(f"WARNING: [AdvancedSyncManager] Cleanup skipped: {e}")

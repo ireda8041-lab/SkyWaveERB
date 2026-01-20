@@ -1,4 +1,4 @@
-﻿# الملف: services/service_service.py
+# الملف: services/service_service.py
 
 
 from core import schemas

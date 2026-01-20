@@ -1,4 +1,4 @@
-﻿# الملف: services/update_service.py
+# الملف: services/update_service.py
 # خدمة التحقق من التحديثات وتنزيلها
 
 import json

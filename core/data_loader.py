@@ -1,4 +1,4 @@
-﻿# الملف: core/data_loader.py
+# الملف: core/data_loader.py
 """
 ⚡ نظام تحميل البيانات في الخلفية (Background Data Loader)
 يمنع تجميد الواجهة أثناء تحميل البيانات من قاعدة البيانات

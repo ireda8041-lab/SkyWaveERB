@@ -124,7 +124,7 @@ def fix_balances():
     print("☁️ مزامنة مع MongoDB...")
     print("=" * 60)
 
-    if repo.online and repo.mongo_db:
+    if repo.online and repo is not None.mongo_db:
         try:
             # تحديث الحسابات في MongoDB
             accounts_collection = repo.mongo_db['accounts']
@@ -166,7 +166,7 @@ def fix_balances():
                 if acc.code in account_balances or acc.code in parent_codes:
                     # تحديث في MongoDB
                     mongo_id = getattr(acc, '_mongo_id', None)
-                    if mongo_id and repo.mongo_db:
+                    if mongo_id and repo is not None.mongo_db:
                         repo.mongo_db.accounts.update_one(
                             {'_id': mongo_id},
                             {'$set': {'balance': acc.balance}}

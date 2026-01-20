@@ -1,4 +1,4 @@
-﻿# الملف: core/auth_models.py
+# الملف: core/auth_models.py
 """
 نماذج المصادقة والمستخدمين
 """
@@ -150,7 +150,8 @@ class AuthService:
         """إنشاء مستخدم جديد"""
         try:
             # التحقق من عدم وجود المستخدم
-            if self.repo.get_user_by_username(username):
+            user = self.repo.get_user_by_username(username)
+            if user is not None:
                 return False
 
             user = User(

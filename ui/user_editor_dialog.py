@@ -1,4 +1,4 @@
-﻿# الملف: ui/user_editor_dialog.py
+# الملف: ui/user_editor_dialog.py
 """
 نافذة إضافة/تعديل المستخدمين
 """

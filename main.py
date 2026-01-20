@@ -1,4 +1,4 @@
-﻿# الملف: main.py
+# الملف: main.py
 # ruff: noqa: E402
 """
 ⚡ Sky Wave ERP - الملف الرئيسي
@@ -122,7 +122,7 @@ class SkyWaveERPApp:
             try:
                 import time
                 time.sleep(3)  # انتظار اتصال MongoDB
-                if self.repository.online:
+                if self.repository.online is not None and self.repository.online:
                     self.settings_service.sync_settings_from_cloud(self.repository)
             except Exception as e:
                 logger.debug(f"[MainApp] فشل مزامنة الإعدادات: {e}")
@@ -764,3 +764,6 @@ if __name__ == "__main__":
         logger.info("="*80)
         logger.info("إغلاق التطبيق")
         logger.info("="*80)
+
+if __name__ == '__main__':
+    main()

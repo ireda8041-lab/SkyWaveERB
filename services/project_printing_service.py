@@ -1,4 +1,4 @@
-﻿# الملف: services/project_printing_service.py
+# الملف: services/project_printing_service.py
 """
 خدمة طباعة المشاريع مع خلفية مخصصة
 يدعم النصوص العربية والتصميم الاحترافي مع خلفية الفاتورة

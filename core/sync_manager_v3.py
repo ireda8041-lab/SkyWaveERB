@@ -1,4 +1,4 @@
-﻿"""
+"""
 🚀 مدير المزامنة الجديد - الإصدار الثالث
 =====================================
 حل نهائي لجميع مشاكل المزامنة:
@@ -147,7 +147,7 @@ class SyncManagerV3(QObject):
     @property
     def is_online(self) -> bool:
         """حالة الاتصال"""
-        return self.repo.online if self.repo else False
+        return self.repo.online if self.repo is not None else False
 
     @property
     def is_syncing(self) -> bool:

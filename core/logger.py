@@ -1,4 +1,4 @@
-﻿# الملف: core/logger.py
+# الملف: core/logger.py
 # نظام التسجيل (Logging) المركزي
 
 import logging

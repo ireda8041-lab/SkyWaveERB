@@ -1,4 +1,4 @@
-﻿# الملف: services/client_service.py
+# الملف: services/client_service.py
 """
 خدمة العملاء (Client Service)
 

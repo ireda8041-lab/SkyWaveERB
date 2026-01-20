@@ -1,4 +1,4 @@
-﻿"""
+"""
 صيانة قاعدة البيانات التلقائية
 يتم تشغيلها تلقائياً عند بدء البرنامج
 الإصدار المحسّن للأداء
@@ -122,7 +122,7 @@ class DatabaseMaintenance:
 
     def close(self):
         """إغلاق الاتصال"""
-        if self.db:
+        if self.db is not None:
             self.db.close()
 
     def run_all_maintenance(self, auto_mode: bool = False):
