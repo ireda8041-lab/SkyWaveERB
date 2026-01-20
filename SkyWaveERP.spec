@@ -13,7 +13,8 @@ datas = [
     ('update_settings.json', '.'), 
     ('icon.ico', '.'), 
     ('logo.png', '.'), 
-    ('site logo.png', '.')
+    ('site logo.png', '.'),
+    ('skywave_local.db', '.')  # قاعدة البيانات الأولية
 ]
 binaries = []
 

@@ -908,26 +908,43 @@ class PaymentsManagerTab(QWidget):
                     client_name = "عميل غير محدد"
                     project_name = payment.project_id or "مشروع غير محدد"
 
-                    # ⚡ إصلاح: البحث عن العميل بطرق متعددة
-                    # 1. أولاً: استخدام client_id من الدفعة مباشرة (الأولوية الأعلى)
-                    if payment.client_id and payment.client_id.strip():
-                        client_name = payment.client_id.strip()
-
-                    # 2. ثانياً: البحث في المشروع
-                    if client_name == "عميل غير محدد" and payment.project_id:
+                    # ⚡ إصلاح: البحث عن العميل بطرق متعددة ومحسّنة
+                    # 1. أولاً: البحث في المشروع للحصول على client_id الصحيح
+                    if payment.project_id:
                         if payment.project_id in projects_cache:
                             project = projects_cache[payment.project_id]
                             project_name = project.name
                             if project.client_id and project.client_id.strip():
-                                client_name = project.client_id.strip()
+                                # البحث عن العميل في الـ cache بطرق متعددة
+                                client_id = project.client_id.strip()
+                                if client_id in data['clients_cache']:
+                                    client = data['clients_cache'][client_id]
+                                    client_name = client.name
+                                else:
+                                    # استخدام client_id كما هو إذا لم نجد العميل
+                                    client_name = client_id
                         else:
                             # المشروع غير موجود في الـ cache - ابحث بالاسم الجزئي
                             for proj_name, proj in projects_cache.items():
                                 if payment.project_id in proj_name or proj_name in payment.project_id:
                                     project_name = proj.name
                                     if proj.client_id and proj.client_id.strip():
-                                        client_name = proj.client_id.strip()
+                                        client_id = proj.client_id.strip()
+                                        if client_id in data['clients_cache']:
+                                            client = data['clients_cache'][client_id]
+                                            client_name = client.name
+                                        else:
+                                            client_name = client_id
                                     break
+
+                    # 2. ثانياً: استخدام client_id من الدفعة مباشرة كـ fallback
+                    if client_name == "عميل غير محدد" and payment.client_id and payment.client_id.strip():
+                        client_id = payment.client_id.strip()
+                        if client_id in data['clients_cache']:
+                            client = data['clients_cache'][client_id]
+                            client_name = client.name
+                        else:
+                            client_name = client_id
 
                     self.payments_table.setItem(i, 3, create_centered_item(f"{client_name} - {project_name}"))
 

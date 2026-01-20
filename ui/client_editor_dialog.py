@@ -65,11 +65,23 @@ class ClientEditorDialog(QDialog):
         else:
             self.setWindowTitle("إضافة عميل جديد")
 
-        # 📱 Responsive: الحد الأدنى والأقصى
-        self.setMinimumWidth(420)
-        self.setMinimumHeight(450)
-        self.setMaximumHeight(650)  # ⚡ منع التمدد الزائد
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        # 📱 الديالوج على قد المحتوى بالضبط - بدون scroll
+        self.setMinimumWidth(520)
+        self.setMinimumHeight(680)  # ⚡ زيادة قليلة لإظهار كل المحتوى
+        
+        # ⚡ فتح الديالوج بحجم ثابت مناسب للمحتوى
+        self.resize(520, 680)  # حجم ثابت مناسب
+        
+        # وضع الديالوج في منتصف الشاشة
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        if screen:
+            screen_geo = screen.availableGeometry()
+            x = (screen_geo.width() - 520) // 2
+            y = (screen_geo.height() - 680) // 2
+            self.move(x, y)
+        
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar

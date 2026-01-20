@@ -273,9 +273,13 @@ class UserEditorDialog(QDialog):
 
         # التحقق من تفرد اسم المستخدم (للمستخدمين الجدد فقط)
         if not self.is_editing:
-            existing_user = self.auth_service.repo.get_user_by_username(username)
-            if existing_user:
-                return False, f"اسم المستخدم '{username}' موجود مسبقاً"
+            try:
+                existing_user = self.auth_service.repo.get_user_by_username(username)
+                if existing_user:
+                    return False, f"اسم المستخدم '{username}' موجود مسبقاً"
+            except Exception as e:
+                safe_print(f"WARNING: [UserEditorDialog] فشل فحص تفرد اسم المستخدم: {e}")
+                # نتابع بدون فحص التفرد في حالة الخطأ
 
         # كلمة المرور
         password = self.password_input.text()
@@ -351,25 +355,32 @@ class UserEditorDialog(QDialog):
                     QMessageBox.warning(self, "خطأ", "فشل في تعديل المستخدم.")
             else:
                 # إضافة مستخدم جديد
-                success = self.auth_service.create_user(
-                    username=username,
-                    password=password,
-                    role=role,
-                    full_name=full_name
-                )
+                try:
+                    success = self.auth_service.create_user(
+                        username=username,
+                        password=password,
+                        role=role,
+                        full_name=full_name
+                    )
 
-                if success:
-                    # تحديث البريد الإلكتروني إذا تم إدخاله
-                    if email:
-                        self.auth_service.repo.update_user_by_username(
-                            username,
-                            {"email": email}
-                        )
+                    if success:
+                        # تحديث البريد الإلكتروني إذا تم إدخاله
+                        if email:
+                            try:
+                                self.auth_service.repo.update_user_by_username(
+                                    username,
+                                    {"email": email}
+                                )
+                            except Exception as e:
+                                safe_print(f"WARNING: [UserEditorDialog] فشل تحديث البريد الإلكتروني: {e}")
 
-                    QMessageBox.information(self, "تم", "تم إضافة المستخدم بنجاح.")
-                    self.accept()
-                else:
-                    QMessageBox.warning(self, "خطأ", "فشل في إضافة المستخدم.")
+                        QMessageBox.information(self, "تم", "تم إضافة المستخدم بنجاح.")
+                        self.accept()
+                    else:
+                        QMessageBox.warning(self, "خطأ", "فشل في إضافة المستخدم.")
+                except Exception as create_error:
+                    safe_print(f"ERROR: [UserEditorDialog] فشل إنشاء المستخدم: {create_error}")
+                    QMessageBox.critical(self, "خطأ", f"فشل في إضافة المستخدم: {create_error}")
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حفظ المستخدم:\n{str(e)}")

@@ -27,6 +27,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QTableWidget,
+    QTableWidgetItem,  # ⚡ إضافة QTableWidgetItem
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -131,12 +132,24 @@ class SettingsTab(QWidget):
         apply_rtl_alignment_to_all_fields(self)
 
     def _on_sub_tab_changed(self, index):
-        """معالج تغيير التاب الفرعي"""
+        """معالج تغيير التاب الفرعي - محسّن لتجنب التحميل المتكرر"""
         tab_text = self.tabs.tabText(index)
         safe_print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
 
+        # ⚡ تحميل البيانات فقط إذا كان الجدول فارغاً (لتجنب التحميل المتكرر)
         if "المستخدمين" in tab_text:
-            self.load_users()
+            if self.users_table.rowCount() == 0:
+                self.load_users()
+        elif "بيانات الشركة" in tab_text:
+            # تحميل بيانات الشركة فقط إذا كانت الحقول فارغة
+            if not self.company_name_input.text():
+                self.load_settings_data()
+        elif "العملات" in tab_text:
+            if self.currencies_table.rowCount() == 0:
+                self.load_currencies()
+        elif "الحسابات الافتراضية" in tab_text:
+            if self.default_treasury_combo.count() == 0:
+                self.load_default_accounts()
 
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
@@ -227,14 +240,23 @@ class SettingsTab(QWidget):
         fields_layout.addWidget(name_lbl, 0, 0)
         fields_layout.addWidget(self.company_name_input, 1, 0)
 
+        # الشعار (Tagline)
+        tagline_lbl = QLabel("✨ الشعار")
+        tagline_lbl.setStyleSheet(label_style)
+        self.company_tagline_input = QLineEdit()
+        self.company_tagline_input.setPlaceholderText("وكالة تسويق رقمي متكاملة")
+        self.company_tagline_input.setStyleSheet(input_style)
+        fields_layout.addWidget(tagline_lbl, 0, 1)
+        fields_layout.addWidget(self.company_tagline_input, 1, 1)
+
         # العنوان
         addr_lbl = QLabel("📍 العنوان")
         addr_lbl.setStyleSheet(label_style)
         self.company_address_input = QLineEdit()
         self.company_address_input.setPlaceholderText("العنوان الكامل...")
         self.company_address_input.setStyleSheet(input_style)
-        fields_layout.addWidget(addr_lbl, 0, 1)
-        fields_layout.addWidget(self.company_address_input, 1, 1)
+        fields_layout.addWidget(addr_lbl, 2, 0)
+        fields_layout.addWidget(self.company_address_input, 3, 0)
 
         # الهاتف
         phone_lbl = QLabel("📱 رقم الهاتف")
@@ -242,8 +264,8 @@ class SettingsTab(QWidget):
         self.company_phone_input = QLineEdit()
         self.company_phone_input.setPlaceholderText("+20 10 123 4567")
         self.company_phone_input.setStyleSheet(input_style)
-        fields_layout.addWidget(phone_lbl, 2, 0)
-        fields_layout.addWidget(self.company_phone_input, 3, 0)
+        fields_layout.addWidget(phone_lbl, 2, 1)
+        fields_layout.addWidget(self.company_phone_input, 3, 1)
 
         # البريد
         email_lbl = QLabel("📧 البريد الإلكتروني")
@@ -251,8 +273,8 @@ class SettingsTab(QWidget):
         self.company_email_input = QLineEdit()
         self.company_email_input.setPlaceholderText("info@company.com")
         self.company_email_input.setStyleSheet(input_style)
-        fields_layout.addWidget(email_lbl, 2, 1)
-        fields_layout.addWidget(self.company_email_input, 3, 1)
+        fields_layout.addWidget(email_lbl, 4, 0)
+        fields_layout.addWidget(self.company_email_input, 5, 0)
 
         # الموقع
         web_lbl = QLabel("🌐 موقع الشركة")
@@ -260,8 +282,8 @@ class SettingsTab(QWidget):
         self.company_website_input = QLineEdit()
         self.company_website_input.setPlaceholderText("www.company.com")
         self.company_website_input.setStyleSheet(input_style)
-        fields_layout.addWidget(web_lbl, 4, 0)
-        fields_layout.addWidget(self.company_website_input, 5, 0)
+        fields_layout.addWidget(web_lbl, 4, 1)
+        fields_layout.addWidget(self.company_website_input, 5, 1)
 
         # الرقم الضريبي
         vat_lbl = QLabel("🔢 الرقم الضريبي")
@@ -269,8 +291,8 @@ class SettingsTab(QWidget):
         self.company_vat_input = QLineEdit()
         self.company_vat_input.setPlaceholderText("أدخل الرقم الضريبي")
         self.company_vat_input.setStyleSheet(input_style)
-        fields_layout.addWidget(vat_lbl, 4, 1)
-        fields_layout.addWidget(self.company_vat_input, 5, 1)
+        fields_layout.addWidget(vat_lbl, 6, 0)
+        fields_layout.addWidget(self.company_vat_input, 7, 0)
 
         fields_container.addLayout(fields_layout)
 
@@ -526,7 +548,8 @@ class SettingsTab(QWidget):
         fix_table_rtl(self.currencies_table)
         layout.addWidget(self.currencies_table)
 
-        self.load_currencies()
+        # ⚡ لا نحمل البيانات هنا - سيتم التحميل عند فتح التاب
+        # self.load_currencies()
 
     def setup_users_tab(self):
         """إعداد تاب إدارة المستخدمين"""
@@ -726,7 +749,9 @@ class SettingsTab(QWidget):
         safe_print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
         try:
             settings = self.settings_service.get_settings()
+            
             self.company_name_input.setText(settings.get("company_name", ""))
+            self.company_tagline_input.setText(settings.get("company_tagline", ""))
             self.company_address_input.setText(settings.get("company_address", ""))
             self.company_phone_input.setText(settings.get("company_phone", ""))
             self.company_email_input.setText(settings.get("company_email", ""))
@@ -766,8 +791,12 @@ class SettingsTab(QWidget):
                     self.logo_preview.setProperty("logo_path", logo_path)
             else:
                 self.logo_preview.setText("📷\nلا يوجد شعار")
+            
+            safe_print("INFO: [SettingsTab] ✅ تم تحميل الإعدادات")
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
+            import traceback
+            traceback.print_exc()
 
     def save_settings(self):
         safe_print("INFO: [SettingsTab] جاري حفظ الإعدادات...")
@@ -780,6 +809,7 @@ class SettingsTab(QWidget):
 
             new_settings = {
                 "company_name": self.company_name_input.text(),
+                "company_tagline": self.company_tagline_input.text(),
                 "company_address": self.company_address_input.text(),
                 "company_phone": self.company_phone_input.text(),
                 "company_email": self.company_email_input.text(),
@@ -808,51 +838,53 @@ class SettingsTab(QWidget):
             QMessageBox.critical(self, "خطأ", f"فشل حفظ الإعدادات: {e}")
 
     def load_currencies(self):
-        """تحميل العملات من قاعدة البيانات"""
+        """تحميل العملات من قاعدة البيانات - محسّن"""
+        # ⚡ تعطيل التحديثات للسرعة
+        self.currencies_table.setUpdatesEnabled(False)
         self.currencies_table.setRowCount(0)
 
-        currencies = []
-        if self.repository:
-            # جلب العملات من قاعدة البيانات
-            currencies = self.repository.get_all_currencies()
-
-            # إذا لم توجد عملات، إنشاء العملات الافتراضية
-            if not currencies:
-                self.repository.init_default_currencies()
+        try:
+            currencies = []
+            if self.repository:
                 currencies = self.repository.get_all_currencies()
+                if not currencies:
+                    self.repository.init_default_currencies()
+                    currencies = self.repository.get_all_currencies()
 
-        # إذا لم يكن هناك repository أو فشل الجلب، استخدم القيم الافتراضية
-        if not currencies:
-            currencies = self._get_default_currencies()
+            if not currencies:
+                currencies = self._get_default_currencies()
 
-        # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
-        self.currencies_table.setRowCount(len(currencies))
+            # ⚡ تعيين عدد الصفوف مرة واحدة
+            self.currencies_table.setRowCount(len(currencies))
 
-        for i, curr in enumerate(currencies):
-            code = curr.get('code', '')
-            name = curr.get('name', '')
-            symbol = curr.get('symbol', '')
-            rate = curr.get('rate', 1.0)
-            is_base = curr.get('is_base', False)
-            active = curr.get('active', True)
+            for i, curr in enumerate(currencies):
+                code = curr.get('code', '')
+                name = curr.get('name', '')
+                symbol = curr.get('symbol', '')
+                rate = curr.get('rate', 1.0)
+                is_base = curr.get('is_base', False)
+                active = curr.get('active', True)
 
-            self.currencies_table.setItem(i, 0, create_centered_item(str(i + 1)))
-            self.currencies_table.setItem(i, 1, create_centered_item(code))
+                self.currencies_table.setItem(i, 0, create_centered_item(str(i + 1)))
+                self.currencies_table.setItem(i, 1, create_centered_item(code))
 
-            name_display = name
-            if is_base:
-                name_display += " ⭐"
-            self.currencies_table.setItem(i, 2, create_centered_item(name_display))
+                name_display = name
+                if is_base:
+                    name_display += " ⭐"
+                self.currencies_table.setItem(i, 2, create_centered_item(name_display))
 
-            self.currencies_table.setItem(i, 3, create_centered_item(symbol))
+                self.currencies_table.setItem(i, 3, create_centered_item(symbol))
 
-            rate_display = f"{rate:.2f}"
-            if is_base:
-                rate_display += " (أساسية)"
-            self.currencies_table.setItem(i, 4, create_centered_item(rate_display))
+                rate_display = f"{rate:.2f}"
+                if is_base:
+                    rate_display += " (أساسية)"
+                self.currencies_table.setItem(i, 4, create_centered_item(rate_display))
 
-            status = "✅ نشط" if active else "❌ غير نشط"
-            self.currencies_table.setItem(i, 5, create_centered_item(status))
+                status = "✅ نشط" if active else "❌ غير نشط"
+                self.currencies_table.setItem(i, 5, create_centered_item(status))
+        finally:
+            # ⚡ إعادة تفعيل التحديثات
+            self.currencies_table.setUpdatesEnabled(True)
 
     def add_currency(self):
         """إضافة عملة جديدة"""
@@ -1235,33 +1267,48 @@ class SettingsTab(QWidget):
                     QMessageBox.critical(self, "خطأ", f"فشل استرجاع النسخة الاحتياطية:\n{e}")
 
     def load_db_stats(self):
-        """تحميل إحصائيات قاعدة البيانات الحقيقية"""
+        """تحميل إحصائيات قاعدة البيانات - محسّن بدون تحميل كل البيانات"""
         try:
             if self.repository:
-                # جلب الإحصائيات الحقيقية من قاعدة البيانات
-                clients_count = len(self.repository.get_all_clients())
-                services_count = len(self.repository.get_all_services())
-                invoices_count = len(self.repository.get_all_invoices())
-                expenses_count = len(self.repository.get_all_expenses())
-                accounts_count = len(self.repository.get_all_accounts())
-                currencies_count = len(self.repository.get_all_currencies())
-                journal_count = len(self.repository.get_all_journal_entries())
-
-                # محاولة جلب المشاريع
+                # ⚡ استخدام COUNT بدلاً من جلب كل البيانات
                 try:
-                    projects_count = len(self.repository.get_all_projects())
-                except (AttributeError, TypeError) as e:
-                    safe_print(f"WARNING: فشل جلب عدد المشاريع: {e}")
-                    projects_count = 0
+                    cursor = self.repository.sqlite_cursor
+                    
+                    cursor.execute("SELECT COUNT(*) FROM clients")
+                    clients_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM services")
+                    services_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM invoices")
+                    invoices_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM expenses")
+                    expenses_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM accounts")
+                    accounts_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM currencies")
+                    currencies_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM journal_entries")
+                    journal_count = cursor.fetchone()[0]
+                    
+                    try:
+                        cursor.execute("SELECT COUNT(*) FROM projects")
+                        projects_count = cursor.fetchone()[0]
+                    except:
+                        projects_count = 0
 
-                total = (clients_count + services_count + invoices_count +
-                        expenses_count + accounts_count + currencies_count +
-                        journal_count + projects_count)
+                    total = (clients_count + services_count + invoices_count +
+                            expenses_count + accounts_count + currencies_count +
+                            journal_count + projects_count)
 
-                # حالة الاتصال
-                connection_status = "✅ متصل" if self.repository.online else "⚠️ غير متصل"
+                    # حالة الاتصال
+                    connection_status = "✅ متصل" if self.repository.online else "⚠️ غير متصل"
 
-                stats_text = f"""
+                    stats_text = f"""
 📊 إحصائيات قاعدة البيانات:
 
 • العملاء: {clients_count} سجل
@@ -1276,7 +1323,10 @@ class SettingsTab(QWidget):
 📁 إجمالي السجلات: {total}
 
 🔄 حالة الاتصال بالأونلاين: {connection_status}
-                """
+                    """
+                except Exception as e:
+                    safe_print(f"ERROR: فشل جلب الإحصائيات: {e}")
+                    stats_text = f"❌ خطأ في جلب الإحصائيات: {e}"
             else:
                 stats_text = """
 📊 إحصائيات قاعدة البيانات:
@@ -1374,8 +1424,8 @@ class SettingsTab(QWidget):
 
         layout.addStretch()
 
-        # تحميل الحسابات
-        self.load_default_accounts()
+        # ⚡ لا نحمل البيانات هنا - سيتم التحميل عند فتح التاب
+        # self.load_default_accounts()
 
     def load_default_accounts(self):
         """تحميل الحسابات من قاعدة البيانات وملء القوائم المنسدلة"""
@@ -1470,32 +1520,35 @@ class SettingsTab(QWidget):
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
 
     def load_users(self):
-        """تحميل المستخدمين من قاعدة البيانات"""
-        safe_print("=" * 50)
-        safe_print("INFO: [SettingsTab] ========== جاري تحميل المستخدمين ==========")
-        safe_print(f"INFO: [SettingsTab] repository موجود: {self.repository is not None}")
-        self.users_table.setRowCount(0)
-
+        """تحميل المستخدمين من قاعدة البيانات - محسّن لتجنب التجميد"""
+        safe_print("INFO: [SettingsTab] بدء تحميل المستخدمين")
+        
         if not self.repository:
             safe_print("WARNING: [SettingsTab] لا يوجد repository!")
             return
-
+        
         try:
-            # جلب المستخدمين من قاعدة البيانات
-            safe_print("INFO: [SettingsTab] جاري استدعاء get_all_users...")
+            # ⚡ تعطيل التحديثات أثناء الملء (أسرع بكثير!)
+            self.users_table.setUpdatesEnabled(False)
+            self.users_table.setRowCount(0)
+            
+            # ⚡ جلب المستخدمين من قاعدة البيانات (بدون انتظار MongoDB)
             users = self.repository.get_all_users()
-            safe_print(f"INFO: [SettingsTab] ✅ تم جلب {len(users)} مستخدم")
-
-            # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
+            safe_print(f"INFO: [SettingsTab] تم جلب {len(users)} مستخدم")
+            
+            if len(users) == 0:
+                safe_print("WARNING: [SettingsTab] لا يوجد مستخدمين")
+                return
+            
+            # ⚡ تعيين عدد الصفوف مرة واحدة
             self.users_table.setRowCount(len(users))
-
+            
             for i, user in enumerate(users):
                 # العمود 0: الرقم التسلسلي
                 self.users_table.setItem(i, 0, create_centered_item(str(i + 1)))
 
                 # العمود 1: اسم المستخدم (نخزن الـ ID هنا)
                 username_item = create_centered_item(user.username)
-                # CRITICAL: تخزين الـ ID الحقيقي
                 user_id = user.id if user.id else (user.mongo_id if hasattr(user, 'mongo_id') else None)
                 username_item.setData(Qt.ItemDataRole.UserRole, user_id)
                 self.users_table.setItem(i, 1, username_item)
@@ -1507,7 +1560,6 @@ class SettingsTab(QWidget):
                 self.users_table.setItem(i, 3, create_centered_item(user.email or ""))
 
                 # العمود 4: الدور
-                # التعامل مع الدور سواء كان enum أو string
                 if hasattr(user.role, 'value'):
                     role_value = user.role.value
                 else:
@@ -1519,7 +1571,6 @@ class SettingsTab(QWidget):
                 }
                 role_display = role_display_map.get(role_value.lower(), role_value)
                 self.users_table.setItem(i, 4, create_centered_item(role_display))
-                safe_print(f"INFO: [SettingsTab] تم إضافة مستخدم: {user.username} - {role_display}")
 
                 # العمود 5: الحالة
                 status = "✅ نشط" if user.is_active else "❌ غير نشط"
@@ -1528,17 +1579,17 @@ class SettingsTab(QWidget):
                 # العمود 6: تاريخ الإنشاء
                 created_date = user.created_at[:10] if user.created_at else ""
                 self.users_table.setItem(i, 6, create_centered_item(created_date))
-
-            # تحديث الجدول
-            self.users_table.viewport().update()
-            safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {self.users_table.rowCount()} صف في الجدول")
-            safe_print("=" * 50)
-
+            
+            safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {len(users)} مستخدم")
+            
         except Exception as e:
-            safe_print(f"ERROR: فشل تحميل المستخدمين: {e}")
+            safe_print(f"ERROR: [SettingsTab] فشل تحميل المستخدمين: {e}")
             import traceback
             traceback.print_exc()
-            QMessageBox.warning(self, "خطأ", f"فشل تحميل المستخدمين: {e}")
+        finally:
+            # ⚡ إعادة تفعيل التحديثات
+            self.users_table.setUpdatesEnabled(True)
+            self.users_table.viewport().update()
 
     def add_user(self):
         """إضافة مستخدم جديد"""

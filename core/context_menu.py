@@ -39,15 +39,23 @@ class RightClickBlocker(QObject):
         self.table = table
 
     def eventFilter(self, obj, event):
-        if self.table and obj == self.table.viewport():
-            if event.type() == QEvent.Type.MouseButtonPress:
-                if event.button() == Qt.MouseButton.RightButton:
-                    RightClickBlocker.is_right_clicking = True
-            elif event.type() == QEvent.Type.MouseButtonRelease:
-                if event.button() == Qt.MouseButton.RightButton:
-                    # تأخير إعادة التعيين
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(200, self._reset_flag)
+        # ⚡ التحقق من وجود الـ table قبل الوصول له
+        try:
+            if self.table and not self.table.isVisible():
+                return False
+                
+            if self.table and obj == self.table.viewport():
+                if event.type() == QEvent.Type.MouseButtonPress:
+                    if event.button() == Qt.MouseButton.RightButton:
+                        RightClickBlocker.is_right_clicking = True
+                elif event.type() == QEvent.Type.MouseButtonRelease:
+                    if event.button() == Qt.MouseButton.RightButton:
+                        # تأخير إعادة التعيين
+                        from PyQt6.QtCore import QTimer
+                        QTimer.singleShot(200, self._reset_flag)
+        except RuntimeError:
+            # الـ table تم حذفه - تجاهل الخطأ
+            return False
         return False
 
     @staticmethod

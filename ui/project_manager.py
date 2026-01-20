@@ -191,15 +191,15 @@ class ProjectEditorDialog(QDialog):
         screen = QApplication.primaryScreen()
         if screen:
             screen_geo = screen.availableGeometry()
-            # فتح بنسبة 90% من حجم الشاشة
-            width = int(screen_geo.width() * 0.9)
-            height = int(screen_geo.height() * 0.9)
+            # ⚡ فتح بنسبة 95% من حجم الشاشة لإظهار كل المحتوى بدون scroll
+            width = int(screen_geo.width() * 0.95)
+            height = int(screen_geo.height() * 0.95)
             x = (screen_geo.width() - width) // 2
             y = (screen_geo.height() - height) // 2
             self.setGeometry(x, y, width, height)
 
-        self.setMinimumWidth(900)
-        self.setMinimumHeight(600)
+        self.setMinimumWidth(1100)  # ⚡ زيادة العرض الأدنى
+        self.setMinimumHeight(750)  # ⚡ زيادة الارتفاع الأدنى
 
         # 📱 سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
@@ -289,8 +289,8 @@ class ProjectEditorDialog(QDialog):
 
     def init_ui(self):
         main_layout = QVBoxLayout()
-        main_layout.setSpacing(6)
-        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)  # ⚡ زيادة المسافات قليلاً
+        main_layout.setContentsMargins(10, 10, 10, 10)  # ⚡ زيادة الهوامش
 
         # === التخطيط الأفقي الرئيسي: اليسار واليمين ===
         main_horizontal_layout = QHBoxLayout()
@@ -429,8 +429,8 @@ class ProjectEditorDialog(QDialog):
         # ستايل الجدول
         self.items_table.setStyleSheet(TABLE_STYLE_DARK)
 
-        self.items_table.setMinimumHeight(140)
-        self.items_table.verticalHeader().setDefaultSectionSize(28)  # ارتفاع الصفوف أصغر
+        self.items_table.setMinimumHeight(180)  # ⚡ زيادة ارتفاع الجدول
+        self.items_table.verticalHeader().setDefaultSectionSize(30)  # ⚡ ارتفاع الصفوف أكبر قليلاً
         self.items_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.items_table.verticalHeader().setVisible(True)
         self.items_table.setShowGrid(True)
@@ -544,7 +544,7 @@ class ProjectEditorDialog(QDialog):
                 border: 1px solid #0A6CF1;
             }
         """)
-        self.notes_input.setMinimumHeight(140)
+        self.notes_input.setMinimumHeight(180)  # ⚡ زيادة ارتفاع حقل الملاحظات
 
         # تعيين القالب الافتراضي للمشاريع الجديدة
         if not self.is_editing:
@@ -1920,6 +1920,12 @@ class ProjectManagerTab(QWidget):
             payments = self.project_service.get_payments_for_project(project_name)
             expenses = self.project_service.get_expenses_for_project(project_name)
 
+            # 🔍 Debug: طباعة عدد الدفعات
+            safe_print(f"DEBUG: [ProjectManager] تم جلب {len(payments) if payments else 0} دفعة للمشروع {project_name}")
+            if payments:
+                for i, pay in enumerate(payments):
+                    safe_print(f"  - دفعة {i+1}: {pay.amount:,.2f} ج.م في {pay.date} (حساب: {pay.account_id})")
+
             # جلب المهام
             tasks = []
             try:
@@ -1948,7 +1954,9 @@ class ProjectManagerTab(QWidget):
             self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
 
             # تحديث الجداول
-            self._populate_payments_table(data.get('payments', []))
+            payments_data = data.get('payments', [])
+            safe_print(f"DEBUG: [ProjectManager] جاري عرض {len(payments_data) if payments_data else 0} دفعة في الجدول")
+            self._populate_payments_table(payments_data)
             self._populate_expenses_table(data.get('expenses', []))
             self._populate_tasks_table(data.get('tasks', []))
 
@@ -1960,13 +1968,51 @@ class ProjectManagerTab(QWidget):
         )
 
     def _populate_payments_table(self, payments):
-        """⚡ ملء جدول الدفعات"""
+        """⚡ ملء جدول الدفعات - محسّن مع عرض اسم الحساب"""
         try:
+            safe_print(f"DEBUG: [_populate_payments_table] بدء ملء الجدول بـ {len(payments) if payments else 0} دفعة")
+            safe_print(f"DEBUG: [_populate_payments_table] عدد الأعمدة في الجدول: {self.preview_payments_table.columnCount()}")
+            safe_print(f"DEBUG: [_populate_payments_table] أسماء الأعمدة: {[self.preview_payments_table.horizontalHeaderItem(i).text() for i in range(self.preview_payments_table.columnCount())]}")
+            
+            # ⚡ تعطيل التحديثات أثناء الملء للسرعة
+            self.preview_payments_table.setUpdatesEnabled(False)
+            
+            # ⚡ إزالة كل الـ spans القديمة - يجب إزالتها من الخلية الأصلية فقط!
+            old_row_count = self.preview_payments_table.rowCount()
+            old_col_count = self.preview_payments_table.columnCount()
+            processed_spans = set()
+            
+            safe_print(f"DEBUG: [_populate_payments_table] إزالة الـ spans القديمة...")
+            for row in range(old_row_count):
+                for col in range(old_col_count):
+                    if (row, col) in processed_spans:
+                        continue
+                        
+                    row_span = self.preview_payments_table.rowSpan(row, col)
+                    col_span = self.preview_payments_table.columnSpan(row, col)
+                    
+                    if row_span > 1 or col_span > 1:
+                        safe_print(f"DEBUG: [_populate_payments_table] صف {row}, عمود {col} كان له span: {row_span}×{col_span}")
+                        self.preview_payments_table.setSpan(row, col, 1, 1)
+                        
+                        # نضيف كل الخلايا المتأثرة بالـ span للقائمة
+                        for r in range(row, row + row_span):
+                            for c in range(col, col + col_span):
+                                processed_spans.add((r, c))
+            
+            # ⚡ مسح الجدول
+            self.preview_payments_table.clearContents()
+            self.preview_payments_table.setRowCount(0)
+            safe_print(f"DEBUG: [_populate_payments_table] تم مسح الجدول")
+            
             if payments and len(payments) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_payments_table.setRowCount(len(payments))
+                safe_print(f"DEBUG: [_populate_payments_table] تم تعيين {len(payments)} صف")
 
                 for i, pay in enumerate(payments):
+                    safe_print(f"DEBUG: [_populate_payments_table] دفعة {i+1}: amount={pay.amount}, date={pay.date}, account={pay.account_id}")
+                    
                     # معالجة التاريخ بأمان
                     try:
                         if hasattr(pay.date, 'strftime'):
@@ -1976,27 +2022,109 @@ class ProjectManagerTab(QWidget):
                     except (AttributeError, ValueError, TypeError):
                         date_str = "N/A"
 
-                    # عرض اسم الحساب بدلاً من ID
-                    account_name = str(pay.account_id) if pay.account_id else "نقدي"
+                    # ⚡ عرض اسم الحساب الفعلي بدلاً من الكود
+                    account_name = "نقدي"
+                    if pay.account_id:
+                        try:
+                            account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+                            if account:
+                                account_name = account.name
+                                safe_print(f"DEBUG: [_populate_payments_table] اسم الحساب: {account_name}")
+                            else:
+                                account_name = str(pay.account_id)
+                                safe_print(f"DEBUG: [_populate_payments_table] لم يتم العثور على الحساب، استخدام الكود: {account_name}")
+                        except Exception as e:
+                            account_name = str(pay.account_id)
+                            safe_print(f"DEBUG: [_populate_payments_table] خطأ في جلب الحساب: {e}")
 
                     # ترتيب الأعمدة: [الحساب, المبلغ, التاريخ]
-                    self.preview_payments_table.setItem(i, 0, QTableWidgetItem(account_name))
-                    self.preview_payments_table.setItem(i, 1, QTableWidgetItem(f"{pay.amount:,.2f}"))
-                    self.preview_payments_table.setItem(i, 2, QTableWidgetItem(date_str))
+                    account_item = QTableWidgetItem(account_name)
+                    account_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    account_item.setFont(get_cairo_font(9))  # ⚡ تصغير الخط من 11 إلى 9
+                    self.preview_payments_table.setItem(i, 0, account_item)
+                    safe_print(f"DEBUG: [_populate_payments_table] عمود 0 (الحساب): {account_name}")
+                    
+                    amount_item = QTableWidgetItem(f"{pay.amount:,.2f} ج.م")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(QColor("#10b981"))
+                    amount_item.setFont(get_cairo_font(9, bold=True))  # ⚡ تصغير الخط من 11 إلى 9
+                    self.preview_payments_table.setItem(i, 1, amount_item)
+                    safe_print(f"DEBUG: [_populate_payments_table] عمود 1 (المبلغ): {pay.amount:,.2f} ج.م")
+                    
+                    date_item = QTableWidgetItem(date_str)
+                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    date_item.setFont(get_cairo_font(9))  # ⚡ تصغير الخط من 10 إلى 9
+                    self.preview_payments_table.setItem(i, 2, date_item)
+                    safe_print(f"DEBUG: [_populate_payments_table] عمود 2 (التاريخ): {date_str}")
+                
+                # ⚡ التحقق من البيانات بعد الملء
+                safe_print(f"\nDEBUG: [_populate_payments_table] التحقق من البيانات بعد الملء:")
+                for row in range(min(3, self.preview_payments_table.rowCount())):  # أول 3 صفوف فقط
+                    safe_print(f"  صف {row}:")
+                    for col in range(self.preview_payments_table.columnCount()):
+                        item = self.preview_payments_table.item(row, col)
+                        span = (self.preview_payments_table.rowSpan(row, col), self.preview_payments_table.columnSpan(row, col))
+                        if item:
+                            safe_print(f"    عمود {col}: '{item.text()}' | span: {span}")
+                        else:
+                            safe_print(f"    عمود {col}: فارغ | span: {span}")
+                    
+                safe_print(f"SUCCESS: [_populate_payments_table] تم عرض {len(payments)} دفعة في الجدول")
             else:
                 # إضافة صف يوضح عدم وجود دفعات
                 self.preview_payments_table.setRowCount(1)
                 no_data_item = QTableWidgetItem("لا توجد دفعات مسجلة")
-                no_data_item.setForeground(QColor("gray"))
+                no_data_item.setForeground(QColor("#6B7280"))
+                no_data_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                no_data_item.setFont(get_cairo_font(11))
                 self.preview_payments_table.setItem(0, 0, no_data_item)
                 self.preview_payments_table.setSpan(0, 0, 1, 3)
+                safe_print("DEBUG: [_populate_payments_table] لا توجد دفعات لعرضها")
 
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول الدفعات: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # ⚡ إعادة تفعيل التحديثات
+            self.preview_payments_table.setUpdatesEnabled(True)
 
     def _populate_expenses_table(self, expenses):
-        """⚡ ملء جدول المصروفات"""
+        """⚡ ملء جدول المصروفات - محسّن"""
         try:
+            # ⚡ تعطيل التحديثات أثناء الملء للسرعة
+            self.preview_expenses_table.setUpdatesEnabled(False)
+            
+            # ⚡ إزالة كل الـ spans القديمة - يجب إزالتها من الخلية الأصلية فقط!
+            old_row_count = self.preview_expenses_table.rowCount()
+            old_col_count = self.preview_expenses_table.columnCount()
+            safe_print(f"DEBUG: [_populate_expenses_table] الجدول القديم: {old_row_count} صف × {old_col_count} عمود")
+            
+            # نتتبع الخلايا اللي تم معالجتها عشان منكررش
+            processed_spans = set()
+            
+            for row in range(old_row_count):
+                for col in range(old_col_count):
+                    if (row, col) in processed_spans:
+                        continue
+                        
+                    row_span = self.preview_expenses_table.rowSpan(row, col)
+                    col_span = self.preview_expenses_table.columnSpan(row, col)
+                    
+                    if row_span > 1 or col_span > 1:
+                        safe_print(f"DEBUG: [_populate_expenses_table] إزالة span من صف {row}, عمود {col}: {row_span}×{col_span}")
+                        self.preview_expenses_table.setSpan(row, col, 1, 1)
+                        
+                        # نضيف كل الخلايا المتأثرة بالـ span للقائمة
+                        for r in range(row, row + row_span):
+                            for c in range(col, col + col_span):
+                                processed_spans.add((r, c))
+            
+            # ⚡ مسح الجدول بالكامل
+            self.preview_expenses_table.setRowCount(0)
+            self.preview_expenses_table.clearContents()
+            safe_print(f"DEBUG: [_populate_expenses_table] تم مسح الجدول")
+            
             if expenses and len(expenses) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_expenses_table.setRowCount(len(expenses))
@@ -2012,23 +2140,79 @@ class ProjectManagerTab(QWidget):
                         date_str = "N/A"
 
                     # ترتيب الأعمدة: [المبلغ, الوصف, التاريخ]
-                    self.preview_expenses_table.setItem(i, 0, QTableWidgetItem(f"{exp.amount:,.2f}"))
-                    self.preview_expenses_table.setItem(i, 1, QTableWidgetItem(exp.description or exp.category))
-                    self.preview_expenses_table.setItem(i, 2, QTableWidgetItem(date_str))
+                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(QColor("#ef4444"))
+                    amount_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
+                    self.preview_expenses_table.setItem(i, 0, amount_item)
+                    
+                    desc_item = QTableWidgetItem(exp.description or exp.category or "-")
+                    desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    desc_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
+                    self.preview_expenses_table.setItem(i, 1, desc_item)
+                    
+                    date_item = QTableWidgetItem(date_str)
+                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    date_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
+                    self.preview_expenses_table.setItem(i, 2, date_item)
+                
+                # ⚡ التحقق من البيانات بعد الملء
+                safe_print(f"\nDEBUG: [_populate_expenses_table] التحقق من البيانات بعد الملء:")
+                for row in range(min(3, self.preview_expenses_table.rowCount())):
+                    safe_print(f"  صف {row}:")
+                    for col in range(self.preview_expenses_table.columnCount()):
+                        item = self.preview_expenses_table.item(row, col)
+                        span = (self.preview_expenses_table.rowSpan(row, col), self.preview_expenses_table.columnSpan(row, col))
+                        if item:
+                            safe_print(f"    عمود {col}: '{item.text()}' | span: {span}")
+                        else:
+                            safe_print(f"    عمود {col}: فارغ | span: {span}")
+                safe_print(f"SUCCESS: [_populate_expenses_table] تم عرض {len(expenses)} مصروف في الجدول")
             else:
                 # إضافة صف يوضح عدم وجود مصروفات
                 self.preview_expenses_table.setRowCount(1)
                 no_data_item = QTableWidgetItem("لا توجد مصروفات مسجلة")
                 no_data_item.setForeground(QColor("gray"))
+                no_data_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.preview_expenses_table.setItem(0, 0, no_data_item)
                 self.preview_expenses_table.setSpan(0, 0, 1, 3)
 
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            # ⚡ إعادة تفعيل التحديثات
+            self.preview_expenses_table.setUpdatesEnabled(True)
 
     def _populate_tasks_table(self, tasks):
         """⚡ ملء جدول المهام - محسّن للسرعة"""
         try:
+            # ⚡ إزالة كل الـ spans القديمة - يجب إزالتها من الخلية الأصلية فقط!
+            old_row_count = self.preview_tasks_table.rowCount()
+            old_col_count = self.preview_tasks_table.columnCount()
+            processed_spans = set()
+            
+            for row in range(old_row_count):
+                for col in range(old_col_count):
+                    if (row, col) in processed_spans:
+                        continue
+                        
+                    row_span = self.preview_tasks_table.rowSpan(row, col)
+                    col_span = self.preview_tasks_table.columnSpan(row, col)
+                    
+                    if row_span > 1 or col_span > 1:
+                        self.preview_tasks_table.setSpan(row, col, 1, 1)
+                        
+                        # نضيف كل الخلايا المتأثرة بالـ span للقائمة
+                        for r in range(row, row + row_span):
+                            for c in range(col, col + col_span):
+                                processed_spans.add((r, c))
+            
+            # ⚡ مسح الجدول
+            self.preview_tasks_table.clearContents()
+            self.preview_tasks_table.setRowCount(0)
+            
             if tasks and len(tasks) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_tasks_table.setRowCount(len(tasks))

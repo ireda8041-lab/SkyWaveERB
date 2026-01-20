@@ -225,13 +225,23 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         try:
-            current_status = self.is_online
+            # ⚡ فحص أن MongoDB client لا يزال متاحاً قبل الاستخدام
+            if not self.repo or self.repo.mongo_client is None or self.repo.mongo_db is None:
+                current_status = False
+            else:
+                try:
+                    # محاولة ping للتأكد من أن الاتصال فعال
+                    self.repo.mongo_client.admin.command('ping')
+                    current_status = True
+                except Exception:
+                    current_status = False
 
             # إرسال إشارة عند تغيير الحالة فقط
             if current_status != self._last_online_status:
                 self._last_online_status = current_status
                 try:
-                    self.connection_changed.emit(current_status)
+                    if not self._shutdown:
+                        self.connection_changed.emit(current_status)
                 except RuntimeError:
                     return  # Qt object deleted
 
@@ -265,8 +275,9 @@ class UnifiedSyncManagerV3(QObject):
             except Exception as e:
                 logger.warning(f"⚠️ المزامنة الأولية: {e}")
 
-        thread = threading.Thread(target=sync_thread, daemon=True)
-        thread.start()
+        # استخدام QTimer بدلاً من daemon thread
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, sync_thread)
 
     def _auto_full_sync(self):
         """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
@@ -283,8 +294,9 @@ class UnifiedSyncManagerV3(QObject):
             except Exception as e:
                 logger.debug(f"مزامنة تلقائية: {e}")
 
-        thread = threading.Thread(target=sync_thread, daemon=True)
-        thread.start()
+        # استخدام QTimer بدلاً من daemon thread
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, sync_thread)
 
     def _quick_push_changes(self):
         """⚡ رفع التغييرات المحلية بسرعة"""
@@ -293,24 +305,25 @@ class UnifiedSyncManagerV3(QObject):
 
         try:
             # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
-            cursor = self.repo.sqlite_conn.cursor()
+            cursor = self.repo.get_cursor()
             has_pending = False
 
-            for table in self.TABLES:
-                try:
-                    cursor.execute(f"""
-                        SELECT COUNT(*) FROM {table}
-                        WHERE sync_status != 'synced' OR sync_status IS NULL
-                    """)
-                    count = cursor.fetchone()[0]
-                    if count > 0:
-                        has_pending = True
-                        break
-                except Exception:
-                    # فشل فحص العنصر
-                    pass
-
-            cursor.close()  # ⚡ إغلاق الـ cursor
+            try:
+                for table in self.TABLES:
+                    try:
+                        cursor.execute(f"""
+                            SELECT COUNT(*) FROM {table}
+                            WHERE sync_status != 'synced' OR sync_status IS NULL
+                        """)
+                        count = cursor.fetchone()[0]
+                        if count > 0:
+                            has_pending = True
+                            break
+                    except Exception:
+                        # فشل فحص العنصر
+                        pass
+            finally:
+                cursor.close()  # ⚡ إغلاق الـ cursor
 
             if has_pending:
                 def push_thread():
@@ -323,8 +336,9 @@ class UnifiedSyncManagerV3(QObject):
                     except Exception as e:
                         logger.error(f"❌ فشل رفع التغييرات: {e}")
 
-                thread = threading.Thread(target=push_thread, daemon=True)
-                thread.start()
+                # استخدام QTimer بدلاً من daemon thread
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(100, push_thread)
 
         except Exception as e:
             logger.debug(f"خطأ في فحص التغييرات: {e}")
@@ -338,8 +352,20 @@ class UnifiedSyncManagerV3(QObject):
 
     @property
     def is_online(self) -> bool:
-        """التحقق من الاتصال"""
-        return self.repo.online if self.repo else False
+        """التحقق من الاتصال مع فحص حالة MongoDB client"""
+        if not self.repo:
+            return False
+        
+        # ⚡ فحص أن MongoDB client متاح ولم يُغلق
+        if not self.repo.mongo_client or not self.repo.mongo_db:
+            return False
+            
+        try:
+            # محاولة ping سريعة للتأكد من أن الاتصال فعال
+            self.repo.mongo_client.admin.command('ping')
+            return True
+        except Exception:
+            return False
 
     def _wait_for_connection(self, timeout: int = 10) -> bool:
         """⚡ انتظار اتصال MongoDB مع timeout"""
@@ -470,69 +496,70 @@ class UnifiedSyncManagerV3(QObject):
                 return stats
 
             # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
-            cursor = self.repo.sqlite_conn.cursor()
+            cursor = self.repo.get_cursor()
             conn = self.repo.sqlite_conn
             unique_field = self.UNIQUE_FIELDS.get(table_name, 'name')
 
-            # الحصول على أعمدة الجدول
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            table_columns = {row[1] for row in cursor.fetchall()}
-
-            # جمع كل الـ mongo_ids من السحابة
-            cloud_mongo_ids = set()
-
-            for i, cloud_item in enumerate(cloud_data):
-                self.sync_progress.emit(table_name, i + 1, len(cloud_data))
-
-                mongo_id = str(cloud_item['_id'])
-                cloud_mongo_ids.add(mongo_id)
-                unique_value = cloud_item.get(unique_field)
-
-                # تحضير البيانات
-                item_data = self._prepare_cloud_data(cloud_item)
-                item_data['_mongo_id'] = mongo_id
-                item_data['sync_status'] = 'synced'
-
-                # البحث عن السجل المحلي
-                local_id = self._find_local_record(
-                    cursor, table_name, mongo_id, unique_field, unique_value, table_columns
-                )
-
-                # تصفية الحقول
-                filtered = {k: v for k, v in item_data.items() if k in table_columns}
-
-                # ⚡ تسجيل لو logo_data موجود
-                if table_name == 'clients' and 'logo_data' in item_data and item_data['logo_data']:
-                    if 'logo_data' in filtered:
-                        logger.info(f"📷 [{unique_value}] logo_data سيتم حفظه ({len(filtered['logo_data'])} حرف)")
-                    else:
-                        logger.warning(f"⚠️ [{unique_value}] logo_data تم تجاهله! (غير موجود في أعمدة الجدول)")
-                        logger.warning(f"   أعمدة الجدول: {table_columns}")
-
-                if local_id:
-                    # تحديث السجل الموجود
-                    self._update_record(cursor, table_name, local_id, filtered)
-                    stats['updated'] += 1
-                else:
-                    # إدراج سجل جديد
-                    self._insert_record(cursor, table_name, filtered)
-                    stats['inserted'] += 1
-
-                stats['synced'] += 1
-
-            # حذف السجلات المحلية غير الموجودة في السحابة
-            deleted = self._delete_orphan_records(cursor, table_name, cloud_mongo_ids)
-            stats['deleted'] = deleted
-
-            conn.commit()
-
-            # ⚡ إغلاق الـ cursor
             try:
-                cursor.close()
-            except Exception:
-                pass
+                # الحصول على أعمدة الجدول
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                table_columns = {row[1] for row in cursor.fetchall()}
 
-            logger.info(f"✅ {table_name}: +{stats['inserted']} ~{stats['updated']} -{stats['deleted']}")
+                # جمع كل الـ mongo_ids من السحابة
+                cloud_mongo_ids = set()
+
+                for i, cloud_item in enumerate(cloud_data):
+                    self.sync_progress.emit(table_name, i + 1, len(cloud_data))
+
+                    mongo_id = str(cloud_item['_id'])
+                    cloud_mongo_ids.add(mongo_id)
+                    unique_value = cloud_item.get(unique_field)
+
+                    # تحضير البيانات
+                    item_data = self._prepare_cloud_data(cloud_item)
+                    item_data['_mongo_id'] = mongo_id
+                    item_data['sync_status'] = 'synced'
+
+                    # البحث عن السجل المحلي
+                    local_id = self._find_local_record(
+                        cursor, table_name, mongo_id, unique_field, unique_value, table_columns
+                    )
+
+                    # تصفية الحقول
+                    filtered = {k: v for k, v in item_data.items() if k in table_columns}
+
+                    # ⚡ تسجيل لو logo_data موجود
+                    if table_name == 'clients' and 'logo_data' in item_data and item_data['logo_data']:
+                        if 'logo_data' in filtered:
+                            logger.info(f"📷 [{unique_value}] logo_data سيتم حفظه ({len(filtered['logo_data'])} حرف)")
+                        else:
+                            logger.warning(f"⚠️ [{unique_value}] logo_data تم تجاهله! (غير موجود في أعمدة الجدول)")
+                            logger.warning(f"   أعمدة الجدول: {table_columns}")
+
+                    if local_id:
+                        # تحديث السجل الموجود
+                        self._update_record(cursor, table_name, local_id, filtered)
+                        stats['updated'] += 1
+                    else:
+                        # إدراج سجل جديد
+                        self._insert_record(cursor, table_name, filtered)
+                        stats['inserted'] += 1
+
+                    stats['synced'] += 1
+
+                # حذف السجلات المحلية غير الموجودة في السحابة
+                deleted = self._delete_orphan_records(cursor, table_name, cloud_mongo_ids)
+                stats['deleted'] = deleted
+
+                conn.commit()
+                logger.info(f"✅ {table_name}: +{stats['inserted']} ~{stats['updated']} -{stats['deleted']}")
+
+            finally:
+                # ⚡ إغلاق الـ cursor
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"❌ خطأ في مزامنة {table_name}: {e}")
@@ -779,7 +806,7 @@ class UnifiedSyncManagerV3(QObject):
 
         # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
         try:
-            cursor = self.repo.sqlite_conn.cursor()
+            cursor = self.repo.get_cursor()
         except Exception as e:
             logger.debug(f"فشل إنشاء cursor: {e}")
             return
@@ -813,87 +840,89 @@ class UnifiedSyncManagerV3(QObject):
 
         pushed = 0
 
-        for row in unsynced:
-            row_dict = dict(row)
-            local_id = row_dict.get('id')
-            mongo_id = row_dict.get('_mongo_id')
-            unique_value = row_dict.get(unique_field)
+        try:
+            for row in unsynced:
+                row_dict = dict(row)
+                local_id = row_dict.get('id')
+                mongo_id = row_dict.get('_mongo_id')
+                unique_value = row_dict.get(unique_field)
 
-            # تحضير البيانات للسحابة
-            cloud_data = self._prepare_data_for_cloud(row_dict)
+                # تحضير البيانات للسحابة
+                cloud_data = self._prepare_data_for_cloud(row_dict)
 
-            try:
-                if mongo_id:
-                    # تحديث سجل موجود
-                    from bson import ObjectId
-                    collection.update_one(
-                        {'_id': ObjectId(mongo_id)},
-                        {'$set': cloud_data}
-                    )
-                else:
-                    # ⚡ فحص التكرار قبل الإدراج - معالجة خاصة للدفعات
-                    existing = None
-
-                    if table_name == 'payments':
-                        # البحث بـ (project_id + date + amount)
-                        project_id = row_dict.get('project_id')
-                        date = row_dict.get('date', '')
-                        amount = row_dict.get('amount', 0)
-                        date_short = str(date)[:10] if date else ''
-
-                        if project_id and amount:
-                            existing = collection.find_one({
-                                'project_id': project_id,
-                                'amount': amount,
-                                'date': {'$regex': f'^{date_short}'}
-                            })
-                    elif unique_value:
-                        existing = collection.find_one({unique_field: unique_value})
-
-                    if existing:
-                        # ربط بالسجل الموجود
-                        mongo_id = str(existing['_id'])
+                try:
+                    if mongo_id:
+                        # تحديث سجل موجود
+                        from bson import ObjectId
                         collection.update_one(
-                            {'_id': existing['_id']},
+                            {'_id': ObjectId(mongo_id)},
                             {'$set': cloud_data}
                         )
                     else:
-                        # إدراج جديد
-                        result = collection.insert_one(cloud_data)
-                        mongo_id = str(result.inserted_id)
+                        # ⚡ فحص التكرار قبل الإدراج - معالجة خاصة للدفعات
+                        existing = None
 
-                # تحديث السجل المحلي
-                cursor.execute(
-                    f"UPDATE {table_name} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
-                    (mongo_id, local_id)
-                )
-                pushed += 1
+                        if table_name == 'payments':
+                            # البحث بـ (project_id + date + amount)
+                            project_id = row_dict.get('project_id')
+                            date = row_dict.get('date', '')
+                            amount = row_dict.get('amount', 0)
+                            date_short = str(date)[:10] if date else ''
 
-            except Exception as e:
-                # ⚡ تجاهل أخطاء التكرار
-                if 'duplicate key' in str(e).lower() or 'E11000' in str(e):
-                    logger.debug(f"تجاهل سجل مكرر في {table_name}: {e}")
-                    # تحديث حالة المزامنة على أي حال
+                            if project_id and amount:
+                                existing = collection.find_one({
+                                    'project_id': project_id,
+                                    'amount': amount,
+                                    'date': {'$regex': f'^{date_short}'}
+                                })
+                        elif unique_value:
+                            existing = collection.find_one({unique_field: unique_value})
+
+                        if existing:
+                            # ربط بالسجل الموجود
+                            mongo_id = str(existing['_id'])
+                            collection.update_one(
+                                {'_id': existing['_id']},
+                                {'$set': cloud_data}
+                            )
+                        else:
+                            # إدراج جديد
+                            result = collection.insert_one(cloud_data)
+                            mongo_id = str(result.inserted_id)
+
+                    # تحديث السجل المحلي
                     cursor.execute(
-                        f"UPDATE {table_name} SET sync_status = 'synced' WHERE id = ?",
-                        (local_id,)
+                        f"UPDATE {table_name} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                        (mongo_id, local_id)
                     )
-                else:
-                    logger.error(f"❌ فشل رفع {table_name}/{local_id}: {e}")
+                    pushed += 1
 
-        try:
-            conn.commit()
-        except Exception:
-            pass
+                except Exception as e:
+                    # ⚡ تجاهل أخطاء التكرار
+                    if 'duplicate key' in str(e).lower() or 'E11000' in str(e):
+                        logger.debug(f"تجاهل سجل مكرر في {table_name}: {e}")
+                        # تحديث حالة المزامنة على أي حال
+                        cursor.execute(
+                            f"UPDATE {table_name} SET sync_status = 'synced' WHERE id = ?",
+                            (local_id,)
+                        )
+                    else:
+                        logger.error(f"❌ فشل رفع {table_name}/{local_id}: {e}")
 
-        # ⚡ إغلاق الـ cursor
-        try:
-            cursor.close()
-        except Exception:
-            pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
 
-        if pushed > 0:
-            logger.info(f"📤 {table_name}: رفع {pushed} سجل")
+            if pushed > 0:
+                logger.info(f"📤 {table_name}: رفع {pushed} سجل")
+
+        finally:
+            # ⚡ إغلاق الـ cursor
+            try:
+                cursor.close()
+            except Exception:
+                pass
 
     def _prepare_data_for_cloud(self, data: dict) -> dict:
         """تحضير البيانات للرفع للسحابة"""
@@ -1266,3 +1295,49 @@ class UnifiedSyncManagerV3(QObject):
 def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
     """إنشاء مدير مزامنة موحد"""
     return UnifiedSyncManagerV3(repository)
+
+    def _check_mongodb_connection(self) -> bool:
+        """فحص شامل لاتصال MongoDB"""
+        try:
+            if not self.is_online:
+                return False
+            
+            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+                logger.warning("MongoDB client أو database غير متوفر")
+                return False
+            
+            # محاولة ping للتأكد من الاتصال
+            self.repo.mongo_client.admin.command('ping', maxTimeMS=5000)
+            
+            # فحص حالة الاتصال
+            server_info = self.repo.mongo_client.server_info()
+            if not server_info:
+                logger.warning("فشل الحصول على معلومات الخادم")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "cannot use mongoclient after close" in error_msg:
+                logger.debug("MongoDB client مغلق")
+            elif "serverselectiontimeout" in error_msg:
+                logger.debug("انتهت مهلة الاتصال بـ MongoDB")
+            elif "network" in error_msg or "connection" in error_msg:
+                logger.debug("مشكلة في الشبكة مع MongoDB")
+            else:
+                logger.warning(f"خطأ في فحص MongoDB: {e}")
+            
+            return False
+    
+    def _safe_mongodb_operation(self, operation_func, *args, **kwargs):
+        """تنفيذ عملية MongoDB بشكل آمن"""
+        try:
+            if not self._check_mongodb_connection():
+                return None
+            
+            return operation_func(*args, **kwargs)
+            
+        except Exception as e:
+            logger.error(f"فشل عملية MongoDB: {e}")
+            return None

@@ -28,11 +28,13 @@ from core.logger import get_logger
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
+
 
 logger = get_logger(__name__)
 
@@ -54,13 +56,14 @@ class SQLiteConnectionPool:
         return cls._instance
 
     def __init__(self, db_path: str | None = None, pool_size: int = 5):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
 
         # ⚡ استخدام المسار الصحيح من Config
         if db_path is None:
             from core.config import Config
+
             db_path = Config.get_local_db_path()
 
         self.db_path = db_path
@@ -74,7 +77,7 @@ class SQLiteConnectionPool:
             conn = self._create_connection()
             self._pool.put(conn)
 
-        logger.info(f"⚡ [ConnectionPool] تم إنشاء {pool_size} اتصالات")
+        logger.info("⚡ [ConnectionPool] تم إنشاء %s اتصالات", pool_size)
 
     def _create_connection(self) -> sqlite3.Connection:
         """إنشاء اتصال جديد محسّن"""
@@ -82,7 +85,7 @@ class SQLiteConnectionPool:
             self.db_path,
             check_same_thread=False,
             timeout=30.0,
-            isolation_level=None  # Autocommit
+            isolation_level=None,  # Autocommit
         )
         conn.row_factory = sqlite3.Row
 
@@ -144,7 +147,7 @@ class SmartQueryCache:
         return cls._instance
 
     def __init__(self, max_size: int = 500, default_ttl: int = 60):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
 
@@ -159,7 +162,7 @@ class SmartQueryCache:
         self._hits = 0
         self._misses = 0
 
-        logger.info(f"⚡ [QueryCache] تم إنشاء cache بحجم {max_size}")
+        logger.info("⚡ [QueryCache] تم إنشاء cache بحجم %s", max_size)
 
     def get(self, key: str) -> Any | None:
         """جلب قيمة من الـ cache"""
@@ -211,7 +214,7 @@ class SmartQueryCache:
                 for key in list(self._table_keys[table]):
                     self._remove_key(key)
                 self._table_keys[table].clear()
-                logger.debug(f"⚡ [QueryCache] تم إبطال cache الجدول: {table}")
+                logger.debug("⚡ [QueryCache] تم إبطال cache الجدول: %s", table)
 
     def invalidate_all(self):
         """إبطال كل الـ cache"""
@@ -230,7 +233,7 @@ class SmartQueryCache:
             "max_size": self.max_size,
             "hits": self._hits,
             "misses": self._misses,
-            "hit_rate": f"{hit_rate:.1f}%"
+            "hit_rate": f"{hit_rate:.1f}%",
         }
 
 
@@ -273,7 +276,7 @@ class BatchProcessor:
             try:
                 callback(batch)
             except Exception as e:
-                logger.error(f"⚡ [BatchProcessor] خطأ في callback: {e}")
+                logger.error("⚡ [BatchProcessor] خطأ في callback: %s", e)
 
     def on_flush(self, callback: Callable):
         """إضافة callback عند الـ flush"""
@@ -299,7 +302,7 @@ class MemoryManager:
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
 
@@ -320,7 +323,7 @@ class MemoryManager:
         collected = gc.collect()
 
         if collected > 0:
-            logger.debug(f"⚡ [MemoryManager] تم تنظيف {collected} كائن")
+            logger.debug("⚡ [MemoryManager] تم تنظيف %s كائن", collected)
 
         return collected
 
@@ -330,11 +333,12 @@ class MemoryManager:
         return {
             "gc_objects": len(gc.get_objects()),
             "gc_garbage": len(gc.garbage),
-            "weak_refs": len(self._weak_refs)
+            "weak_refs": len(self._weak_refs),
         }
 
 
 # ==================== Decorators ====================
+
 
 def cached_query(table: str, ttl: int = 60):
     """
@@ -344,6 +348,7 @@ def cached_query(table: str, ttl: int = 60):
     def get_all_projects():
         ...
     """
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -376,6 +381,7 @@ def batch_operation(batch_size: int = 50):
     """
     ⚡ Decorator لتجميع العمليات في دفعات
     """
+
     def decorator(func: Callable) -> Callable:
         processor = BatchProcessor(batch_size=batch_size)
 
@@ -395,6 +401,7 @@ def measure_time(func: Callable) -> Callable:
     """
     ⚡ Decorator لقياس وقت التنفيذ
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         start = time.perf_counter()
@@ -402,7 +409,7 @@ def measure_time(func: Callable) -> Callable:
         elapsed = time.perf_counter() - start
 
         if elapsed > 0.5:  # تحذير إذا أكثر من 500ms
-            logger.warning(f"⚠️ [Performance] {func.__name__} استغرق {elapsed:.2f}s")
+            logger.warning("⚠️ [Performance] %s استغرق %.2fs", func.__name__, elapsed)
 
         return result
 
@@ -410,6 +417,7 @@ def measure_time(func: Callable) -> Callable:
 
 
 # ==================== Utility Functions ====================
+
 
 def optimize_sqlite_connection(conn: sqlite3.Connection):
     """تطبيق تحسينات SQLite على اتصال موجود"""
@@ -441,15 +449,16 @@ def print_performance_stats():
     cache = SmartQueryCache()
     memory = MemoryManager()
 
-    safe_print("\n" + "="*60)
+    safe_print("\n" + "=" * 60)
     safe_print("⚡ إحصائيات الأداء - Sky Wave ERP")
-    safe_print("="*60)
+    safe_print("=" * 60)
     safe_print(f"📊 Query Cache: {cache.get_stats()}")
     safe_print(f"💾 Memory: {memory.get_memory_usage()}")
-    safe_print("="*60 + "\n")
+    safe_print("=" * 60 + "\n")
 
 
 # ==================== Main Performance Optimizer Class ====================
+
 
 class PerformanceOptimizer:
     """
@@ -468,7 +477,7 @@ class PerformanceOptimizer:
         return cls._instance
 
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
 
@@ -507,48 +516,49 @@ class PerformanceOptimizer:
             "memory": self.memory_manager.get_memory_usage(),
             "connections": {
                 "active": self.connection_pool._active_connections,
-                "pool_size": self.connection_pool.pool_size
-            }
+                "pool_size": self.connection_pool.pool_size,
+            },
         }
 
     def print_stats(self):
         """طباعة إحصائيات الأداء"""
         stats = self.get_stats()
-        safe_print("\n" + "="*60)
+        safe_print("\n" + "=" * 60)
         safe_print("⚡ إحصائيات محسّن الأداء - Sky Wave ERP")
-        safe_print("="*60)
+        safe_print("=" * 60)
         safe_print(f"📊 Query Cache: {stats['cache']}")
         safe_print(f"💾 Memory: {stats['memory']}")
         safe_print(f"🔗 Connections: {stats['connections']}")
-        safe_print("="*60 + "\n")
+        safe_print("=" * 60 + "\n")
 
 
 # ==================== Global Instance ====================
 
 # إنشاء instance عام للاستخدام
-_optimizer = None
+_OPTIMIZER = None
+
 
 def get_performance_optimizer() -> PerformanceOptimizer:
     """الحصول على instance من PerformanceOptimizer"""
-    global _optimizer
-    if _optimizer is None:
-        _optimizer = PerformanceOptimizer()
-    return _optimizer
+    global _OPTIMIZER
+    if _OPTIMIZER is None:
+        _OPTIMIZER = PerformanceOptimizer()
+    return _OPTIMIZER
 
 
 # تصدير الفئات والدوال المهمة
 __all__ = [
-    'PerformanceOptimizer',
-    'SQLiteConnectionPool',
-    'SmartQueryCache',
-    'BatchProcessor',
-    'MemoryManager',
-    'cached_query',
-    'batch_operation',
-    'measure_time',
-    'get_performance_optimizer',
-    'get_query_cache',
-    'get_memory_manager',
-    'invalidate_all_caches',
-    'print_performance_stats'
+    "PerformanceOptimizer",
+    "SQLiteConnectionPool",
+    "SmartQueryCache",
+    "BatchProcessor",
+    "MemoryManager",
+    "cached_query",
+    "batch_operation",
+    "measure_time",
+    "get_performance_optimizer",
+    "get_query_cache",
+    "get_memory_manager",
+    "invalidate_all_caches",
+    "print_performance_stats",
 ]

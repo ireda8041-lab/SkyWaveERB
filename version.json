@@ -1,15 +1,20 @@
 {
-  "version": "1.3.12",
-  "version_name": "Release 1.3.12 - إزالة Smart Scan وتحسينات",
-  "release_date": "2026-01-17",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v1.3.12/SkyWaveERP-Setup-1.3.12.exe",
+  "version": "2.0.0",
+  "version_name": "Sky Wave ERP v2.0.0",
+  "release_date": "2026-01-20",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.0.0/SkyWaveERP-Setup-2.0.0.exe",
   "changelog": [
-    "🔧 إصلاح مشكلة google.generativeai عند التشغيل",
-    "⚡ استيراد آمن للمكتبات الاختيارية",
-    "✅ البرنامج يعمل حتى بدون مكتبة Smart Scan"
+    "🎉 إصدار جديد كامل مع تحسينات شاملة",
+    "⚡ تحسين الأداء والسرعة بشكل كبير",
+    "🔧 إصلاح جميع المشاكل المعروفة",
+    "🎨 واجهة محسّنة وأكثر استقراراً",
+    "🔄 نظام مزامنة محسّن ومستقر",
+    "🔐 تحسينات أمنية",
+    "📊 تقارير محسّنة",
+    "🖨️ نظام طباعة محسّن"
   ],
   "min_version": "1.0.0",
-  "mandatory": true,
-  "notes_ar": "تحسينات وإصلاحات عامة",
-  "notes_en": "General improvements and fixes"
+  "mandatory": false,
+  "notes_ar": "إصدار جديد كامل مع تحسينات شاملة في الأداء والاستقرار. يُنصح بالتحديث للحصول على أفضل تجربة.",
+  "notes_en": "Major new release with comprehensive improvements in performance and stability. Update recommended for the best experience."
 }

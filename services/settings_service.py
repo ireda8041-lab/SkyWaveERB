@@ -7,14 +7,16 @@ from typing import Any
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
 
+
 # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
-_APP_DATA_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+_APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SkyWaveERP")
 os.makedirs(_APP_DATA_DIR, exist_ok=True)
 
 # ملف الإعدادات المحلي في مجلد المشروع
@@ -47,14 +49,24 @@ class SettingsService:
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
 
     def _merge_local_settings(self):
+        """⚡ دمج الإعدادات من الملف المحلي (يحدث القيم الموجودة)"""
         try:
             if os.path.exists(_LOCAL_SETTINGS_FILE):
+                safe_print(f"INFO: [SettingsService] جاري تحميل الإعدادات من {_LOCAL_SETTINGS_FILE}")
                 with open(_LOCAL_SETTINGS_FILE, encoding="utf-8") as f:
                     local_settings = json.load(f)
-                
+
+                # ⚡ تحديث كل القيم من الملف المحلي (له الأولوية)
+                updated_count = 0
                 for key, value in local_settings.items():
-                    if key not in self.settings:
+                    if key not in self.settings or self.settings[key] != value:
                         self.settings[key] = value
+                        updated_count += 1
+                
+                if updated_count > 0:
+                    safe_print(f"INFO: [SettingsService] ✅ تم تحديث {updated_count} إعداد من الملف المحلي")
+                    # حفظ الإعدادات المدمجة
+                    self.save_settings(self.settings)
         except Exception as e:
             safe_print(f"WARNING: [SettingsService] فشل قراءة الملف المحلي: {e}")
 
@@ -68,7 +80,9 @@ class SettingsService:
                         settings[key] = value
                 return dict(settings)
             except Exception as e:
-                safe_print(f"ERROR: [SettingsService] فشل تحميل ملف الإعدادات: {e}. سيتم استخدام الافتراضي.")
+                safe_print(
+                    f"ERROR: [SettingsService] فشل تحميل ملف الإعدادات: {e}. سيتم استخدام الافتراضي."
+                )
                 return dict(self.DEFAULT_SETTINGS)
         else:
             safe_print("INFO: [SettingsService] ملف الإعدادات غير موجود. سيتم إنشاؤه.")
@@ -109,15 +123,15 @@ class SettingsService:
             if not file_path or not os.path.exists(file_path):
                 return False
 
-            with open(file_path, 'rb') as f:
+            with open(file_path, "rb") as f:
                 logo_bytes = f.read()
 
             # تحويل لـ Base64
-            logo_base64 = base64.b64encode(logo_bytes).decode('utf-8')
+            logo_base64 = base64.b64encode(logo_bytes).decode("utf-8")
 
             # حفظ في الإعدادات
-            self.settings['company_logo_data'] = logo_base64
-            self.settings['company_logo_path'] = file_path  # للعرض المحلي
+            self.settings["company_logo_data"] = logo_base64
+            self.settings["company_logo_path"] = file_path  # للعرض المحلي
             self.save_settings(self.settings)
 
             safe_print(f"INFO: [SettingsService] تم حفظ اللوجو ({len(logo_base64)} حرف)")
@@ -137,7 +151,7 @@ class SettingsService:
             from PyQt6.QtGui import QPixmap
 
             # أولاً: محاولة تحميل من Base64 (للمزامنة)
-            logo_data = self.settings.get('company_logo_data', '')
+            logo_data = self.settings.get("company_logo_data", "")
             if logo_data:
                 try:
                     logo_bytes = base64.b64decode(logo_data)
@@ -149,7 +163,7 @@ class SettingsService:
                     safe_print(f"WARNING: [SettingsService] فشل تحميل اللوجو من Base64: {e}")
 
             # ثانياً: محاولة تحميل من المسار المحلي
-            logo_path = self.settings.get('company_logo_path', '')
+            logo_path = self.settings.get("company_logo_path", "")
             if logo_path and os.path.exists(logo_path):
                 pixmap = QPixmap(logo_path)
                 if not pixmap.isNull():
@@ -163,8 +177,8 @@ class SettingsService:
 
     def clear_logo(self):
         """مسح اللوجو"""
-        self.settings['company_logo_data'] = ''
-        self.settings['company_logo_path'] = ''
+        self.settings["company_logo_data"] = ""
+        self.settings["company_logo_path"] = ""
         self.save_settings(self.settings)
         safe_print("INFO: [SettingsService] تم مسح اللوجو")
 
@@ -179,14 +193,10 @@ class SettingsService:
                 return False
 
             # حفظ الإعدادات في مجموعة system_settings
-            collection = repository.mongo_db['system_settings']
+            collection = repository.mongo_db["system_settings"]
 
             # استخدام upsert لتحديث أو إنشاء
-            collection.update_one(
-                {'_id': 'company_settings'},
-                {'$set': self.settings},
-                upsert=True
-            )
+            collection.update_one({"_id": "company_settings"}, {"$set": self.settings}, upsert=True)
 
             safe_print("INFO: [SettingsService] ✅ تم رفع الإعدادات للسحابة")
             return True
@@ -201,12 +211,12 @@ class SettingsService:
             if not repository or not repository.online or repository.mongo_db is None:
                 return False
 
-            collection = repository.mongo_db['system_settings']
-            cloud_settings = collection.find_one({'_id': 'company_settings'})
+            collection = repository.mongo_db["system_settings"]
+            cloud_settings = collection.find_one({"_id": "company_settings"})
 
             if cloud_settings:
                 # إزالة _id من الإعدادات
-                cloud_settings.pop('_id', None)
+                cloud_settings.pop("_id", None)
 
                 # دمج الإعدادات (السحابة تأخذ الأولوية)
                 for key, value in cloud_settings.items():

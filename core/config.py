@@ -83,22 +83,9 @@ class Config:
     def get_local_db_path() -> str:
         """الحصول على مسار قاعدة البيانات المحلية"""
         if getattr(sys, "frozen", False):
-            # عند التشغيل كـ EXE، ابحث في مجلد البرنامج أولاً
+            # عند التشغيل كـ EXE، استخدم مجلد البرنامج دائماً لضمان عدم استخدام النسخة المضمنة في _internal
             exe_dir = Path(sys.executable).parent
-
-            # 1. ابحث في نفس مجلد الـ EXE
-            db_in_exe_dir = exe_dir / "skywave_local.db"
-            if db_in_exe_dir.exists():
-                return str(db_in_exe_dir)
-
-            # 2. ابحث في مجلد _internal
-            db_in_internal = exe_dir / "_internal" / "skywave_local.db"
-            if db_in_internal.exists():
-                return str(db_in_internal)
-
-            # 3. لو مش موجود، استخدم مجلد البرنامج (وليس AppData)
-            # هذا يضمن أن البيانات تبقى مع البرنامج
-            return str(db_in_exe_dir)
+            return str(exe_dir / "skywave_local.db")
         else:
             # عند التطوير، استخدم مجلد المشروع
             project_dir = _get_project_root()

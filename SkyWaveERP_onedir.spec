@@ -2,23 +2,30 @@
 """
 Sky Wave ERP - PyInstaller Spec File (One Directory Mode)
 أسرع في التشغيل وأفضل للبرامج الكبيرة
+✅ FIXED: Added all required files and folders
 """
 
 block_cipher = None
 
-# جمع كل الملفات المطلوبة
+# جمع كل الملفات المطلوبة - ✅ FIXED: Added all required files
 added_files = [
-    ('logo.png', '.'),
+    ('ui', 'ui'),  # ✅ Added
+    ('services', 'services'),  # ✅ Added
+    ('core', 'core'),  # ✅ Added
+    ('assets', 'assets'),
+    ('skywave_settings.json', '.'),
+    ('version.json', '.'),
+    ('version.py', '.'),
+    ('updater.py', '.'),
+    ('update_settings.json', '.'),
     ('icon.ico', '.'),
+    ('logo.png', '.'),
     ('site logo.png', '.'),
     ('Sky Wave template.jpg', '.'),
-    ('version.json', '.'),
-    ('skywave_settings.json', '.'),
-    ('update_settings.json', '.'),
-    ('assets', 'assets'),
+    ('skywave_local.db', '.'),  # ✅ Added database
 ]
 
-# جمع كل الـ submodules
+# جمع كل الـ submodules - ✅ FIXED: Added more imports
 hidden_imports = [
     'PyQt6',
     'PyQt6.QtCore',
@@ -27,20 +34,28 @@ hidden_imports = [
     'PyQt6.QtWebEngineWidgets',
     'PyQt6.QtWebEngineCore',
     'PyQt6.QtPrintSupport',
+    'PyQt6.sip',
     'pymongo',
+    'pymongo.errors',
+    'pymongo.collection',
+    'pymongo.database',
+    'bson',
+    'bson.objectid',
     'pydantic',
     'pydantic_core',
-    'pandas',
     'openpyxl',
     'jinja2',
     'reportlab',
     'arabic_reshaper',
     'bidi',
+    'bidi.algorithm',
     'PIL',
     'requests',
     'colorlog',
     'dns',
     'dns.resolver',
+    'certifi',
+    'urllib3',
 ]
 
 a = Analysis(
@@ -53,7 +68,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'matplotlib',
         'scipy',
         'tkinter',
         'unittest',

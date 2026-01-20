@@ -100,11 +100,13 @@ def _copy_initial_db():
         # التطبيق يعمل كـ EXE
         exe_dir = os.path.dirname(sys.executable)
         possible_paths = [
+            os.path.join(
+                exe_dir, "skywave_local.db"
+            ),  # الأولوية للملف الموجود بجانب الملف التنفيذي
             os.path.join(exe_dir, "_internal", "skywave_local.db"),
-            os.path.join(exe_dir, "skywave_local.db"),
         ]
         if hasattr(sys, "_MEIPASS"):
-            possible_paths.insert(0, os.path.join(sys._MEIPASS, "skywave_local.db"))
+            possible_paths.append(os.path.join(sys._MEIPASS, "skywave_local.db"))
     else:
         # التطبيق يعمل كـ Python script
         possible_paths = [
@@ -176,8 +178,13 @@ class Repository:
         يجب إغلاق الـ cursor بعد الاستخدام: cursor.close()
         """
         with self._lock:
-            cursor = self.sqlite_conn.cursor()
-            return cursor
+            try:
+                cursor = self.sqlite_conn.cursor()
+                cursor.row_factory = sqlite3.Row  # تأكد من تطبيق row_factory
+                return cursor
+            except Exception as e:
+                safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
+                raise
 
     def close(self):
         """⚡ إغلاق اتصالات قاعدة البيانات"""
@@ -252,8 +259,9 @@ class Repository:
                 self._mongo_connecting = False
 
         # تشغيل الاتصال في thread منفصل
-        mongo_thread = threading.Thread(target=connect_mongo, daemon=True)
-        mongo_thread.start()
+        # استخدام QTimer بدلاً من daemon thread
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1000, connect_mongo)  # تأخير ثانية واحدة
 
     def _init_local_db(self):
         """دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي فقط إذا لم تكن موجودة."""
@@ -1137,6 +1145,7 @@ class Repository:
         self.sqlite_conn.commit()
 
         local_id = self.sqlite_cursor.lastrowid
+        client_data.id = local_id  # ⚡ تعيين الـ ID للعميل المُنشأ
         safe_print(f"INFO: تم حفظ العميل '{client_data.name}' محلياً (ID: {local_id}).")
 
         # 2. محاولة الحفظ في MongoDB (الأونلاين)
@@ -1278,17 +1287,31 @@ class Repository:
 
     def get_all_clients(self) -> list[schemas.Client]:
         """
-        ⚡ جلب كل العملاء النشطين (SQLite أولاً للسرعة)
+        ⚡ جلب كل العملاء النشطين (SQLite أولاً للسرعة) - مع Cache ذكي
         """
+        # ⚡ استخدام الـ cache إذا كان متاحاً
+        if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+            cached_result = self._clients_cache.get("all_clients")
+            if cached_result is not None:
+                safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} عميل من الـ Cache")
+                return cached_result
+
         active_status = schemas.ClientStatus.ACTIVE.value
 
         # ⚡ جلب من SQLite أولاً (سريع جداً) - استخدام cursor جديد لتجنب التعارض
         try:
-            cursor = self.sqlite_conn.cursor()
-            cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
-            rows = cursor.fetchall()
-            clients_list = [schemas.Client(**dict(row)) for row in rows]
-            cursor.close()
+            with self._lock:
+                cursor = self.get_cursor()
+                try:
+                    cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
+                    rows = cursor.fetchall()
+                    clients_list = [schemas.Client(**dict(row)) for row in rows]
+                finally:
+                    cursor.close()
+
+            # ⚡ حفظ في الـ cache
+            if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+                self._clients_cache.set("all_clients", clients_list)
 
             # ⚡ تسجيل عدد العملاء اللي عندهم صور
             clients_with_logo = sum(1 for c in clients_list if c.logo_data)
@@ -1313,6 +1336,11 @@ class Repository:
                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
                     except Exception:
                         continue
+                
+                # ⚡ حفظ في الـ cache
+                if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+                    self._clients_cache.set("all_clients", clients_list)
+                
                 safe_print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
                 return clients_list
             except Exception as e:
@@ -1848,7 +1876,8 @@ class Repository:
 
             import threading
 
-            threading.Thread(target=sync_to_mongo, daemon=True).start()
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, sync_to_mongo)
 
         return account_data
 
@@ -1888,10 +1917,12 @@ class Repository:
         # ⚡ جلب من SQLite أولاً (سريع جداً) - cursor منفصل لتجنب Recursive cursor
         try:
             with self._lock:
-                temp_cursor = self.sqlite_conn.cursor()
-                temp_cursor.execute("SELECT * FROM accounts WHERE sync_status != 'deleted'")
-                rows = temp_cursor.fetchall()
-                temp_cursor.close()
+                cursor = self.get_cursor()
+                try:
+                    cursor.execute("SELECT * FROM accounts WHERE sync_status != 'deleted'")
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             if rows:
                 accounts_list = [schemas.Account(**dict(row)) for row in rows]
                 safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
@@ -2178,34 +2209,21 @@ class Repository:
             return False
 
     def get_all_users(self):
-        """جلب جميع المستخدمين من MongoDB أو SQLite"""
-        safe_print("INFO: [Repository] جاري جلب المستخدمين...")
+        """جلب جميع المستخدمين من MongoDB أو SQLite - محسّن للأداء"""
         try:
             from core.auth_models import User, UserRole
 
             users = []
 
-            # انتظار اكتمال الاتصال بـ MongoDB إذا كان جاري
-            import time
+            # ⚡ تخطي الانتظار - استخدام SQLite مباشرة إذا كان MongoDB غير متصل
+            # لا ننتظر اتصال MongoDB لتجنب التجميد
 
-            wait_count = 0
-            while self._mongo_connecting and wait_count < 10:
-                safe_print(f"INFO: [Repository] انتظار اتصال MongoDB... ({wait_count + 1}/10)")
-                time.sleep(0.5)
-                wait_count += 1
-
-            safe_print(
-                f"INFO: [Repository] حالة الاتصال: online={self.online}, mongo_db={self.mongo_db is not None}"
-            )
-
-            # جلب من MongoDB أولاً
-            if self.online and self.mongo_db is not None:
+            # جلب من MongoDB أولاً (فقط إذا كان متصل بالفعل)
+            if self.online and self.mongo_db is not None and not self._mongo_connecting:
                 try:
                     users_data = list(self.mongo_db.users.find())
-                    safe_print(f"INFO: [Repository] وجدت {len(users_data)} مستخدم في MongoDB")
                     for user_data in users_data:
                         try:
-                            # استخراج _id من MongoDB
                             mongo_id = str(user_data.pop("_id", ""))
 
                             # تحويل datetime إلى string
@@ -2230,7 +2248,6 @@ class Repository:
                             else:
                                 role_enum = role_value
 
-                            # إنشاء كائن User
                             user = User(
                                 id=mongo_id,
                                 mongo_id=mongo_id,
@@ -2245,14 +2262,8 @@ class Repository:
                                 custom_permissions=user_data.get("custom_permissions"),
                             )
                             users.append(user)
-                            safe_print(
-                                f"INFO: [Repository] تم تحويل مستخدم من MongoDB: {user.username}"
-                            )
                         except Exception as e:
                             safe_print(f"WARNING: [Repository] فشل تحويل مستخدم من MongoDB: {e}")
-                            import traceback
-
-                            traceback.print_exc()
                             continue
 
                     if users:
@@ -2260,15 +2271,10 @@ class Repository:
                         return users
                 except Exception as e:
                     safe_print(f"WARNING: [Repository] فشل جلب المستخدمين من MongoDB: {e}")
-                    import traceback
-
-                    traceback.print_exc()
 
             # جلب من SQLite
-            safe_print("INFO: [Repository] جاري جلب المستخدمين من SQLite...")
             self.sqlite_cursor.execute("SELECT * FROM users")
             rows = self.sqlite_cursor.fetchall()
-            safe_print(f"INFO: [Repository] وجدت {len(rows)} مستخدم في SQLite")
 
             for row in rows:
                 try:
@@ -2286,12 +2292,10 @@ class Repository:
                     if row_dict.get("custom_permissions"):
                         try:
                             import json
-
                             custom_perms = json.loads(row_dict["custom_permissions"])
                         except (json.JSONDecodeError, TypeError):
                             custom_perms = None
 
-                    # إنشاء كائن User مع الحقول المطلوبة فقط
                     user = User(
                         id=str(row_dict.get("id", "")),
                         mongo_id=row_dict.get("_mongo_id"),
@@ -2305,17 +2309,12 @@ class Repository:
                         last_login=row_dict.get("last_login"),
                         custom_permissions=custom_perms,
                     )
-
                     users.append(user)
-                    safe_print(f"INFO: [Repository] تم تحويل مستخدم: {user.username}")
                 except Exception as e:
                     safe_print(f"WARNING: [Repository] فشل تحويل مستخدم من SQLite: {e}")
-                    import traceback
-
-                    traceback.print_exc()
                     continue
 
-            safe_print(f"INFO: [Repository] تم جلب {len(users)} مستخدم إجمالاً")
+            safe_print(f"INFO: [Repository] ✅ تم جلب {len(users)} مستخدم")
             return users
         except Exception as e:
             safe_print(f"ERROR: [Repository] فشل جلب المستخدمين: {e}")
@@ -2561,7 +2560,8 @@ class Repository:
 
             import threading
 
-            threading.Thread(target=sync_to_mongo, daemon=True).start()
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, sync_to_mongo)
 
         return account_data
 
@@ -2651,7 +2651,8 @@ class Repository:
 
                 import threading
 
-                threading.Thread(target=delete_from_mongo, daemon=True).start()
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(100, delete_from_mongo)
 
             return True
         except Exception as e:
@@ -3029,7 +3030,10 @@ class Repository:
         """
         (جديدة) جلب كل الدفعات المرتبطة بمشروع (أونلاين أولاً)
         ⚡ يستخدم cursor منفصل لتجنب مشكلة Recursive cursor
+        ⚡ يدعم البحث المرن للتعامل مع الاختلافات البسيطة في الأسماء
         """
+        safe_print(f"DEBUG: [Repo] جلب دفعات للمشروع: [{project_name}]")
+        
         query_filter = {"project_id": project_name}
         if self.online:
             try:
@@ -3037,10 +3041,10 @@ class Repository:
                 payments_list = []
                 for d in data:
                     mongo_id = str(d.pop("_id"))
-                    # حذف _mongo_id و mongo_id من البيانات لتجنب التكرار
                     d.pop("_mongo_id", None)
                     d.pop("mongo_id", None)
                     payments_list.append(schemas.Payment(**d, _mongo_id=mongo_id))
+                safe_print(f"DEBUG: [Repo] تم جلب {len(payments_list)} دفعة من MongoDB")
                 return payments_list
             except Exception as e:
                 safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (Mongo): {e}")
@@ -3049,12 +3053,50 @@ class Repository:
         try:
             with self._lock:
                 temp_cursor = self.sqlite_conn.cursor()
+                
+                # ⚡ محاولة 1: البحث الدقيق
                 temp_cursor.execute("SELECT * FROM payments WHERE project_id = ?", (project_name,))
                 rows = temp_cursor.fetchall()
+                
+                # ⚡ محاولة 2: إذا لم يتم العثور على نتائج، جرب البحث المرن
+                if len(rows) == 0:
+                    safe_print(f"DEBUG: [Repo] لم يتم العثور على دفعات بالبحث الدقيق، جاري البحث المرن...")
+                    
+                    # تنظيف اسم المشروع (إزالة المسافات الزائدة والرموز الخاصة)
+                    clean_name = project_name.strip().replace('  ', ' ')
+                    
+                    # البحث باستخدام LIKE
+                    temp_cursor.execute(
+                        "SELECT * FROM payments WHERE TRIM(project_id) = ? OR project_id LIKE ?",
+                        (clean_name, f"%{clean_name}%")
+                    )
+                    rows = temp_cursor.fetchall()
+                    
+                    if len(rows) > 0:
+                        safe_print(f"DEBUG: [Repo] ✅ تم العثور على {len(rows)} دفعة بالبحث المرن")
+                
                 temp_cursor.close()
-            return [schemas.Payment(**dict(row)) for row in rows]
+            
+            payments = [schemas.Payment(**dict(row)) for row in rows]
+            safe_print(f"DEBUG: [Repo] تم جلب {len(payments)} دفعة من SQLite")
+            
+            # 🔍 Debug: إذا لم يتم العثور على دفعات
+            if len(payments) == 0:
+                safe_print(f"WARNING: [Repo] لم يتم العثور على دفعات للمشروع [{project_name}]")
+                # جلب كل أسماء المشاريع اللي عندها دفعات (أول 5 فقط)
+                temp_cursor2 = self.sqlite_conn.cursor()
+                temp_cursor2.execute("SELECT DISTINCT project_id FROM payments LIMIT 5")
+                all_project_names = [row[0] for row in temp_cursor2.fetchall()]
+                temp_cursor2.close()
+                safe_print(f"DEBUG: [Repo] أمثلة من المشاريع اللي عندها دفعات:")
+                for pname in all_project_names:
+                    safe_print(f"  - [{pname}]")
+            
+            return payments
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (SQLite): {e}")
+            import traceback
+            traceback.print_exc()
             return []
 
     def get_all_payments(self) -> list[schemas.Payment]:
@@ -4064,6 +4106,11 @@ class Repository:
                 else:
                     safe_print(f"ERROR: فشل مزامنة المشروع الجديد: {e}")
 
+        # ⚡ إبطال الـ cache بعد إضافة مشروع جديد
+        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+            self._projects_cache.clear()
+            safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الإضافة")
+
         return project_data
 
     def get_all_projects(
@@ -4072,8 +4119,16 @@ class Repository:
         exclude_status: schemas.ProjectStatus | None = None,
     ) -> list[schemas.Project]:
         """
-        ⚡ جلب كل المشاريع (SQLite أولاً للسرعة)
+        ⚡ جلب كل المشاريع (SQLite أولاً للسرعة) - مع Cache ذكي
         """
+        # ⚡ استخدام الـ cache إذا كان متاحاً
+        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+            cache_key = f"all_projects_{status}_{exclude_status}"
+            cached_result = self._projects_cache.get(cache_key)
+            if cached_result is not None:
+                safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} مشروع من الـ Cache")
+                return cached_result
+
         sql_query = "SELECT * FROM projects"
         sql_params: list[Any] = []
 
@@ -4088,27 +4143,37 @@ class Repository:
 
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            self.sqlite_cursor.execute(sql_query, sql_params)
-            rows = self.sqlite_cursor.fetchall()
-            data_list: list[schemas.Project] = []
-            for row in rows:
-                row_dict = dict(row)
-                items_value = row_dict.get("items")
-                if isinstance(items_value, str):
-                    try:
-                        row_dict["items"] = json.loads(items_value)
-                    except json.JSONDecodeError:
-                        row_dict["items"] = []
-                # ⚡ معالجة milestones (JSON string -> list)
-                milestones_value = row_dict.get("milestones")
-                if isinstance(milestones_value, str):
-                    try:
-                        row_dict["milestones"] = json.loads(milestones_value)
-                    except json.JSONDecodeError:
-                        row_dict["milestones"] = []
-                data_list.append(schemas.Project(**row_dict))
-            safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
-            return data_list
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(sql_query, sql_params)
+                rows = cursor.fetchall()
+                data_list: list[schemas.Project] = []
+                for row in rows:
+                    row_dict = dict(row)
+                    items_value = row_dict.get("items")
+                    if isinstance(items_value, str):
+                        try:
+                            row_dict["items"] = json.loads(items_value)
+                        except json.JSONDecodeError:
+                            row_dict["items"] = []
+                    # ⚡ معالجة milestones (JSON string -> list)
+                    milestones_value = row_dict.get("milestones")
+                    if isinstance(milestones_value, str):
+                        try:
+                            row_dict["milestones"] = json.loads(milestones_value)
+                        except json.JSONDecodeError:
+                            row_dict["milestones"] = []
+                    data_list.append(schemas.Project(**row_dict))
+                
+                # ⚡ حفظ في الـ cache
+                if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+                    cache_key = f"all_projects_{status}_{exclude_status}"
+                    self._projects_cache.set(cache_key, data_list)
+                
+                safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
+                return data_list
+            finally:
+                cursor.close()
         except Exception as e:
             safe_print(f"ERROR: فشل جلب المشاريع من SQLite: {e}")
 
@@ -4146,6 +4211,12 @@ class Repository:
                         data_list.append(schemas.Project(**d, _mongo_id=mongo_id))
                     except Exception:
                         continue
+                
+                # ⚡ حفظ في الـ cache
+                if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+                    cache_key = f"all_projects_{status}_{exclude_status}"
+                    self._projects_cache.set(cache_key, data_list)
+                
                 safe_print(f"INFO: تم جلب {len(data_list)} مشروع من الأونلاين.")
                 return data_list
             except Exception as e:
@@ -4258,6 +4329,11 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: [Repo] فشل تحديث المشروع (Mongo): {e}")
 
+        # ⚡ إبطال الـ cache بعد تحديث المشروع
+        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+            self._projects_cache.clear()
+            safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد التحديث")
+
         return project_data
 
     def delete_project(self, project_id: str) -> bool:
@@ -4306,6 +4382,12 @@ class Repository:
                 safe_print(f"WARNING: [Repo] فشل حذف الدفعات المرتبطة: {e}")
 
             safe_print(f"SUCCESS: [Repo] ✅ تم حذف المشروع {project_name} بنجاح")
+            
+            # ⚡ إبطال الـ cache بعد حذف المشروع
+            if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+                self._projects_cache.clear()
+                safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الحذف")
+            
             return True
 
         except Exception as e:

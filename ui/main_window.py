@@ -591,8 +591,16 @@ class MainWindow(QMainWindow):
                     self.todo_tab.load_tasks()
             elif tab_name == "🔧 الإعدادات":
                 if hasattr(self, 'settings_tab'):
-                    self.settings_tab.load_settings_data()
-                    self.settings_tab.load_users()
+                    # ⚡ تحميل البيانات بشكل سريع بدون انتظار
+                    try:
+                        self.settings_tab.load_settings_data()
+                    except Exception as e:
+                        safe_print(f"WARNING: فشل تحميل بيانات الشركة: {e}")
+                    
+                    try:
+                        self.settings_tab.load_users()
+                    except Exception as e:
+                        safe_print(f"WARNING: فشل تحميل المستخدمين: {e}")
 
         except Exception as e:
             safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
@@ -626,8 +634,8 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 safe_print(f"WARNING: فشل فحص مواعيد المشاريع: {e}")
 
-        thread = threading.Thread(target=check_in_background, daemon=True)
-        thread.start()
+        # استخدام QTimer بدلاً من daemon thread
+        QTimer.singleShot(1000, check_in_background)  # تأخير ثانية واحدة
 
     def _load_initial_data(self):
         """تحميل البيانات الأولية بدون تجميد - deprecated"""
@@ -725,8 +733,8 @@ class MainWindow(QMainWindow):
                     safe_print(f"ERROR: فشلت المزامنة اللحظية: {e}")
 
             # تشغيل المزامنة في الخلفية
-            sync_thread = threading.Thread(target=do_sync, daemon=True)
-            sync_thread.start()
+            # استخدام QTimer بدلاً من daemon thread
+            QTimer.singleShot(100, do_sync)  # تأخير 100ms
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في بدء المزامنة اللحظية: {e}")
@@ -825,8 +833,8 @@ class MainWindow(QMainWindow):
                     pass
 
         # تشغيل المزامنة في الخلفية
-        sync_thread = threading.Thread(target=do_full_sync, daemon=True)
-        sync_thread.start()
+        # استخدام QTimer بدلاً من daemon thread
+        QTimer.singleShot(100, do_full_sync)  # تأخير 100ms
 
     def _on_full_sync_completed(self, result: object):
         """

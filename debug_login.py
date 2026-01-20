@@ -1,13 +1,12 @@
-import sys
 import os
-from pathlib import Path
+import sys
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
 try:
-    from core.repository import Repository
     from core.auth_models import User
+    from core.repository import Repository
 except ImportError as e:
     print(f"Import Error: {e}")
     sys.exit(1)
@@ -19,13 +18,13 @@ except Exception as e:
     print(f"Repository Init Error: {e}")
     sys.exit(1)
 
-username = "reda"
-print(f"--- Attempting to load user: {username} ---")
+USERNAME = "reda"
+print(f"--- Attempting to load user: {USERNAME} ---")
 
 # Access SQLite directly to see raw data first
 print("Raw SQLite Data:")
 try:
-    repo.sqlite_cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    repo.sqlite_cursor.execute("SELECT * FROM users WHERE username = ?", (USERNAME,))
     row = repo.sqlite_cursor.fetchone()
     if row:
         row_dict = dict(row)
@@ -35,9 +34,9 @@ try:
 except Exception as e:
     print(f"SQLite Error: {e}")
 
-# Try using get_user_by_username which uses Pydantic
+# Try using get_user_by_USERNAME which uses Pydantic
 print("\n--- Testing get_user_by_username ---")
-user = repo.get_user_by_username(username)
+user = repo.get_user_by_username(USERNAME)
 if user:
     print(f"✅ User Loaded Successfully: {user.username}")
     print(f"   Password Hash: {user.password_hash}")
@@ -49,8 +48,9 @@ else:
 if not user and row:
     print("\n--- Debugging Validation Error ---")
     try:
-        from core.auth_models import UserRole
         import json
+
+        from core.auth_models import UserRole
 
         user_data = dict(row)
         user_data["id"] = str(user_data["id"])

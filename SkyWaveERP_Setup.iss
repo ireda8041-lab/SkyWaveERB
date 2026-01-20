@@ -68,17 +68,17 @@ Name: "desktopicon"; Description: "إنشاء اختصار على سطح الم�
 Name: "quicklaunchicon"; Description: "إنشاء اختصار في شريط المهام"; GroupDescription: "اختصارات إضافية:"; Flags: unchecked
 
 [Files]
-; نسخ كل محتويات مجلد dist\SkyWaveERP (باستثناء ملفات قاعدة البيانات)
-Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.db,*.db-shm,*.db-wal,*.log"
+; نسخ كل محتويات مجلد dist\SkyWaveERP (قاعدة البيانات موجودة في _internal)
+Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.db-shm,*.db-wal,*.log"
 
-; نسخ قاعدة البيانات الأولية فقط إذا لم تكن موجودة (أول تثبيت)
-Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist
+; نسخ قاعدة البيانات الأولية من المجلد الجذري كاحتياطي (لو مش موجودة في _internal)
+Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 
 ; نسخ الأيقونة
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
-; نسخ المحدث
-Source: "dist\updater\updater.exe"; DestDir: "{app}"; Flags: ignoreversion
+; نسخ المحدث (إذا كان موجوداً)
+Source: "updater.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]
 ; اختصار في قائمة Start

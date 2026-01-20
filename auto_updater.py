@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 def check_for_updates() -> tuple[bool, str, str, list]:
     """
     التحقق من وجود تحديثات جديدة
-    
+
     Returns:
         tuple: (has_update, latest_version, download_url, changelog)
     """
@@ -29,27 +29,27 @@ def check_for_updates() -> tuple[bool, str, str, list]:
         changelog = data.get("changelog", [])
 
         if remote_version and compare_versions(remote_version, CURRENT_VERSION) > 0:
-            logger.info(f"🆕 تحديث جديد متاح: v{remote_version}")
+            logger.info("🆕 تحديث جديد متاح: v%s", remote_version)
             return True, remote_version, download_url, changelog
         else:
-            logger.debug(f"✅ الإصدار الحالي ({CURRENT_VERSION}) هو الأحدث")
+            logger.debug("✅ الإصدار الحالي (%s) هو الأحدث", CURRENT_VERSION)
             return False, CURRENT_VERSION, "", []
 
     except requests.Timeout:
         logger.warning("⏱️ انتهت مهلة التحقق من التحديثات")
         return False, CURRENT_VERSION, "", []
     except requests.RequestException as e:
-        logger.warning(f"⚠️ فشل التحقق من التحديثات: {e}")
+        logger.warning("⚠️ فشل التحقق من التحديثات: %s", e)
         return False, CURRENT_VERSION, "", []
     except Exception as e:
-        logger.error(f"❌ خطأ غير متوقع في التحقق من التحديثات: {e}")
+        logger.error("❌ خطأ غير متوقع في التحقق من التحديثات: %s", e)
         return False, CURRENT_VERSION, "", []
 
 
 def get_update_info() -> dict:
     """
-    الحصول على معلومات التحديث الكاملة
-    
+    الحصول على معلومات التحديث الكاملة.
+
     Returns:
         dict: معلومات التحديث
     """
@@ -59,5 +59,5 @@ def get_update_info() -> dict:
         "current_version": CURRENT_VERSION,
         "latest_version": version,
         "download_url": url,
-        "changelog": changelog
+        "changelog": changelog,
     }

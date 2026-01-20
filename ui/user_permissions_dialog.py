@@ -318,9 +318,14 @@ class UserPermissionsDialog(QDialog):
 
             # حفظ في قاعدة البيانات باستخدام username (أكثر أماناً)
             safe_print(f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}")
-            success = self.repository.update_user_by_username(self.user.username, {
-                'custom_permissions': custom_permissions
-            })
+            
+            try:
+                success = self.repository.update_user_by_username(self.user.username, {
+                    'custom_permissions': custom_permissions
+                })
+            except Exception as update_error:
+                safe_print(f"ERROR: [UserPermissionsDialog] فشل تحديث الصلاحيات: {update_error}")
+                success = False
 
             if success:
                 QMessageBox.information(
@@ -335,4 +340,5 @@ class UserPermissionsDialog(QDialog):
                 QMessageBox.critical(self, "خطأ", "فشل حفظ الصلاحيات في قاعدة البيانات!")
 
         except Exception as e:
+            safe_print(f"ERROR: [UserPermissionsDialog] خطأ في حفظ الصلاحيات: {e}")
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء حفظ الصلاحيات:\n{e}")

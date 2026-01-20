@@ -32,6 +32,80 @@ class DatabaseMaintenance:
         self.db = None
         self.cursor = None
 
+    @staticmethod
+    def should_run_monthly_maintenance() -> bool:
+        """⚡ التحقق من ضرورة تشغيل الصيانة الشهرية"""
+        try:
+            import os
+            import json
+            from datetime import datetime
+
+            # ملف تتبع آخر صيانة (في المجلد الرئيسي)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            root_dir = os.path.dirname(current_dir)  # الرجوع للمجلد الرئيسي
+            maintenance_file = os.path.join(root_dir, "last_maintenance.json")
+
+            safe_print(f"DEBUG: [DBMaintenance] ملف الصيانة: {maintenance_file}")
+
+            # إذا الملف مش موجود، نشغل الصيانة
+            if not os.path.exists(maintenance_file):
+                safe_print("INFO: [DBMaintenance] لم يتم العثور على ملف الصيانة - سيتم تشغيل الصيانة")
+                return True
+
+            # قراءة تاريخ آخر صيانة
+            with open(maintenance_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                last_run_str = data.get('last_run', '2000-01-01')
+                last_run = datetime.fromisoformat(last_run_str)
+
+            # التحقق: مر شهر أو أكثر؟
+            now = datetime.now()
+            days_since_last = (now - last_run).days
+
+            safe_print(f"INFO: [DBMaintenance] آخر صيانة كانت قبل {days_since_last} يوم")
+
+            # تشغيل الصيانة كل 30 يوم
+            should_run = days_since_last >= 30
+            
+            if should_run:
+                safe_print("INFO: [DBMaintenance] ✅ حان موعد الصيانة الشهرية")
+            else:
+                safe_print(f"INFO: [DBMaintenance] ⏭️ لا حاجة للصيانة (باقي {30 - days_since_last} يوم)")
+            
+            return should_run
+
+        except Exception as e:
+            safe_print(f"WARNING: [DBMaintenance] فشل التحقق من موعد الصيانة: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @staticmethod
+    def mark_maintenance_done():
+        """⚡ تسجيل تاريخ آخر صيانة"""
+        try:
+            import os
+            import json
+            from datetime import datetime
+
+            # ملف تتبع آخر صيانة (في المجلد الرئيسي)
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            root_dir = os.path.dirname(current_dir)  # الرجوع للمجلد الرئيسي
+            maintenance_file = os.path.join(root_dir, "last_maintenance.json")
+
+            data = {
+                'last_run': datetime.now().isoformat(),
+                'version': '1.3.12'
+            }
+
+            with open(maintenance_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            safe_print(f"INFO: [DBMaintenance] ✅ تم تسجيل تاريخ الصيانة في: {maintenance_file}")
+
+        except Exception as e:
+            safe_print(f"WARNING: [DBMaintenance] فشل تسجيل تاريخ الصيانة: {e}")
+
     def connect(self):
         """الاتصال بقاعدة البيانات مع تحسينات الأداء"""
         try:
@@ -51,15 +125,26 @@ class DatabaseMaintenance:
         if self.db:
             self.db.close()
 
-    def run_all_maintenance(self):
-        """تشغيل كل عمليات الصيانة - محسّن للسرعة"""
+    def run_all_maintenance(self, auto_mode: bool = False):
+        """
+        تشغيل كل عمليات الصيانة - محسّن للسرعة
+        
+        Args:
+            auto_mode: True إذا كانت الصيانة تلقائية (شهرية)
+        """
         if not self.connect():
             return False
 
         start_time = time.time()
-        safe_print("\n" + "="*60)
-        safe_print("🔧 [DBMaintenance] بدء صيانة قاعدة البيانات...")
-        safe_print("="*60)
+        
+        if auto_mode:
+            safe_print("\n" + "="*60)
+            safe_print("🔧 [DBMaintenance] صيانة شهرية تلقائية...")
+            safe_print("="*60)
+        else:
+            safe_print("\n" + "="*60)
+            safe_print("🔧 [DBMaintenance] بدء صيانة قاعدة البيانات...")
+            safe_print("="*60)
 
         try:
             # ⚡ تشغيل كل العمليات في transaction واحد للسرعة
@@ -90,6 +175,10 @@ class DatabaseMaintenance:
             safe_print("="*60)
             safe_print(f"✅ [DBMaintenance] اكتملت الصيانة في {elapsed:.2f} ثانية")
             safe_print("="*60 + "\n")
+
+            # ⚡ تسجيل تاريخ الصيانة إذا كانت تلقائية
+            if auto_mode:
+                DatabaseMaintenance.mark_maintenance_done()
 
             return True
 
@@ -126,6 +215,26 @@ class DatabaseMaintenance:
                 self.cursor.execute(f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_mongo_id
                     ON {table}(_mongo_id) WHERE _mongo_id IS NOT NULL AND _mongo_id != ''
+                """)
+            except Exception:
+                pass
+
+        # ⚡ إضافة indexes للأداء (غير unique)
+        performance_indexes = [
+            ("idx_payments_project_id", "payments", "project_id"),
+            ("idx_payments_client_id", "payments", "client_id"),
+            ("idx_payments_date", "payments", "date"),
+            ("idx_expenses_project_id", "expenses", "project_id"),
+            ("idx_expenses_date", "expenses", "date"),
+            ("idx_projects_status", "projects", "status"),
+            ("idx_projects_client_id", "projects", "client_id"),
+        ]
+
+        for idx_name, table, column in performance_indexes:
+            try:
+                self.cursor.execute(f"""
+                    CREATE INDEX IF NOT EXISTS {idx_name}
+                    ON {table}({column})
                 """)
             except Exception:
                 pass
@@ -381,6 +490,28 @@ def run_maintenance():
     """دالة سريعة لتشغيل الصيانة"""
     maintenance = DatabaseMaintenance()
     return maintenance.run_all_maintenance()
+
+
+def run_monthly_maintenance_if_needed():
+    """⚡ تشغيل الصيانة الشهرية التلقائية إذا لزم الأمر"""
+    try:
+        if DatabaseMaintenance.should_run_monthly_maintenance():
+            safe_print("INFO: [DBMaintenance] 🔧 بدء الصيانة الشهرية التلقائية...")
+            maintenance = DatabaseMaintenance()
+            success = maintenance.run_all_maintenance(auto_mode=True)
+            
+            if success:
+                safe_print("SUCCESS: [DBMaintenance] ✅ اكتملت الصيانة الشهرية بنجاح")
+            else:
+                safe_print("WARNING: [DBMaintenance] ⚠️ فشلت الصيانة الشهرية")
+            
+            return success
+        else:
+            safe_print("INFO: [DBMaintenance] ⏭️ لا حاجة للصيانة الآن (آخر صيانة كانت حديثة)")
+            return True
+    except Exception as e:
+        safe_print(f"ERROR: [DBMaintenance] خطأ في الصيانة التلقائية: {e}")
+        return False
 
 
 # للاستخدام المباشر

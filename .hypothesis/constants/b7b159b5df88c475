@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\read_preferences.py
-# hypothesis_version: 6.148.3
-
-[0.2, 0.8, 'NEAREST', 'PRIMARY', 'PRIMARY_PREFERRED', 'Primary()', 'SECONDARY', 'SECONDARY_PREFERRED', '__hedge', '__max_staleness', '__mode', '__mongos_mode', '__tag_sets', 'effective_pref', 'hedge', 'maxStalenessSeconds', 'max_staleness', 'mode', 'nearest', 'pref', 'primary', 'primaryPreferred', 'secondary', 'secondaryPreferred', 'tag_sets', 'tags']

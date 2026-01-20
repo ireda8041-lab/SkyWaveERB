@@ -4,10 +4,11 @@ Uses hypothesis library for property-based testing.
 
 Feature: enhanced-dashboard
 """
+
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from core.schemas import CashFlowEntry, KPIData
+from core.schemas import CashFlowEntry, DashboardSettings, KPIData
 
 
 class TestKPIDataProperties:
@@ -16,14 +17,14 @@ class TestKPIDataProperties:
     @settings(max_examples=100)
     @given(
         current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False),
-        previous=st.floats(min_value=0.01, max_value=1e9, allow_nan=False, allow_infinity=False)
+        previous=st.floats(min_value=0.01, max_value=1e9, allow_nan=False, allow_infinity=False),
     )
     def test_trend_percentage_calculation(self, current: float, previous: float):
         """
         Property 2: Trend Percentage Calculation
         Feature: enhanced-dashboard, Property 2: Trend percentage calculation
         Validates: Requirements 1.4
-        
+
         For any pair of current value and previous value where previous value is non-zero,
         the trend percentage SHALL equal ((current - previous) / previous) * 100.
         """
@@ -33,18 +34,17 @@ class TestKPIDataProperties:
             f"Expected {expected}, got {kpi.change_percentage}"
         )
 
-
     @settings(max_examples=100)
     @given(
         current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False),
-        previous=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False)
+        previous=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False),
     )
     def test_trend_direction_determination(self, current: float, previous: float):
         """
         Property 3: Trend Direction Determination
         Feature: enhanced-dashboard, Property 3: Trend direction determination
         Validates: Requirements 1.5, 1.6, 1.7
-        
+
         For any pair of current value and previous value:
         - If current > previous, trend direction SHALL be "up"
         - If current < previous, trend direction SHALL be "down"
@@ -66,15 +66,13 @@ class TestKPIDataProperties:
             )
 
     @settings(max_examples=100)
-    @given(
-        current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False)
-    )
+    @given(current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False))
     def test_trend_direction_with_none_previous(self, current: float):
         """
         Property 3 (edge case): Trend Direction with None previous value
         Feature: enhanced-dashboard, Property 3: Trend direction determination
         Validates: Requirements 1.7
-        
+
         When previous value is None, trend direction SHALL be "neutral"
         """
         kpi = KPIData(name="test", current_value=current, previous_value=None)
@@ -83,36 +81,30 @@ class TestKPIDataProperties:
         )
 
 
-
 class TestCashFlowEntryProperties:
     """Property-based tests for CashFlowEntry model"""
 
     @settings(max_examples=100)
     @given(
         inflow=st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
-        outflow=st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False)
+        outflow=st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
     )
     def test_net_cash_flow_calculation(self, inflow: float, outflow: float):
         """
         Property 5: Net Cash Flow Calculation
         Feature: enhanced-dashboard, Property 5: Net cash flow calculation
         Validates: Requirements 2.5
-        
+
         For any cash flow entry with inflow amount I and outflow amount O,
         the net flow SHALL equal I - O.
         """
         from datetime import datetime
 
-        entry = CashFlowEntry(
-            date=datetime.now(),
-            inflow=inflow,
-            outflow=outflow
-        )
+        entry = CashFlowEntry(date=datetime.now(), inflow=inflow, outflow=outflow)
         expected = inflow - outflow
         assert abs(entry.net_flow - expected) < 0.0001, (
             f"Expected net_flow={expected}, got {entry.net_flow}"
         )
-
 
 
 class TestCashFlowAggregationProperties:
@@ -123,25 +115,20 @@ class TestCashFlowAggregationProperties:
         amounts=st.lists(
             st.floats(min_value=0.01, max_value=1e6, allow_nan=False, allow_infinity=False),
             min_size=1,
-            max_size=20
+            max_size=20,
         ),
-        days_offsets=st.lists(
-            st.integers(min_value=0, max_value=365),
-            min_size=1,
-            max_size=20
-        )
+        days_offsets=st.lists(st.integers(min_value=0, max_value=365), min_size=1, max_size=20),
     )
     def test_cash_flow_period_aggregation_daily(self, amounts: list, days_offsets: list):
         """
         Property 4: Cash Flow Period Aggregation (Daily)
         Feature: enhanced-dashboard, Property 4: Cash flow period aggregation
         Validates: Requirements 2.2
-        
+
         For any list of cash flow entries and daily period,
         the aggregation function SHALL group entries by date and sum amounts within each group.
         """
         from datetime import datetime, timedelta
-
 
         # Ensure lists have same length
         min_len = min(len(amounts), len(days_offsets))
@@ -152,7 +139,7 @@ class TestCashFlowAggregationProperties:
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
-            for amount, offset in zip(amounts, days_offsets)
+            for amount, offset in zip(amounts, days_offsets, strict=True)
         ]
 
         # Create a mock service to test the aggregation method
@@ -173,7 +160,7 @@ class TestCashFlowAggregationProperties:
         )
 
         # Verify: each period contains correct sum
-        for date_val, amount in data:
+        for date_val, _ in data:
             period_key = date_val.strftime("%Y-%m-%d")
             assert period_key in aggregated, f"Period {period_key} should exist in aggregated data"
 
@@ -182,20 +169,16 @@ class TestCashFlowAggregationProperties:
         amounts=st.lists(
             st.floats(min_value=0.01, max_value=1e6, allow_nan=False, allow_infinity=False),
             min_size=1,
-            max_size=20
+            max_size=20,
         ),
-        days_offsets=st.lists(
-            st.integers(min_value=0, max_value=365),
-            min_size=1,
-            max_size=20
-        )
+        days_offsets=st.lists(st.integers(min_value=0, max_value=365), min_size=1, max_size=20),
     )
     def test_cash_flow_period_aggregation_monthly(self, amounts: list, days_offsets: list):
         """
         Property 4: Cash Flow Period Aggregation (Monthly)
         Feature: enhanced-dashboard, Property 4: Cash flow period aggregation
         Validates: Requirements 2.2
-        
+
         For any list of cash flow entries and monthly period,
         the aggregation function SHALL group entries by month and sum amounts within each group.
         """
@@ -210,7 +193,7 @@ class TestCashFlowAggregationProperties:
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
-            for amount, offset in zip(amounts, days_offsets)
+            for amount, offset in zip(amounts, days_offsets, strict=True)
         ]
 
         # Aggregate by month
@@ -234,20 +217,16 @@ class TestCashFlowAggregationProperties:
         amounts=st.lists(
             st.floats(min_value=0.01, max_value=1e6, allow_nan=False, allow_infinity=False),
             min_size=1,
-            max_size=20
+            max_size=20,
         ),
-        days_offsets=st.lists(
-            st.integers(min_value=0, max_value=365),
-            min_size=1,
-            max_size=20
-        )
+        days_offsets=st.lists(st.integers(min_value=0, max_value=365), min_size=1, max_size=20),
     )
     def test_cash_flow_period_aggregation_weekly(self, amounts: list, days_offsets: list):
         """
         Property 4: Cash Flow Period Aggregation (Weekly)
         Feature: enhanced-dashboard, Property 4: Cash flow period aggregation
         Validates: Requirements 2.2
-        
+
         For any list of cash flow entries and weekly period,
         the aggregation function SHALL group entries by ISO week and sum amounts within each group.
         """
@@ -262,7 +241,7 @@ class TestCashFlowAggregationProperties:
         base_date = datetime(2024, 1, 1)
         data = [
             (base_date + timedelta(days=offset), amount)
-            for amount, offset in zip(amounts, days_offsets)
+            for amount, offset in zip(amounts, days_offsets, strict=True)
         ]
 
         # Aggregate by week
@@ -283,26 +262,23 @@ class TestCashFlowAggregationProperties:
         )
 
 
-
 class TestDateRangeFilteringProperties:
     """Property-based tests for Date Range Filtering"""
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
-        days_offsets=st.lists(
-            st.integers(min_value=0, max_value=365),
-            min_size=1,
-            max_size=30
-        ),
+        days_offsets=st.lists(st.integers(min_value=0, max_value=365), min_size=1, max_size=30),
         range_start_offset=st.integers(min_value=0, max_value=180),
-        range_length=st.integers(min_value=1, max_value=180)
+        range_length=st.integers(min_value=1, max_value=180),
     )
-    def test_date_range_filtering(self, days_offsets: list, range_start_offset: int, range_length: int):
+    def test_date_range_filtering(
+        self, days_offsets: list, range_start_offset: int, range_length: int
+    ):
         """
         Property 7: Date Range Filtering
         Feature: enhanced-dashboard, Property 7: Date range filtering
         Validates: Requirements 4.2
-        
+
         For any selected date range (start_date, end_date) and a set of records,
         the filtered results SHALL contain only records where start_date <= record.date <= end_date.
         """
@@ -321,12 +297,14 @@ class TestDateRangeFilteringProperties:
 
         # Filter records by date range
         filtered = [
-            r for r in records
-            if r["date"] and start_date <= r["date"] <= end_date
+            r
+            for r in records
+            if r["date"] and isinstance(r["date"], datetime) and start_date <= r["date"] <= end_date
         ]
 
         # Verify: all filtered records are within the date range
         for record in filtered:
+            assert isinstance(record["date"], datetime)
             assert start_date <= record["date"] <= end_date, (
                 f"Record date {record['date']} should be within range [{start_date}, {end_date}]"
             )
@@ -335,26 +313,25 @@ class TestDateRangeFilteringProperties:
         for record in records:
             if record not in filtered:
                 # Record should be outside the range
-                assert not (start_date <= record["date"] <= end_date), (
-                    f"Record date {record['date']} is within range but was not included in filtered results"
-                )
+                if isinstance(record["date"], datetime):
+                    assert not (start_date <= record["date"] <= end_date), (
+                        f"Record date {record['date']} is within range but was not included in filtered results"
+                    )
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
-        days_offsets=st.lists(
-            st.integers(min_value=0, max_value=365),
-            min_size=1,
-            max_size=30
-        ),
+        days_offsets=st.lists(st.integers(min_value=0, max_value=365), min_size=1, max_size=30),
         range_start_offset=st.integers(min_value=0, max_value=180),
-        range_length=st.integers(min_value=1, max_value=180)
+        range_length=st.integers(min_value=1, max_value=180),
     )
-    def test_date_range_filtering_completeness(self, days_offsets: list, range_start_offset: int, range_length: int):
+    def test_date_range_filtering_completeness(
+        self, days_offsets: list, range_start_offset: int, range_length: int
+    ):
         """
         Property 7: Date Range Filtering (Completeness)
         Feature: enhanced-dashboard, Property 7: Date range filtering
         Validates: Requirements 4.2
-        
+
         For any date range, all records within the range SHALL be included in the filtered results.
         """
         from datetime import datetime, timedelta
@@ -372,14 +349,16 @@ class TestDateRangeFilteringProperties:
 
         # Filter records by date range
         filtered = [
-            r for r in records
-            if r["date"] and start_date <= r["date"] <= end_date
+            r
+            for r in records
+            if r["date"] and isinstance(r["date"], datetime) and start_date <= r["date"] <= end_date
         ]
 
         # Count records that should be in range
         expected_count = sum(
-            1 for r in records
-            if start_date <= r["date"] <= end_date
+            1
+            for r in records
+            if isinstance(r["date"], datetime) and start_date <= r["date"] <= end_date
         )
 
         # Verify: filtered count matches expected count
@@ -390,14 +369,14 @@ class TestDateRangeFilteringProperties:
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
         range_start_offset=st.integers(min_value=0, max_value=180),
-        range_length=st.integers(min_value=1, max_value=180)
+        range_length=st.integers(min_value=1, max_value=180),
     )
     def test_date_range_filtering_boundary(self, range_start_offset: int, range_length: int):
         """
         Property 7: Date Range Filtering (Boundary)
         Feature: enhanced-dashboard, Property 7: Date range filtering
         Validates: Requirements 4.2
-        
+
         Records exactly on the boundary dates (start_date and end_date) SHALL be included.
         """
         from datetime import datetime, timedelta
@@ -417,8 +396,9 @@ class TestDateRangeFilteringProperties:
 
         # Filter records by date range
         filtered = [
-            r for r in records
-            if r["date"] and start_date <= r["date"] <= end_date
+            r
+            for r in records
+            if r["date"] and isinstance(r["date"], datetime) and start_date <= r["date"] <= end_date
         ]
 
         # Verify: boundary records are included
@@ -431,21 +411,20 @@ class TestDateRangeFilteringProperties:
         assert "after_end" not in filtered_values, "Record after end_date should be excluded"
 
 
-
 class TestKPIDataConsistencyProperties:
     """Property-based tests for KPI Data Consistency"""
 
     @settings(max_examples=100)
     @given(
         current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False),
-        previous=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False)
+        previous=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False),
     )
     def test_kpi_data_consistency(self, current: float, previous: float):
         """
         Property 1: KPI Data Consistency
         Feature: enhanced-dashboard, Property 1: KPI data consistency
         Validates: Requirements 1.2
-        
+
         For any set of financial data, the KPI data object SHALL contain values
         that exactly match the input values.
         """
@@ -458,25 +437,22 @@ class TestKPIDataConsistencyProperties:
         assert kpi.previous_value == previous, (
             f"Previous value mismatch: expected {previous}, got {kpi.previous_value}"
         )
-        assert kpi.name == "test_kpi", (
-            f"Name mismatch: expected 'test_kpi', got {kpi.name}"
-        )
+        assert kpi.name == "test_kpi", f"Name mismatch: expected 'test_kpi', got {kpi.name}"
 
     @settings(max_examples=100)
     @given(
         name=st.text(min_size=1, max_size=50),
         current=st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False),
         previous=st.one_of(
-            st.none(),
-            st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False)
-        )
+            st.none(), st.floats(min_value=0, max_value=1e9, allow_nan=False, allow_infinity=False)
+        ),
     )
     def test_kpi_data_with_various_names(self, name: str, current: float, previous):
         """
         Property 1: KPI Data Consistency (with various names)
         Feature: enhanced-dashboard, Property 1: KPI data consistency
         Validates: Requirements 1.2
-        
+
         For any valid name and values, the KPI data SHALL preserve all input data.
         """
         kpi = KPIData(name=name, current_value=current, previous_value=previous)
@@ -486,9 +462,6 @@ class TestKPIDataConsistencyProperties:
         assert kpi.previous_value == previous, "Previous value not preserved"
 
 
-from core.schemas import DashboardSettings
-
-
 class TestSettingsPersistenceProperties:
     """Property-based tests for Settings Persistence Round-Trip"""
 
@@ -496,19 +469,18 @@ class TestSettingsPersistenceProperties:
     @given(
         auto_refresh_enabled=st.booleans(),
         auto_refresh_interval=st.integers(min_value=5, max_value=300),
-        selected_period=st.sampled_from(["today", "this_week", "this_month", "this_year", "custom"])
+        selected_period=st.sampled_from(
+            ["today", "this_week", "this_month", "this_year", "custom"]
+        ),
     )
     def test_settings_persistence_round_trip(
-        self,
-        auto_refresh_enabled: bool,
-        auto_refresh_interval: int,
-        selected_period: str
+        self, auto_refresh_enabled: bool, auto_refresh_interval: int, selected_period: str
     ):
         """
         Property 8: Settings Persistence Round-Trip
         Feature: enhanced-dashboard, Property 8: Settings persistence round-trip
         Validates: Requirements 4.4
-        
+
         For any valid DashboardSettings object, the values SHALL be preserved
         when creating a new instance with the same parameters.
         """
@@ -516,7 +488,7 @@ class TestSettingsPersistenceProperties:
         original = DashboardSettings(
             auto_refresh_enabled=auto_refresh_enabled,
             auto_refresh_interval=auto_refresh_interval,
-            selected_period=selected_period
+            selected_period=selected_period,
         )
 
         # Simulate round-trip by creating a new object with same values
@@ -525,7 +497,7 @@ class TestSettingsPersistenceProperties:
             auto_refresh_interval=original.auto_refresh_interval,
             selected_period=original.selected_period,
             custom_start_date=original.custom_start_date,
-            custom_end_date=original.custom_end_date
+            custom_end_date=original.custom_end_date,
         )
 
         # Verify all values are preserved
@@ -541,21 +513,20 @@ class TestSettingsPersistenceProperties:
 
     @settings(max_examples=100)
     @given(
-        selected_period=st.sampled_from(["today", "this_week", "this_month", "this_year", "custom"]),
+        selected_period=st.sampled_from(
+            ["today", "this_week", "this_month", "this_year", "custom"]
+        ),
         days_offset_start=st.integers(min_value=0, max_value=365),
-        days_offset_end=st.integers(min_value=0, max_value=365)
+        days_offset_end=st.integers(min_value=0, max_value=365),
     )
     def test_settings_with_custom_dates_round_trip(
-        self,
-        selected_period: str,
-        days_offset_start: int,
-        days_offset_end: int
+        self, selected_period: str, days_offset_start: int, days_offset_end: int
     ):
         """
         Property 8: Settings Persistence Round-Trip (with custom dates)
         Feature: enhanced-dashboard, Property 8: Settings persistence round-trip
         Validates: Requirements 4.4
-        
+
         For any valid DashboardSettings with custom dates, all values SHALL be preserved.
         """
         from datetime import datetime, timedelta
@@ -568,7 +539,7 @@ class TestSettingsPersistenceProperties:
         original = DashboardSettings(
             selected_period=selected_period,
             custom_start_date=custom_start if selected_period == "custom" else None,
-            custom_end_date=custom_end if selected_period == "custom" else None
+            custom_end_date=custom_end if selected_period == "custom" else None,
         )
 
         # Simulate round-trip
@@ -577,7 +548,7 @@ class TestSettingsPersistenceProperties:
             auto_refresh_interval=original.auto_refresh_interval,
             selected_period=original.selected_period,
             custom_start_date=original.custom_start_date,
-            custom_end_date=original.custom_end_date
+            custom_end_date=original.custom_end_date,
         )
 
         # Verify
@@ -588,18 +559,16 @@ class TestSettingsPersistenceProperties:
     @settings(max_examples=100)
     @given(
         auto_refresh_enabled=st.booleans(),
-        auto_refresh_interval=st.integers(min_value=5, max_value=300)
+        auto_refresh_interval=st.integers(min_value=5, max_value=300),
     )
     def test_settings_json_serialization_round_trip(
-        self,
-        auto_refresh_enabled: bool,
-        auto_refresh_interval: int
+        self, auto_refresh_enabled: bool, auto_refresh_interval: int
     ):
         """
         Property 8: Settings Persistence Round-Trip (JSON serialization)
         Feature: enhanced-dashboard, Property 8: Settings persistence round-trip
         Validates: Requirements 4.4
-        
+
         For any valid DashboardSettings, JSON serialization and deserialization
         SHALL produce an equivalent object.
         """
@@ -608,7 +577,7 @@ class TestSettingsPersistenceProperties:
         original = DashboardSettings(
             auto_refresh_enabled=auto_refresh_enabled,
             auto_refresh_interval=auto_refresh_interval,
-            selected_period="this_month"
+            selected_period="this_month",
         )
 
         # Serialize to JSON

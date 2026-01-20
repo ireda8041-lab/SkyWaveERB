@@ -84,6 +84,13 @@ class SkyWaveERPApp:
         # --- 1. تجهيز "القلب" ---
         self.repository = Repository()
 
+        # ⚡ الصيانة الشهرية التلقائية (تشغيل مرة واحدة عند البدء)
+        try:
+            from core.db_maintenance import run_monthly_maintenance_if_needed
+            run_monthly_maintenance_if_needed()
+        except Exception as e:
+            logger.warning(f"[MainApp] تحذير: فشلت الصيانة الشهرية: {e}")
+
         # ✅ صيانة قاعدة البيانات التلقائية (في الخلفية لتسريع البدء)
         def run_maintenance_background():
             try:
@@ -92,9 +99,11 @@ class SkyWaveERPApp:
             except Exception as e:
                 logger.warning(f"[MainApp] تحذير: فشلت الصيانة التلقائية: {e}")
 
-        import threading
-        maintenance_thread = threading.Thread(target=run_maintenance_background, daemon=True)
-        maintenance_thread.start()
+        # استخدام QTimer بدلاً من daemon thread للصيانة
+        from PyQt6.QtCore import QTimer
+        self.maintenance_timer = QTimer()
+        self.maintenance_timer.timeout.connect(self._run_maintenance_safe)
+        self.maintenance_timer.start(300000)  # كل 5 دقائق
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
 
@@ -118,8 +127,10 @@ class SkyWaveERPApp:
             except Exception as e:
                 logger.debug(f"[MainApp] فشل مزامنة الإعدادات: {e}")
 
-        settings_thread = threading.Thread(target=sync_settings_background, daemon=True)
-        settings_thread.start()
+        # استخدام QTimer بدلاً من daemon thread للإعدادات
+        self.settings_timer = QTimer()
+        self.settings_timer.timeout.connect(self._sync_settings_safe)
+        self.settings_timer.start(60000)  # كل دقيقة
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
@@ -199,9 +210,10 @@ class SkyWaveERPApp:
             except Exception as e:
                 logger.warning(f"فشل التحقق من التحديثات: {e}")
 
-        import threading
-        update_thread = threading.Thread(target=check_updates_background, daemon=True)
-        update_thread.start()
+        # استخدام QTimer بدلاً من daemon thread للتحديثات
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self._check_updates_safe)
+        self.update_timer.start(3600000)  # كل ساعة
 
         logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
         logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
@@ -620,36 +632,90 @@ class SkyWaveERPApp:
 
 
 # --- Global Exception Hook ---
+
+    def _run_maintenance_safe(self):
+        """تشغيل الصيانة بشكل آمن"""
+        try:
+            run_maintenance_background()
+        except Exception as e:
+            logger.error(f"خطأ في الصيانة: {e}")
+    
+    def _sync_settings_safe(self):
+        """مزامنة الإعدادات بشكل آمن"""
+        try:
+            sync_settings_background()
+        except Exception as e:
+            logger.error(f"خطأ في مزامنة الإعدادات: {e}")
+    
+    def _check_updates_safe(self):
+        """فحص التحديثات بشكل آمن"""
+        try:
+            check_updates_background()
+        except Exception as e:
+            logger.error(f"خطأ في فحص التحديثات: {e}")
+
 def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
-    """معالج الأخطاء غير المتوقعة - محسّن لمنع الإغلاق المفاجئ"""
+    """معالج الأخطاء غير المتوقعة - محسّن وآمن"""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    # تجاهل كل الأخطاء غير الحرجة - لا نريد إغلاق البرنامج أبداً
+    # تسجيل الخطأ بشكل صحيح
+    logger.error(f"خطأ غير متوقع: {exc_type.__name__}: {exc_value}", 
+                 exc_info=(exc_type, exc_value, exc_traceback))
+    
+    # أخطاء Qt التي يمكن تجاهلها بأمان
     error_msg = str(exc_value).lower() if exc_value else ""
-
-    # قائمة الأخطاء التي يجب تجاهلها
-    ignore_patterns = [
-        "deleted", "c/c++ object", "wrapped c/c++", "runtime", "qobject", "destroyed", "invalid",
-        "connection", "timeout", "network", "socket", "pymongo", "mongo", "serverselection", "autoreconnect",
-        "thread", "daemon", "join", "queue", "lock", "semaphore",
-        "database is locked", "disk i/o error", "busy", "closed database", "closed cursor",
-        "truth value", "bool()", "nonetype", "attributeerror"
+    safe_to_ignore = [
+        "wrapped c/c++ object", "deleted", "destroyed", 
+        "qobject", "runtime error", "c/c++ object"
     ]
-
-    if any(x in error_msg for x in ignore_patterns):
-        logger.debug(f"تجاهل خطأ: {exc_value}")
+    
+    # تجاهل أخطاء Qt فقط
+    if any(pattern in error_msg for pattern in safe_to_ignore):
+        logger.debug(f"تجاهل خطأ Qt: {exc_value}")
         return
-
-    logger.warning(f"خطأ غير متوقع (تم تجاهله): {exc_value}")
-    # لا نُغلق البرنامج أبداً
+    
+    # للأخطاء الأخرى، نسجلها ونعرضها للمستخدم
+    try:
+        from core.error_handler import ErrorHandler
+        ErrorHandler.handle_exception(
+            exception=exc_value,
+            context="uncaught_exception",
+            user_message=f"حدث خطأ غير متوقع: {exc_value}",
+            show_dialog=False  # لا نعرض dialog لتجنب التعطل
+        )
+    except Exception:
+        # إذا فشل ErrorHandler، نطبع الخطأ على الأقل
+        print(f"خطأ حرج: {exc_value}")
 
 # ⚡ معالج أخطاء الـ Threads
 def handle_thread_exception(args):
-    """معالج أخطاء الـ Threads - يمنع إغلاق البرنامج"""
-    # تجاهل كل أخطاء الـ threads - لا نريد إغلاق البرنامج أبداً
-    pass
+    """معالج أخطاء الـ Threads - محسّن وآمن"""
+    try:
+        exc_type = args.exc_type
+        exc_value = args.exc_value
+        exc_traceback = args.exc_traceback
+        thread = args.thread
+        
+        # تسجيل خطأ الـ thread
+        logger.error(f"خطأ في Thread '{thread.name}': {exc_type.__name__}: {exc_value}",
+                     exc_info=(exc_type, exc_value, exc_traceback))
+        
+        # محاولة معالجة الخطأ
+        try:
+            from core.error_handler import ErrorHandler
+            ErrorHandler.handle_exception(
+                exception=exc_value,
+                context=f"thread_{thread.name}",
+                user_message=f"حدث خطأ في العملية الخلفية: {exc_value}",
+                show_dialog=False
+            )
+        except Exception:
+            print(f"خطأ في Thread {thread.name}: {exc_value}")
+            
+    except Exception as e:
+        logger.error(f"فشل معالجة خطأ Thread: {e}")
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception
