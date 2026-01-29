@@ -355,68 +355,114 @@ class ProjectProfitDialog(QDialog):
         """)
 
     def load_profit_data(self):
-        """تحميل بيانات الربحية"""
-        try:
-            profit_data = self.project_service.get_project_profitability(self.project.name)
+        """⚡ تحميل بيانات الربحية في الخلفية لمنع التجميد"""
+        # عرض رسالة تحميل
+        self.collection_label.setText("⏳ جاري تحميل البيانات...")
+        self.collection_progress.setValue(0)
+        
+        from core.data_loader import get_data_loader
+        
+        project_name = self.project.name
+        
+        def fetch_profit_data():
+            """جلب بيانات الربحية في thread منفصل"""
+            try:
+                profit_data = self.project_service.get_project_profitability(project_name)
+                payments = self.project_service.get_payments_for_project(project_name)
+                expenses = self.project_service.get_expenses_for_project(project_name)
+                
+                return {
+                    'profit_data': profit_data,
+                    'payments': payments,
+                    'expenses': expenses,
+                    'error': None
+                }
+            except Exception as e:
+                safe_print(f"ERROR: [ProjectProfitDialog] {e}")
+                return {'error': str(e)}
+        
+        def on_data_loaded(data):
+            """تحديث الواجهة بالبيانات"""
+            try:
+                if data.get('error'):
+                    QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {data['error']}")
+                    return
+                
+                profit_data = data['profit_data']
+                payments = data['payments']
+                expenses = data['expenses']
 
-            total_revenue = profit_data.get("total_revenue", 0.0)
-            total_paid = profit_data.get("total_paid", 0.0)
-            balance_due = profit_data.get("balance_due", 0.0)
-            total_expenses = profit_data.get("total_expenses", 0.0)
-            net_profit = profit_data.get("net_profit", 0.0)
+                total_revenue = profit_data.get("total_revenue", 0.0)
+                total_paid = profit_data.get("total_paid", 0.0)
+                balance_due = profit_data.get("balance_due", 0.0)
+                total_expenses = profit_data.get("total_expenses", 0.0)
+                net_profit = profit_data.get("net_profit", 0.0)
 
-            # تحديث الكروت
-            self._update_card(self.revenue_card, "revenue", total_revenue)
-            self._update_card(self.paid_card, "paid", total_paid)
-            self._update_card(self.due_card, "due", balance_due)
-            self._update_card(self.expenses_card, "expenses", total_expenses)
-            self._update_card(self.profit_card, "profit", net_profit)
+                # تحديث الكروت
+                self._update_card(self.revenue_card, "revenue", total_revenue)
+                self._update_card(self.paid_card, "paid", total_paid)
+                self._update_card(self.due_card, "due", balance_due)
+                self._update_card(self.expenses_card, "expenses", total_expenses)
+                self._update_card(self.profit_card, "profit", net_profit)
 
-            # تحديث شريط التقدم
-            if total_revenue > 0:
-                percent = int((total_paid / total_revenue) * 100)
-                self.collection_progress.setValue(min(percent, 100))
-                self.collection_label.setText(f"تم تحصيل {percent}% ({total_paid:,.2f} من {total_revenue:,.2f})")
-            else:
-                self.collection_progress.setValue(0)
-                self.collection_label.setText("لا توجد قيمة للعقد")
+                # تحديث شريط التقدم
+                if total_revenue > 0:
+                    percent = int((total_paid / total_revenue) * 100)
+                    self.collection_progress.setValue(min(percent, 100))
+                    self.collection_label.setText(f"تم تحصيل {percent}% ({total_paid:,.2f} من {total_revenue:,.2f})")
+                else:
+                    self.collection_progress.setValue(0)
+                    self.collection_label.setText("لا توجد قيمة للعقد")
 
-            # تحديث جدول الدفعات
-            from ui.styles import create_centered_item
-            payments = self.project_service.get_payments_for_project(self.project.name)
-            self.payments_table.setRowCount(0)
-            for i, pay in enumerate(payments):
-                self.payments_table.insertRow(i)
-                date_str = pay.date.strftime("%Y-%m-%d") if isinstance(pay.date, datetime) else str(pay.date)
-                self.payments_table.setItem(i, 0, create_centered_item(date_str))
+                # تحديث جدول الدفعات
+                from ui.styles import create_centered_item
+                self.payments_table.setRowCount(0)
+                for i, pay in enumerate(payments):
+                    self.payments_table.insertRow(i)
+                    date_str = pay.date.strftime("%Y-%m-%d") if isinstance(pay.date, datetime) else str(pay.date)
+                    self.payments_table.setItem(i, 0, create_centered_item(date_str))
 
-                amount_item = create_centered_item(f"{pay.amount:,.2f}")
-                amount_item.setForeground(QColor("#10b981"))
-                amount_item.setFont(get_cairo_font(10, bold=True))
-                self.payments_table.setItem(i, 1, amount_item)
+                    amount_item = create_centered_item(f"{pay.amount:,.2f}")
+                    amount_item.setForeground(QColor("#10b981"))
+                    amount_item.setFont(get_cairo_font(10, bold=True))
+                    self.payments_table.setItem(i, 1, amount_item)
 
-                account_name = self._get_account_name(pay)
-                self.payments_table.setItem(i, 2, create_centered_item(account_name))
-                self.payments_table.setItem(i, 3, create_centered_item(getattr(pay, 'notes', '') or "-"))
+                    account_name = self._get_account_name(pay)
+                    self.payments_table.setItem(i, 2, create_centered_item(account_name))
+                    self.payments_table.setItem(i, 3, create_centered_item(getattr(pay, 'notes', '') or "-"))
 
-            # تحديث جدول المصروفات
-            expenses = self.project_service.get_expenses_for_project(self.project.name)
-            self.expenses_table.setRowCount(0)
-            for i, exp in enumerate(expenses):
-                self.expenses_table.insertRow(i)
-                date_str = exp.date.strftime("%Y-%m-%d") if isinstance(exp.date, datetime) else str(exp.date)
-                self.expenses_table.setItem(i, 0, create_centered_item(date_str))
-                self.expenses_table.setItem(i, 1, create_centered_item(exp.category or "-"))
-                self.expenses_table.setItem(i, 2, create_centered_item(exp.description or "-"))
+                # تحديث جدول المصروفات
+                self.expenses_table.setRowCount(0)
+                for i, exp in enumerate(expenses):
+                    self.expenses_table.insertRow(i)
+                    date_str = exp.date.strftime("%Y-%m-%d") if isinstance(exp.date, datetime) else str(exp.date)
+                    self.expenses_table.setItem(i, 0, create_centered_item(date_str))
+                    self.expenses_table.setItem(i, 1, create_centered_item(exp.category or "-"))
+                    self.expenses_table.setItem(i, 2, create_centered_item(exp.description or "-"))
 
-                amount_item = create_centered_item(f"{exp.amount:,.2f}")
-                amount_item.setForeground(QColor("#ef4444"))
-                amount_item.setFont(get_cairo_font(10, bold=True))
-                self.expenses_table.setItem(i, 3, amount_item)
-
-        except Exception as e:
-            safe_print(f"ERROR: [ProjectProfitDialog] {e}")
-            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {e}")
+                    amount_item = create_centered_item(f"{exp.amount:,.2f}")
+                    amount_item.setForeground(QColor("#ef4444"))
+                    amount_item.setFont(get_cairo_font(10, bold=True))
+                    self.expenses_table.setItem(i, 3, amount_item)
+                    
+            except Exception as e:
+                safe_print(f"ERROR: [ProjectProfitDialog] فشل تحديث الواجهة: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        def on_error(error_msg):
+            safe_print(f"ERROR: [ProjectProfitDialog] {error_msg}")
+            QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {error_msg}")
+        
+        # ⚡ تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="project_profit_data",
+            load_function=fetch_profit_data,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _get_account_name(self, payment) -> str:
         """جلب اسم الحساب"""

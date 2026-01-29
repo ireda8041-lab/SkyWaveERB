@@ -291,123 +291,162 @@ class LedgerWindow(QDialog):
         self.setLayout(layout)
 
     def load_ledger_data(self):
-        """تحميل بيانات كشف الحساب"""
+        """⚡ تحميل بيانات كشف الحساب في الخلفية لمنع التجميد"""
         safe_print(f"INFO: [LedgerWindow] جاري تحميل كشف حساب: {self.account.name}")
+        
+        # عرض رسالة تحميل
+        self.movements_table.setRowCount(0)
+        self.total_debit_label.setText("إجمالي المدين: ⏳ جاري التحميل...")
+        self.total_credit_label.setText("إجمالي الدائن: ⏳ جاري التحميل...")
+        self.net_movement_label.setText("صافي الحركة: ⏳ جاري التحميل...")
+        
+        from core.data_loader import get_data_loader
+        
+        # حفظ الفترة المحددة
+        start_date = self.start_date.date().toPyDate()
+        end_date = self.end_date.date().toPyDate()
+        account_code = self.account.code
+        account_type = self.account.type.value if self.account.type else self.account.type
+        
+        def fetch_ledger_data():
+            """جلب بيانات كشف الحساب في thread منفصل"""
+            try:
+                # تحويل إلى datetime
+                start_datetime = datetime.combine(start_date, datetime.min.time())
+                end_datetime = datetime.combine(end_date, datetime.max.time())
 
-        try:
-            # الحصول على الفترة
-            start_date = self.start_date.date().toPyDate()
-            end_date = self.end_date.date().toPyDate()
+                # جلب جميع القيود المحاسبية
+                all_entries = self.accounting_service.repo.get_all_journal_entries()
 
-            # تحويل إلى datetime
-            start_datetime = datetime.combine(start_date, datetime.min.time())
-            end_datetime = datetime.combine(end_date, datetime.max.time())
+                # فلترة القيود حسب الحساب والفترة
+                movements = []
+                running_balance = 0.0
 
-            # جلب جميع القيود المحاسبية
-            all_entries = self.accounting_service.repo.get_all_journal_entries()
+                for entry in all_entries:
+                    entry_date = entry.date
 
-            # فلترة القيود حسب الحساب والفترة
-            movements = []
-            running_balance = 0.0
+                    # التحقق من الفترة
+                    if entry_date < start_datetime or entry_date > end_datetime:
+                        continue
 
-            for entry in all_entries:
-                entry_date = entry.date
+                    # البحث عن بنود تخص هذا الحساب
+                    for line in entry.lines:
+                        acc_code = line.account_code or line.account_id
 
-                # التحقق من الفترة
-                if entry_date < start_datetime or entry_date > end_datetime:
-                    continue
+                        if acc_code == account_code:
+                            debit = line.debit
+                            credit = line.credit
 
-                # البحث عن بنود تخص هذا الحساب
-                for line in entry.lines:
-                    acc_code = line.account_code or line.account_id
+                            # حساب الرصيد الجاري
+                            asset_types = ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']
 
-                    if acc_code == self.account.code:
-                        debit = line.debit
-                        credit = line.credit
+                            if account_type in asset_types:
+                                running_balance += debit - credit
+                            else:
+                                running_balance += credit - debit
 
-                        # حساب الرصيد الجاري
-                        # الأصول والمصروفات: المدين يزيد، الدائن ينقص
-                        # الخصوم والإيرادات: الدائن يزيد، المدين ينقص
-                        asset_types = ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']
-                        acc_type = self.account.type.value if self.account.type else self.account.type
+                            movements.append({
+                                'date': entry_date,
+                                'description': line.description or entry.description,
+                                'reference': entry.related_document_id or '',
+                                'debit': debit,
+                                'credit': credit,
+                                'balance': running_balance
+                            })
 
-                        if acc_type in asset_types:
-                            running_balance += debit - credit
-                        else:
-                            running_balance += credit - debit
+                # ترتيب الحركات حسب التاريخ
+                movements.sort(key=lambda x: x['date'])
+                
+                return {'movements': movements, 'error': None}
+                
+            except Exception as e:
+                safe_print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
+                import traceback
+                traceback.print_exc()
+                return {'movements': [], 'error': str(e)}
+        
+        def on_data_loaded(data):
+            """تحديث الواجهة بالبيانات"""
+            try:
+                if data.get('error'):
+                    QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{data['error']}")
+                    return
+                
+                movements = data['movements']
+                
+                # عرض الحركات في الجدول
+                self.movements_table.setRowCount(0)
 
-                        movements.append({
-                            'date': entry_date,
-                            'description': line.description or entry.description,
-                            'reference': entry.related_document_id or '',
-                            'debit': debit,
-                            'credit': credit,
-                            'balance': running_balance
-                        })
+                total_debit = 0.0
+                total_credit = 0.0
 
-            # ترتيب الحركات حسب التاريخ
-            movements.sort(key=lambda x: x['date'])
+                for i, movement in enumerate(movements):
+                    self.movements_table.insertRow(i)
 
-            # عرض الحركات في الجدول
-            self.movements_table.setRowCount(0)
+                    # التاريخ
+                    date_str = movement['date'].strftime("%Y-%m-%d") if hasattr(movement['date'], 'strftime') else str(movement['date'])[:10]
+                    self.movements_table.setItem(i, 0, create_centered_item(date_str))
 
-            total_debit = 0.0
-            total_credit = 0.0
+                    # الوصف
+                    self.movements_table.setItem(i, 1, create_centered_item(movement['description']))
 
-            for i, movement in enumerate(movements):
-                self.movements_table.insertRow(i)
+                    # المرجع
+                    ref_text = movement['reference'][:20] if len(movement['reference']) > 20 else movement['reference']
+                    self.movements_table.setItem(i, 2, create_centered_item(ref_text))
 
-                # التاريخ
-                date_str = movement['date'].strftime("%Y-%m-%d") if hasattr(movement['date'], 'strftime') else str(movement['date'])[:10]
-                self.movements_table.setItem(i, 0, create_centered_item(date_str))
+                    # مدين
+                    debit_text = f"{movement['debit']:,.2f}" if movement['debit'] > 0 else "-"
+                    debit_item = create_centered_item(debit_text)
+                    if movement['debit'] > 0:
+                        debit_item.setForeground(QColor(COLORS['success']))
+                    self.movements_table.setItem(i, 3, debit_item)
 
-                # الوصف
-                self.movements_table.setItem(i, 1, create_centered_item(movement['description']))
+                    # دائن
+                    credit_text = f"{movement['credit']:,.2f}" if movement['credit'] > 0 else "-"
+                    credit_item = create_centered_item(credit_text)
+                    if movement['credit'] > 0:
+                        credit_item.setForeground(QColor(COLORS['danger']))
+                    self.movements_table.setItem(i, 4, credit_item)
 
-                # المرجع
-                ref_text = movement['reference'][:20] if len(movement['reference']) > 20 else movement['reference']
-                self.movements_table.setItem(i, 2, create_centered_item(ref_text))
+                    # الرصيد
+                    balance_item = create_centered_item(f"{movement['balance']:,.2f}")
+                    balance_item.setFont(get_cairo_font(10, bold=True))
+                    if movement['balance'] > 0:
+                        balance_item.setForeground(QColor(COLORS['success']))
+                    elif movement['balance'] < 0:
+                        balance_item.setForeground(QColor(COLORS['danger']))
+                    self.movements_table.setItem(i, 5, balance_item)
 
-                # مدين
-                debit_text = f"{movement['debit']:,.2f}" if movement['debit'] > 0 else "-"
-                debit_item = create_centered_item(debit_text)
-                if movement['debit'] > 0:
-                    debit_item.setForeground(QColor(COLORS['success']))
-                self.movements_table.setItem(i, 3, debit_item)
+                    total_debit += movement['debit']
+                    total_credit += movement['credit']
 
-                # دائن
-                credit_text = f"{movement['credit']:,.2f}" if movement['credit'] > 0 else "-"
-                credit_item = create_centered_item(credit_text)
-                if movement['credit'] > 0:
-                    credit_item.setForeground(QColor(COLORS['danger']))
-                self.movements_table.setItem(i, 4, credit_item)
+                # تحديث الملخص
+                self.total_debit_label.setText(f"إجمالي المدين: {total_debit:,.2f} جنيه")
+                self.total_credit_label.setText(f"إجمالي الدائن: {total_credit:,.2f} جنيه")
 
-                # الرصيد
-                balance_item = create_centered_item(f"{movement['balance']:,.2f}")
-                balance_item.setFont(get_cairo_font(10, bold=True))
-                if movement['balance'] > 0:
-                    balance_item.setForeground(QColor(COLORS['success']))
-                elif movement['balance'] < 0:
-                    balance_item.setForeground(QColor(COLORS['danger']))
-                self.movements_table.setItem(i, 5, balance_item)
+                net_movement = total_debit - total_credit
+                self.net_movement_label.setText(f"صافي الحركة: {net_movement:,.2f} جنيه")
 
-                total_debit += movement['debit']
-                total_credit += movement['credit']
-
-            # تحديث الملخص
-            self.total_debit_label.setText(f"إجمالي المدين: {total_debit:,.2f} جنيه")
-            self.total_credit_label.setText(f"إجمالي الدائن: {total_credit:,.2f} جنيه")
-
-            net_movement = total_debit - total_credit
-            self.net_movement_label.setText(f"صافي الحركة: {net_movement:,.2f} جنيه")
-
-            safe_print(f"INFO: [LedgerWindow] تم تحميل {len(movements)} حركة")
-
-        except Exception as e:
-            safe_print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{str(e)}")
+                safe_print(f"INFO: [LedgerWindow] تم تحميل {len(movements)} حركة")
+                
+            except Exception as e:
+                safe_print(f"ERROR: [LedgerWindow] فشل تحديث الواجهة: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        def on_error(error_msg):
+            safe_print(f"ERROR: [LedgerWindow] {error_msg}")
+            QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{error_msg}")
+        
+        # ⚡ تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="ledger_data",
+            load_function=fetch_ledger_data,
+            on_success=on_data_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def reset_filter(self):
         """إعادة تعيين الفلتر"""

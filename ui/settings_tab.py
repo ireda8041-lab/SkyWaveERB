@@ -1348,99 +1348,122 @@ class SettingsTab(QWidget):
                     QMessageBox.critical(self, "خطأ", f"فشل استرجاع النسخة الاحتياطية:\n{e}")
 
     def load_db_stats(self):
-        """تحميل إحصائيات قاعدة البيانات - محسّن بدون تحميل كل البيانات"""
-        try:
-            if self.repository is not None:
-                # ✅ استخدام Repository.get_cursor بشكل صحيح
-                try:
-                    cursor = self.repository.get_cursor()
-                    try:
-                        cursor.execute("SELECT COUNT(*) FROM clients")
-                        result = cursor.fetchone()
-                        clients_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM services")
-                        result = cursor.fetchone()
-                        services_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM invoices")
-                        result = cursor.fetchone()
-                        invoices_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM expenses")
-                        result = cursor.fetchone()
-                        expenses_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM accounts")
-                        result = cursor.fetchone()
-                        accounts_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM currencies")
-                        result = cursor.fetchone()
-                        currencies_count = result[0] if result else 0
-
-                        cursor.execute("SELECT COUNT(*) FROM journal_entries")
-                        result = cursor.fetchone()
-                        journal_count = result[0] if result else 0
-
-                        try:
-                            cursor.execute("SELECT COUNT(*) FROM projects")
-                            result = cursor.fetchone()
-                            projects_count = result[0] if result else 0
-                        except Exception:
-                            projects_count = 0
-                    finally:
-                        cursor.close()
-
-                    total = (
-                        clients_count
-                        + services_count
-                        + invoices_count
-                        + expenses_count
-                        + accounts_count
-                        + currencies_count
-                        + journal_count
-                        + projects_count
-                    )
-
-                    # حالة الاتصال
-                    connection_status = (
-                        "✅ متصل"
-                        if self.repository.online is not None and self.repository.online
-                        else "⚠️ غير متصل"
-                    )
-
-                    stats_text = f"""
-📊 إحصائيات قاعدة البيانات:
-
-• العملاء: {clients_count} سجل
-• الخدمات: {services_count} سجل
-• المشاريع: {projects_count} سجل
-• الفواتير: {invoices_count} سجل
-• المصروفات: {expenses_count} سجل
-• الحسابات المحاسبية: {accounts_count} سجل
-• العملات: {currencies_count} سجل
-• قيود اليومية: {journal_count} سجل
-
-📁 إجمالي السجلات: {total}
-
-🔄 حالة الاتصال بالأونلاين: {connection_status}
-                    """
-                except Exception as e:
-                    safe_print(f"ERROR: فشل جلب الإحصائيات: {e}")
-                    stats_text = f"❌ خطأ في جلب الإحصائيات: {e}"
-            else:
-                stats_text = """
+        """⚡ تحميل إحصائيات قاعدة البيانات في الخلفية لمنع التجميد"""
+        # عرض رسالة تحميل
+        self.db_stats_label.setText("⏳ جاري تحميل الإحصائيات...")
+        
+        if self.repository is None:
+            self.db_stats_label.setText("""
 📊 إحصائيات قاعدة البيانات:
 
 ⚠️ قاعدة البيانات غير متصلة
 يرجى التحقق من الاتصال
+            """)
+            return
+        
+        from core.data_loader import get_data_loader
+        
+        def fetch_stats():
+            """جلب الإحصائيات في thread منفصل"""
+            try:
+                cursor = self.repository.get_cursor()
+                try:
+                    # ⚡ استعلام واحد بدلاً من 8 استعلامات منفصلة
+                    cursor.execute("""
+                        SELECT 
+                            (SELECT COUNT(*) FROM clients) as clients,
+                            (SELECT COUNT(*) FROM services) as services,
+                            (SELECT COUNT(*) FROM invoices) as invoices,
+                            (SELECT COUNT(*) FROM expenses) as expenses,
+                            (SELECT COUNT(*) FROM accounts) as accounts,
+                            (SELECT COUNT(*) FROM currencies) as currencies,
+                            (SELECT COUNT(*) FROM journal_entries) as journal_entries
+                    """)
+                    result = cursor.fetchone()
+                    
+                    clients_count = result[0] if result else 0
+                    services_count = result[1] if result else 0
+                    invoices_count = result[2] if result else 0
+                    expenses_count = result[3] if result else 0
+                    accounts_count = result[4] if result else 0
+                    currencies_count = result[5] if result else 0
+                    journal_count = result[6] if result else 0
+                    
+                    # جلب عدد المشاريع بشكل منفصل (قد لا يكون الجدول موجوداً)
+                    try:
+                        cursor.execute("SELECT COUNT(*) FROM projects")
+                        projects_result = cursor.fetchone()
+                        projects_count = projects_result[0] if projects_result else 0
+                    except Exception:
+                        projects_count = 0
+                finally:
+                    cursor.close()
+                
+                # حالة الاتصال
+                is_online = self.repository.online is not None and self.repository.online
+                
+                return {
+                    'clients': clients_count,
+                    'services': services_count,
+                    'projects': projects_count,
+                    'invoices': invoices_count,
+                    'expenses': expenses_count,
+                    'accounts': accounts_count,
+                    'currencies': currencies_count,
+                    'journal': journal_count,
+                    'is_online': is_online
+                }
+            except Exception as e:
+                safe_print(f"ERROR: فشل جلب الإحصائيات: {e}")
+                return {'error': str(e)}
+        
+        def on_stats_loaded(data):
+            """تحديث الواجهة بالإحصائيات"""
+            try:
+                if 'error' in data:
+                    self.db_stats_label.setText(f"❌ خطأ في جلب الإحصائيات: {data['error']}")
+                    return
+                
+                total = (
+                    data['clients'] + data['services'] + data['invoices'] +
+                    data['expenses'] + data['accounts'] + data['currencies'] +
+                    data['journal'] + data['projects']
+                )
+                
+                connection_status = "✅ متصل" if data['is_online'] else "⚠️ غير متصل"
+                
+                stats_text = f"""
+📊 إحصائيات قاعدة البيانات:
+
+• العملاء: {data['clients']} سجل
+• الخدمات: {data['services']} سجل
+• المشاريع: {data['projects']} سجل
+• الفواتير: {data['invoices']} سجل
+• المصروفات: {data['expenses']} سجل
+• الحسابات المحاسبية: {data['accounts']} سجل
+• العملات: {data['currencies']} سجل
+• قيود اليومية: {data['journal']} سجل
+
+📁 إجمالي السجلات: {total}
+
+🔄 حالة الاتصال بالأونلاين: {connection_status}
                 """
-
-            self.db_stats_label.setText(stats_text)
-
-        except Exception as e:
-            self.db_stats_label.setText(f"❌ خطأ في جلب الإحصائيات: {e}")
+                self.db_stats_label.setText(stats_text)
+            except Exception as e:
+                self.db_stats_label.setText(f"❌ خطأ في عرض الإحصائيات: {e}")
+        
+        def on_error(error_msg):
+            self.db_stats_label.setText(f"❌ خطأ: {error_msg}")
+        
+        # ⚡ تحميل في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="db_stats",
+            load_function=fetch_stats,
+            on_success=on_stats_loaded,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def setup_default_accounts_tab(self):
         """إعداد تاب الحسابات الافتراضية"""
