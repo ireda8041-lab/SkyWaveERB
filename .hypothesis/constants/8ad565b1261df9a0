@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\trio\_abc.py
+# hypothesis_version: 6.148.3
+
+['ReceiveType', 'SendType', 'T', 'T_resource', '_abc', 'abc']

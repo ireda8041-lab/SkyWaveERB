@@ -136,7 +136,8 @@ class AuthService:
                 # تحديث آخر تسجيل دخول
                 from datetime import datetime
                 user.last_login = datetime.now().isoformat()
-                self.repo.update_user(user.id or user._mongo_id, {"last_login": user.last_login})
+                # استخدام update_user_by_username مباشرة لتجنب مشاكل ID
+                self.repo.update_user_by_username(username, {"last_login": user.last_login})
                 role_display = user.role.value if hasattr(user.role, 'value') else str(user.role)
                 safe_print(f"INFO: [AuthService] تم تسجيل دخول المستخدم: {username} ({role_display})")
                 result: User | None = user

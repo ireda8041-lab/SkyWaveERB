@@ -42,20 +42,30 @@ from ui.styles import (
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
 
+
 # استيراد نظام الإشعارات
 try:
     from ui.notification_system import notify_error, notify_info, notify_success, notify_warning
 except ImportError:
-    def notify_success(msg, title=None): pass
-    def notify_error(msg, title=None): pass
-    def notify_warning(msg, title=None): pass
-    def notify_info(msg, title=None): pass
+
+    def notify_success(msg, title=None):
+        pass
+
+    def notify_error(msg, title=None):
+        pass
+
+    def notify_warning(msg, title=None):
+        pass
+
+    def notify_info(msg, title=None):
+        pass
 
 
 class ProjectItemDialog(QDialog):
@@ -71,10 +81,12 @@ class ProjectItemDialog(QDialog):
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         # إزالة الإطار البرتقالي نهائياً
@@ -171,7 +183,7 @@ class ProjectEditorDialog(QDialog):
         self.project_items: list[schemas.ProjectItem] = []
 
         # Get settings service for default treasury account
-        self.settings_service = getattr(service_service, 'settings_service', None)
+        self.settings_service = getattr(service_service, "settings_service", None)
 
         if self.is_editing:
             self.setWindowTitle(f"تعديل مشروع: {project_to_edit.name}")
@@ -180,14 +192,15 @@ class ProjectEditorDialog(QDialog):
 
         # ⚡ فتح النافذة بحجم الشاشة الكامل
         self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowMaximizeButtonHint |
-            Qt.WindowType.WindowMinimizeButtonHint |
-            Qt.WindowType.WindowCloseButtonHint
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
         )
 
         # الحصول على حجم الشاشة وفتح النافذة بحجم كبير
         from PyQt6.QtWidgets import QApplication
+
         screen = QApplication.primaryScreen()
         if screen:
             screen_geo = screen.availableGeometry()
@@ -203,10 +216,12 @@ class ProjectEditorDialog(QDialog):
 
         # 📱 سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         # تصغير العناصر وإزالة الإطار البرتقالي
@@ -279,10 +294,11 @@ class ProjectEditorDialog(QDialog):
         # فلترة الحسابات النقدية فقط (الخزينة والبنوك والمحافظ الإلكترونية)
         all_accounts = self.accounting_service.repo.get_all_accounts()
         self.cash_accounts = [
-            acc for acc in all_accounts
-            if acc.type == schemas.AccountType.CASH or
-               (acc.code and acc.code.startswith("111")) or  # الخزينة 111x
-               (acc.code and acc.code.startswith("12"))      # المحافظ الإلكترونية 12xx
+            acc
+            for acc in all_accounts
+            if acc.type == schemas.AccountType.CASH
+            or (acc.code and acc.code.startswith("111"))  # الخزينة 111x
+            or (acc.code and acc.code.startswith("12"))  # المحافظ الإلكترونية 12xx
         ]
 
         self.init_ui()
@@ -357,7 +373,9 @@ class ProjectEditorDialog(QDialog):
         self.service_combo = SmartFilterComboBox()
         self.service_combo.addItem("اختر الخدمة أو الباقة...", userData=None)
         for service in self.services_list:
-            self.service_combo.addItem(f"{service.name} ({service.default_price})", userData=service)
+            self.service_combo.addItem(
+                f"{service.name} ({service.default_price})", userData=service
+            )
         self.service_combo.setCurrentIndex(0)
         self.item_price_input = CustomSpinBox(decimals=2, minimum=0, maximum=9999999999)
         self.item_price_input.setSuffix(" ج.م")
@@ -365,6 +383,7 @@ class ProjectEditorDialog(QDialog):
         self.item_quantity_input.setValue(1.0)
         self.add_item_button = QPushButton("➕ إضافة البند")
         from ui.styles import BUTTON_STYLES
+
         self.add_item_button.setStyleSheet(BUTTON_STYLES["primary"])
         add_item_layout.addWidget(self.service_combo, 3)
         add_item_layout.addWidget(QLabel("الكمية:"))
@@ -378,13 +397,16 @@ class ProjectEditorDialog(QDialog):
 
         # ⚡ إضافة label لعرض وصف الخدمة بشكل واضح
         from PyQt6.QtWidgets import QSizePolicy
+
         self.service_description_label = QLabel("")
         self.service_description_label.setWordWrap(True)
         self.service_description_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.service_description_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.service_description_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
         self.service_description_label.setStyleSheet(f"""
             QLabel {{
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
                 font-size: 12px;
                 font-family: 'Cairo';
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -402,10 +424,14 @@ class ProjectEditorDialog(QDialog):
 
         self.items_table = QTableWidget()
         self.items_table.setColumnCount(6)
-        self.items_table.setHorizontalHeaderLabels(["البند", "الكمية", "السعر", "خصم", "الإجمالي", "حذف"])
+        self.items_table.setHorizontalHeaderLabels(
+            ["البند", "الكمية", "السعر", "خصم", "الإجمالي", "حذف"]
+        )
 
         # تفعيل التحرير البسيط للكمية والسعر والخصم
-        self.items_table.setEditTriggers(QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.SelectedClicked)
+        self.items_table.setEditTriggers(
+            QTableWidget.EditTrigger.DoubleClicked | QTableWidget.EditTrigger.SelectedClicked
+        )
         self.items_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
         self.items_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
 
@@ -414,11 +440,11 @@ class ProjectEditorDialog(QDialog):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # عمود البند (يتمدد)
 
         # تحديد عرض ثابت للأعمدة الرقمية - مصغر
-        self.items_table.setColumnWidth(1, 60)   # الكمية
-        self.items_table.setColumnWidth(2, 75)   # السعر
-        self.items_table.setColumnWidth(3, 55)   # الخصم
-        self.items_table.setColumnWidth(4, 85)   # الإجمالي
-        self.items_table.setColumnWidth(5, 35)   # الحذف
+        self.items_table.setColumnWidth(1, 60)  # الكمية
+        self.items_table.setColumnWidth(2, 75)  # السعر
+        self.items_table.setColumnWidth(3, 55)  # الخصم
+        self.items_table.setColumnWidth(4, 85)  # الإجمالي
+        self.items_table.setColumnWidth(5, 35)  # الحذف
 
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
@@ -627,7 +653,7 @@ class ProjectEditorDialog(QDialog):
         # --- 5. أزرار التحكم ---
         buttons_layout = QHBoxLayout()
         self.save_button = QPushButton("💾 حفظ المشروع")
-        from ui.styles import BUTTON_STYLES
+
         self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_button.setFixedHeight(28)
         self.save_button.clicked.connect(self.save_project)
@@ -639,12 +665,14 @@ class ProjectEditorDialog(QDialog):
 
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.on_service_selected(0)
 
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
+
         apply_arrows_to_all_widgets(self)
 
         if self.is_editing:
@@ -680,7 +708,9 @@ class ProjectEditorDialog(QDialog):
                     account_data = self.payment_account_combo.itemData(i)
                     if account_data and account_data.code == default_treasury_code:
                         self.payment_account_combo.setCurrentIndex(i)
-                        safe_print(f"INFO: [ProjectDialog] Auto-selected default treasury: {account_data.name} ({default_treasury_code})")
+                        safe_print(
+                            f"INFO: [ProjectDialog] Auto-selected default treasury: {account_data.name} ({default_treasury_code})"
+                        )
                         break
         except Exception as e:
             safe_print(f"WARNING: [ProjectDialog] Failed to auto-select default treasury: {e}")
@@ -699,7 +729,10 @@ class ProjectEditorDialog(QDialog):
 
             if (
                 (client_mongo_id and client_mongo_id.strip() == project_client_ref)
-                or (client_local_id is not None and str(client_local_id).strip() == project_client_ref)
+                or (
+                    client_local_id is not None
+                    and str(client_local_id).strip() == project_client_ref
+                )
                 or client_name == project_client_ref
             ):
                 client_index = i
@@ -711,8 +744,8 @@ class ProjectEditorDialog(QDialog):
             self.status_combo.setCurrentIndex(status_index)
         # الوصف في notes_input دلوقتي
         self.notes_input.setText(self.project_to_edit.project_notes or "")
-        start_value = self.project_to_edit.start_date or datetime.datetime.now()
-        end_value = self.project_to_edit.end_date or datetime.datetime.now()
+        start_value = self.project_to_edit.start_date or datetime.now()
+        end_value = self.project_to_edit.end_date or datetime.now()
         self.start_date_input.setDate(QDate(start_value.year, start_value.month, start_value.day))
         self.end_date_input.setDate(QDate(end_value.year, end_value.month, end_value.day))
         self.discount_rate_input.setValue(self.project_to_edit.discount_rate)
@@ -728,7 +761,7 @@ class ProjectEditorDialog(QDialog):
         if service:
             self.item_price_input.setValue(service.default_price)
             # ⚡ عرض وصف الخدمة بشكل واضح
-            service_desc = getattr(service, 'description', None)
+            service_desc = getattr(service, "description", None)
             safe_print(f"DEBUG: [ProjectEditor] الخدمة: {service.name}, الوصف: {service_desc}")
 
             if service_desc and str(service_desc).strip():
@@ -741,7 +774,7 @@ class ProjectEditorDialog(QDialog):
                 self.service_combo.setToolTip("")
         else:
             # إخفاء الوصف عند عدم اختيار خدمة
-            if hasattr(self, 'service_description_label'):
+            if hasattr(self, "service_description_label"):
                 self.service_description_label.setVisible(False)
             self.service_combo.setToolTip("")
 
@@ -785,7 +818,7 @@ class ProjectEditorDialog(QDialog):
                 unit_price=price,
                 discount_rate=0.0,
                 discount_amount=0.0,
-                total=subtotal_item
+                total=subtotal_item,
             )
             # حفظ وصف الخدمة الكامل للـ tooltip
             item_schema._service_full_desc = service_desc
@@ -821,7 +854,7 @@ class ProjectEditorDialog(QDialog):
             desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
 
             # إضافة tooltip بوصف الخدمة الكامل إذا وجد
-            full_desc = getattr(item, '_service_full_desc', None)
+            full_desc = getattr(item, "_service_full_desc", None)
             if full_desc:
                 desc_item.setToolTip(f"📝 {full_desc}")
             else:
@@ -842,7 +875,9 @@ class ProjectEditorDialog(QDialog):
 
             # عمود السعر (قابل للتعديل، في الوسط)
             price_item = QTableWidgetItem(str(item.unit_price))
-            price_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            price_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             price_item.setToolTip("دبل كليك للتعديل")
             price_item.setBackground(QColor("#1A202C"))
             self.items_table.setItem(index, 2, price_item)
@@ -850,7 +885,9 @@ class ProjectEditorDialog(QDialog):
             # عمود الخصم بالمبلغ (قابل للتعديل، في الوسط)
             discount_text = f"{item.discount_amount:.2f}" if item.discount_amount > 0 else "0"
             discount_item = QTableWidgetItem(discount_text)
-            discount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            discount_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             discount_item.setToolTip("دبل كليك للتعديل (بالجنيه)")
             discount_item.setBackground(QColor("#1A202C"))
             self.items_table.setItem(index, 3, discount_item)
@@ -858,7 +895,9 @@ class ProjectEditorDialog(QDialog):
             # عمود الإجمالي (غير قابل للتعديل، في الوسط)
             total_item = QTableWidgetItem(f"{item.total:,.2f}")
             total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            total_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            total_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+            )
             self.items_table.setItem(index, 4, total_item)
 
             # زرار الحذف (صغير ومظبوط)
@@ -946,7 +985,7 @@ class ProjectEditorDialog(QDialog):
 
             elif column == 3:  # الخصم بالمبلغ
                 try:
-                    discount_text = cell_text.replace('ج.م', '').strip()
+                    discount_text = cell_text.replace("ج.م", "").strip()
                     item.discount_amount = float(discount_text) if discount_text else 0
                     # حساب النسبة من المبلغ للحفظ
                     subtotal = item.quantity * item.unit_price
@@ -1055,7 +1094,7 @@ class ProjectEditorDialog(QDialog):
         for i in range(self.service_combo.count()):
             item_text = self.service_combo.itemText(i)
             # استخراج اسم الخدمة فقط (قبل القوس)
-            service_name = item_text.split('(')[0].strip()
+            service_name = item_text.split("(")[0].strip()
             if service_name.lower() == text.lower():
                 found = True
                 break
@@ -1068,6 +1107,7 @@ class ProjectEditorDialog(QDialog):
         try:
             # فتح نافذة إضافة عميل جديد
             from ui.client_editor_dialog import ClientEditorDialog
+
             dialog = ClientEditorDialog(self.client_service, parent=self)
             dialog.name_input.setText(client_name)  # ملء الاسم مسبقاً
 
@@ -1083,7 +1123,9 @@ class ProjectEditorDialog(QDialog):
                         break
 
                 if new_client:
-                    QMessageBox.information(self, "نجح", f"تم إضافة العميل '{new_client.name}' بنجاح!")
+                    QMessageBox.information(
+                        self, "نجح", f"تم إضافة العميل '{new_client.name}' بنجاح!"
+                    )
                     return new_client
 
             return None
@@ -1096,6 +1138,7 @@ class ProjectEditorDialog(QDialog):
         try:
             # فتح نافذة إضافة خدمة جديدة
             from ui.service_editor_dialog import ServiceEditorDialog
+
             dialog = ServiceEditorDialog(self.service_service, parent=self)
             dialog.name_input.setText(service_name)  # ملء الاسم مسبقاً
 
@@ -1111,7 +1154,9 @@ class ProjectEditorDialog(QDialog):
                         break
 
                 if new_service:
-                    QMessageBox.information(self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!")
+                    QMessageBox.information(
+                        self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!"
+                    )
                     return new_service
 
             return None
@@ -1132,7 +1177,7 @@ class ProjectEditorDialog(QDialog):
             "عميل جديد",
             f"العميل '{client_name}' غير موجود.\nهل تريد إضافته كعميل جديد؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
+            QMessageBox.StandardButton.Yes,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
@@ -1153,12 +1198,13 @@ class ProjectEditorDialog(QDialog):
             "خدمة جديدة",
             f"الخدمة '{service_name}' غير موجودة.\nهل تريد إضافتها كخدمة جديدة؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.Yes
+            QMessageBox.StandardButton.Yes,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             # فتح نافذة إضافة خدمة جديدة
             from ui.service_editor_dialog import ServiceEditorDialog
+
             dialog = ServiceEditorDialog(self.service_service, parent=self)
             dialog.name_input.setText(service_name)  # ملء الاسم مسبقاً
 
@@ -1178,9 +1224,13 @@ class ProjectEditorDialog(QDialog):
                     new_service = self.services_list[-1]
 
                 if new_service:
-                    self.service_combo.addItem(f"{new_service.name} ({new_service.default_price})", userData=new_service)
+                    self.service_combo.addItem(
+                        f"{new_service.name} ({new_service.default_price})", userData=new_service
+                    )
                     self.service_combo.setCurrentText(new_service.name)
-                    QMessageBox.information(self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!")
+                    QMessageBox.information(
+                        self, "نجح", f"تم إضافة الخدمة '{new_service.name}' بنجاح!"
+                    )
                     return new_service
                 else:
                     QMessageBox.warning(self, "خطأ", "فشل في العثور على الخدمة المضافة")
@@ -1237,7 +1287,7 @@ class ProjectEditorDialog(QDialog):
             "discount_rate": discount_rate,
             "tax_rate": self.tax_rate_input.value(),
             "project_notes": self.notes_input.toPlainText(),
-            "currency": schemas.CurrencyCode.EGP
+            "currency": schemas.CurrencyCode.EGP,
         }
 
         # 2. (الجديد) تجميع بيانات الدفعة المقدمة
@@ -1253,7 +1303,7 @@ class ProjectEditorDialog(QDialog):
             payment_data = {
                 "amount": payment_amount,
                 "date": self.payment_date_input.dateTime().toPyDateTime(),
-                "account_id": selected_account.code
+                "account_id": selected_account.code,
             }
 
         # حساب إجمالي المشروع للتحقق من نسبة الدفعة المقدمة
@@ -1279,7 +1329,7 @@ class ProjectEditorDialog(QDialog):
                     f"الحد الأدنى الموصى به: 70% ({min_payment:,.2f})\n\n"
                     f"هل تريد المتابعة على أي حال؟",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    QMessageBox.StandardButton.No,
                 )
                 if reply == QMessageBox.StandardButton.No:
                     return
@@ -1341,9 +1391,9 @@ class ProjectManagerTab(QWidget):
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
+
         app_signals.projects_changed.connect(self._on_projects_changed)
         app_signals.payments_changed.connect(self._on_projects_changed)
-
 
         # --- 1. الجزء الأيسر (الجدول والأزرار) ---
         left_widget = QWidget()
@@ -1352,6 +1402,7 @@ class ProjectManagerTab(QWidget):
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
+
         self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ مشروع جديد")
@@ -1428,16 +1479,19 @@ class ProjectManagerTab(QWidget):
 
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
+
         self.projects_table = QTableWidget()
         self.projects_table.setColumnCount(5)
-        self.projects_table.setHorizontalHeaderLabels(["رقم الفاتورة", "اسم المشروع", "العميل", "الحالة", "تاريخ البدء"])
+        self.projects_table.setHorizontalHeaderLabels(
+            ["رقم الفاتورة", "اسم المشروع", "العميل", "الحالة", "تاريخ البدء"]
+        )
 
         # ⚡ تفعيل الترتيب بالضغط على رأس العمود
         self.projects_table.setSortingEnabled(True)
 
         self.search_bar = UniversalSearchBar(
             self.projects_table,
-            placeholder="🔍 بحث (رقم الفاتورة، اسم المشروع، العميل، الحالة، التاريخ)..."
+            placeholder="🔍 بحث (رقم الفاتورة، اسم المشروع، العميل، الحالة، التاريخ)...",
         )
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -1445,6 +1499,7 @@ class ProjectManagerTab(QWidget):
         self.projects_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.projects_table)
         self.projects_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.projects_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1461,7 +1516,6 @@ class ProjectManagerTab(QWidget):
         self.projects_table.itemSelectionChanged.connect(self.on_project_selection_changed)
         self.projects_table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
-
         # إضافة دبل كليك للتعديل
         self.projects_table.itemDoubleClicked.connect(self.open_editor_for_selected)
 
@@ -1474,8 +1528,8 @@ class ProjectManagerTab(QWidget):
         summary_frame = QFrame()
         summary_frame.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['bg_medium']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_medium"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
                 padding: 8px;
             }}
@@ -1486,14 +1540,18 @@ class ProjectManagerTab(QWidget):
 
         # عدد الفواتير
         self.invoices_count_label = QLabel("📄 عدد الفواتير: 0")
-        self.invoices_count_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        self.invoices_count_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;"
+        )
         summary_layout.addWidget(self.invoices_count_label)
 
         summary_layout.addStretch()
 
         # إجمالي مبالغ الفواتير
         self.invoices_total_label = QLabel("💰 إجمالي الفواتير: 0.00 جنيه")
-        self.invoices_total_label.setStyleSheet("color: #10b981; font-size: 12px; font-weight: bold;")
+        self.invoices_total_label.setStyleSheet(
+            "color: #10b981; font-size: 12px; font-weight: bold;"
+        )
         summary_layout.addWidget(self.invoices_total_label)
 
         table_layout.addWidget(summary_frame)
@@ -1530,7 +1588,9 @@ class ProjectManagerTab(QWidget):
 
         # === عنوان اللوحة (بسيط) ===
         header_title = QLabel("📊 معاينة ربحية المشروع")
-        header_title.setStyleSheet("color: #93C5FD; font-size: 12px; font-weight: bold; background: transparent; padding: 2px 0;")
+        header_title.setStyleSheet(
+            "color: #93C5FD; font-size: 12px; font-weight: bold; background: transparent; padding: 2px 0;"
+        )
         header_title.setAlignment(Qt.AlignmentFlag.AlignRight)
         preview_layout.addWidget(header_title)
 
@@ -1549,7 +1609,11 @@ class ProjectManagerTab(QWidget):
         payments_section = self._create_preview_section(
             "💳 الدفعات المسجلة",
             ["الحساب", "المبلغ", "التاريخ"],
-            [QHeaderView.ResizeMode.Stretch, QHeaderView.ResizeMode.ResizeToContents, QHeaderView.ResizeMode.ResizeToContents]
+            [
+                QHeaderView.ResizeMode.Stretch,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.ResizeToContents,
+            ],
         )
         self.preview_payments_table = payments_section["table"]
         preview_layout.addWidget(payments_section["frame"])
@@ -1558,7 +1622,11 @@ class ProjectManagerTab(QWidget):
         expenses_section = self._create_preview_section(
             "💸 المصروفات المرتبطة",
             ["المبلغ", "الوصف", "التاريخ"],
-            [QHeaderView.ResizeMode.ResizeToContents, QHeaderView.ResizeMode.Stretch, QHeaderView.ResizeMode.ResizeToContents]
+            [
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.Stretch,
+                QHeaderView.ResizeMode.ResizeToContents,
+            ],
         )
         self.preview_expenses_table = expenses_section["table"]
         preview_layout.addWidget(expenses_section["frame"])
@@ -1567,8 +1635,13 @@ class ProjectManagerTab(QWidget):
         tasks_section = self._create_preview_section(
             "📋 المهام المرتبطة",
             ["المهمة", "الأولوية", "الحالة", "الاستحقاق"],
-            [QHeaderView.ResizeMode.Stretch, QHeaderView.ResizeMode.ResizeToContents, QHeaderView.ResizeMode.ResizeToContents, QHeaderView.ResizeMode.ResizeToContents],
-            show_add_btn=True
+            [
+                QHeaderView.ResizeMode.Stretch,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.ResizeToContents,
+                QHeaderView.ResizeMode.ResizeToContents,
+            ],
+            show_add_btn=True,
         )
         self.preview_tasks_table = tasks_section["table"]
         self.add_task_btn = tasks_section.get("add_btn")
@@ -1614,9 +1687,13 @@ class ProjectManagerTab(QWidget):
         card_layout.setContentsMargins(8, 6, 8, 6)
         card_layout.setSpacing(2)
         title_label = QLabel(title)
-        title_label.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 9px; background: transparent;")
+        title_label.setStyleSheet(
+            "color: rgba(255,255,255,0.85); font-size: 9px; background: transparent;"
+        )
         value_label = QLabel(value)
-        value_label.setStyleSheet("color: white; font-weight: bold; font-size: 13px; background: transparent;")
+        value_label.setStyleSheet(
+            "color: white; font-weight: bold; font-size: 13px; background: transparent;"
+        )
         obj_name = f"val_{title}"
         value_label.setObjectName(obj_name)
         card.setProperty("value_label_name", obj_name)
@@ -1637,7 +1714,9 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل تحديث الكارت: {e}")
 
-    def _create_preview_section(self, title: str, headers: list, resize_modes: list, show_add_btn: bool = False) -> dict:
+    def _create_preview_section(
+        self, title: str, headers: list, resize_modes: list, show_add_btn: bool = False
+    ) -> dict:
         """إنشاء قسم معاينة بسيط مع جدول"""
         # Container بدون فريم
         container = QWidget()
@@ -1678,7 +1757,9 @@ class ProjectManagerTab(QWidget):
 
         # عنوان بسيط بدون فريم
         title_label = QLabel(title)
-        title_label.setStyleSheet("color: #93C5FD; font-size: 11px; font-weight: bold; background: transparent;")
+        title_label.setStyleSheet(
+            "color: #93C5FD; font-size: 11px; font-weight: bold; background: transparent;"
+        )
         header_layout.addWidget(title_label)
         layout.addLayout(header_layout)
 
@@ -1688,10 +1769,10 @@ class ProjectManagerTab(QWidget):
         table.setHorizontalHeaderLabels(headers)
         table.setStyleSheet(f"""
             QTableWidget {{
-                background-color: {COLORS['bg_dark']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_dark"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 4px;
-                gridline-color: {COLORS['border']};
+                gridline-color: {COLORS["border"]};
                 font-size: 11px;
             }}
             QTableWidget::item {{
@@ -1699,10 +1780,10 @@ class ProjectManagerTab(QWidget):
                 border-bottom: 1px solid rgba(30, 58, 95, 0.3);
             }}
             QTableWidget::item:selected {{
-                background-color: {COLORS['primary']};
+                background-color: {COLORS["primary"]};
             }}
             QHeaderView::section {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS['header_bg']}, stop:1 #1d4ed8);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["header_bg"]}, stop:1 #1d4ed8);
                 color: white;
                 padding: 5px;
                 border: none;
@@ -1712,6 +1793,7 @@ class ProjectManagerTab(QWidget):
             }}
         """)
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(table)
 
         # تطبيق أوضاع تغيير حجم الأعمدة
@@ -1777,20 +1859,20 @@ class ProjectManagerTab(QWidget):
         menu = QMenu(self.projects_table)
         menu.setStyleSheet(f"""
             QMenu {{
-                background-color: {COLORS['bg_medium']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_medium"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 8px;
                 padding: 5px;
             }}
             QMenu::item {{
                 background-color: transparent;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
                 padding: 8px 25px 8px 15px;
                 border-radius: 4px;
                 margin: 2px 5px;
             }}
             QMenu::item:selected {{
-                background-color: {COLORS['primary']};
+                background-color: {COLORS["primary"]};
                 color: white;
             }}
         """)
@@ -1842,6 +1924,7 @@ class ProjectManagerTab(QWidget):
             project = self.project_service.get_project_by_id(project_name)
             if project:
                 from ui.project_profit_dialog import ProjectProfitDialog
+
                 dialog = ProjectProfitDialog(project, self.project_service, self)
                 dialog.exec()
 
@@ -1852,13 +1935,14 @@ class ProjectManagerTab(QWidget):
             row = selected[0].row()
             project_name = self.projects_table.item(row, 1).text()
             project = self.project_service.get_project_by_id(project_name)
-            if project and hasattr(self, 'printing_service') and self.printing_service:
+            if project and hasattr(self, "printing_service") and self.printing_service:
                 self.printing_service.print_invoice(project)
 
     def on_project_selection_changed(self):
-        """ (معدلة) تملى لوحة المعاينة بكل التفاصيل - ⚡ محسّنة للسرعة """
+        """(معدلة) تملى لوحة المعاينة بكل التفاصيل - ⚡ محسّنة للسرعة"""
         # ⚡ تجاهل التحديث إذا كان الكليك يمين (لمنع التحميل المتكرر)
         from core.context_menu import is_right_click_active
+
         if is_right_click_active():
             return
 
@@ -1892,7 +1976,9 @@ class ProjectManagerTab(QWidget):
             self.preview_groupbox.setVisible(True)
 
             # حفظ ID المشروع للمهام
-            project_id_for_tasks = getattr(self.selected_project, 'id', None) or getattr(self.selected_project, '_mongo_id', project_name)
+            project_id_for_tasks = getattr(self.selected_project, "id", None) or getattr(
+                self.selected_project, "_mongo_id", project_name
+            )
 
             # ⚡ تحميل البيانات في الخلفية لمنع التجميد
             self._load_preview_data_async(project_name, project_id_for_tasks)
@@ -1921,25 +2007,30 @@ class ProjectManagerTab(QWidget):
             expenses = self.project_service.get_expenses_for_project(project_name)
 
             # 🔍 Debug: طباعة عدد الدفعات
-            safe_print(f"DEBUG: [ProjectManager] تم جلب {len(payments) if payments else 0} دفعة للمشروع {project_name}")
+            safe_print(
+                f"DEBUG: [ProjectManager] تم جلب {len(payments) if payments else 0} دفعة للمشروع {project_name}"
+            )
             if payments:
                 for i, pay in enumerate(payments):
-                    safe_print(f"  - دفعة {i+1}: {pay.amount:,.2f} ج.م في {pay.date} (حساب: {pay.account_id})")
+                    safe_print(
+                        f"  - دفعة {i + 1}: {pay.amount:,.2f} ج.م في {pay.date} (حساب: {pay.account_id})"
+                    )
 
             # جلب المهام
             tasks = []
             try:
                 from ui.todo_manager import TaskService
+
                 task_service = TaskService()
                 tasks = task_service.get_tasks_by_project(str(project_id_for_tasks))
             except Exception:
                 pass
 
             return {
-                'profit': profit_data,
-                'payments': payments,
-                'expenses': expenses,
-                'tasks': tasks
+                "profit": profit_data,
+                "payments": payments,
+                "expenses": expenses,
+                "tasks": tasks,
             }
 
         def on_all_data_loaded(data):
@@ -1948,74 +2039,86 @@ class ProjectManagerTab(QWidget):
                 return
 
             # تحديث الكروت
-            profit_data = data.get('profit', {})
+            profit_data = data.get("profit", {})
             self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
             self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
             self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
 
             # تحديث الجداول
-            payments_data = data.get('payments', [])
-            safe_print(f"DEBUG: [ProjectManager] جاري عرض {len(payments_data) if payments_data else 0} دفعة في الجدول")
+            payments_data = data.get("payments", [])
+            safe_print(
+                f"DEBUG: [ProjectManager] جاري عرض {len(payments_data) if payments_data else 0} دفعة في الجدول"
+            )
             self._populate_payments_table(payments_data)
-            self._populate_expenses_table(data.get('expenses', []))
-            self._populate_tasks_table(data.get('tasks', []))
+            self._populate_expenses_table(data.get("expenses", []))
+            self._populate_tasks_table(data.get("tasks", []))
 
         data_loader.load_async(
             operation_name=f"preview_{project_name}",
             load_function=fetch_all_data,
             on_success=on_all_data_loaded,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _populate_payments_table(self, payments):
         """⚡ ملء جدول الدفعات - محسّن مع عرض اسم الحساب"""
         try:
-            safe_print(f"DEBUG: [_populate_payments_table] بدء ملء الجدول بـ {len(payments) if payments else 0} دفعة")
-            safe_print(f"DEBUG: [_populate_payments_table] عدد الأعمدة في الجدول: {self.preview_payments_table.columnCount()}")
-            safe_print(f"DEBUG: [_populate_payments_table] أسماء الأعمدة: {[self.preview_payments_table.horizontalHeaderItem(i).text() for i in range(self.preview_payments_table.columnCount())]}")
-            
+            safe_print(
+                f"DEBUG: [_populate_payments_table] بدء ملء الجدول بـ {len(payments) if payments else 0} دفعة"
+            )
+            safe_print(
+                f"DEBUG: [_populate_payments_table] عدد الأعمدة في الجدول: {self.preview_payments_table.columnCount()}"
+            )
+            safe_print(
+                f"DEBUG: [_populate_payments_table] أسماء الأعمدة: {[self.preview_payments_table.horizontalHeaderItem(i).text() for i in range(self.preview_payments_table.columnCount())]}"
+            )
+
             # ⚡ تعطيل التحديثات أثناء الملء للسرعة
             self.preview_payments_table.setUpdatesEnabled(False)
-            
+
             # ⚡ إزالة كل الـ spans القديمة - يجب إزالتها من الخلية الأصلية فقط!
             old_row_count = self.preview_payments_table.rowCount()
             old_col_count = self.preview_payments_table.columnCount()
             processed_spans = set()
-            
-            safe_print(f"DEBUG: [_populate_payments_table] إزالة الـ spans القديمة...")
+
+            safe_print("DEBUG: [_populate_payments_table] إزالة الـ spans القديمة...")
             for row in range(old_row_count):
                 for col in range(old_col_count):
                     if (row, col) in processed_spans:
                         continue
-                        
+
                     row_span = self.preview_payments_table.rowSpan(row, col)
                     col_span = self.preview_payments_table.columnSpan(row, col)
-                    
+
                     if row_span > 1 or col_span > 1:
-                        safe_print(f"DEBUG: [_populate_payments_table] صف {row}, عمود {col} كان له span: {row_span}×{col_span}")
+                        safe_print(
+                            f"DEBUG: [_populate_payments_table] صف {row}, عمود {col} كان له span: {row_span}×{col_span}"
+                        )
                         self.preview_payments_table.setSpan(row, col, 1, 1)
-                        
+
                         # نضيف كل الخلايا المتأثرة بالـ span للقائمة
                         for r in range(row, row + row_span):
                             for c in range(col, col + col_span):
                                 processed_spans.add((r, c))
-            
+
             # ⚡ مسح الجدول
             self.preview_payments_table.clearContents()
             self.preview_payments_table.setRowCount(0)
-            safe_print(f"DEBUG: [_populate_payments_table] تم مسح الجدول")
-            
+            safe_print("DEBUG: [_populate_payments_table] تم مسح الجدول")
+
             if payments and len(payments) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_payments_table.setRowCount(len(payments))
                 safe_print(f"DEBUG: [_populate_payments_table] تم تعيين {len(payments)} صف")
 
                 for i, pay in enumerate(payments):
-                    safe_print(f"DEBUG: [_populate_payments_table] دفعة {i+1}: amount={pay.amount}, date={pay.date}, account={pay.account_id}")
-                    
+                    safe_print(
+                        f"DEBUG: [_populate_payments_table] دفعة {i + 1}: amount={pay.amount}, date={pay.date}, account={pay.account_id}"
+                    )
+
                     # معالجة التاريخ بأمان
                     try:
-                        if hasattr(pay.date, 'strftime'):
+                        if hasattr(pay.date, "strftime"):
                             date_str = pay.date.strftime("%Y-%m-%d")
                         else:
                             date_str = str(pay.date)[:10]
@@ -2026,13 +2129,19 @@ class ProjectManagerTab(QWidget):
                     account_name = "نقدي"
                     if pay.account_id:
                         try:
-                            account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+                            account = self.accounting_service.repo.get_account_by_code(
+                                pay.account_id
+                            )
                             if account:
                                 account_name = account.name
-                                safe_print(f"DEBUG: [_populate_payments_table] اسم الحساب: {account_name}")
+                                safe_print(
+                                    f"DEBUG: [_populate_payments_table] اسم الحساب: {account_name}"
+                                )
                             else:
                                 account_name = str(pay.account_id)
-                                safe_print(f"DEBUG: [_populate_payments_table] لم يتم العثور على الحساب، استخدام الكود: {account_name}")
+                                safe_print(
+                                    f"DEBUG: [_populate_payments_table] لم يتم العثور على الحساب، استخدام الكود: {account_name}"
+                                )
                         except Exception as e:
                             account_name = str(pay.account_id)
                             safe_print(f"DEBUG: [_populate_payments_table] خطأ في جلب الحساب: {e}")
@@ -2043,33 +2152,40 @@ class ProjectManagerTab(QWidget):
                     account_item.setFont(get_cairo_font(9))  # ⚡ تصغير الخط من 11 إلى 9
                     self.preview_payments_table.setItem(i, 0, account_item)
                     safe_print(f"DEBUG: [_populate_payments_table] عمود 0 (الحساب): {account_name}")
-                    
+
                     amount_item = QTableWidgetItem(f"{pay.amount:,.2f} ج.م")
                     amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     amount_item.setForeground(QColor("#10b981"))
                     amount_item.setFont(get_cairo_font(9, bold=True))  # ⚡ تصغير الخط من 11 إلى 9
                     self.preview_payments_table.setItem(i, 1, amount_item)
-                    safe_print(f"DEBUG: [_populate_payments_table] عمود 1 (المبلغ): {pay.amount:,.2f} ج.م")
-                    
+                    safe_print(
+                        f"DEBUG: [_populate_payments_table] عمود 1 (المبلغ): {pay.amount:,.2f} ج.م"
+                    )
+
                     date_item = QTableWidgetItem(date_str)
                     date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     date_item.setFont(get_cairo_font(9))  # ⚡ تصغير الخط من 10 إلى 9
                     self.preview_payments_table.setItem(i, 2, date_item)
                     safe_print(f"DEBUG: [_populate_payments_table] عمود 2 (التاريخ): {date_str}")
-                
+
                 # ⚡ التحقق من البيانات بعد الملء
-                safe_print(f"\nDEBUG: [_populate_payments_table] التحقق من البيانات بعد الملء:")
+                safe_print("\nDEBUG: [_populate_payments_table] التحقق من البيانات بعد الملء:")
                 for row in range(min(3, self.preview_payments_table.rowCount())):  # أول 3 صفوف فقط
                     safe_print(f"  صف {row}:")
                     for col in range(self.preview_payments_table.columnCount()):
                         item = self.preview_payments_table.item(row, col)
-                        span = (self.preview_payments_table.rowSpan(row, col), self.preview_payments_table.columnSpan(row, col))
+                        span = (
+                            self.preview_payments_table.rowSpan(row, col),
+                            self.preview_payments_table.columnSpan(row, col),
+                        )
                         if item:
                             safe_print(f"    عمود {col}: '{item.text()}' | span: {span}")
                         else:
                             safe_print(f"    عمود {col}: فارغ | span: {span}")
-                    
-                safe_print(f"SUCCESS: [_populate_payments_table] تم عرض {len(payments)} دفعة في الجدول")
+
+                safe_print(
+                    f"SUCCESS: [_populate_payments_table] تم عرض {len(payments)} دفعة في الجدول"
+                )
             else:
                 # إضافة صف يوضح عدم وجود دفعات
                 self.preview_payments_table.setRowCount(1)
@@ -2084,6 +2200,7 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول الدفعات: {e}")
             import traceback
+
             traceback.print_exc()
         finally:
             # ⚡ إعادة تفعيل التحديثات
@@ -2094,37 +2211,41 @@ class ProjectManagerTab(QWidget):
         try:
             # ⚡ تعطيل التحديثات أثناء الملء للسرعة
             self.preview_expenses_table.setUpdatesEnabled(False)
-            
+
             # ⚡ إزالة كل الـ spans القديمة - يجب إزالتها من الخلية الأصلية فقط!
             old_row_count = self.preview_expenses_table.rowCount()
             old_col_count = self.preview_expenses_table.columnCount()
-            safe_print(f"DEBUG: [_populate_expenses_table] الجدول القديم: {old_row_count} صف × {old_col_count} عمود")
-            
+            safe_print(
+                f"DEBUG: [_populate_expenses_table] الجدول القديم: {old_row_count} صف × {old_col_count} عمود"
+            )
+
             # نتتبع الخلايا اللي تم معالجتها عشان منكررش
             processed_spans = set()
-            
+
             for row in range(old_row_count):
                 for col in range(old_col_count):
                     if (row, col) in processed_spans:
                         continue
-                        
+
                     row_span = self.preview_expenses_table.rowSpan(row, col)
                     col_span = self.preview_expenses_table.columnSpan(row, col)
-                    
+
                     if row_span > 1 or col_span > 1:
-                        safe_print(f"DEBUG: [_populate_expenses_table] إزالة span من صف {row}, عمود {col}: {row_span}×{col_span}")
+                        safe_print(
+                            f"DEBUG: [_populate_expenses_table] إزالة span من صف {row}, عمود {col}: {row_span}×{col_span}"
+                        )
                         self.preview_expenses_table.setSpan(row, col, 1, 1)
-                        
+
                         # نضيف كل الخلايا المتأثرة بالـ span للقائمة
                         for r in range(row, row + row_span):
                             for c in range(col, col + col_span):
                                 processed_spans.add((r, c))
-            
+
             # ⚡ مسح الجدول بالكامل
             self.preview_expenses_table.setRowCount(0)
             self.preview_expenses_table.clearContents()
-            safe_print(f"DEBUG: [_populate_expenses_table] تم مسح الجدول")
-            
+            safe_print("DEBUG: [_populate_expenses_table] تم مسح الجدول")
+
             if expenses and len(expenses) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_expenses_table.setRowCount(len(expenses))
@@ -2132,7 +2253,7 @@ class ProjectManagerTab(QWidget):
                 for i, exp in enumerate(expenses):
                     # معالجة التاريخ بأمان
                     try:
-                        if hasattr(exp.date, 'strftime'):
+                        if hasattr(exp.date, "strftime"):
                             date_str = exp.date.strftime("%Y-%m-%d")
                         else:
                             date_str = str(exp.date)[:10]
@@ -2145,29 +2266,34 @@ class ProjectManagerTab(QWidget):
                     amount_item.setForeground(QColor("#ef4444"))
                     amount_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
                     self.preview_expenses_table.setItem(i, 0, amount_item)
-                    
+
                     desc_item = QTableWidgetItem(exp.description or exp.category or "-")
                     desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     desc_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
                     self.preview_expenses_table.setItem(i, 1, desc_item)
-                    
+
                     date_item = QTableWidgetItem(date_str)
                     date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     date_item.setFont(get_cairo_font(9))  # ⚡ إضافة خط أصغر
                     self.preview_expenses_table.setItem(i, 2, date_item)
-                
+
                 # ⚡ التحقق من البيانات بعد الملء
-                safe_print(f"\nDEBUG: [_populate_expenses_table] التحقق من البيانات بعد الملء:")
+                safe_print("\nDEBUG: [_populate_expenses_table] التحقق من البيانات بعد الملء:")
                 for row in range(min(3, self.preview_expenses_table.rowCount())):
                     safe_print(f"  صف {row}:")
                     for col in range(self.preview_expenses_table.columnCount()):
                         item = self.preview_expenses_table.item(row, col)
-                        span = (self.preview_expenses_table.rowSpan(row, col), self.preview_expenses_table.columnSpan(row, col))
+                        span = (
+                            self.preview_expenses_table.rowSpan(row, col),
+                            self.preview_expenses_table.columnSpan(row, col),
+                        )
                         if item:
                             safe_print(f"    عمود {col}: '{item.text()}' | span: {span}")
                         else:
                             safe_print(f"    عمود {col}: فارغ | span: {span}")
-                safe_print(f"SUCCESS: [_populate_expenses_table] تم عرض {len(expenses)} مصروف في الجدول")
+                safe_print(
+                    f"SUCCESS: [_populate_expenses_table] تم عرض {len(expenses)} مصروف في الجدول"
+                )
             else:
                 # إضافة صف يوضح عدم وجود مصروفات
                 self.preview_expenses_table.setRowCount(1)
@@ -2180,6 +2306,7 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المصروفات: {e}")
             import traceback
+
             traceback.print_exc()
         finally:
             # ⚡ إعادة تفعيل التحديثات
@@ -2192,27 +2319,27 @@ class ProjectManagerTab(QWidget):
             old_row_count = self.preview_tasks_table.rowCount()
             old_col_count = self.preview_tasks_table.columnCount()
             processed_spans = set()
-            
+
             for row in range(old_row_count):
                 for col in range(old_col_count):
                     if (row, col) in processed_spans:
                         continue
-                        
+
                     row_span = self.preview_tasks_table.rowSpan(row, col)
                     col_span = self.preview_tasks_table.columnSpan(row, col)
-                    
+
                     if row_span > 1 or col_span > 1:
                         self.preview_tasks_table.setSpan(row, col, 1, 1)
-                        
+
                         # نضيف كل الخلايا المتأثرة بالـ span للقائمة
                         for r in range(row, row + row_span):
                             for c in range(col, col + col_span):
                                 processed_spans.add((r, c))
-            
+
             # ⚡ مسح الجدول
             self.preview_tasks_table.clearContents()
             self.preview_tasks_table.setRowCount(0)
-            
+
             if tasks and len(tasks) > 0:
                 # ⚡ تعيين عدد الصفوف مرة واحدة
                 self.preview_tasks_table.setRowCount(len(tasks))
@@ -2227,9 +2354,11 @@ class ProjectManagerTab(QWidget):
                         "منخفضة": QColor("#10B981"),
                         "متوسطة": QColor("#0A6CF1"),
                         "عالية": QColor("#FF6636"),
-                        "عاجلة": QColor("#FF4FD8")
+                        "عاجلة": QColor("#FF4FD8"),
                     }
-                    priority_item.setForeground(priority_colors.get(task.priority.value, QColor("white")))
+                    priority_item.setForeground(
+                        priority_colors.get(task.priority.value, QColor("white"))
+                    )
                     self.preview_tasks_table.setItem(i, 1, priority_item)
 
                     # الحالة
@@ -2238,7 +2367,7 @@ class ProjectManagerTab(QWidget):
                         "قيد الانتظار": QColor("#B0C4DE"),
                         "قيد التنفيذ": QColor("#FF6636"),
                         "مكتملة": QColor("#10B981"),
-                        "ملغاة": QColor("#FF4FD8")
+                        "ملغاة": QColor("#FF4FD8"),
                     }
                     status_item.setForeground(status_colors.get(task.status.value, QColor("white")))
                     self.preview_tasks_table.setItem(i, 2, status_item)
@@ -2297,13 +2426,15 @@ class ProjectManagerTab(QWidget):
                 self.projects_table.setRowCount(len(self.projects_list))
                 for row, project in enumerate(self.projects_list):
                     # ⚡ جلب رقم الفاتورة مباشرة من المشروع
-                    invoice_number = getattr(project, 'invoice_number', None) or ""
+                    invoice_number = getattr(project, "invoice_number", None) or ""
 
                     self.projects_table.setItem(row, 0, create_centered_item(invoice_number))
                     self.projects_table.setItem(row, 1, create_centered_item(project.name))
                     self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
                     self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
-                    self.projects_table.setItem(row, 4, create_centered_item(self._format_date(project.start_date)))
+                    self.projects_table.setItem(
+                        row, 4, create_centered_item(self._format_date(project.start_date))
+                    )
 
                 # إعادة تفعيل الجدول
                 self.projects_table.blockSignals(False)
@@ -2320,6 +2451,7 @@ class ProjectManagerTab(QWidget):
             except Exception as e:
                 safe_print(f"ERROR: [ProjectManager] فشل تحديث الجدول: {e}")
                 import traceback
+
                 traceback.print_exc()
                 # إعادة تفعيل الجدول حتى في حالة الخطأ
                 self.projects_table.blockSignals(False)
@@ -2339,34 +2471,36 @@ class ProjectManagerTab(QWidget):
             load_function=fetch_projects,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _on_projects_changed(self):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.project_service, 'invalidate_cache'):
+        if hasattr(self.project_service, "invalidate_cache"):
             self.project_service.invalidate_cache()
         self.load_projects_data()
 
     def _update_invoices_summary(self):
         """⚡ تحديث ملخص الفواتير (العدد والإجمالي)"""
         try:
-            invoices_count = len(self.projects_list) if hasattr(self, 'projects_list') else 0
+            invoices_count = len(self.projects_list) if hasattr(self, "projects_list") else 0
             invoices_total = 0.0
 
             # حساب إجمالي مبالغ الفواتير من المشاريع
             for project in self.projects_list:
-                invoices_total += getattr(project, 'total_amount', 0) or 0
+                invoices_total += getattr(project, "total_amount", 0) or 0
 
             # تحديث الـ labels
-            if hasattr(self, 'invoices_count_label'):
+            if hasattr(self, "invoices_count_label"):
                 self.invoices_count_label.setText(f"📄 عدد الفواتير: {invoices_count}")
-            if hasattr(self, 'invoices_total_label'):
+            if hasattr(self, "invoices_total_label"):
                 self.invoices_total_label.setText(f"💰 إجمالي الفواتير: {invoices_total:,.2f} جنيه")
 
-            safe_print(f"INFO: [ProjectManager] ملخص الفواتير: {invoices_count} فاتورة بإجمالي {invoices_total:,.2f}")
+            safe_print(
+                f"INFO: [ProjectManager] ملخص الفواتير: {invoices_count} فاتورة بإجمالي {invoices_total:,.2f}"
+            )
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل تحديث ملخص الفواتير: {e}")
 
@@ -2374,6 +2508,7 @@ class ProjectManagerTab(QWidget):
         """تحميل المهام المرتبطة بالمشروع (متزامن - للاستخدام بعد إضافة مهمة)"""
         try:
             from ui.todo_manager import TaskService
+
             task_service = TaskService()
             tasks = task_service.get_tasks_by_project(str(project_id))
             self._populate_tasks_table(tasks)
@@ -2396,12 +2531,14 @@ class ProjectManagerTab(QWidget):
             from ui.todo_manager import TaskEditorDialog, TaskService
 
             # إنشاء مهمة جديدة مع ربطها بالمشروع
-            project_id = getattr(self.selected_project, 'id', None) or getattr(self.selected_project, '_mongo_id', self.selected_project.name)
+            project_id = getattr(self.selected_project, "id", None) or getattr(
+                self.selected_project, "_mongo_id", self.selected_project.name
+            )
 
             dialog = TaskEditorDialog(
                 parent=self,
                 project_service=self.project_service,
-                client_service=self.client_service
+                client_service=self.client_service,
             )
 
             # تحديد المشروع مسبقاً
@@ -2431,8 +2568,8 @@ class ProjectManagerTab(QWidget):
         if isinstance(value, str):
             try:
                 # محاولة تحليل التاريخ من النص
-                if 'T' in value:
-                    parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                if "T" in value:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
                 else:
                     parsed = datetime.strptime(value[:10], "%Y-%m-%d")
                 return parsed.strftime("%Y-%m-%d")
@@ -2441,14 +2578,14 @@ class ProjectManagerTab(QWidget):
         return str(value)
 
     def open_editor(self, project_to_edit: schemas.Project | None = None):
-        """ (معدلة) يفتح نافذة الحوار ويمرر "قسم المحاسبة" """
+        """(معدلة) يفتح نافذة الحوار ويمرر "قسم المحاسبة" """
         dialog = ProjectEditorDialog(
             project_service=self.project_service,
             client_service=self.client_service,
             service_service=self.service_service,
             accounting_service=self.accounting_service,
             project_to_edit=project_to_edit,
-            parent=self
+            parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_projects_data()
@@ -2473,7 +2610,7 @@ class ProjectManagerTab(QWidget):
             "تأكيد الحذف",
             f"هل أنت متأكد من حذف المشروع:\n\n{project_name}\n\n⚠️ سيتم حذف جميع البيانات المرتبطة بالمشروع!",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -2493,6 +2630,7 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل حذف المشروع: {e}")
             import traceback
+
             traceback.print_exc()
             notify_error(f"فشل حذف المشروع: {e}", "خطأ")
 
@@ -2509,10 +2647,11 @@ class ProjectManagerTab(QWidget):
         # جلب حسابات البنك/الخزينة فقط (الخزينة والمحافظ الإلكترونية)
         all_accounts = self.accounting_service.repo.get_all_accounts()
         cash_accounts = [
-            acc for acc in all_accounts
-            if acc.type == schemas.AccountType.CASH or
-               (acc.code and acc.code.startswith("111")) or  # الخزينة 111x
-               (acc.code and acc.code.startswith("12"))      # المحافظ الإلكترونية 12xx
+            acc
+            for acc in all_accounts
+            if acc.type == schemas.AccountType.CASH
+            or (acc.code and acc.code.startswith("111"))  # الخزينة 111x
+            or (acc.code and acc.code.startswith("12"))  # المحافظ الإلكترونية 12xx
         ]
 
         if not cash_accounts:
@@ -2520,7 +2659,7 @@ class ProjectManagerTab(QWidget):
                 self,
                 "خطأ إعداد",
                 "لم يتم العثور على حسابات بنك أو خزينة.\n\n"
-                "يرجى إضافة حسابات نقدية (كود يبدأ بـ 11 أو 12) أولاً."
+                "يرجى إضافة حسابات نقدية (كود يبدأ بـ 11 أو 12) أولاً.",
             )
             return
 
@@ -2528,7 +2667,7 @@ class ProjectManagerTab(QWidget):
             project=self.selected_project,
             accounts=cash_accounts,
             project_service=self.project_service,
-            parent=self
+            parent=self,
         )
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -2548,9 +2687,7 @@ class ProjectManagerTab(QWidget):
         from ui.project_profit_dialog import ProjectProfitDialog
 
         dialog = ProjectProfitDialog(
-            project=self.selected_project,
-            project_service=self.project_service,
-            parent=self
+            project=self.selected_project, project_service=self.project_service, parent=self
         )
         dialog.exec()
 
@@ -2575,11 +2712,11 @@ class ProjectManagerTab(QWidget):
 
             # تجهيز معلومات العميل
             client_info = {
-                'name': client.name,
-                'company_name': getattr(client, 'company_name', '') or '',
-                'phone': client.phone or "---",
-                'email': client.email or "",
-                'address': client.address or "---"
+                "name": client.name,
+                "company_name": getattr(client, "company_name", "") or "",
+                "phone": client.phone or "---",
+                "email": client.email or "",
+                "address": client.address or "---",
             }
 
             # ⚡ استخدام template_service
@@ -2587,17 +2724,14 @@ class ProjectManagerTab(QWidget):
                 safe_print("INFO: [ProjectManager] استخدام template_service للطباعة")
 
                 success = self.template_service.preview_template(
-                    project=project,
-                    client_info=client_info,
-                    payments=payments_list
+                    project=project, client_info=client_info, payments=payments_list
                 )
 
                 if success:
                     QMessageBox.information(
                         self,
                         "✅ تم إنشاء الفاتورة",
-                        "تم فتح معاينة الفاتورة في المتصفح.\n\n"
-                        "يمكنك طباعتها من المتصفح (Ctrl+P)"
+                        "تم فتح معاينة الفاتورة في المتصفح.\n\nيمكنك طباعتها من المتصفح (Ctrl+P)",
                     )
                 else:
                     QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
@@ -2609,15 +2743,19 @@ class ProjectManagerTab(QWidget):
             # Fallback: استخدام InvoicePrintingService
             # Step D: Prepare the complete data dictionary
             # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
-            invoice_number = getattr(project, 'invoice_number', None)
+            invoice_number = getattr(project, "invoice_number", None)
             if not invoice_number:
-                local_id = getattr(project, 'id', None) or 1
+                local_id = getattr(project, "id", None) or 1
                 invoice_number = f"SW-{97161 + int(local_id)}"
 
             invoice_data = {
                 "invoice_number": invoice_number,
-                "invoice_date": project.start_date.strftime("%Y-%m-%d") if hasattr(project, 'start_date') and project.start_date else datetime.now().strftime("%Y-%m-%d"),
-                "due_date": project.end_date.strftime("%Y-%m-%d") if hasattr(project, 'end_date') and project.end_date else datetime.now().strftime("%Y-%m-%d"),
+                "invoice_date": project.start_date.strftime("%Y-%m-%d")
+                if hasattr(project, "start_date") and project.start_date
+                else datetime.now().strftime("%Y-%m-%d"),
+                "due_date": project.end_date.strftime("%Y-%m-%d")
+                if hasattr(project, "end_date") and project.end_date
+                else datetime.now().strftime("%Y-%m-%d"),
                 "client_name": client.name,
                 "client_phone": client.phone or "---",
                 "client_address": client.address or "---",
@@ -2629,18 +2767,18 @@ class ProjectManagerTab(QWidget):
                         "qty": float(item.quantity),
                         "price": float(item.unit_price),
                         "discount": float(item.discount_rate),
-                        "total": float(item.total)
+                        "total": float(item.total),
                     }
                     for item in project.items
                 ],
                 # حساب المجموع الفرعي من البنود (مع الخصومات)
                 "subtotal": sum([float(item.total) for item in project.items]),
                 "grand_total": float(project.total_amount),
-                "total_paid": float(profit_data.get('total_paid', 0)),
-                "remaining_amount": float(profit_data.get('balance_due', 0)),
-                "remaining": float(profit_data.get('balance_due', 0)),
+                "total_paid": float(profit_data.get("total_paid", 0)),
+                "remaining_amount": float(profit_data.get("balance_due", 0)),
+                "remaining": float(profit_data.get("balance_due", 0)),
                 "total_amount": float(project.total_amount),
-                "payments": payments_list
+                "payments": payments_list,
             }
 
             # Step E: Use InvoicePrintingService to generate and open PDF
@@ -2648,7 +2786,7 @@ class ProjectManagerTab(QWidget):
 
             # Get settings service for company data
             settings_service = None
-            if self.service_service and hasattr(self.service_service, 'settings_service'):
+            if self.service_service and hasattr(self.service_service, "settings_service"):
                 settings_service = self.service_service.settings_service
 
             # Initialize printing service
@@ -2658,12 +2796,12 @@ class ProjectManagerTab(QWidget):
             pdf_path = printing_service.print_invoice(invoice_data)
 
             if pdf_path:
-                if pdf_path.endswith('.pdf'):
+                if pdf_path.endswith(".pdf"):
                     QMessageBox.information(
                         self,
                         "✅ تم إنشاء الفاتورة",
                         f"تم إنشاء فاتورة PDF بنجاح!\n\n📄 {os.path.basename(pdf_path)}\n\n"
-                        f"تم فتح الملف تلقائياً للطباعة."
+                        f"تم فتح الملف تلقائياً للطباعة.",
                     )
                 else:
                     # HTML file was created instead
@@ -2674,7 +2812,7 @@ class ProjectManagerTab(QWidget):
                         f"📄 {os.path.basename(pdf_path)}\n\n"
                         f"💡 لإنشاء PDF، قم بتثبيت:\n"
                         f"   pip install weasyprint\n"
-                        f"أو استخدم Google Chrome/Edge"
+                        f"أو استخدم Google Chrome/Edge",
                     )
             else:
                 QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
@@ -2682,10 +2820,8 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في طباعة الفاتورة:\n{str(e)}")
             import traceback
+
             traceback.print_exc()
-
-
-
 
     def _get_payments_list(self, project_name: str) -> list:
         """جلب قائمة الدفعات للمشروع - محسّن للسرعة"""
@@ -2700,7 +2836,7 @@ class ProjectManagerTab(QWidget):
 
             for payment in payments:
                 account_name = "نقدي"
-                account_id = getattr(payment, 'account_id', None)
+                account_id = getattr(payment, "account_id", None)
 
                 if account_id:
                     # ⚡ استخدام الكاش
@@ -2719,18 +2855,20 @@ class ProjectManagerTab(QWidget):
 
                 # تحويل التاريخ
                 payment_date = payment.date
-                if hasattr(payment_date, 'strftime'):
+                if hasattr(payment_date, "strftime"):
                     date_str = payment_date.strftime("%Y-%m-%d")
                 else:
                     date_str = str(payment_date)[:10] if payment_date else ""
 
-                payments_list.append({
-                    'date': date_str,
-                    'amount': float(payment.amount) if payment.amount else 0.0,
-                    'method': getattr(payment, 'method', account_name),
-                    'account_name': account_name,
-                    'account_id': str(account_id) if account_id else ''
-                })
+                payments_list.append(
+                    {
+                        "date": date_str,
+                        "amount": float(payment.amount) if payment.amount else 0.0,
+                        "method": getattr(payment, "method", account_name),
+                        "account_name": account_name,
+                        "account_id": str(account_id) if account_id else "",
+                    }
+                )
 
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل جلب الدفعات: {e}")
@@ -2758,27 +2896,24 @@ class ProjectManagerTab(QWidget):
 
             # تجهيز معلومات العميل
             client_info = {
-                'name': client.name,
-                'company_name': getattr(client, 'company_name', '') or '',
-                'phone': client.phone or "---",
-                'email': client.email or "",
-                'address': client.address or "---"
+                "name": client.name,
+                "company_name": getattr(client, "company_name", "") or "",
+                "phone": client.phone or "---",
+                "email": client.email or "",
+                "address": client.address or "---",
             }
 
             # استخدام template_service للمعاينة
             if self.template_service:
                 success = self.template_service.preview_template(
-                    project=project,
-                    client_info=client_info,
-                    payments=payments_list
+                    project=project, client_info=client_info, payments=payments_list
                 )
 
                 if success:
                     QMessageBox.information(
                         self,
                         "✅ معاينة الفاتورة",
-                        "تم فتح معاينة الفاتورة في المتصفح.\n\n"
-                        "يمكنك طباعتها من المتصفح (Ctrl+P)"
+                        "تم فتح معاينة الفاتورة في المتصفح.\n\nيمكنك طباعتها من المتصفح (Ctrl+P)",
                     )
                 else:
                     QMessageBox.critical(self, "خطأ", "فشل في معاينة الفاتورة")
@@ -2788,4 +2923,5 @@ class ProjectManagerTab(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في معاينة الفاتورة:\n{str(e)}")
             import traceback
+
             traceback.print_exc()

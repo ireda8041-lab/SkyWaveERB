@@ -56,7 +56,7 @@ class ClientService:
         self.repo = repository
         self._cache_time: float = 0
         self._cached_clients: list[schemas.Client] | None = None
-        self._cache_ttl = 30  # ⚡ 30 ثانية
+        self._cache_ttl = 120  # ⚡ دقيقتين للتوازن بين الأداء والتحديث
         logger.info("⚡ قسم العملاء (ClientService) جاهز")
 
     def get_all_clients(self) -> list[schemas.Client]:
@@ -351,3 +351,51 @@ class ClientService:
                 "by_type": {},
                 "by_country": {}
             }
+
+    def get_client_financial_totals(self) -> tuple[dict, dict]:
+        """
+        ✅ جلب الإجماليات المالية للعملاء (المشاريع والمدفوعات)
+        
+        Returns:
+            tuple: (client_projects_total, client_payments_total)
+                - client_projects_total: {client_id: total_amount}
+                - client_payments_total: {client_id: total_paid}
+        """
+        try:
+            cursor = self.repo.get_cursor()
+            try:
+                # إجمالي المشاريع لكل عميل
+                cursor.execute("""
+                    SELECT client_id, SUM(total_amount) as total_projects
+                    FROM projects
+                    WHERE status != 'مؤرشف' AND status != 'ملغي'
+                    GROUP BY client_id
+                """)
+                projects_result = cursor.fetchall()
+                
+                client_projects_total = {
+                    str(row[0]): float(row[1]) if row[1] else 0.0
+                    for row in projects_result
+                }
+                
+                # إجمالي المدفوعات لكل عميل
+                cursor.execute("""
+                    SELECT client_id, SUM(amount) as total_paid
+                    FROM payments
+                    WHERE client_id IS NOT NULL AND client_id != ''
+                    GROUP BY client_id
+                """)
+                payments_result = cursor.fetchall()
+                
+                client_payments_total = {
+                    str(row[0]): float(row[1]) if row[1] else 0.0
+                    for row in payments_result
+                }
+                
+                return client_projects_total, client_payments_total
+            finally:
+                cursor.close()
+                
+        except Exception as e:
+            logger.error(f"[ClientService] فشل جلب الإجماليات المالية: {e}", exc_info=True)
+            return {}, {}

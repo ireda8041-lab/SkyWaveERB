@@ -88,16 +88,261 @@ class AccountingService:
 
     def _ensure_default_accounts_exist(self) -> None:
         """
-        ⚡ التحقق من وجود حسابات النقدية الأساسية
+        ⚡ التحقق من وجود الحسابات المحاسبية الأساسية وإعادة حساب الأرصدة
+        
+        الحسابات الضرورية للنظام:
+        - حساب العملاء (112100) - للقيود المحاسبية عند إنشاء مشروع
+        - حساب الإيرادات (410100) - للقيود المحاسبية عند إنشاء مشروع
+        - حسابات النقدية (111xxx) - للدفعات والمصروفات
         """
         try:
-            # فقط نتحقق من حسابات النقدية (لا نحتاج حساب العملاء)
-            cash_accounts = self.repo.get_all_accounts()
-            cash_count = sum(1 for acc in cash_accounts if acc.type == schemas.AccountType.CASH)
-            safe_print(f"INFO: [AccountingService] ✅ تم العثور على {cash_count} حساب نقدية")
+            existing_accounts = self.repo.get_all_accounts()
+            existing_codes = {acc.code for acc in existing_accounts if acc.code}
+            
+            # التحقق من وجود الحسابات الضرورية فقط (بدون إنشاء)
+            required_codes = ["112100", "410100"]  # العملاء والإيرادات
+            missing = [code for code in required_codes if code not in existing_codes]
+            
+            if missing:
+                safe_print(f"WARNING: [AccountingService] ⚠️ حسابات مفقودة: {missing}")
+                safe_print("INFO: [AccountingService] يرجى إنشاء هذه الحسابات من واجهة البرنامج")
+            
+            cash_count = sum(1 for acc in existing_accounts if acc.type == schemas.AccountType.CASH)
+            safe_print(f"INFO: [AccountingService] ✅ تم العثور على {len(existing_codes)} حساب ({cash_count} نقدية)")
+
+            # ⚡ إعادة حساب أرصدة الحسابات النقدية من الدفعات والمصروفات
+            self._recalculate_cash_balances()
 
         except Exception as e:
             safe_print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
+
+    def _recalculate_cash_balances(self) -> None:
+        """
+        ⚡ إعادة حساب أرصدة الحسابات النقدية من الدفعات والمصروفات
+        الرصيد = إجمالي الدفعات المستلمة - إجمالي المصروفات المدفوعة
+        
+        ⚠️ هذه الدالة تُستدعى فقط عند بدء البرنامج لضمان صحة الأرصدة
+        ⚡ محسّنة: تستخدم cursor منفصل لتجنب Recursive cursor error
+        """
+        try:
+            # ⚡ استخدام cursor منفصل
+            cursor = self.repo.sqlite_conn.cursor()
+            cursor.row_factory = self.repo.sqlite_conn.row_factory
+            
+            try:
+                # ⚡ جلب الحسابات النقدية (الأوراق فقط - ليس المجموعات)
+                # المجموعات تنتهي بـ 000 (مثل 111000)
+                # نوع الحساب قد يكون 'cash' أو 'أصول نقدية'
+                cursor.execute("""
+                    SELECT code, name, balance FROM accounts 
+                    WHERE (type = 'cash' OR type = 'أصول نقدية' OR code LIKE '111%')
+                    AND code NOT LIKE '%000'
+                    AND code IS NOT NULL
+                """)
+                cash_accounts = cursor.fetchall()
+                
+                if not cash_accounts:
+                    return
+                
+                # ⚡ حساب إجمالي الدفعات لكل حساب باستخدام SQL
+                cursor.execute("""
+                    SELECT account_id, COALESCE(SUM(amount), 0) as total
+                    FROM payments 
+                    WHERE account_id IS NOT NULL
+                    GROUP BY account_id
+                """)
+                payments_by_account = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # ⚡ حساب إجمالي المصروفات لكل حساب باستخدام SQL
+                cursor.execute("""
+                    SELECT account_id, COALESCE(SUM(amount), 0) as total
+                    FROM expenses 
+                    WHERE account_id IS NOT NULL
+                    GROUP BY account_id
+                """)
+                expenses_by_account = {row[0]: row[1] for row in cursor.fetchall()}
+            finally:
+                cursor.close()
+            
+            # تحديث أرصدة الحسابات النقدية
+            updated_count = 0
+            for acc_code, acc_name, current_balance in cash_accounts:
+                payments_total = payments_by_account.get(acc_code, 0)
+                expenses_total = expenses_by_account.get(acc_code, 0)
+                new_balance = payments_total - expenses_total
+                
+                # تحديث الرصيد إذا تغير
+                if abs((current_balance or 0) - new_balance) > 0.01:
+                    safe_print(f"INFO: [AccountingService] تحديث رصيد {acc_code} ({acc_name}): {current_balance} -> {new_balance}")
+                    self.repo.update_account_balance(acc_code, new_balance)
+                    updated_count += 1
+            
+            # تحديث أرصدة المجموعات (مجموع الأبناء)
+            self._update_parent_balances()
+            
+            if updated_count > 0:
+                safe_print(f"INFO: [AccountingService] ✅ تم تحديث {updated_count} رصيد حساب نقدي")
+
+        except Exception as e:
+            safe_print(f"WARNING: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def recalculate_account_balance(self, account_code: str) -> float:
+        """
+        ⚡ إعادة حساب رصيد حساب نقدي واحد من الدفعات والمصروفات
+        يُستخدم بعد إضافة/تعديل/حذف دفعة أو مصروف
+        
+        ⚡ محسّن: يستخدم cursor منفصل لتجنب Recursive cursor error
+        
+        Returns:
+            الرصيد الجديد
+        """
+        try:
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.sqlite_conn.cursor()
+            cursor.row_factory = self.repo.sqlite_conn.row_factory
+            
+            try:
+                # حساب إجمالي الدفعات لهذا الحساب
+                cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE account_id = ?', (account_code,))
+                payments_total = cursor.fetchone()[0]
+                
+                # حساب إجمالي المصروفات لهذا الحساب
+                cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE account_id = ?', (account_code,))
+                expenses_total = cursor.fetchone()[0]
+            finally:
+                cursor.close()
+            
+            # الرصيد = الدفعات - المصروفات
+            new_balance = payments_total - expenses_total
+            
+            # تحديث الرصيد في قاعدة البيانات
+            self.repo.update_account_balance(account_code, new_balance)
+            
+            safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {account_code} = {new_balance}")
+            
+            # إبطال الـ cache
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            
+            return new_balance
+            
+        except Exception as e:
+            safe_print(f"ERROR: [AccountingService] فشل إعادة حساب رصيد {account_code}: {e}")
+            return 0.0
+
+    def recalculate_all_balances(self) -> dict[str, float]:
+        """
+        ⚡ إعادة حساب جميع أرصدة الحسابات النقدية من الدفعات والمصروفات
+        يُستخدم لإصلاح الأرصدة الخاطئة
+        
+        Returns:
+            قاموس بالأرصدة الجديدة {account_code: new_balance}
+        """
+        results = {}
+        try:
+            safe_print("INFO: [AccountingService] 🔄 جاري إعادة حساب جميع الأرصدة...")
+            
+            # ⚡ استخدام cursor منفصل
+            cursor = self.repo.sqlite_conn.cursor()
+            cursor.row_factory = self.repo.sqlite_conn.row_factory
+            
+            try:
+                # جلب جميع الحسابات النقدية
+                # نوع الحساب قد يكون 'cash' أو 'أصول نقدية'
+                cursor.execute("""
+                    SELECT code, name, balance FROM accounts 
+                    WHERE (type = 'cash' OR type = 'أصول نقدية' OR code LIKE '111%')
+                    AND code IS NOT NULL
+                """)
+                cash_accounts = cursor.fetchall()
+                
+                # حساب إجمالي الدفعات لكل حساب
+                cursor.execute("""
+                    SELECT account_id, COALESCE(SUM(amount), 0) as total
+                    FROM payments WHERE account_id IS NOT NULL
+                    GROUP BY account_id
+                """)
+                payments_by_account = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # حساب إجمالي المصروفات لكل حساب
+                cursor.execute("""
+                    SELECT account_id, COALESCE(SUM(amount), 0) as total
+                    FROM expenses WHERE account_id IS NOT NULL
+                    GROUP BY account_id
+                """)
+                expenses_by_account = {row[0]: row[1] for row in cursor.fetchall()}
+            finally:
+                cursor.close()
+            
+            # تحديث أرصدة الحسابات النقدية
+            for acc_code, acc_name, current_balance in cash_accounts:
+                # تخطي المجموعات (سيتم حسابها لاحقاً)
+                if acc_code.endswith('000'):
+                    continue
+                    
+                payments_total = payments_by_account.get(acc_code, 0)
+                expenses_total = expenses_by_account.get(acc_code, 0)
+                new_balance = payments_total - expenses_total
+                
+                # تحديث الرصيد
+                if abs((current_balance or 0) - new_balance) > 0.01:
+                    safe_print(f"INFO: [AccountingService] تصحيح {acc_code} ({acc_name}): {current_balance} -> {new_balance}")
+                    self.repo.update_account_balance(acc_code, new_balance)
+                
+                results[acc_code] = new_balance
+            
+            # تحديث أرصدة المجموعات
+            self._update_parent_balances()
+            
+            # إبطال الـ cache
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            
+            safe_print(f"INFO: [AccountingService] ✅ تم إعادة حساب {len(results)} رصيد")
+            return results
+            
+        except Exception as e:
+            safe_print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            return results
+
+    def _update_parent_balances(self) -> None:
+        """
+        تحديث أرصدة الحسابات الأب (المجموعات) = مجموع أرصدة الأبناء
+        ⚡ محسّنة: تستخدم cursor منفصل لتجنب Recursive cursor error
+        """
+        try:
+            # ⚡ استخدام cursor منفصل
+            cursor = self.repo.sqlite_conn.cursor()
+            cursor.row_factory = self.repo.sqlite_conn.row_factory
+            
+            try:
+                # ⚡ جلب كل الحسابات مع أرصدتها باستخدام SQL
+                cursor.execute("SELECT code, balance FROM accounts WHERE code IS NOT NULL")
+                accounts_data = {row[0]: row[1] or 0 for row in cursor.fetchall()}
+            finally:
+                cursor.close()
+            
+            # تحديث المجموعات (111000, 112000, etc.)
+            for acc_code, current_balance in accounts_data.items():
+                if not acc_code.endswith('000'):
+                    continue
+                
+                # جمع أرصدة الأبناء
+                prefix = acc_code[:3]  # مثل 111
+                children_balance = sum(
+                    balance for code, balance in accounts_data.items()
+                    if code.startswith(prefix) and code != acc_code and not code.endswith('000')
+                )
+                
+                # تحديث رصيد المجموعة إذا تغير
+                if abs(current_balance - children_balance) > 0.01:
+                    self.repo.update_account_balance(acc_code, children_balance)
+                    safe_print(f"INFO: [AccountingService] تحديث مجموعة {acc_code}: {children_balance}")
+
+        except Exception as e:
+            safe_print(f"WARNING: [AccountingService] فشل تحديث أرصدة المجموعات: {e}")
 
     def _subscribe_to_events(self) -> None:
         """
@@ -230,6 +475,7 @@ class AccountingService:
     def get_hierarchy_with_balances(self, force_refresh: bool = False) -> dict[str, dict]:
         """
         ⚡ جلب شجرة الحسابات مع حساب الأرصدة التراكمية للمجموعات (مع cache)
+        ⚡ محسّن للسرعة: يستخدم الأرصدة المخزنة مباشرة بدلاً من حساب القيود
 
         Returns:
             Dict[code, {obj: Account, total: float, children: []}]
@@ -244,232 +490,79 @@ class AccountingService:
             and (current_time - AccountingService._hierarchy_cache_time)
             < AccountingService._HIERARCHY_CACHE_TTL
         ):
-            safe_print("INFO: [AccountingService] استخدام cache الشجرة المحاسبية")
             return AccountingService._hierarchy_cache
-
-        safe_print("INFO: [AccountingService] جاري حساب الأرصدة التراكمية للشجرة...")
 
         try:
             accounts = self.repo.get_all_accounts()
 
             if not accounts:
-                safe_print("WARNING: [AccountingService] لا توجد حسابات")
                 return {}
 
-            # 1. حساب الأرصدة من القيود المحاسبية
-            account_movements = {}  # {code: {'debit': 0, 'credit': 0}}
-
-            # إنشاء قاموس لربط account_id بـ account_code
-            account_id_to_code = {}
-            for acc in accounts:
-                if acc.code:
-                    # ربط بالـ _mongo_id
-                    if hasattr(acc, "_mongo_id") and acc._mongo_id:
-                        account_id_to_code[str(acc._mongo_id)] = acc.code
-                    # ربط بالـ id
-                    if hasattr(acc, "id") and acc.id:
-                        account_id_to_code[str(acc.id)] = acc.code
-                    # ربط بالكود نفسه
-                    account_id_to_code[acc.code] = acc.code
-
-            try:
-                # جلب القيود بالطريقة العادية (أكثر موثوقية)
-                journal_entries = self.repo.get_all_journal_entries()
-                safe_print(f"DEBUG: [AccountingService] تم جلب {len(journal_entries)} قيد محاسبي")
-
-                for entry in journal_entries:
-                    for line in entry.lines:
-                        # محاولة الحصول على الكود من account_code أو account_id
-                        code = getattr(line, "account_code", None)
-                        if not code:
-                            # محاولة الحصول على الكود من account_id
-                            acc_id = getattr(line, "account_id", None)
-                            if acc_id:
-                                code = account_id_to_code.get(str(acc_id))
-
-                        if not code:
-                            continue
-
-                        if code not in account_movements:
-                            account_movements[code] = {"debit": 0.0, "credit": 0.0}
-                        account_movements[code]["debit"] += getattr(line, "debit", 0) or 0.0
-                        account_movements[code]["credit"] += getattr(line, "credit", 0) or 0.0
-
-                safe_print(
-                    f"DEBUG: [AccountingService] تم حساب حركات {len(account_movements)} حساب"
-                )
-                for code, mov in list(account_movements.items())[:5]:
-                    safe_print(f"  - {code}: مدين={mov['debit']}, دائن={mov['credit']}")
-
-            except Exception as e:
-                safe_print(f"ERROR: [AccountingService] فشل جلب القيود: {e}")
-                import traceback
-
-                traceback.print_exc()
-
-            # 2. إنشاء قاموس للوصول السريع O(1)
+            # ⚡ إنشاء قاموس للوصول السريع O(1)
             tree_map: dict[str, dict] = {}
             for acc in accounts:
                 if acc.code:
+                    # ⚡ استخدام الرصيد المخزن مباشرة (أسرع بكثير)
+                    stored_balance = getattr(acc, "balance", 0.0) or 0.0
                     tree_map[acc.code] = {
                         "obj": acc,
-                        "total": 0.0,
+                        "total": stored_balance,
                         "children": [],
                         "is_group": getattr(acc, "is_group", False),
                     }
 
-            # 3. بناء هيكل الشجرة وحساب الأرصدة من القيود
+            # ⚡ دالة استنتاج كود الأب
             def get_parent_code_from_code(code: str) -> str | None:
-                """
-                استنتاج كود الأب من كود الحساب تلقائياً
-                يدعم نظام 4 أرقام (القديم) و 6 أرقام (Enterprise)
-                """
                 if not code:
                     return None
-
                 code_len = len(code)
-
-                # نظام 6 أرقام (Enterprise)
                 if code_len == 6:
-                    # أمثلة: 111101 -> 111100, 111100 -> 111000, 111000 -> 110000, 110000 -> 100000
                     if code.endswith("00000"):
-                        return None  # جذر (100000, 200000, ...)
+                        return None
                     elif code.endswith("0000"):
-                        return code[0] + "00000"  # 110000 -> 100000
+                        return code[0] + "00000"
                     elif code.endswith("000"):
-                        return code[:2] + "0000"  # 111000 -> 110000
+                        return code[:2] + "0000"
                     elif code.endswith("00"):
-                        return code[:3] + "000"  # 111100 -> 111000
+                        return code[:3] + "000"
                     else:
-                        return code[:4] + "00"  # 111101 -> 111100
-
-                # نظام 4 أرقام (القديم - للتوافق)
+                        return code[:4] + "00"
                 elif code_len == 4:
                     if code.endswith("000"):
-                        return None  # جذر (1000, 2000, ...)
+                        return None
                     elif code.endswith("00"):
-                        return code[0] + "000"  # 1100 -> 1000
+                        return code[0] + "000"
                     else:
-                        return code[:2] + "00"  # 1101 -> 1100
-
+                        return code[:2] + "00"
                 return None
 
+            # ⚡ ربط الحسابات بالآباء
             for acc in accounts:
                 if not acc.code:
                     continue
-
-                node = tree_map[acc.code]
-
-                # حساب الرصيد من القيود المحاسبية
-                movements = account_movements.get(acc.code, {"debit": 0.0, "credit": 0.0})
-                debit_total = movements["debit"]
-                credit_total = movements["credit"]
-
-                # الرصيد المخزن في قاعدة البيانات
-                stored_balance = getattr(acc, "balance", 0.0) or 0.0
-
-                # حساب الرصيد حسب طبيعة الحساب
-                # الأصول والمصروفات: مدين بطبيعته (الرصيد = مدين - دائن)
-                # الخصوم والإيرادات وحقوق الملكية: دائن بطبيعته (الرصيد = دائن - مدين)
-                asset_types = [
-                    schemas.AccountType.ASSET,
-                    schemas.AccountType.CASH,
-                    schemas.AccountType.EXPENSE,
-                ]
-
-                if acc.type in asset_types:
-                    calculated_balance = debit_total - credit_total
-                else:
-                    calculated_balance = credit_total - debit_total
-
-                # ⚡ استخدام الرصيد المخزن دائماً (الأولوية للرصيد المخزن)
-                # لأن الدفعات تحدث الرصيد مباشرة بدون قيود محاسبية
-                if stored_balance != 0:
-                    calculated_balance = stored_balance
-                    safe_print(
-                        f"DEBUG: {acc.code} ({acc.name}): استخدام الرصيد المخزن = {calculated_balance}"
-                    )
-                elif debit_total > 0 or credit_total > 0:
-                    safe_print(
-                        f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}"
-                    )
-
-                node["total"] = calculated_balance
-
-                # طباعة للتأكد (للحسابات التي لها حركات)
-                if debit_total > 0 or credit_total > 0:
-                    safe_print(
-                        f"DEBUG: {acc.code} ({acc.name}): مدين={debit_total}, دائن={credit_total}, رصيد={calculated_balance}"
-                    )
-
-            # ربط الحسابات بالآباء تلقائياً بناءً على الكود
-            for acc in accounts:
-                if not acc.code:
-                    continue
-
                 code_len = len(acc.code)
-
-                # تحديد الجذور حسب طول الكود
-                if code_len == 6 and acc.code.endswith("00000"):
-                    continue  # جذر نظام 6 أرقام (100000, 200000, ...)
-                elif code_len == 4 and acc.code.endswith("000"):
-                    continue  # جذر نظام 4 أرقام (1000, 2000, ...)
-
-                # استنتاج الأب من الكود أو من parent_id المخزن
+                if (code_len == 6 and acc.code.endswith("00000")) or (code_len == 4 and acc.code.endswith("000")):
+                    continue
                 parent_code = getattr(acc, "parent_id", None) or getattr(acc, "parent_code", None)
-
-                # إذا لم يوجد parent_id، نحاول استنتاجه من الكود
                 if not parent_code:
                     parent_code = get_parent_code_from_code(acc.code)
-
-                # التحقق من وجود الأب في الشجرة
                 if parent_code and parent_code in tree_map and parent_code != acc.code:
                     tree_map[parent_code]["children"].append(tree_map[acc.code])
-                    safe_print(f"DEBUG: ربط {acc.code} -> {parent_code}")
 
-            # طباعة الأبناء لكل حساب رئيسي (يدعم نظام 4 و 6 أرقام)
-            root_codes = [
-                "100000",
-                "200000",
-                "300000",
-                "400000",
-                "500000",
-                "600000",  # 6 أرقام
-                "1000",
-                "2000",
-                "3000",
-                "4000",
-                "5000",
-            ]  # 4 أرقام (للتوافق)
-            for code in root_codes:
-                if code in tree_map:
-                    children = [c["obj"].code for c in tree_map[code]["children"]]
-                    if children:
-                        safe_print(f"DEBUG: {code} أبناؤه: {children}")
-
-            # 4. حساب الأرصدة التراكمية للمجموعات (من الأوراق للجذور)
+            # ⚡ حساب الأرصدة التراكمية للمجموعات
             def calculate_total(node: dict) -> float:
-                """حساب إجمالي العقدة بشكل تكراري"""
-                # إذا لم يكن له أبناء، أرجع رصيده الخاص
                 if not node["children"]:
                     return float(node["total"])
-
-                # حساب أرصدة الأبناء (مجموع الأرصدة الفعلية)
                 total = sum(calculate_total(child) for child in node["children"])
                 node["total"] = total
                 return float(total)
 
-            # ⚡ تحديد الجذور الفعلية (الحسابات التي ليس لها أب في الشجرة)
+            # ⚡ حساب الجذور
             for code, node in tree_map.items():
                 acc = node["obj"]
                 parent_id = getattr(acc, "parent_id", None) or getattr(acc, "parent_code", None)
-                # إذا لم يكن له أب، أو أبوه غير موجود في الشجرة، فهو جذر
                 if not parent_id or parent_id not in tree_map:
                     calculate_total(node)
-                    safe_print(f"DEBUG: حساب جذر: {code} = {node['total']}")
-
-            # طباعة ملخص للتأكد
-            safe_print(f"INFO: [AccountingService] تم حساب أرصدة {len(tree_map)} حساب")
 
             # ⚡ حفظ في الـ cache
             AccountingService._hierarchy_cache = tree_map
@@ -479,9 +572,6 @@ class AccountingService:
 
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل حساب الأرصدة التراكمية: {e}")
-            import traceback
-
-            traceback.print_exc()
             return {}
 
     def get_financial_summary(self) -> dict[str, float]:
@@ -514,12 +604,17 @@ class AccountingService:
                 "total", 0.0
             )
 
-            # ⚡ إذا لم توجد حسابات إيرادات، احسب من الدفعات المستلمة
+            # ⚡ إذا لم توجد حسابات إيرادات، احسب من الدفعات المستلمة باستخدام SQL
             if revenue == 0:
                 try:
-                    all_payments = self.repo.get_all_payments()
-                    revenue = sum(p.amount for p in all_payments)
-                    safe_print(f"INFO: [AccountingService] الإيرادات من الدفعات: {revenue}")
+                    # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+                    cursor = self.repo.sqlite_conn.cursor()
+                    try:
+                        cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM payments')
+                        revenue = cursor.fetchone()[0]
+                        safe_print(f"INFO: [AccountingService] الإيرادات من الدفعات: {revenue}")
+                    finally:
+                        cursor.close()
                 except Exception as e:
                     safe_print(f"WARNING: [AccountingService] فشل جلب الدفعات: {e}")
 
@@ -536,14 +631,19 @@ class AccountingService:
             # إجمالي المصروفات من الحسابات
             total_expenses = cogs + opex
 
-            # ⚡ إذا لم توجد حسابات مصروفات، احسب من جدول expenses مباشرة
+            # ⚡ إذا لم توجد حسابات مصروفات، احسب من جدول expenses مباشرة باستخدام SQL
             if total_expenses == 0:
                 try:
-                    all_expenses = self.repo.get_all_expenses()
-                    total_expenses = sum(exp.amount for exp in all_expenses)
-                    safe_print(
-                        f"INFO: [AccountingService] المصروفات من جدول expenses: {total_expenses}"
-                    )
+                    # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+                    cursor = self.repo.sqlite_conn.cursor()
+                    try:
+                        cursor.execute('SELECT COALESCE(SUM(amount), 0) FROM expenses')
+                        total_expenses = cursor.fetchone()[0]
+                        safe_print(
+                            f"INFO: [AccountingService] المصروفات من جدول expenses: {total_expenses}"
+                        )
+                    finally:
+                        cursor.close()
                 except Exception as e:
                     safe_print(f"WARNING: [AccountingService] فشل جلب المصروفات: {e}")
 
@@ -779,13 +879,10 @@ class AccountingService:
 
     def handle_new_expense(self, data):
         """
-        معالج إنشاء مصروف جديد - ينشئ قيد يومية تلقائياً
+        معالج إنشاء مصروف جديد - يعيد حساب رصيد الحساب
 
-        القيد المحاسبي للمصروف:
-        - مدين: حساب المصروف (5xxx) - يزيد المصروفات
-        - دائن: حساب الدفع (11xx) - ينقص النقدية
-
-        ملاحظة: إذا لم يوجد حساب مصروفات، يتم خصم المبلغ من حساب الدفع فقط
+        عند إنشاء مصروف:
+        - يتم إعادة حساب رصيد حساب الدفع من جميع الدفعات والمصروفات
         """
         # دعم استقبال البيانات كـ dict أو كـ Expense مباشرة
         if isinstance(data, dict):
@@ -798,110 +895,35 @@ class AccountingService:
         safe_print(
             f"INFO: [AccountingService] تم استقبال حدث مصروف جديد: {expense.category} - {expense.amount} جنيه"
         )
-        safe_print(
-            f"INFO: [AccountingService] حساب المصروف: {expense.account_id}, حساب الدفع: {expense.payment_account_id}"
-        )
 
         try:
-            # التحقق من وجود الحسابات المطلوبة
-            expense_account_code = getattr(expense, "account_id", None)
-            payment_account_code = getattr(expense, "payment_account_id", None)
+            # تحديد حساب الدفع
+            payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
 
             if not payment_account_code:
-                safe_print(
-                    "WARNING: [AccountingService] لم يتم تحديد حساب الدفع، سيتم استخدام الحساب الافتراضي 1111"
-                )
-                payment_account_code = self.CASH_ACCOUNT_CODE  # الخزنة الرئيسية
-
-            # التحقق من وجود حساب الدفع
-            payment_account = self.repo.get_account_by_code(payment_account_code)
-            if not payment_account:
-                safe_print(
-                    f"ERROR: [AccountingService] حساب الدفع {payment_account_code} غير موجود!"
-                )
+                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الدفع!")
                 return
 
-            # إنشاء معرف المصروف
-            expense_id = (
-                getattr(expense, "_mongo_id", None)
-                or str(getattr(expense, "id", ""))
-                or f"EXP-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-            )
+            # ⚡ إعادة حساب رصيد الحساب من جميع الدفعات والمصروفات
+            new_balance = self.recalculate_account_balance(payment_account_code)
 
-            # البحث عن حساب مصروفات مناسب (يبدأ بـ 5)
-            expense_account = None
-            if expense_account_code and expense_account_code.startswith("5"):
-                expense_account = self.repo.get_account_by_code(expense_account_code)
+            safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {payment_account_code} = {new_balance}")
 
-            if not expense_account:
-                # البحث عن أي حساب مصروفات موجود
-                all_accounts = self.repo.get_all_accounts()
-                expense_accounts = [
-                    acc for acc in all_accounts if acc.code and acc.code.startswith("5")
-                ]
-                if expense_accounts:
-                    expense_account = expense_accounts[0]
-                    safe_print(
-                        f"INFO: [AccountingService] استخدام حساب المصروفات: {expense_account.name}"
-                    )
-
-            if expense_account:
-                # إنشاء قيد محاسبي كامل (مدين: مصروفات، دائن: نقدية)
-                success = self.post_journal_entry(
-                    date=expense.date or datetime.now(),
-                    description=f"مصروف: {expense.category} - {expense.description or ''}",
-                    ref_type="expense",
-                    ref_id=expense_id,
-                    debit_account_code=expense_account.code,  # حساب المصروف (مدين)
-                    credit_account_code=payment_account_code,  # حساب الدفع (دائن)
-                    amount=expense.amount,
-                )
-            else:
-                # لا يوجد حساب مصروفات - خصم المبلغ من حساب الدفع فقط
-                safe_print(
-                    f"INFO: [AccountingService] لا يوجد حساب مصروفات - خصم المبلغ من {payment_account.name}"
-                )
-
-                # تحديث رصيد حساب الدفع مباشرة (خصم)
-                new_balance = (payment_account.balance or 0) - expense.amount
-                self.repo.update_account_balance(payment_account_code, new_balance)
-
-                # تحديث الحساب الأب إن وجد
-                if payment_account.parent_code:
-                    self._update_parent_balance_recursive(payment_account.parent_code)
-
-                # إبطال الـ cache
-                AccountingService._hierarchy_cache = None
-                AccountingService._hierarchy_cache_time = 0
-
-                success = True
-                safe_print(
-                    f"SUCCESS: [AccountingService] تم خصم {expense.amount} من {payment_account.name} - الرصيد الجديد: {new_balance}"
-                )
-
-            if success:
-                safe_print(f"SUCCESS: [AccountingService] تم معالجة المصروف {expense.category}")
-                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
-                try:
-                    app_signals.emit_data_changed("accounting")
-                    app_signals.emit_data_changed("expenses")
-                    safe_print(
-                        "INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للمصروف"
-                    )
-                except Exception as sig_err:
-                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-            else:
-                safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف {expense.category}")
+            # ⚡ إرسال إشارات التحديث الفوري
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("expenses")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل معالجة المصروف: {e}")
             import traceback
-
             traceback.print_exc()
 
     def handle_updated_expense(self, data):
         """
-        ✅ معالج تعديل مصروف - يحدث القيد المحاسبي
+        ✅ معالج تعديل مصروف - يعيد حساب رصيد الحساب
         """
         try:
             if isinstance(data, dict):
@@ -913,303 +935,164 @@ class AccountingService:
 
             safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
 
-            expense_id = getattr(expense, "_mongo_id", None) or str(getattr(expense, "id", ""))
+            # تحديد حساب الدفع
+            payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
 
-            # البحث عن القيد الأصلي
-            original_entry = self.repo.get_journal_entry_by_doc_id(expense_id)
+            if payment_account_code:
+                # ⚡ إعادة حساب رصيد الحساب
+                new_balance = self.recalculate_account_balance(payment_account_code)
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {payment_account_code} = {new_balance}")
 
-            if not original_entry:
-                safe_print("INFO: [AccountingService] لا يوجد قيد أصلي للمصروف - إنشاء قيد جديد")
-                self.handle_new_expense(data)
-                return
-
-            # تحديث القيد بالقيمة الجديدة
-            expense_account_code = getattr(expense, "account_id", None) or "5900"
-            payment_account_code = (
-                getattr(expense, "payment_account_id", None) or self.CASH_ACCOUNT_CODE
-            )
-
-            expense_account = self.repo.get_account_by_code(expense_account_code)
-            payment_account = self.repo.get_account_by_code(payment_account_code)
-
-            if not expense_account or not payment_account:
-                safe_print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
-                return
-
-            new_lines = [
-                schemas.JournalEntryLine(
-                    account_id=expense_account.code,
-                    account_code=expense_account.code,
-                    account_name=expense_account.name,
-                    debit=expense.amount,
-                    credit=0.0,
-                    description=f"مدين: {expense_account.name}",
-                ),
-                schemas.JournalEntryLine(
-                    account_id=payment_account.code,
-                    account_code=payment_account.code,
-                    account_name=payment_account.name,
-                    debit=0.0,
-                    credit=expense.amount,
-                    description=f"دائن: {payment_account.name}",
-                ),
-            ]
-
-            success = self.repo.update_journal_entry_by_doc_id(
-                doc_id=expense_id,
-                new_lines=new_lines,
-                new_description=f"تعديل مصروف: {expense.category}",
-            )
-
-            if success:
-                safe_print("SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمصروف")
-            else:
-                safe_print("WARNING: [AccountingService] فشل تحديث القيد للمصروف")
+            # ⚡ إرسال إشارات التحديث
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("expenses")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل تعديل قيد المصروف: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل تعديل المصروف: {e}")
             import traceback
-
             traceback.print_exc()
 
     def handle_deleted_expense(self, data: dict):
         """
-        ✅ معالج حذف مصروف - يعكس القيد المحاسبي
+        ✅ معالج حذف مصروف - يعيد حساب رصيد الحساب
         """
         try:
             expense_id = data.get("id")
-            if not expense_id:
-                safe_print("WARNING: [AccountingService] لم يتم تحديد معرف المصروف المحذوف")
-                return
-
+            expense = data.get("expense")
+            
             safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
 
-            # البحث عن القيد الأصلي
-            original_entry = self.repo.get_journal_entry_by_doc_id(str(expense_id))
+            # تحديد حساب الدفع
+            payment_account_code = None
+            if expense:
+                payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
 
-            if not original_entry:
-                safe_print("INFO: [AccountingService] لا يوجد قيد محاسبي للمصروف المحذوف")
-                return
+            if payment_account_code:
+                # ⚡ إعادة حساب رصيد الحساب
+                new_balance = self.recalculate_account_balance(payment_account_code)
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {payment_account_code} = {new_balance}")
+            else:
+                # إعادة حساب جميع الحسابات النقدية
+                self._recalculate_cash_balances()
 
-            # إنشاء قيد عكسي
-            reversed_lines = []
-            for line in original_entry.lines:
-                reversed_lines.append(
-                    schemas.JournalEntryLine(
-                        account_id=line.account_id,
-                        account_code=getattr(line, "account_code", None),
-                        account_name=getattr(line, "account_name", None),
-                        debit=line.credit,  # عكس
-                        credit=line.debit,  # عكس
-                        description=f"عكس قيد: {line.description}",
-                    )
-                )
-
-            journal_entry_data = schemas.JournalEntry(
-                date=datetime.now(),
-                description="قيد عكسي لحذف مصروف",
-                lines=reversed_lines,
-                related_document_id=f"DEL-{expense_id}",
-            )
-
-            self.repo.create_journal_entry(journal_entry_data)
-            safe_print("SUCCESS: [AccountingService] تم إنشاء القيد العكسي للمصروف المحذوف")
+            # ⚡ إرسال إشارات التحديث
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("expenses")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل إنشاء القيد العكسي للمصروف: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حذف المصروف: {e}")
             import traceback
-
             traceback.print_exc()
 
     def handle_new_payment(self, data: dict):
         """
-        معالج استلام دفعة جديدة - يحدث رصيد حساب الاستلام مباشرة
+        معالج استلام دفعة جديدة - يعيد حساب رصيد الحساب
 
         عند استلام دفعة:
-        - يزيد رصيد حساب الاستلام (النقدية/البنك) بمبلغ الدفعة
+        - يتم إعادة حساب رصيد حساب الاستلام من جميع الدفعات والمصروفات
         """
-        safe_print("=" * 60)
         safe_print("INFO: [AccountingService] ⚡ تم استدعاء handle_new_payment!")
-        safe_print("=" * 60)
 
         try:
             payment: schemas.Payment = data["payment"]
         except (KeyError, TypeError) as e:
             safe_print(f"ERROR: [AccountingService] فشل استخراج بيانات الدفعة: {e}")
-            safe_print(f"DEBUG: [AccountingService] البيانات المستلمة: {data}")
             return
 
-        project = data.get("project")
-
         safe_print(f"INFO: [AccountingService] تم استقبال حدث دفعة جديدة: {payment.amount} جنيه")
-        safe_print(f"DEBUG: [AccountingService] payment.account_id: {payment.account_id}")
 
         try:
-            # تحديد حساب الاستلام (الخزينة أو البنك)
-            receiving_account_code = getattr(payment, "account_id", None) or self.CASH_ACCOUNT_CODE
-            safe_print(f"DEBUG: [AccountingService] حساب الاستلام: {receiving_account_code}")
-
-            # ⚡ التحقق من وجود حساب الاستلام
-            receiving_account = self.repo.get_account_by_code(receiving_account_code)
-            if not receiving_account:
-                safe_print(
-                    f"ERROR: [AccountingService] ❌ حساب الاستلام {receiving_account_code} غير موجود!"
-                )
+            # تحديد حساب الاستلام
+            receiving_account_code = getattr(payment, "account_id", None)
+            
+            if not receiving_account_code:
+                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الاستلام!")
                 return
 
-            # ⚡ تحديث رصيد حساب الاستلام مباشرة (زيادة)
-            old_balance = receiving_account.balance or 0.0
-            new_balance = old_balance + payment.amount
+            # ⚡ إعادة حساب رصيد الحساب من جميع الدفعات والمصروفات
+            new_balance = self.recalculate_account_balance(receiving_account_code)
 
-            safe_print(f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name}:")
-            safe_print(f"  - الرصيد القديم: {old_balance}")
-            safe_print(f"  - مبلغ الدفعة: +{payment.amount}")
-            safe_print(f"  - الرصيد الجديد: {new_balance}")
+            safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
 
-            # تحديث الحساب في قاعدة البيانات
-            # ⚡ إصلاح: التحقق من وجود ID صالح - استخدام code كـ fallback
-            account_id = (
-                receiving_account._mongo_id
-                or (str(receiving_account.id) if receiving_account.id else None)
-                or receiving_account.code
-            )
-            if not account_id:
-                safe_print(
-                    f"ERROR: [AccountingService] ❌ لا يوجد ID صالح للحساب {receiving_account.name}"
-                )
-                return
-
-            updated_account = receiving_account.model_copy(update={"balance": new_balance})
-            result = self.repo.update_account(account_id, updated_account)
-
-            if result:
-                # إبطال الـ cache
-                AccountingService._hierarchy_cache = None
-                AccountingService._hierarchy_cache_time = 0
-
-                project_name = getattr(project, "name", "") if project else ""
-                safe_print(
-                    f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}"
-                )
-                safe_print(
-                    f"SUCCESS: [AccountingService] ✅ دفعة {payment.amount} جنيه للمشروع {project_name}"
-                )
-
-                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
-                try:
-                    app_signals.emit_data_changed("accounting")
-                    app_signals.emit_data_changed("payments")
-                    safe_print("INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للدفعة")
-                except Exception as sig_err:
-                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-            else:
-                safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
+            # ⚡ إرسال إشارات التحديث الفوري
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("payments")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
             import traceback
-
             traceback.print_exc()
 
     def handle_updated_payment(self, data: dict):
         """
-        ✅ معالج تعديل دفعة - يحدث رصيد الحساب
-
-        ملاحظة: هذا التعديل بسيط - لا يتتبع الفرق بين المبلغ القديم والجديد
+        ✅ معالج تعديل دفعة - يعيد حساب رصيد الحساب
         """
         try:
             payment: schemas.Payment = data["payment"]
-            safe_print(
-                f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه"
-            )
+            safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
 
-            # ⚡ ببساطة نعيد حساب الرصيد من الدفعات
-            # هذا أبسط وأكثر دقة من تتبع الفروقات
-            safe_print(
-                "INFO: [AccountingService] تعديل الدفعة - سيتم إعادة حساب الأرصدة عند التحديث"
-            )
+            # تحديد حساب الاستلام
+            receiving_account_code = getattr(payment, "account_id", None)
 
-            # إبطال الـ cache
-            AccountingService._hierarchy_cache = None
-            AccountingService._hierarchy_cache_time = 0
+            if receiving_account_code:
+                # ⚡ إعادة حساب رصيد الحساب
+                new_balance = self.recalculate_account_balance(receiving_account_code)
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
+
+            # ⚡ إرسال إشارات التحديث
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("payments")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل تعديل الدفعة: {e}")
             import traceback
-
             traceback.print_exc()
 
     def handle_deleted_payment(self, data: dict):
         """
-        ✅ معالج حذف دفعة - ينقص رصيد حساب الاستلام
+        ✅ معالج حذف دفعة - يعيد حساب رصيد الحساب
         """
         try:
             payment_id = data.get("payment_id")
             payment = data.get("payment")
 
-            if not payment:
-                safe_print("WARNING: [AccountingService] لم يتم تحديد بيانات الدفعة المحذوفة")
-                return
-
             safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
-            safe_print(f"DEBUG: [AccountingService] مبلغ الدفعة المحذوفة: {payment.amount}")
 
             # تحديد حساب الاستلام
-            receiving_account_code = getattr(payment, "account_id", None)
-            if not receiving_account_code:
-                safe_print(
-                    "WARNING: [AccountingService] لم يتم تحديد حساب الاستلام للدفعة المحذوفة"
-                )
-                return
+            receiving_account_code = None
+            if payment:
+                receiving_account_code = getattr(payment, "account_id", None)
 
-            receiving_account = self.repo.get_account_by_code(receiving_account_code)
-            if not receiving_account:
-                safe_print(
-                    f"WARNING: [AccountingService] حساب الاستلام {receiving_account_code} غير موجود"
-                )
-                return
-
-            # ⚡ تحديث رصيد حساب الاستلام (نقصان)
-            old_balance = receiving_account.balance or 0.0
-            new_balance = old_balance - payment.amount
-
-            safe_print(
-                f"DEBUG: [AccountingService] تحديث رصيد {receiving_account.name} (حذف دفعة):"
-            )
-            safe_print(f"  - الرصيد القديم: {old_balance}")
-            safe_print(f"  - مبلغ الدفعة المحذوفة: -{payment.amount}")
-            safe_print(f"  - الرصيد الجديد: {new_balance}")
-
-            # تحديث الحساب في قاعدة البيانات
-            # ⚡ إصلاح: التحقق من وجود ID صالح - استخدام code كـ fallback
-            account_id = (
-                receiving_account._mongo_id
-                or (str(receiving_account.id) if receiving_account.id else None)
-                or receiving_account.code
-            )
-            if not account_id:
-                safe_print(
-                    f"ERROR: [AccountingService] ❌ لا يوجد ID صالح للحساب {receiving_account.name}"
-                )
-                return
-
-            updated_account = receiving_account.model_copy(update={"balance": new_balance})
-            result = self.repo.update_account(account_id, updated_account)
-
-            if result:
-                # إبطال الـ cache
-                AccountingService._hierarchy_cache = None
-                AccountingService._hierarchy_cache_time = 0
-                safe_print(
-                    f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account.name}: {old_balance} -> {new_balance}"
-                )
+            if receiving_account_code:
+                # ⚡ إعادة حساب رصيد الحساب
+                new_balance = self.recalculate_account_balance(receiving_account_code)
+                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
             else:
-                safe_print(f"ERROR: [AccountingService] ❌ فشل تحديث رصيد {receiving_account.name}")
+                # إعادة حساب جميع الحسابات النقدية
+                self._recalculate_cash_balances()
+
+            # ⚡ إرسال إشارات التحديث
+            try:
+                app_signals.emit_data_changed("accounting")
+                app_signals.emit_data_changed("payments")
+            except Exception as sig_err:
+                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
 
         except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل معالجة حذف الدفعة: {e}")
+            safe_print(f"ERROR: [AccountingService] فشل حذف الدفعة: {e}")
             import traceback
-
             traceback.print_exc()
 
     def _update_account_balance(self, account, amount: float, is_debit: bool):

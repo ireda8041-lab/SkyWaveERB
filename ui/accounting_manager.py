@@ -108,27 +108,15 @@ class AccountingManagerTab(QWidget):
         apply_rtl_alignment_to_all_fields(self)
 
     def _connect_realtime_signals(self):
-        """⚡ ربط جميع الإشارات للتحديث الفوري التلقائي"""
-        # إشارات التحديث العامة
+        """⚡ ربط جميع الإشارات للتحديث الفوري التلقائي - محسّن لتجنب التكرار"""
+        # ⚡ ربط إشارة واحدة فقط لتجنب التكرار
+        # data_changed تغطي كل الحالات
         app_signals.data_changed.connect(self._on_any_data_changed)
-        app_signals.accounts_changed.connect(self.load_accounts_data)
+        
+        # ⚡ إشارة القيود المحاسبية فقط (لأنها خاصة)
         app_signals.journal_entry_created.connect(self._on_journal_entry_created)
-        app_signals.accounting_changed.connect(self.load_accounts_data)
 
-        # ⚡ إشارات المشاريع والدفعات (للتحديث الفوري عند إنشاء مشروع أو دفعة)
-        app_signals.projects_changed.connect(self._on_projects_changed)
-        app_signals.payments_changed.connect(self._on_payments_changed)
-
-        # ⚡ إشارات المصروفات
-        app_signals.expenses_changed.connect(self._on_expenses_changed)
-
-        # ✨ Connect to Global Events for Real-time Updates
-        if EVENTS_AVAILABLE:
-            events.data_changed.connect(self._on_any_data_changed)
-            events.accounting_refresh.connect(self.load_accounts_data)
-            safe_print("INFO: ✅ [AccManager] تم ربط الأحداث العالمية - التحديث الفوري مفعّل!")
-
-        safe_print("INFO: ✅ [AccManager] تم ربط جميع إشارات Real-time Sync")
+        safe_print("INFO: ✅ [AccManager] تم ربط إشارات التحديث (محسّن)")
 
     def _on_any_data_changed(self, data_type: str = None):
         """⚡ معالج التحديث الفوري عند تغيير أي بيانات"""
@@ -136,44 +124,15 @@ class AccountingManagerTab(QWidget):
         relevant_types = [
             "accounts",
             "accounting",
-            "projects",
             "payments",
             "expenses",
-            "journal_entries",
-            None,
         ]
         if data_type in relevant_types:
-            safe_print(f"INFO: ✅ [AccManager] تحديث فوري - نوع البيانات: {data_type}")
             self.load_accounts_data()
 
     def _on_journal_entry_created(self, entry_id: str = None):
         """⚡ معالج إنشاء قيد محاسبي جديد - تحديث فوري"""
-        safe_print(f"INFO: ✅ [AccManager] قيد محاسبي جديد: {entry_id} - تحديث الأرصدة فوراً...")
         # إبطال الـ cache لضمان جلب البيانات الجديدة
-        self.accounting_service._hierarchy_cache = None
-        self.accounting_service._hierarchy_cache_time = 0
-        self.load_accounts_data()
-
-    def _on_projects_changed(self):
-        """⚡ معالج تغيير المشاريع - تحديث المحاسبة فوراً"""
-        safe_print("INFO: ✅ [AccManager] تغيير في المشاريع - تحديث المحاسبة...")
-        # إبطال الـ cache
-        self.accounting_service._hierarchy_cache = None
-        self.accounting_service._hierarchy_cache_time = 0
-        self.load_accounts_data()
-
-    def _on_payments_changed(self):
-        """⚡ معالج تغيير الدفعات - تحديث المحاسبة فوراً"""
-        safe_print("INFO: ✅ [AccManager] تغيير في الدفعات - تحديث المحاسبة...")
-        # إبطال الـ cache
-        self.accounting_service._hierarchy_cache = None
-        self.accounting_service._hierarchy_cache_time = 0
-        self.load_accounts_data()
-
-    def _on_expenses_changed(self):
-        """⚡ معالج تغيير المصروفات - تحديث المحاسبة فوراً"""
-        safe_print("INFO: ✅ [AccManager] تغيير في المصروفات - تحديث المحاسبة...")
-        # إبطال الـ cache
         self.accounting_service._hierarchy_cache = None
         self.accounting_service._hierarchy_cache_time = 0
         self.load_accounts_data()

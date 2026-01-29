@@ -14,7 +14,7 @@ datas = [
     ('icon.ico', '.'), 
     ('logo.png', '.'), 
     ('site logo.png', '.'),
-    ('skywave_local.db', '.')  # قاعدة البيانات الأولية
+    ('skywave_local.db', '.'),  # ✅ تضمين قاعدة البيانات مع المستخدمين والحسابات
 ]
 binaries = []
 

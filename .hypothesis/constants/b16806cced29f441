@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\asynchronous\change_stream.py
+# hypothesis_version: 6.148.3
+
+[133, 150, 189, 234, 262, 9001, 10107, 11600, 11602, 13388, 13435, 13436, '$changeStream', '_id', 'allChangesForCluster', 'batchSize', 'cursor', 'firstBatch', 'fullDocument', 'full_document', 'maxAwaitTimeMS', 'operationTime', 'pipeline', 'postBatchResumeToken', 'resumeAfter', 'showExpandedEvents', 'startAfter', 'startAtOperationTime']

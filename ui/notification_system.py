@@ -289,7 +289,7 @@ class NotificationSyncWorker(QThread):
 
     def _check_new_notifications(self):
         try:
-            if self.repo is None or self.repo is not None is not None is not None.mongo_db is None:
+            if self.repo is None or self.repo.mongo_db is None:
                 return
 
             collection = self.repo.mongo_db.notifications

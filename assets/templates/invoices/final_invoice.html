@@ -494,6 +494,18 @@
             font-size: 11px;
         }
         
+        /* ⚡ تنسيق الروابط */
+        .footer a {
+            color: var(--primary-blue);
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        
+        .footer a:hover {
+            color: var(--primary-green);
+            text-decoration: underline;
+        }
+        
         /* ⚡ تحسينات الطباعة */
         @media print {
             @page {
@@ -697,7 +709,7 @@
                         📞 {{ company_phone }}
                     </div>
                     <div class="footer-item">
-                        🌐 {{ company_website }}
+                        🌐 <a href="https://{{ company_website }}" target="_blank" style="color: var(--primary-blue); text-decoration: none;">{{ company_website }}</a>
                     </div>
                 </div>
                 <div class="footer-left">❤️ شكراً لثقتكم</div>

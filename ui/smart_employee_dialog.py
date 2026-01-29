@@ -417,18 +417,15 @@ class SmartEmployeeDialog(QDialog):
 
     def _generate_employee_id(self):
         """توليد رقم موظف تلقائي"""
-        import sqlite3
         try:
-            # ⚡ استخدام المسار الصحيح من Config
-            from core.config import Config
-            db_path = Config.get_local_db_path()
-
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM employees")
-            count = cursor.fetchone()[0]
-            conn.close()
-            return f"EMP{count + 1:04d}"
+            # ✅ استخدام Repository بدلاً من الاتصال المباشر
+            from core.repository import Repository
+            repo = Repository()
+            
+            with repo.db_context as ctx:
+                result = ctx.execute("SELECT COUNT(*) FROM employees").fetchone()
+                count = result[0] if result else 0
+                return f"EMP{count + 1:04d}"
         except Exception:
             # فشل الاتصال بقاعدة البيانات - استخدم timestamp
             return f"EMP{datetime.now().strftime('%Y%m%d%H%M%S')}"

@@ -97,9 +97,12 @@ class Config:
         """الحصول على كلمة المرور الافتراضية للمدير"""
         password = os.environ.get("DEFAULT_ADMIN_PASSWORD")
         if not password:
-            # كلمة مرور افتراضية أقوى
-            password = "SkyWave@Admin2024!"
-            safe_print("WARNING: [Config] ⚠️ استخدام كلمة مرور افتراضية - يرجى تغييرها!")
+            # توليد كلمة مرور عشوائية آمنة إذا لم تكن محددة
+            import secrets
+            import string
+            chars = string.ascii_letters + string.digits + "!@#$%^&*"
+            password = ''.join(secrets.choice(chars) for _ in range(16))
+            safe_print("WARNING: [Config] ⚠️ تم توليد كلمة مرور عشوائية - يرجى تعيين DEFAULT_ADMIN_PASSWORD في .env!")
         return password
 
     @staticmethod

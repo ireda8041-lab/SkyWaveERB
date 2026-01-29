@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\synchronous\pool.py
+# hypothesis_version: 6.148.3
+
+[0.0, 1000, 10107, ' CLOSED', '.', 'DEFAULT', 'admin', 'client', 'code', 'compression', 'errmsg', 'helloOk', 'inf', 'loadBalanced', 'maxAwaitTimeMS', 'maxTimeMS', 'not primary', 'ok', 'saslSupportedMechs', 'topologyVersion']

@@ -673,8 +673,10 @@ class PaymentEditorDialog(QDialog):
             self.payment.date = self.date_input.dateTime().toPyDateTime()
             self.payment.method = self.method_combo.currentText()
 
-            # حفظ في قاعدة البيانات مع تحديث حالة المشروع أوتوماتيك ⚡
+            # ⚡ استخدام الـ id الرقمي أولاً (أكثر موثوقية للـ SQLite)
             payment_id = self.payment.id or self.payment._mongo_id
+            
+            safe_print(f"DEBUG: [PaymentEditor] تعديل دفعة - id={payment_id}, account_id={self.payment.account_id}")
 
             if self.project_service:
                 result = self.project_service.update_payment_for_project(payment_id, self.payment)
@@ -683,12 +685,14 @@ class PaymentEditorDialog(QDialog):
 
             if result:
                 # ⚡ القيد المحاسبي يتم تحديثه تلقائياً عبر EventBus (PAYMENT_UPDATED)
-                # لا حاجة لعكس القيد يدوياً هنا - الـ AccountingService يتولى ذلك
                 QMessageBox.information(self, "تم", "تم تعديل الدفعة وتحديث القيود المحاسبية وحالة المشروع.")
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل حفظ التعديلات.")
         except Exception as e:
+            safe_print(f"ERROR: [PaymentEditor] فشل تعديل الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.critical(self, "خطأ", f"فشل تعديل الدفعة: {e}")
 
     # ⚡ تم إزالة _reverse_and_repost_journal_entry - القيود تُدار عبر EventBus

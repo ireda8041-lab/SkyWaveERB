@@ -1,26 +1,26 @@
 {
-  "sync_settings": {
-    "conflict_resolution": "local_wins",
-    "auto_backup": true,
-    "backup_interval_hours": 24,
-    "max_backups": 5,
-    "protected_tables": [
-      "users",
-      "settings",
-      "user_preferences"
-    ],
-    "sync_interval_minutes": 5,
-    "connection_check_interval_seconds": 30
-  },
-  "database_settings": {
-    "enable_wal_mode": true,
-    "cache_size": 10000,
-    "synchronous_mode": "NORMAL",
-    "auto_vacuum": true
-  },
-  "logging": {
-    "level": "INFO",
-    "max_log_files": 10,
-    "log_rotation_mb": 10
-  }
+  "enabled": true,
+  "auto_sync_interval": 300,
+  "quick_sync_interval": 300,
+  "connection_check_interval": 30,
+  "max_retries": 2,
+  "timeout": 5,
+  "tables_to_sync": [
+    "clients",
+    "projects",
+    "services",
+    "accounts",
+    "payments",
+    "expenses",
+    "invoices",
+    "journal_entries",
+    "currencies",
+    "notifications",
+    "tasks"
+  ],
+  "conflict_resolution": "local_wins",
+  "batch_size": 30,
+  "enable_compression": false,
+  "enable_encryption": false,
+  "sync_status": "ready"
 }

@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\read_concern.py
+# hypothesis_version: 6.148.3
+
+['ReadConcern(%s)', 'ReadConcern()', 'level', 'local']

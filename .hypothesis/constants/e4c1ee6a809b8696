@@ -1,0 +1,4 @@
+# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\asynchronous\aggregation.py
+# hypothesis_version: 6.148.3
+
+['$merge', '$out', '.', 'aggregate', 'batchSize', 'collation', 'comment', 'cursor', 'explain', 'firstBatch', 'id', 'let', 'maxAwaitTimeMS', 'ns', 'options', 'pipeline', 'readConcern', 'result', 'writeConcern']

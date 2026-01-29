@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\logger.py
+# hypothesis_version: 6.148.3
+
+[1024, '%Y%m%d_%H%M%S', '%Y-%m-%d %H:%M:%S', '.log', '=', 'LOCALAPPDATA', 'SkyWaveERP', '__main__', 'logs', 'skywave_erp.log', 'utf-8', '~', 'هذه رسالة CRITICAL', 'هذه رسالة DEBUG', 'هذه رسالة ERROR', 'هذه رسالة INFO', 'هذه رسالة WARNING']

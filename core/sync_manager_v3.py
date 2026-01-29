@@ -83,63 +83,67 @@ class SyncManagerV3(QObject):
     def _init_sync_tables(self):
         """إنشاء الجداول المطلوبة للمزامنة"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            # جدول حفظ البيانات المحذوفة (سلة المهملات)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS deleted_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    table_name TEXT NOT NULL,
-                    record_id INTEGER NOT NULL,
-                    record_data TEXT NOT NULL,
-                    deleted_at TEXT NOT NULL,
-                    deleted_by TEXT,
-                    can_restore INTEGER DEFAULT 1
-                )
-            """)
+            try:
+                # جدول حفظ البيانات المحذوفة (سلة المهملات)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS deleted_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        table_name TEXT NOT NULL,
+                        record_id INTEGER NOT NULL,
+                        record_data TEXT NOT NULL,
+                        deleted_at TEXT NOT NULL,
+                        deleted_by TEXT,
+                        can_restore INTEGER DEFAULT 1
+                    )
+                """)
 
-            # جدول تتبع التغييرات
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS change_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    table_name TEXT NOT NULL,
-                    record_id INTEGER NOT NULL,
-                    operation TEXT NOT NULL,
-                    old_data TEXT,
-                    new_data TEXT,
-                    changed_at TEXT NOT NULL,
-                    changed_by TEXT,
-                    sync_status TEXT DEFAULT 'pending'
-                )
-            """)
+                # جدول تتبع التغييرات
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS change_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        table_name TEXT NOT NULL,
+                        record_id INTEGER NOT NULL,
+                        operation TEXT NOT NULL,
+                        old_data TEXT,
+                        new_data TEXT,
+                        changed_at TEXT NOT NULL,
+                        changed_by TEXT,
+                        sync_status TEXT DEFAULT 'pending'
+                    )
+                """)
 
-            # جدول حل التعارضات
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sync_conflicts (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    table_name TEXT NOT NULL,
-                    record_id INTEGER NOT NULL,
-                    local_data TEXT NOT NULL,
-                    remote_data TEXT NOT NULL,
-                    resolution TEXT,
-                    resolved_at TEXT,
-                    created_at TEXT NOT NULL
-                )
-            """)
+                # جدول حل التعارضات
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS sync_conflicts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        table_name TEXT NOT NULL,
+                        record_id INTEGER NOT NULL,
+                        local_data TEXT NOT NULL,
+                        remote_data TEXT NOT NULL,
+                        resolution TEXT,
+                        resolved_at TEXT,
+                        created_at TEXT NOT NULL
+                    )
+                """)
 
-            # جدول النسخ الاحتياطية
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sync_backups (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    backup_name TEXT NOT NULL,
-                    backup_data TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    restore_point INTEGER DEFAULT 0
-                )
-            """)
+                # جدول النسخ الاحتياطية
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS sync_backups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        backup_name TEXT NOT NULL,
+                        backup_data TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        restore_point INTEGER DEFAULT 0
+                    )
+                """)
 
-            self.repo.sqlite_conn.commit()
-            logger.info("✅ تم إنشاء جداول المزامنة")
+                self.repo.sqlite_conn.commit()
+                logger.info("✅ تم إنشاء جداول المزامنة")
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.error(f"❌ خطأ في إنشاء جداول المزامنة: {e}")
@@ -160,48 +164,52 @@ class SyncManagerV3(QObject):
             if not name:
                 name = f"auto_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
             backup_data = {}
 
-            # نسخ احتياطية من كل الجداول المهمة
-            for table in self.SYNC_TABLES + self.PROTECTED_TABLES:
-                try:
-                    cursor.execute(f"SELECT * FROM {table}")
-                    rows = cursor.fetchall()
+            try:
+                # نسخ احتياطية من كل الجداول المهمة
+                for table in self.SYNC_TABLES + self.PROTECTED_TABLES:
+                    try:
+                        cursor.execute(f"SELECT * FROM {table}")
+                        rows = cursor.fetchall()
 
-                    # تحويل إلى قائمة من القواميس
-                    cursor.execute(f"PRAGMA table_info({table})")
-                    columns = [col[1] for col in cursor.fetchall()]
+                        # تحويل إلى قائمة من القواميس
+                        cursor.execute(f"PRAGMA table_info({table})")
+                        columns = [col[1] for col in cursor.fetchall()]
 
-                    backup_data[table] = [dict(zip(columns, row, strict=False)) for row in rows]
-                except Exception as e:
-                    logger.warning(f"تعذر نسخ جدول {table}: {e}")
+                        backup_data[table] = [dict(zip(columns, row, strict=False)) for row in rows]
+                    except Exception as e:
+                        logger.warning(f"تعذر نسخ جدول {table}: {e}")
 
-            # حفظ النسخة الاحتياطية
-            cursor.execute(
-                """
-                INSERT INTO sync_backups (backup_name, backup_data, created_at, restore_point)
-                VALUES (?, ?, ?, 1)
-            """,
-                (
-                    name,
-                    json.dumps(backup_data, ensure_ascii=False, default=str),
-                    datetime.now().isoformat(),
-                ),
-            )
-
-            # الاحتفاظ بآخر 5 نسخ فقط
-            cursor.execute("""
-                DELETE FROM sync_backups
-                WHERE id NOT IN (
-                    SELECT id FROM sync_backups
-                    ORDER BY created_at DESC
-                    LIMIT 5
+                # حفظ النسخة الاحتياطية
+                cursor.execute(
+                    """
+                    INSERT INTO sync_backups (backup_name, backup_data, created_at, restore_point)
+                    VALUES (?, ?, ?, 1)
+                """,
+                    (
+                        name,
+                        json.dumps(backup_data, ensure_ascii=False, default=str),
+                        datetime.now().isoformat(),
+                    ),
                 )
-            """)
 
-            self.repo.sqlite_conn.commit()
-            logger.info(f"✅ تم إنشاء نقطة استعادة: {name}")
+                # الاحتفاظ بآخر 5 نسخ فقط
+                cursor.execute("""
+                    DELETE FROM sync_backups
+                    WHERE id NOT IN (
+                        SELECT id FROM sync_backups
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    )
+                """)
+
+                self.repo.sqlite_conn.commit()
+                logger.info(f"✅ تم إنشاء نقطة استعادة: {name}")
+            finally:
+                cursor.close()
             return True
 
         except Exception as e:
@@ -294,64 +302,68 @@ class SyncManagerV3(QObject):
     def _sync_protected_users(self):
         """مزامنة المستخدمين مع حماية خاصة"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            # جلب المستخدمين من السحابة
-            cloud_users = list(self.repo.mongo_db.users.find())
+            try:
+                # جلب المستخدمين من السحابة
+                cloud_users = list(self.repo.mongo_db.users.find())
 
-            # حماية المستخدمين المحليين
-            cursor.execute("SELECT * FROM users")
-            local_users = cursor.fetchall()
+                # حماية المستخدمين المحليين
+                cursor.execute("SELECT * FROM users")
+                local_users = cursor.fetchall()
 
-            # تحويل إلى قاموس للمقارنة
-            cursor.execute("PRAGMA table_info(users)")
-            columns = [col[1] for col in cursor.fetchall()]
-            local_users_dict = {
-                row[columns.index("username")]: dict(zip(columns, row, strict=False))
-                for row in local_users
-            }
+                # تحويل إلى قاموس للمقارنة
+                cursor.execute("PRAGMA table_info(users)")
+                columns = [col[1] for col in cursor.fetchall()]
+                local_users_dict = {
+                    row[columns.index("username")]: dict(zip(columns, row, strict=False))
+                    for row in local_users
+                }
 
-            # مزامنة بدون حذف المستخدمين المحليين
-            for cloud_user in cloud_users:
-                username = cloud_user.get("username")
-                if not username:
-                    continue
+                # مزامنة بدون حذف المستخدمين المحليين
+                for cloud_user in cloud_users:
+                    username = cloud_user.get("username")
+                    if not username:
+                        continue
 
-                # تحضير البيانات
-                user_data = self._prepare_cloud_data_for_local(cloud_user)
-                user_data["_mongo_id"] = str(cloud_user["_id"])
-                user_data["sync_status"] = "synced"
+                    # تحضير البيانات
+                    user_data = self._prepare_cloud_data_for_local(cloud_user)
+                    user_data["_mongo_id"] = str(cloud_user["_id"])
+                    user_data["sync_status"] = "synced"
 
-                if username in local_users_dict:
-                    # تحديث المستخدم الموجود (بحذر)
-                    local_user = local_users_dict[username]
+                    if username in local_users_dict:
+                        # تحديث المستخدم الموجود (بحذر)
+                        local_user = local_users_dict[username]
 
-                    # لا نحدث كلمة المرور إذا كانت مختلفة محلياً
-                    if local_user.get("password_hash") != user_data.get("password_hash"):
-                        user_data.pop("password_hash", None)
+                        # لا نحدث كلمة المرور إذا كانت مختلفة محلياً
+                        if local_user.get("password_hash") != user_data.get("password_hash"):
+                            user_data.pop("password_hash", None)
 
-                    # تحديث البيانات الأخرى فقط
-                    update_fields = ["full_name", "email", "role", "_mongo_id", "sync_status"]
-                    set_clause = ", ".join([f"{field}=?" for field in update_fields])
-                    values = [user_data.get(field) for field in update_fields] + [local_user["id"]]
+                        # تحديث البيانات الأخرى فقط
+                        update_fields = ["full_name", "email", "role", "_mongo_id", "sync_status"]
+                        set_clause = ", ".join([f"{field}=?" for field in update_fields])
+                        values = [user_data.get(field) for field in update_fields] + [local_user["id"]]
 
-                    cursor.execute(f"UPDATE users SET {set_clause} WHERE id=?", values)
-                else:
-                    # إضافة مستخدم جديد
-                    filtered_data = {
-                        k: v for k, v in user_data.items() if k in columns and k != "id"
-                    }
+                        cursor.execute(f"UPDATE users SET {set_clause} WHERE id=?", values)
+                    else:
+                        # إضافة مستخدم جديد
+                        filtered_data = {
+                            k: v for k, v in user_data.items() if k in columns and k != "id"
+                        }
 
-                    if filtered_data:
-                        cols = ", ".join(filtered_data.keys())
-                        placeholders = ", ".join(["?" for _ in filtered_data])
-                        cursor.execute(
-                            f"INSERT INTO users ({cols}) VALUES ({placeholders})",
-                            list(filtered_data.values()),
-                        )
+                        if filtered_data:
+                            cols = ", ".join(filtered_data.keys())
+                            placeholders = ", ".join(["?" for _ in filtered_data])
+                            cursor.execute(
+                                f"INSERT INTO users ({cols}) VALUES ({placeholders})",
+                                list(filtered_data.values()),
+                            )
 
-            self.repo.sqlite_conn.commit()
-            logger.info("✅ تم مزامنة المستخدمين بأمان")
+                self.repo.sqlite_conn.commit()
+                logger.info("✅ تم مزامنة المستخدمين بأمان")
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.error(f"❌ خطأ في مزامنة المستخدمين: {e}")
@@ -361,75 +373,79 @@ class SyncManagerV3(QObject):
         result = {"synced": 0, "updated": 0, "conflicts": 0, "errors": 0}
 
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            # 1. جلب البيانات من السحابة
-            cloud_data = list(self.repo.mongo_db[table_name].find())
-            cloud_ids = {str(item["_id"]): item for item in cloud_data}
+            try:
+                # 1. جلب البيانات من السحابة
+                cloud_data = list(self.repo.mongo_db[table_name].find())
+                cloud_ids = {str(item["_id"]): item for item in cloud_data}
 
-            # 2. جلب البيانات المحلية
-            cursor.execute(f"SELECT * FROM {table_name}")
-            local_rows = cursor.fetchall()
+                # 2. جلب البيانات المحلية
+                cursor.execute(f"SELECT * FROM {table_name}")
+                local_rows = cursor.fetchall()
 
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            columns = [col[1] for col in cursor.fetchall()]
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                columns = [col[1] for col in cursor.fetchall()]
 
-            local_data = {}
-            for row in local_rows:
-                row_dict = dict(zip(columns, row, strict=False))
-                mongo_id = row_dict.get("_mongo_id")
-                if mongo_id:
-                    local_data[mongo_id] = row_dict
+                local_data = {}
+                for row in local_rows:
+                    row_dict = dict(zip(columns, row, strict=False))
+                    mongo_id = row_dict.get("_mongo_id")
+                    if mongo_id:
+                        local_data[mongo_id] = row_dict
 
-            # 3. مزامنة البيانات من السحابة
-            for mongo_id, cloud_item in cloud_ids.items():
-                try:
-                    prepared_data = self._prepare_cloud_data_for_local(cloud_item)
-                    prepared_data["_mongo_id"] = mongo_id
-                    prepared_data["sync_status"] = "synced"
+                # 3. مزامنة البيانات من السحابة
+                for mongo_id, cloud_item in cloud_ids.items():
+                    try:
+                        prepared_data = self._prepare_cloud_data_for_local(cloud_item)
+                        prepared_data["_mongo_id"] = mongo_id
+                        prepared_data["sync_status"] = "synced"
 
-                    # تصفية الحقول
-                    filtered_data = {k: v for k, v in prepared_data.items() if k in columns}
+                        # تصفية الحقول
+                        filtered_data = {k: v for k, v in prepared_data.items() if k in columns}
 
-                    if mongo_id in local_data:
-                        # تحديث السجل الموجود
-                        local_record = local_data[mongo_id]
+                        if mongo_id in local_data:
+                            # تحديث السجل الموجود
+                            local_record = local_data[mongo_id]
 
-                        # كشف التعارضات
-                        if self._has_conflict(local_record, filtered_data):
-                            conflict_resolved = self._resolve_conflict(
-                                table_name, local_record, filtered_data
-                            )
-                            if conflict_resolved:
-                                filtered_data = conflict_resolved
-                                result["conflicts"] += 1
-                            else:
-                                continue  # تخطي هذا السجل
+                            # كشف التعارضات
+                            if self._has_conflict(local_record, filtered_data):
+                                conflict_resolved = self._resolve_conflict(
+                                    table_name, local_record, filtered_data
+                                )
+                                if conflict_resolved:
+                                    filtered_data = conflict_resolved
+                                    result["conflicts"] += 1
+                                else:
+                                    continue  # تخطي هذا السجل
 
-                        # تحديث السجل
-                        set_clause = ", ".join([f"{k}=?" for k in filtered_data.keys()])
-                        values = list(filtered_data.values()) + [local_record["id"]]
-                        cursor.execute(f"UPDATE {table_name} SET {set_clause} WHERE id=?", values)
-                        result["updated"] += 1
-                    else:
-                        # إدراج سجل جديد
-                        if filtered_data:
-                            cols = ", ".join(filtered_data.keys())
-                            placeholders = ", ".join(["?" for _ in filtered_data])
-                            cursor.execute(
-                                f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})",
-                                list(filtered_data.values()),
-                            )
-                            result["synced"] += 1
+                            # تحديث السجل
+                            set_clause = ", ".join([f"{k}=?" for k in filtered_data.keys()])
+                            values = list(filtered_data.values()) + [local_record["id"]]
+                            cursor.execute(f"UPDATE {table_name} SET {set_clause} WHERE id=?", values)
+                            result["updated"] += 1
+                        else:
+                            # إدراج سجل جديد
+                            if filtered_data:
+                                cols = ", ".join(filtered_data.keys())
+                                placeholders = ", ".join(["?" for _ in filtered_data])
+                                cursor.execute(
+                                    f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})",
+                                    list(filtered_data.values()),
+                                )
+                                result["synced"] += 1
 
-                except Exception as e:
-                    logger.error(f"خطأ في مزامنة سجل من {table_name}: {e}")
-                    result["errors"] += 1
+                    except Exception as e:
+                        logger.error(f"خطأ في مزامنة سجل من {table_name}: {e}")
+                        result["errors"] += 1
 
-            # 4. رفع البيانات المحلية الجديدة للسحابة
-            self._push_local_changes(table_name)
+                # 4. رفع البيانات المحلية الجديدة للسحابة
+                self._push_local_changes(table_name)
 
-            self.repo.sqlite_conn.commit()
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.error(f"❌ خطأ في مزامنة {table_name}: {e}")
@@ -472,23 +488,28 @@ class SyncManagerV3(QObject):
     ) -> dict | None:
         """حل التعارضات بين البيانات"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            # حفظ التعارض في قاعدة البيانات
-            cursor.execute(
-                """
-                INSERT INTO sync_conflicts
-                (table_name, record_id, local_data, remote_data, created_at)
-                VALUES (?, ?, ?, ?, ?)
-            """,
-                (
-                    table_name,
-                    local_record.get("id"),
-                    json.dumps(local_record, ensure_ascii=False, default=str),
-                    json.dumps(remote_data, ensure_ascii=False, default=str),
-                    datetime.now().isoformat(),
-                ),
-            )
+            try:
+                # حفظ التعارض في قاعدة البيانات
+                cursor.execute(
+                    """
+                    INSERT INTO sync_conflicts
+                    (table_name, record_id, local_data, remote_data, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    (
+                        table_name,
+                        local_record.get("id"),
+                        json.dumps(local_record, ensure_ascii=False, default=str),
+                        json.dumps(remote_data, ensure_ascii=False, default=str),
+                        datetime.now().isoformat(),
+                    ),
+                )
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
             # إرسال إشارة التعارض
             self.data_conflict.emit(table_name, local_record, remote_data)
@@ -540,65 +561,69 @@ class SyncManagerV3(QObject):
     def _push_local_changes(self, table_name: str):
         """رفع التغييرات المحلية للسحابة"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            # البحث عن السجلات المحلية غير المتزامنة
-            cursor.execute(f"""
-                SELECT * FROM {table_name}
-                WHERE sync_status != 'synced' OR sync_status IS NULL
-            """)
-            local_changes = cursor.fetchall()
+            try:
+                # البحث عن السجلات المحلية غير المتزامنة
+                cursor.execute(f"""
+                    SELECT * FROM {table_name}
+                    WHERE sync_status != 'synced' OR sync_status IS NULL
+                """)
+                local_changes = cursor.fetchall()
 
-            if not local_changes:
-                return
+                if not local_changes:
+                    return
 
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            columns = [col[1] for col in cursor.fetchall()]
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                columns = [col[1] for col in cursor.fetchall()]
 
-            collection = self.repo.mongo_db[table_name]
-            unique_field = self.UNIQUE_FIELDS.get(table_name, "name")
+                collection = self.repo.mongo_db[table_name]
+                unique_field = self.UNIQUE_FIELDS.get(table_name, "name")
 
-            for row in local_changes:
-                try:
-                    row_dict = dict(zip(columns, row, strict=False))
-                    local_id = row_dict.get("id")
-                    mongo_id = row_dict.get("_mongo_id")
+                for row in local_changes:
+                    try:
+                        row_dict = dict(zip(columns, row, strict=False))
+                        local_id = row_dict.get("id")
+                        mongo_id = row_dict.get("_mongo_id")
 
-                    # تحضير البيانات للسحابة
-                    cloud_data = self._prepare_local_data_for_cloud(row_dict)
+                        # تحضير البيانات للسحابة
+                        cloud_data = self._prepare_local_data_for_cloud(row_dict)
 
-                    if mongo_id:
-                        # تحديث السجل الموجود
-                        from bson import ObjectId
+                        if mongo_id:
+                            # تحديث السجل الموجود
+                            from bson import ObjectId
 
-                        collection.update_one({"_id": ObjectId(mongo_id)}, {"$set": cloud_data})
-                    else:
-                        # فحص التكرار أولاً
-                        unique_value = cloud_data.get(unique_field)
-                        if unique_value:
-                            existing = collection.find_one({unique_field: unique_value})
-                            if existing:
-                                # ربط بالسجل الموجود
-                                mongo_id = str(existing["_id"])
+                            collection.update_one({"_id": ObjectId(mongo_id)}, {"$set": cloud_data})
+                        else:
+                            # فحص التكرار أولاً
+                            unique_value = cloud_data.get(unique_field)
+                            if unique_value:
+                                existing = collection.find_one({unique_field: unique_value})
+                                if existing:
+                                    # ربط بالسجل الموجود
+                                    mongo_id = str(existing["_id"])
+                                else:
+                                    # إنشاء سجل جديد
+                                    result = collection.insert_one(cloud_data)
+                                    mongo_id = str(result.inserted_id)
                             else:
                                 # إنشاء سجل جديد
                                 result = collection.insert_one(cloud_data)
                                 mongo_id = str(result.inserted_id)
-                        else:
-                            # إنشاء سجل جديد
-                            result = collection.insert_one(cloud_data)
-                            mongo_id = str(result.inserted_id)
 
-                        # تحديث المعرف المحلي
-                        cursor.execute(
-                            f"UPDATE {table_name} SET _mongo_id=?, sync_status='synced' WHERE id=?",
-                            (mongo_id, local_id),
-                        )
+                            # تحديث المعرف المحلي
+                            cursor.execute(
+                                f"UPDATE {table_name} SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                                (mongo_id, local_id),
+                            )
 
-                except Exception as e:
-                    logger.error(f"خطأ في رفع سجل من {table_name}: {e}")
+                    except Exception as e:
+                        logger.error(f"خطأ في رفع سجل من {table_name}: {e}")
 
-            self.repo.sqlite_conn.commit()
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.error(f"خطأ في رفع تغييرات {table_name}: {e}")
@@ -674,47 +699,51 @@ class SyncManagerV3(QObject):
     def restore_from_backup(self, backup_name: str = None) -> bool:
         """استعادة البيانات من نقطة استعادة"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
 
-            if backup_name:
-                cursor.execute(
-                    "SELECT backup_data FROM sync_backups WHERE backup_name = ?", (backup_name,)
-                )
-            else:
-                cursor.execute(
-                    "SELECT backup_data FROM sync_backups ORDER BY created_at DESC LIMIT 1"
-                )
+            try:
+                if backup_name:
+                    cursor.execute(
+                        "SELECT backup_data FROM sync_backups WHERE backup_name = ?", (backup_name,)
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT backup_data FROM sync_backups ORDER BY created_at DESC LIMIT 1"
+                    )
 
-            backup_row = cursor.fetchone()
-            if not backup_row:
-                logger.error("لم يتم العثور على نسخة احتياطية")
-                return False
+                backup_row = cursor.fetchone()
+                if not backup_row:
+                    logger.error("لم يتم العثور على نسخة احتياطية")
+                    return False
 
-            backup_data = json.loads(backup_row[0])
+                backup_data = json.loads(backup_row[0])
 
-            # استعادة كل جدول
-            for table_name, table_data in backup_data.items():
-                try:
-                    # مسح الجدول الحالي
-                    cursor.execute(f"DELETE FROM {table_name}")
+                # استعادة كل جدول
+                for table_name, table_data in backup_data.items():
+                    try:
+                        # مسح الجدول الحالي
+                        cursor.execute(f"DELETE FROM {table_name}")
 
-                    # استعادة البيانات
-                    for record in table_data:
-                        if record:  # تأكد من وجود بيانات
-                            columns = ", ".join(record.keys())
-                            placeholders = ", ".join(["?" for _ in record])
-                            cursor.execute(
-                                f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
-                                list(record.values()),
-                            )
+                        # استعادة البيانات
+                        for record in table_data:
+                            if record:  # تأكد من وجود بيانات
+                                columns = ", ".join(record.keys())
+                                placeholders = ", ".join(["?" for _ in record])
+                                cursor.execute(
+                                    f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
+                                    list(record.values()),
+                                )
 
-                    logger.info(f"✅ تم استعادة {len(table_data)} سجل من {table_name}")
+                        logger.info(f"✅ تم استعادة {len(table_data)} سجل من {table_name}")
 
-                except Exception as e:
-                    logger.error(f"خطأ في استعادة {table_name}: {e}")
+                    except Exception as e:
+                        logger.error(f"خطأ في استعادة {table_name}: {e}")
 
-            self.repo.sqlite_conn.commit()
-            logger.info("✅ تم استعادة البيانات بنجاح")
+                self.repo.sqlite_conn.commit()
+                logger.info("✅ تم استعادة البيانات بنجاح")
+            finally:
+                cursor.close()
             return True
 
         except Exception as e:
@@ -723,7 +752,8 @@ class SyncManagerV3(QObject):
 
     def get_sync_status(self) -> dict[str, Any]:
         """الحصول على حالة المزامنة التفصيلية"""
-        cursor = self.repo.sqlite_cursor
+        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+        cursor = self.repo.get_cursor()
 
         status = {
             "is_online": self.is_online,
@@ -733,39 +763,42 @@ class SyncManagerV3(QObject):
             "backups": 0,
         }
 
-        # إحصائيات الجداول
-        for table in self.SYNC_TABLES:
+        try:
+            # إحصائيات الجداول
+            for table in self.SYNC_TABLES:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    total = cursor.fetchone()[0]
+
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM {table}
+                        WHERE sync_status = 'synced'
+                    """)
+                    synced = cursor.fetchone()[0] if cursor.fetchone() else 0
+
+                    status["tables"][table] = {
+                        "total": total,
+                        "synced": synced,
+                        "pending": total - synced,
+                    }
+                except Exception:
+                    status["tables"][table] = {"total": 0, "synced": 0, "pending": 0}
+
+            # عدد التعارضات
             try:
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                total = cursor.fetchone()[0]
-
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM {table}
-                    WHERE sync_status = 'synced'
-                """)
-                synced = cursor.fetchone()[0] if cursor.fetchone() else 0
-
-                status["tables"][table] = {
-                    "total": total,
-                    "synced": synced,
-                    "pending": total - synced,
-                }
+                cursor.execute("SELECT COUNT(*) FROM sync_conflicts WHERE resolution IS NULL")
+                status["conflicts"] = cursor.fetchone()[0]
             except Exception:
-                status["tables"][table] = {"total": 0, "synced": 0, "pending": 0}
+                pass
 
-        # عدد التعارضات
-        try:
-            cursor.execute("SELECT COUNT(*) FROM sync_conflicts WHERE resolution IS NULL")
-            status["conflicts"] = cursor.fetchone()[0]
-        except Exception:
-            pass
-
-        # عدد النسخ الاحتياطية
-        try:
-            cursor.execute("SELECT COUNT(*) FROM sync_backups")
-            status["backups"] = cursor.fetchone()[0]
-        except Exception:
-            pass
+            # عدد النسخ الاحتياطية
+            try:
+                cursor.execute("SELECT COUNT(*) FROM sync_backups")
+                status["backups"] = cursor.fetchone()[0]
+            except Exception:
+                pass
+        finally:
+            cursor.close()
 
         return status
 

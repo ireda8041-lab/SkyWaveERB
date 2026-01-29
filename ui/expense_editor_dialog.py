@@ -375,10 +375,12 @@ class ExpenseEditorDialog(QDialog):
                 self.category_combo.addItem(exp.category, userData=exp.category)
                 self.category_combo.setCurrentIndex(self.category_combo.count() - 1)
 
-        if hasattr(exp, 'payment_account_id') and exp.payment_account_id:
+        # ⚡ تحميل الحساب - البحث في account_id أو payment_account_id
+        account_code = getattr(exp, 'account_id', None) or getattr(exp, 'payment_account_id', None)
+        if account_code:
             for i in range(self.account_combo.count()):
                 acc_code = self.account_combo.itemData(i)
-                if acc_code == exp.payment_account_id:
+                if acc_code == account_code:
                     self.account_combo.setCurrentIndex(i)
                     break
 
@@ -421,8 +423,15 @@ class ExpenseEditorDialog(QDialog):
 
         try:
             if self.is_editing:
+                # ⚡ نقل الـ IDs من المصروف الأصلي
                 expense_data._mongo_id = self.expense_to_edit._mongo_id
+                expense_data.id = self.expense_to_edit.id
+                
+                # ⚡ استخدام الـ id الرقمي أولاً (أكثر موثوقية للـ SQLite)
                 expense_id = self.expense_to_edit.id or self.expense_to_edit._mongo_id
+                
+                safe_print(f"DEBUG: [ExpenseEditor] تعديل مصروف - id={expense_id}, account_id={expense_data.account_id}")
+                
                 result = self.expense_service.update_expense(expense_id, expense_data)
                 if result:
                     QMessageBox.information(self, "تم", "تم حفظ التعديلات بنجاح.")

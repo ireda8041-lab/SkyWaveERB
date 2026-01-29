@@ -156,7 +156,7 @@ class Repository:
             LOCAL_DB_FILE,
             check_same_thread=False,
             timeout=30.0,
-            isolation_level=None,  # ⚡ Autocommit للسرعة
+            isolation_level="DEFERRED",  # ⚡ معاملات آمنة مع أداء جيد
         )
         self.sqlite_conn.row_factory = sqlite3.Row
         self.sqlite_cursor = self.sqlite_conn.cursor()
@@ -200,12 +200,12 @@ class Repository:
             safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
 
     def _apply_sqlite_optimizations(self):
-        """⚡ تحسينات SQLite للسرعة القصوى"""
+        """⚡ تحسينات SQLite للسرعة مع الحفاظ على الأمان"""
         try:
             # WAL mode للقراءة والكتابة المتزامنة
             self.sqlite_cursor.execute("PRAGMA journal_mode=WAL")
-            # تقليل الـ sync للسرعة القصوى
-            self.sqlite_cursor.execute("PRAGMA synchronous=OFF")
+            # NORMAL sync للتوازن بين السرعة والأمان (بدلاً من OFF)
+            self.sqlite_cursor.execute("PRAGMA synchronous=NORMAL")
             # زيادة حجم الـ cache (20000 صفحة = ~80MB)
             self.sqlite_cursor.execute("PRAGMA cache_size=20000")
             # تخزين الجداول المؤقتة في الذاكرة
@@ -218,7 +218,9 @@ class Repository:
             self.sqlite_cursor.execute("PRAGMA locking_mode=NORMAL")
             # تحسين الـ page size
             self.sqlite_cursor.execute("PRAGMA page_size=4096")
-            safe_print("INFO: ⚡ تم تطبيق تحسينات SQLite للسرعة القصوى")
+            # ⚡ تفعيل busy_timeout لتجنب أخطاء القفل
+            self.sqlite_cursor.execute("PRAGMA busy_timeout=30000")
+            safe_print("INFO: ⚡ تم تطبيق تحسينات SQLite للسرعة والأمان")
         except Exception as e:
             safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
 
@@ -1240,6 +1242,12 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
             safe_print(f"DEBUG: [Repo] تم تحديث is_vip = {is_vip_value} للعميل {client_id}")
+            
+            # ⚡ إبطال الـ cache بعد التحديث
+            if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+                self._clients_cache.invalidate()
+                safe_print("INFO: ⚡ تم إبطال cache العملاء بعد التحديث")
+                
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث العميل (SQLite): {e}")
             return None
@@ -1258,7 +1266,7 @@ class Repository:
                     # صورة جديدة - رفعها للسحابة
                     update_dict["logo_data"] = logo_data_value
                     safe_print(
-                        f"INFO: [Repo] 📷 حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB"
+                        f"INFO: [Repo] � حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB"
                     )
                 elif not logo_path_value:
                     # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
@@ -2064,7 +2072,8 @@ class Repository:
                 try:
                     user_data = self.mongo_db.users.find_one({"username": username})
                     if user_data:
-                        user_data["_mongo_id"] = str(user_data["_id"])
+                        user_data["mongo_id"] = str(user_data["_id"])  # استخدام mongo_id بدلاً من _mongo_id
+                        del user_data["_id"]  # حذف _id لتجنب التعارض
                         user_data["role"] = UserRole(user_data["role"])
                         # تحويل datetime إلى string
                         if "created_at" in user_data and hasattr(
@@ -2182,9 +2191,14 @@ class Repository:
             traceback.print_exc()
             return False
 
-    def update_user(self, user_id: str, update_data: dict) -> bool:
+    def update_user(self, user_id: str | None, update_data: dict) -> bool:
         """تحديث بيانات مستخدم باستخدام ID - يستخدم update_user_by_username داخلياً"""
         try:
+            # التحقق من صحة user_id
+            if not user_id:
+                safe_print("WARNING: [Repository] تم تمرير user_id فارغ - تجاهل التحديث")
+                return False
+                
             safe_print(f"INFO: [Repository] جاري تحديث المستخدم بـ ID: {user_id}")
             safe_print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
 
@@ -2213,7 +2227,7 @@ class Repository:
                         safe_print(f"WARNING: [Repository] فشل البحث في MongoDB: {e}")
 
             if not username:
-                safe_print(f"ERROR: [Repository] المستخدم غير موجود بـ ID: {user_id}")
+                safe_print(f"WARNING: [Repository] المستخدم غير موجود بـ ID: {user_id} - تجاهل التحديث")
                 return False
 
             # استخدام الدالة الجديدة للتحديث باستخدام username
@@ -2613,7 +2627,7 @@ class Repository:
             self.sqlite_conn.commit()
 
             # مزامنة مع MongoDB
-            if self.online and self.mongo_db:
+            if self.online and self.mongo_db is not None:
                 try:
                     self.mongo_db.accounts.update_one(
                         {"code": account_code},
@@ -3148,12 +3162,23 @@ class Repository:
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
+        safe_print(f"DEBUG: [Repo] update_payment called with payment_id={payment_id}, type={type(payment_id)}")
+        safe_print(f"DEBUG: [Repo] payment_data.account_id={payment_data.account_id}")
+
         try:
-            sql = """
+            # ⚡ تحديد نوع الـ ID والبحث المناسب
+            if isinstance(payment_id, int) or (isinstance(payment_id, str) and payment_id.isdigit()):
+                where_clause = "WHERE id = ?"
+                where_params = (int(payment_id),)
+            else:
+                where_clause = "WHERE _mongo_id = ?"
+                where_params = (str(payment_id),)
+
+            sql = f"""
                 UPDATE payments SET
                     last_modified = ?, date = ?, amount = ?,
                     account_id = ?, method = ?, sync_status = ?
-                WHERE id = ? OR _mongo_id = ?
+                {where_clause}
             """
             params = (
                 now_iso,
@@ -3162,12 +3187,17 @@ class Repository:
                 payment_data.account_id,
                 payment_data.method,
                 "modified",
-                payment_id,
-                str(payment_id),
-            )
+            ) + where_params
+            
             self.sqlite_cursor.execute(sql, params)
+            rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
-            safe_print(f"INFO: [Repo] تم تعديل الدفعة محلياً (ID: {payment_id}).")
+            
+            safe_print(f"INFO: [Repo] تم تعديل الدفعة محلياً (ID: {payment_id}), rows_affected={rows_affected}")
+
+            if rows_affected == 0:
+                safe_print(f"WARNING: [Repo] لم يتم تحديث أي صف! payment_id={payment_id}")
+                return False
 
             if self.online:
                 try:
@@ -3183,15 +3213,16 @@ class Repository:
                     }
 
                     result = None
-                    if payment_data._mongo_id:
+                    mongo_id = payment_data._mongo_id
+                    if mongo_id:
                         result = self.mongo_db.payments.update_one(
-                            {"_id": ObjectId(payment_data._mongo_id)}, {"$set": payment_dict}
+                            {"_id": ObjectId(mongo_id)}, {"$set": payment_dict}
                         )
 
                     if result and result.modified_count > 0:
                         self.sqlite_cursor.execute(
-                            "UPDATE payments SET sync_status = ? WHERE id = ? OR _mongo_id = ?",
-                            ("synced", payment_id, str(payment_id)),
+                            f"UPDATE payments SET sync_status = ? {where_clause}",
+                            ("synced",) + where_params,
                         )
                         self.sqlite_conn.commit()
                         safe_print("INFO: [Repo] تم مزامنة تعديل الدفعة أونلاين.")
@@ -3201,6 +3232,8 @@ class Repository:
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تعديل الدفعة: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def get_payment_by_id(self, payment_id) -> schemas.Payment | None:
@@ -3837,13 +3870,26 @@ class Repository:
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
+        safe_print(f"DEBUG: [Repo] update_expense called with expense_id={expense_id}, type={type(expense_id)}")
+        safe_print(f"DEBUG: [Repo] expense_data.account_id={expense_data.account_id}")
+
         try:
+            # ⚡ تحديد نوع الـ ID والبحث المناسب
+            # إذا كان رقم، نبحث بالـ id
+            # إذا كان نص، نبحث بالـ _mongo_id
+            if isinstance(expense_id, int) or (isinstance(expense_id, str) and expense_id.isdigit()):
+                where_clause = "WHERE id = ?"
+                where_params = (int(expense_id),)
+            else:
+                where_clause = "WHERE _mongo_id = ?"
+                where_params = (str(expense_id),)
+
             # تحديث في SQLite
-            sql = """
+            sql = f"""
                 UPDATE expenses SET
                     last_modified = ?, date = ?, category = ?, amount = ?,
                     description = ?, account_id = ?, project_id = ?, sync_status = ?
-                WHERE id = ? OR _mongo_id = ?
+                {where_clause}
             """
             params = (
                 now_iso,
@@ -3854,12 +3900,17 @@ class Repository:
                 expense_data.account_id,
                 expense_data.project_id,
                 "modified",
-                expense_id,
-                str(expense_id),
-            )
+            ) + where_params
+            
             self.sqlite_cursor.execute(sql, params)
+            rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
-            safe_print(f"INFO: تم تعديل المصروف محلياً (ID: {expense_id}).")
+            
+            safe_print(f"INFO: [Repo] تم تعديل المصروف محلياً (ID: {expense_id}), rows_affected={rows_affected}")
+
+            if rows_affected == 0:
+                safe_print(f"WARNING: [Repo] لم يتم تحديث أي صف! expense_id={expense_id}")
+                return False
 
             # تحديث في MongoDB
             if self.online:
@@ -3877,26 +3928,29 @@ class Repository:
                         "sync_status": "synced",
                     }
 
-                    # محاولة التحديث بـ _mongo_id أو id
+                    # محاولة التحديث بـ _mongo_id
                     result = None
-                    if expense_data._mongo_id:
+                    mongo_id = expense_data._mongo_id
+                    if mongo_id:
                         result = self.mongo_db.expenses.update_one(
-                            {"_id": ObjectId(expense_data._mongo_id)}, {"$set": expense_dict}
+                            {"_id": ObjectId(mongo_id)}, {"$set": expense_dict}
                         )
 
                     if result and result.modified_count > 0:
                         self.sqlite_cursor.execute(
-                            "UPDATE expenses SET sync_status = ? WHERE id = ? OR _mongo_id = ?",
-                            ("synced", expense_id, str(expense_id)),
+                            f"UPDATE expenses SET sync_status = ? {where_clause}",
+                            ("synced",) + where_params,
                         )
                         self.sqlite_conn.commit()
-                        safe_print("INFO: تم مزامنة تعديل المصروف أونلاين.")
+                        safe_print("INFO: [Repo] تم مزامنة تعديل المصروف أونلاين.")
                 except Exception as e:
-                    safe_print(f"ERROR: فشل مزامنة تعديل المصروف: {e}")
+                    safe_print(f"ERROR: [Repo] فشل مزامنة تعديل المصروف: {e}")
 
             return True
         except Exception as e:
-            safe_print(f"ERROR: فشل تعديل المصروف: {e}")
+            safe_print(f"ERROR: [Repo] فشل تعديل المصروف: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def delete_expense(self, expense_id) -> bool:
@@ -4123,7 +4177,7 @@ class Repository:
 
         # ⚡ إبطال الـ cache بعد إضافة مشروع جديد
         if CACHE_ENABLED and hasattr(self, '_projects_cache'):
-            self._projects_cache.clear()
+            self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الإضافة")
 
         return project_data
@@ -4295,13 +4349,14 @@ class Repository:
 
             sql = """
                 UPDATE projects SET
-                    client_id = ?, status = ?, status_manually_set = ?, description = ?, start_date = ?, end_date = ?,
+                    name = ?, client_id = ?, status = ?, status_manually_set = ?, description = ?, start_date = ?, end_date = ?,
                     items = ?, subtotal = ?, discount_rate = ?, discount_amount = ?, tax_rate = ?,
                     tax_amount = ?, total_amount = ?, currency = ?, project_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE name = ?
             """
             params = (
+                project_data.name,  # ✅ تحديث الاسم الجديد
                 project_data.client_id,
                 project_data.status.value,
                 status_manually_set,
@@ -4318,12 +4373,15 @@ class Repository:
                 project_data.currency.value,
                 project_data.project_notes,
                 now_iso,
-                project_name,
+                project_name,  # WHERE clause - الاسم القديم
             )
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث المشروع في SQLite")
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
         # --- 2. تحديث MongoDB (اختياري - لا يعطل البرنامج) ---
@@ -4338,7 +4396,7 @@ class Repository:
 
                 self.mongo_db.projects.update_one({"name": project_name}, {"$set": update_dict})
                 self.sqlite_cursor.execute(
-                    "UPDATE projects SET sync_status = 'synced' WHERE name = ?", (project_name,)
+                    "UPDATE projects SET sync_status = 'synced' WHERE name = ?", (project_data.name,)
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
@@ -4346,7 +4404,7 @@ class Repository:
 
         # ⚡ إبطال الـ cache بعد تحديث المشروع
         if CACHE_ENABLED and hasattr(self, '_projects_cache'):
-            self._projects_cache.clear()
+            self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد التحديث")
 
         return project_data
@@ -4399,7 +4457,7 @@ class Repository:
             
             # ⚡ إبطال الـ cache بعد حذف المشروع
             if CACHE_ENABLED and hasattr(self, '_projects_cache'):
-                self._projects_cache.clear()
+                self._projects_cache.invalidate()
                 safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الحذف")
             
             return True
@@ -4530,18 +4588,21 @@ class Repository:
         total_collected = 0.0
         total_outstanding = 0.0
         total_expenses = 0.0
+        net_profit_cash = 0.0  # ⚡ تهيئة المتغير هنا لتجنب الخطأ
 
+        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+        cursor = self.get_cursor()
         try:
-            self.sqlite_cursor.execute("SELECT SUM(amount) FROM payments")
-            result = self.sqlite_cursor.fetchone()
+            cursor.execute("SELECT SUM(amount) FROM payments")
+            result = cursor.fetchone()
             total_collected = result[0] if result and result[0] else 0.0
 
-            self.sqlite_cursor.execute("SELECT SUM(amount) FROM expenses")
-            result = self.sqlite_cursor.fetchone()
+            cursor.execute("SELECT SUM(amount) FROM expenses")
+            result = cursor.fetchone()
             total_expenses = result[0] if result and result[0] else 0.0
 
             # حساب المتبقي لكل مشروع على حدة
-            self.sqlite_cursor.execute(
+            cursor.execute(
                 "SELECT name, total_amount FROM projects WHERE status IN (?, ?, ?)",
                 (
                     schemas.ProjectStatus.ACTIVE.value,
@@ -4549,17 +4610,17 @@ class Repository:
                     schemas.ProjectStatus.ON_HOLD.value,
                 ),
             )
-            projects = self.sqlite_cursor.fetchall()
+            projects = cursor.fetchall()
 
             for project in projects:
                 project_name = project[0]
                 project_total = project[1] or 0.0
 
                 # جلب الدفعات الخاصة بهذا المشروع فقط
-                self.sqlite_cursor.execute(
+                cursor.execute(
                     "SELECT SUM(amount) FROM payments WHERE project_id = ?", (project_name,)
                 )
-                paid_result = self.sqlite_cursor.fetchone()
+                paid_result = cursor.fetchone()
                 project_paid = paid_result[0] if paid_result and paid_result[0] else 0.0
 
                 # المتبقي = الإجمالي - المدفوع
@@ -4575,6 +4636,8 @@ class Repository:
 
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حساب أرقام الداشبورد (SQLite): {e}")
+        finally:
+            cursor.close()  # ⚡ إغلاق الـ cursor
 
         result = {
             "total_collected": total_collected,

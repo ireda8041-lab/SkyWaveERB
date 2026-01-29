@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\signals.py
+# hypothesis_version: 6.148.3
+
+['accounting', 'accounts', 'clients', 'expenses', 'invoices', 'payments', 'projects', 'services', 'tasks']

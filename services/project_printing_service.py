@@ -13,6 +13,7 @@ from typing import Any
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -20,10 +21,12 @@ except ImportError:
             # فشل الطباعة بسبب الترميز
             pass
 
+
 # ⚡ استيراد آمن لـ PIL
 try:
     from PIL import Image
     from PIL.Image import Image as PILImage
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -36,10 +39,9 @@ try:
     from bidi.algorithm import get_display  # noqa: F401
     from reportlab.lib import colors  # noqa: F401
     from reportlab.lib.pagesizes import A4  # noqa: F401
-    from reportlab.lib.units import cm, inch, mm  # noqa: F401
+
     from reportlab.lib.utils import ImageReader  # noqa: F401
     from reportlab.pdfgen import canvas  # noqa: F401
-    from reportlab.platypus import SimpleDocTemplate, Spacer  # noqa: F401
 
     PDF_AVAILABLE = True
 except ImportError as e:
@@ -58,7 +60,9 @@ class ProjectInvoiceGenerator:
         self.company_info = self._get_company_info()
 
         if not PDF_AVAILABLE:
-            raise ImportError("PDF libraries not installed. Run: pip install reportlab arabic-reshaper python-bidi Pillow")
+            raise ImportError(
+                "PDF libraries not installed. Run: pip install reportlab arabic-reshaper python-bidi Pillow"
+            )
 
     def _get_company_info(self) -> dict[str, str]:
         """جلب معلومات الشركة من الإعدادات"""
@@ -68,15 +72,16 @@ class ProjectInvoiceGenerator:
                 "tagline": "وكالة تسويق رقمي متكاملة",
                 "address": "القاهرة، مصر",
                 "phone": "+20 10 123 4567",
-                "email": "info@skywave.agency"
+                "email": "info@skywave.agency",
             }
 
         return {
             "name": self.settings_service.get_setting("company_name") or "Sky Wave",
-            "tagline": self.settings_service.get_setting("company_tagline") or "وكالة تسويق رقمي متكاملة",
+            "tagline": self.settings_service.get_setting("company_tagline")
+            or "وكالة تسويق رقمي متكاملة",
             "address": self.settings_service.get_setting("company_address") or "القاهرة، مصر",
             "phone": self.settings_service.get_setting("company_phone") or "+20 10 123 4567",
-            "email": self.settings_service.get_setting("company_email") or "info@skywave.agency"
+            "email": self.settings_service.get_setting("company_email") or "info@skywave.agency",
         }
 
     @staticmethod
@@ -96,7 +101,7 @@ class ProjectInvoiceGenerator:
         """توليد رقم المشروع بتنسيق SW-XXXX"""
         try:
             # محاولة استخراج رقم من ID
-            numeric_part = ''.join(filter(str.isdigit, project_id))
+            numeric_part = "".join(filter(str.isdigit, project_id))
             if len(numeric_part) >= 4:
                 return f"SW-{numeric_part[:4]}"
             else:
@@ -114,7 +119,7 @@ class ProjectInvoiceGenerator:
         client_info: dict[str, str],
         payments: list[dict[str, Any]] | None = None,
         background_image_path: str | None = None,
-        output_path: str | None = None
+        output_path: str | None = None,
     ) -> str:
         """
         إنتاج فاتورة مشروع مع خلفية مخصصة
@@ -162,15 +167,15 @@ class ProjectInvoiceGenerator:
                 img: PILImage = Image.open(image_path)
 
                 # تحويل إلى RGB إذا كانت RGBA
-                if img.mode == 'RGBA':
-                    img = img.convert('RGB')
+                if img.mode == "RGBA":
+                    img = img.convert("RGB")
 
                 # تعديل الحجم ليناسب A4
                 img = img.resize((int(width), int(height)), Image.Resampling.LANCZOS)
 
                 # حفظ في buffer
                 img_buffer = io.BytesIO()
-                img.save(img_buffer, format='JPEG', quality=85)
+                img.save(img_buffer, format="JPEG", quality=85)
                 img_buffer.seek(0)
 
                 # إضافة للـ PDF
@@ -187,9 +192,15 @@ class ProjectInvoiceGenerator:
             canvas_obj.setFillColor(colors.white)
             canvas_obj.rect(0, 0, width, height, fill=1)
 
-    def _add_project_data_overlay(self, canvas_obj, project: schemas.Project,
-                                client_info: dict[str, str], payments: list[dict[str, Any]],
-                                width: float, height: float):
+    def _add_project_data_overlay(
+        self,
+        canvas_obj,
+        project: schemas.Project,
+        client_info: dict[str, str],
+        payments: list[dict[str, Any]],
+        width: float,
+        height: float,
+    ):
         """إضافة بيانات المشروع على الخلفية"""
 
         # إعداد الخطوط
@@ -208,7 +219,11 @@ class ProjectInvoiceGenerator:
 
         # تاريخ المشروع (أعلى يمين تحت رقم المشروع)
         if project.start_date:
-            project_date = project.start_date.strftime("%Y-%m-%d") if hasattr(project.start_date, 'strftime') else str(project.start_date)[:10]
+            project_date = (
+                project.start_date.strftime("%Y-%m-%d")
+                if hasattr(project.start_date, "strftime")
+                else str(project.start_date)[:10]
+            )
         else:
             project_date = datetime.now().strftime("%Y-%m-%d")
         canvas_obj.setFont("Helvetica", 12)
@@ -252,7 +267,9 @@ class ProjectInvoiceGenerator:
         if payments:
             self._add_payments_section(canvas_obj, payments, width, height)
 
-    def _add_services_table(self, canvas_obj, project: schemas.Project, width: float, height: float):
+    def _add_services_table(
+        self, canvas_obj, project: schemas.Project, width: float, height: float
+    ):
         """إضافة جدول الخدمات"""
         table_start_y = height - 320
         row_height = 30
@@ -306,7 +323,9 @@ class ProjectInvoiceGenerator:
 
             current_y -= row_height
 
-    def _add_totals_section(self, canvas_obj, project: schemas.Project, width: float, height: float):
+    def _add_totals_section(
+        self, canvas_obj, project: schemas.Project, width: float, height: float
+    ):
         """إضافة قسم الإجماليات"""
         totals_start_y = 220
 
@@ -333,26 +352,32 @@ class ProjectInvoiceGenerator:
 
         # الخصم
         if project.discount_rate > 0:
-            canvas_obj.drawRightString(width - 60, totals_start_y - 35,
-                                     f"Discount ({project.discount_rate:.1f}%):")
-            canvas_obj.drawRightString(width - 60, totals_start_y - 50,
-                                     f"-{discount_amount:,.2f} EGP")
+            canvas_obj.drawRightString(
+                width - 60, totals_start_y - 35, f"Discount ({project.discount_rate:.1f}%):"
+            )
+            canvas_obj.drawRightString(
+                width - 60, totals_start_y - 50, f"-{discount_amount:,.2f} EGP"
+            )
 
         # الضريبة
         if project.tax_rate > 0:
             y_pos = totals_start_y - 70 if project.discount_rate > 0 else totals_start_y - 35
-            canvas_obj.drawRightString(width - 60, y_pos,
-                                     f"Tax ({project.tax_rate:.1f}%):")
-            canvas_obj.drawRightString(width - 60, y_pos - 15,
-                                     f"{tax_amount:,.2f} EGP")
+            canvas_obj.drawRightString(width - 60, y_pos, f"Tax ({project.tax_rate:.1f}%):")
+            canvas_obj.drawRightString(width - 60, y_pos - 15, f"{tax_amount:,.2f} EGP")
 
         # الإجمالي النهائي
         canvas_obj.setFont("Helvetica-Bold", 14)
         canvas_obj.setFillColor(colors.Color(0.06, 0.72, 0.51))  # أخضر
-        final_y = totals_start_y - 90 if project.tax_rate > 0 or project.discount_rate > 0 else totals_start_y - 50
+        final_y = (
+            totals_start_y - 90
+            if project.tax_rate > 0 or project.discount_rate > 0
+            else totals_start_y - 50
+        )
         canvas_obj.drawRightString(width - 60, final_y, f"TOTAL: {total_amount:,.2f} EGP")
 
-    def _add_payments_section(self, canvas_obj, payments: list[dict[str, Any]], width: float, height: float):
+    def _add_payments_section(
+        self, canvas_obj, payments: list[dict[str, Any]], width: float, height: float
+    ):
         """إضافة قسم الدفعات"""
         payments_start_y = 220
 
@@ -377,14 +402,14 @@ class ProjectInvoiceGenerator:
                 break
 
             # تاريخ الدفعة
-            payment_date = payment.get('date', '')
-            if hasattr(payment_date, 'strftime'):
-                date_str = payment_date.strftime('%Y-%m-%d')
+            payment_date = payment.get("date", "")
+            if hasattr(payment_date, "strftime"):
+                date_str = payment_date.strftime("%Y-%m-%d")
             else:
                 date_str = str(payment_date)[:10]
 
             # مبلغ الدفعة
-            amount = payment.get('amount', 0)
+            amount = payment.get("amount", 0)
             total_paid += amount
 
             # عرض الدفعة
@@ -400,7 +425,7 @@ class ProjectInvoiceGenerator:
         canvas_obj.drawRightString(240, payments_start_y - 75, f"{total_paid:,.2f} EGP")
 
         # المتبقي
-        project_total = getattr(self, '_current_project_total', 0)
+        project_total = getattr(self, "_current_project_total", 0)
 
         remaining = project_total - total_paid
         if remaining > 0:
@@ -432,7 +457,7 @@ class ProjectPrintingService:
         client_info: dict[str, str],
         payments: list[dict[str, Any]] | None = None,
         background_image_path: str | None = None,
-        auto_open: bool = True
+        auto_open: bool = True,
     ) -> str | None:
         """طباعة فاتورة مشروع مع خلفية مخصصة"""
         if not self.is_available():
@@ -459,12 +484,12 @@ class ProjectPrintingService:
             import platform
             import subprocess
 
-            if platform.system() == 'Windows':
+            if platform.system() == "Windows":
                 os.startfile(file_path)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', file_path])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", file_path])
             else:  # Linux
-                subprocess.run(['xdg-open', file_path])
+                subprocess.run(["xdg-open", file_path])
 
             safe_print(f"INFO: [ProjectPrintingService] Opened PDF: {file_path}")
         except Exception as e:
@@ -482,7 +507,7 @@ class ProjectPrinter:
         import sys
 
         # تحديد مسار خط Cairo
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -492,12 +517,13 @@ class ProjectPrinter:
         try:
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont
-            pdfmetrics.registerFont(TTFont('CairoFont', font_path))
-            self.font_name = 'CairoFont'
+
+            pdfmetrics.registerFont(TTFont("CairoFont", font_path))
+            self.font_name = "CairoFont"
             safe_print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {font_path}")
         except (FileNotFoundError, OSError, RuntimeError) as e:
             safe_print(f"⚠️ لم يتم العثور على خط Cairo: {e}")
-            self.font_name = 'Helvetica'
+            self.font_name = "Helvetica"
 
     def fix_text(self, text):
         """تصحيح الحروف العربية المقطعة والمعكوسة"""
@@ -543,16 +569,18 @@ class ProjectPrinter:
         y_position = 550
         c.setFont(self.font_name, 12)
 
-        items = data.get('services', [])
+        items = data.get("services", [])
         for item in items:
-            c.drawRightString(520, y_position, self.fix_text(item['name']))
-            c.drawCentredString(300, y_position, str(item['qty']))
+            c.drawRightString(520, y_position, self.fix_text(item["name"]))
+            c.drawCentredString(300, y_position, str(item["qty"]))
             c.drawString(100, y_position, f"{item['price']:,.2f}")
             y_position -= 30
 
         # الإجماليات
         c.setFont(self.font_name, 16)
-        c.drawRightString(200, 150, self.fix_text(f"الإجمالي: {data.get('total_amount', 0):,.2f} ج.م"))
+        c.drawRightString(
+            200, 150, self.fix_text(f"الإجمالي: {data.get('total_amount', 0):,.2f} ج.م")
+        )
 
         c.save()
         safe_print(f"✅ تم إنشاء ملف المشروع: {self.output_path}")

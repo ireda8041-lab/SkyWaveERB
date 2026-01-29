@@ -1,25 +1,23 @@
-# الملف: core/realtime_sync.py
 """
-نظام المزامنة الفورية (Real-time) بين الأجهزة
-- يستخدم MongoDB Change Streams للتحديث الفوري
-- يرسل إشارات فورية عند تغيير البيانات
+🔄 نظام المزامنة الفورية (Real-time Sync)
+مزامنة فورية بين الأجهزة عبر MongoDB Change Streams
+
+⚡ المميزات:
+- مراقبة التغييرات في MongoDB فوراً
+- مزامنة البيانات بين الأجهزة في الوقت الحقيقي
+- إرسال إشارات لتحديث الواجهة
 """
 
+import threading
 import time
 from datetime import datetime
-from threading import Event
 from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
-# ⚡ استيراد آمن لـ pymongo
-try:
-    from pymongo.errors import PyMongoError
-    PYMONGO_AVAILABLE = True
-except ImportError:
-    PyMongoError = Exception
-    PYMONGO_AVAILABLE = False
+from core.logger import get_logger
 
+# استيراد دالة الطباعة الآمنة
 try:
     from core.safe_print import safe_print
 except ImportError:
@@ -27,437 +25,382 @@ except ImportError:
         try:
             print(msg)
         except UnicodeEncodeError:
-            # فشل الطباعة بسبب الترميز
             pass
 
+# استيراد آمن لـ pymongo
+try:
+    from pymongo.errors import PyMongoError
+    PYMONGO_AVAILABLE = True
+except ImportError:
+    PyMongoError = Exception
+    PYMONGO_AVAILABLE = False
 
-class RealtimeSync(QObject):
-    """نظام المزامنة الفورية"""
+logger = get_logger(__name__)
 
-    # إشارات التحديث الفوري
+# المتغير العام لمدير المزامنة الفورية
+_realtime_manager = None
+
+
+class RealtimeSyncManager(QObject):
+    """
+    🔄 مدير المزامنة الفورية
+    يراقب التغييرات في MongoDB ويزامن البيانات فوراً
+    ⚡ محسّن للأداء - يستخدم thread واحد فقط بدلاً من thread لكل collection
+    """
+    
+    # إشارات
     data_updated = pyqtSignal(str, dict)  # (collection_name, change_data)
     connection_status_changed = pyqtSignal(bool)  # (is_connected)
-
+    sync_completed = pyqtSignal(str)  # (collection_name)
+    
+    # الجداول المراقبة - تقليل العدد للأداء
+    COLLECTIONS = [
+        'clients', 'projects', 'payments',
+        'expenses', 'accounts'
+    ]
+    
     def __init__(self, repository, parent=None):
         super().__init__(parent)
         self.repo = repository
         self.is_running = False
-        self.watch_threads = {}
-        self.stop_event = Event()
-
-        # المجموعات المراد مراقبتها - الأساسية فقط لتجنب البطء
-        self.collections_to_watch = [
-            'projects',
-            'clients',
-            'services',
-            'payments',
-            'expenses',
-            'accounts',
-            'notifications',
-        ]
-
-        # تايمر للتحقق من الاتصال
-        self.connection_timer = QTimer()
-        self.connection_timer.timeout.connect(self._check_connection)
-        self.connection_timer.start(120000)  # كل دقيقتين
-
-        self.last_connection_status = False
-        self._enabled = True  # للتحكم في تشغيل/إيقاف المزامنة
-        self._is_shutting_down = False  # علامة للإغلاق الآمن
-
+        self._shutdown = False
+        self._stop_event = threading.Event()
+        self._watcher_thread = None  # ⚡ thread واحد فقط
+        self._last_sync_time = {}
+        self._pending_changes = set()  # ⚡ تجميع التغييرات
+        self._debounce_timer = None
+        
+        # تهيئة أوقات المزامنة
+        for collection in self.COLLECTIONS:
+            self._last_sync_time[collection] = datetime.now()
+        
+        logger.info("[RealtimeSync] ✅ تم تهيئة مدير المزامنة الفورية (محسّن)")
+    
     def start(self):
-        """بدء المزامنة الفورية - معطّل للاستقرار"""
-        # ⚡ المزامنة الفورية معطّلة بشكل دائم - تسبب عدم استقرار
-        # نظام المزامنة الموحد (unified_sync) يقوم بالمهمة بشكل أفضل
-        safe_print("INFO: [RealtimeSync] المزامنة الفورية معطّلة - استخدم نظام المزامنة الموحد")
-        return
-
+        """🚀 بدء المزامنة الفورية"""
+        if self.is_running:
+            return
+        
+        if not PYMONGO_AVAILABLE:
+            logger.warning("[RealtimeSync] pymongo غير متاح - المزامنة الفورية معطّلة")
+            return
+        
+        if not self.repo.online or self.repo.mongo_db is None:
+            logger.warning("[RealtimeSync] MongoDB غير متاح - المزامنة الفورية معطّلة")
+            return
+        
+        self._shutdown = False
+        self._stop_event.clear()
+        self.is_running = True
+        
+        # ⚡ بدء thread واحد فقط لمراقبة كل الـ collections
+        self._start_unified_watcher()
+        
+        logger.info("[RealtimeSync] 🚀 بدء المزامنة الفورية (thread واحد)")
+        safe_print("INFO: [RealtimeSync] 🚀 بدء المزامنة الفورية (محسّن)")
+    
     def stop(self):
-        """إيقاف المزامنة الفورية"""
+        """⏹️ إيقاف المزامنة الفورية"""
         if not self.is_running:
             return
-
-        safe_print("INFO: [RealtimeSync] إيقاف المزامنة الفورية...")
-        self._is_shutting_down = True
+        
+        logger.info("[RealtimeSync] ⏹️ جاري إيقاف المزامنة الفورية...")
+        self._shutdown = True
+        self._stop_event.set()
         self.is_running = False
-        self._enabled = False
-        self.stop_event.set()
-
-        # إيقاف التايمر بأمان
+        
+        # انتظار انتهاء الـ thread
         try:
-            if self.connection_timer is not None:
-                self.connection_timer.stop()
-        except (RuntimeError, AttributeError):
-            pass
-
-        # انتظار انتهاء جميع الـ threads مع timeout قصير
-        for _collection_name, thread in list(self.watch_threads.items()):
-            try:
-                if thread and thread.is_alive():
-                    thread.join(timeout=1)  # timeout قصير لتجنب التعليق
-            except Exception:
-                pass
-
-        self.watch_threads.clear()
-        safe_print("INFO: [RealtimeSync] تم إيقاف المزامنة الفورية")
-
-    def _watch_collection(self, collection_name: str):
-        """مراقبة مجموعة واحدة للتغييرات - محسّنة ومحمية"""
-        retry_count = 0
-        max_retries = 3
-
-        while not self.stop_event.is_set() and retry_count < max_retries and self._enabled and not self._is_shutting_down:
-            try:
-                if self.repo is None or not self.repo.online or self.repo is not None is not None is not None.mongo_db is None:
-                    time.sleep(5)
-                    continue
-
-                # التحقق من الإغلاق قبل إنشاء الاتصال
-                if self.stop_event.is_set() or self._is_shutting_down:
-                    break
-
-                collection = self.repo.mongo_db[collection_name]
-
-                # إنشاء Change Stream مع timeout
-                try:
-                    with collection.watch(
-                        full_document='updateLookup',
-                        max_await_time_ms=3000  # timeout 3 ثواني بدلاً من 5
-                    ) as stream:
-                        safe_print(f"INFO: [RealtimeSync] بدء مراقبة {collection_name}")
-                        retry_count = 0  # إعادة تعيين عداد المحاولات
-
-                        for change in stream:
-                            if self.stop_event.is_set() or not self._enabled or self._is_shutting_down:
-                                break
-
-                            try:
-                                self._handle_change(collection_name, change)
-                            except Exception as e:
-                                safe_print(f"WARNING: [RealtimeSync] خطأ في معالجة التغيير: {e}")
-                except Exception as stream_error:
-                    if self._is_shutting_down:
-                        break
-                    raise stream_error
-
-            except PyMongoError as e:
-                if self._is_shutting_down:
-                    break
-                retry_count += 1
-                safe_print(f"WARNING: [RealtimeSync] خطأ MongoDB في {collection_name} (محاولة {retry_count}): {e}")
-                if retry_count < max_retries and not self._is_shutting_down:
-                    time.sleep(10)  # انتظار 10 ثواني قبل إعادة المحاولة
-            except Exception as e:
-                if self._is_shutting_down:
-                    break
-                retry_count += 1
-                safe_print(f"WARNING: [RealtimeSync] خطأ عام في {collection_name} (محاولة {retry_count}): {e}")
-                if retry_count < max_retries and not self._is_shutting_down:
-                    time.sleep(10)
-
-        safe_print(f"INFO: [RealtimeSync] انتهت مراقبة {collection_name}")
-
-    def _handle_change(self, collection_name: str, change: dict[str, Any]):
-        """معالجة تغيير في المجموعة - محمية من الأخطاء"""
-        try:
-            operation_type = change.get('operationType')
-            document_id = change.get('documentKey', {}).get('_id')
-
-            safe_print(f"INFO: [RealtimeSync] تغيير في {collection_name}: {operation_type} - {document_id}")
-
-            # إرسال إشارة التحديث
-            change_data = {
-                'operation': operation_type,
-                'document_id': str(document_id) if document_id else None,
-                'full_document': change.get('fullDocument'),
-                'timestamp': datetime.now().isoformat()
-            }
-
-            # ⚡ إرسال الإشارة بشكل آمن
-            try:
-                self.data_updated.emit(collection_name, change_data)
-            except RuntimeError:
-                # Qt object deleted
-                pass
-
-        except Exception as e:
-            # لا نُسقط البرنامج أبداً بسبب خطأ هنا
-            safe_print(f"WARNING: [RealtimeSync] فشل معالجة التغيير: {e}")
-
-    def _check_connection(self):
-        """فحص حالة الاتصال - محسّن ومحمي"""
-        if not self._enabled or self._is_shutting_down:
-            return
-
-        try:
-            is_connected = False
-            if self.repo and self.repo is not None is not None is not None.online and self.repo is not None is not None is not None.mongo_db is not None:
-                try:
-                    # فحص سريع بدون blocking
-                    self.repo.mongo_db.admin.command('ping', maxTimeMS=2000)
-                    is_connected = True
-                except Exception:
-                    is_connected = False
-
-            if is_connected != self.last_connection_status:
-                self.last_connection_status = is_connected
-                try:
-                    self.connection_status_changed.emit(is_connected)
-                except (RuntimeError, AttributeError):
-                    # تجاهل أخطاء Qt
-                    pass
-
-                if is_connected:
-                    safe_print("INFO: [RealtimeSync] ✅ الاتصال متاح")
-                    if not self.is_running and self._enabled and not self._is_shutting_down:
-                        self.start()
-                else:
-                    safe_print("WARNING: [RealtimeSync] ❌ فقدان الاتصال")
-
+            if self._watcher_thread and self._watcher_thread.is_alive():
+                self._watcher_thread.join(timeout=2)
         except Exception:
-            # تجاهل الأخطاء - لا نريد crash
             pass
-
-
-class RealtimeDataManager(QObject):
-    """مدير البيانات الفورية - يربط التحديثات بالواجهة"""
-
-    def __init__(self, repository, parent=None):
-        super().__init__(parent)
-        self.repo = repository
-        self.realtime_sync = RealtimeSync(repository, self)
-
-        # ربط الإشارات
-        self.realtime_sync.data_updated.connect(self._on_data_updated)
-        self.realtime_sync.connection_status_changed.connect(self._on_connection_changed)
-
-    def start(self):
-        """بدء المدير"""
-        self.realtime_sync.start()
-
-    def stop(self):
-        """إيقاف المدير"""
-        self.realtime_sync.stop()
-
-    def _on_data_updated(self, collection_name: str, change_data: dict[str, Any]):
-        """معالجة تحديث البيانات - محمية من الأخطاء"""
+        
+        self._watcher_thread = None
+        logger.info("[RealtimeSync] ✅ تم إيقاف المزامنة الفورية")
+    
+    def _start_unified_watcher(self):
+        """⚡ بدء مراقبة موحدة لكل الـ collections في thread واحد"""
+        def watch_all_collections():
+            logger.debug("[RealtimeSync] بدء المراقبة الموحدة")
+            
+            while not self._stop_event.is_set() and not self._shutdown:
+                try:
+                    if self.repo.mongo_db is None or self.repo.mongo_client is None:
+                        time.sleep(5)
+                        continue
+                    
+                    # مراقبة كل collection بالتناوب
+                    for collection_name in self.COLLECTIONS:
+                        if self._stop_event.is_set() or self._shutdown:
+                            break
+                        
+                        try:
+                            collection = self.repo.mongo_db[collection_name]
+                            
+                            # مراقبة التغييرات مع timeout قصير جداً
+                            with collection.watch(
+                                full_document='updateLookup',
+                                max_await_time_ms=1000  # ⚡ 1 ثانية فقط
+                            ) as stream:
+                                for change in stream:
+                                    if self._stop_event.is_set() or self._shutdown:
+                                        break
+                                    
+                                    # ⚡ تجميع التغييرات بدلاً من معالجتها فوراً
+                                    self._pending_changes.add(collection_name)
+                                    self._schedule_emit_changes()
+                                    break  # ⚡ معالجة تغيير واحد فقط ثم الانتقال للـ collection التالي
+                                    
+                        except PyMongoError as e:
+                            if self._shutdown:
+                                break
+                            error_msg = str(e)
+                            if "Cannot use MongoClient after close" in error_msg:
+                                break
+                            # تجاهل أخطاء timeout
+                            if "timed out" not in error_msg.lower():
+                                logger.debug(f"[RealtimeSync] خطأ في مراقبة {collection_name}: {e}")
+                        except Exception:
+                            pass
+                    
+                    # ⚡ انتظار قصير بين الدورات
+                    time.sleep(2)
+                    
+                except Exception as e:
+                    if self._shutdown:
+                        break
+                    logger.debug(f"[RealtimeSync] خطأ في المراقبة الموحدة: {e}")
+                    time.sleep(5)
+            
+            logger.debug("[RealtimeSync] انتهاء المراقبة الموحدة")
+        
+        # إنشاء وبدء Thread واحد
+        self._watcher_thread = threading.Thread(
+            target=watch_all_collections,
+            daemon=True,
+            name="RealtimeSync-Unified"
+        )
+        self._watcher_thread.start()
+    
+    def _schedule_emit_changes(self):
+        """⚡ جدولة إرسال التغييرات المجمعة"""
+        # استخدام QTimer للتأخير (debounce)
+        from PyQt6.QtCore import QTimer, QMetaObject, Qt, Q_ARG
+        
+        # إرسال التغييرات بعد 500ms
         try:
-            # إرسال إشارة تحديث للواجهة
-            from core.signals import app_signals
-
-            # تحديد نوع البيانات المتغيرة - الأساسية فقط
-            data_type_map = {
-                'projects': 'projects',
-                'clients': 'clients',
-                'services': 'services',
-                'payments': 'payments',
-                'expenses': 'expenses',
-                'accounts': 'accounting',
-                'notifications': 'notifications',
-            }
-
-            data_type = data_type_map.get(collection_name, collection_name)
-
-            safe_print(f"INFO: [RealtimeDataManager] إرسال إشارة تحديث: {data_type} ({collection_name})")
-
-            # ⚡ إرسال الإشارة بشكل آمن
+            QMetaObject.invokeMethod(
+                self, "_emit_pending_changes_slot",
+                Qt.ConnectionType.QueuedConnection
+            )
+        except Exception:
+            pass
+    
+    def _emit_pending_changes_slot(self):
+        """⚡ إرسال التغييرات المجمعة (يعمل على main thread)"""
+        if not self._pending_changes:
+            return
+        
+        changes = list(self._pending_changes)
+        self._pending_changes.clear()
+        
+        for collection_name in changes:
             try:
-                app_signals.emit_data_changed(data_type)
+                self.data_updated.emit(collection_name, {'operation': 'change'})
+                self.sync_completed.emit(collection_name)
+                self._last_sync_time[collection_name] = datetime.now()
             except RuntimeError:
-                # Qt object deleted - تجاهل
-                return
-
-            # إشعارات مخصصة لكل قسم
-            operation = change_data.get('operation', '')
-            if operation in ['insert', 'update', 'delete']:
-                self._send_section_notification(collection_name, operation, change_data)
-
-        except Exception as e:
-            # لا نُسقط البرنامج أبداً
-            safe_print(f"WARNING: [RealtimeDataManager] فشل معالجة التحديث: {e}")
-
-    def _send_section_notification(self, collection_name: str, operation: str, change_data: dict):
-        """إرسال إشعارات مخصصة لكل قسم"""
+                pass
+    
+    def _handle_change(self, collection_name: str, change: dict):
+        """معالجة تغيير من MongoDB"""
         try:
-            from ui.notification_system import notify_info, notify_success, notify_warning
-
-            operation_text = {
-                'insert': 'إضافة',
-                'update': 'تعديل',
-                'delete': 'حذف'
-            }.get(operation, operation)
-
-            document = change_data.get('full_document', {})
-
-            # إشعارات مخصصة حسب القسم
-            if collection_name == 'clients':
-                client_name = document.get('name', 'عميل')
-                if operation == 'update' and 'logo_data' in str(document):
-                    notify_success(
-                        f"تم تحديث لوجو العميل '{client_name}' 🖼️",
-                        "👥 إدارة العملاء",
-                        sync=False
+            operation = change.get('operationType', 'unknown')
+            document = change.get('fullDocument', {})
+            document_id = change.get('documentKey', {}).get('_id')
+            
+            logger.info(f"[RealtimeSync] 🔄 {operation} في {collection_name}")
+            safe_print(f"INFO: [RealtimeSync] 🔄 {operation} في {collection_name}")
+            
+            # مزامنة التغيير محلياً
+            if operation in ['insert', 'update', 'replace']:
+                self._sync_document_to_local(collection_name, document)
+            elif operation == 'delete':
+                self._delete_document_from_local(collection_name, str(document_id))
+            
+            # إرسال إشارة التحديث
+            try:
+                self.data_updated.emit(collection_name, {
+                    'operation': operation,
+                    'document_id': str(document_id) if document_id else None
+                })
+                self.sync_completed.emit(collection_name)
+            except RuntimeError:
+                pass
+            
+            # تحديث وقت المزامنة
+            self._last_sync_time[collection_name] = datetime.now()
+            
+        except Exception as e:
+            logger.debug(f"[RealtimeSync] خطأ في معالجة التغيير: {e}")
+    
+    def _sync_document_to_local(self, collection_name: str, document: dict):
+        """مزامنة مستند من MongoDB إلى SQLite"""
+        if not document:
+            return
+        
+        try:
+            mongo_id = str(document.get('_id', ''))
+            if not mongo_id:
+                return
+            
+            # تحضير البيانات
+            data = self._prepare_document_for_sqlite(document)
+            data['_mongo_id'] = mongo_id
+            data['sync_status'] = 'synced'
+            
+            cursor = self.repo.get_cursor()
+            try:
+                # البحث عن السجل المحلي
+                cursor.execute(
+                    f"SELECT id FROM {collection_name} WHERE _mongo_id = ?",
+                    (mongo_id,)
+                )
+                existing = cursor.fetchone()
+                
+                # الحصول على أعمدة الجدول
+                cursor.execute(f"PRAGMA table_info({collection_name})")
+                table_columns = {row[1] for row in cursor.fetchall()}
+                
+                # تصفية البيانات
+                filtered_data = {k: v for k, v in data.items() if k in table_columns}
+                
+                if existing:
+                    # تحديث
+                    local_id = existing[0]
+                    set_clause = ', '.join([f"{k}=?" for k in filtered_data.keys()])
+                    values = list(filtered_data.values()) + [local_id]
+                    cursor.execute(
+                        f"UPDATE {collection_name} SET {set_clause} WHERE id=?",
+                        values
                     )
                 else:
-                    notify_info(
-                        f"تم {operation_text} العميل '{client_name}'",
-                        "👥 إدارة العملاء",
-                        sync=False
+                    # إدراج
+                    columns = ', '.join(filtered_data.keys())
+                    placeholders = ', '.join(['?' for _ in filtered_data])
+                    cursor.execute(
+                        f"INSERT INTO {collection_name} ({columns}) VALUES ({placeholders})",
+                        list(filtered_data.values())
                     )
-
-            elif collection_name == 'projects':
-                project_name = document.get('name', 'مشروع')
-                notify_info(
-                    f"تم {operation_text} المشروع '{project_name}'",
-                    "📋 إدارة المشاريع",
-                    sync=False
-                )
-
-            elif collection_name == 'services':
-                service_name = document.get('name', 'خدمة')
-                notify_info(
-                    f"تم {operation_text} الخدمة '{service_name}'",
-                    "🛠️ إدارة الخدمات",
-                    sync=False
-                )
-
-            elif collection_name == 'payments':
-                amount = document.get('amount', 0)
-                notify_success(
-                    f"تم {operation_text} دفعة بقيمة {amount} جنيه 💰",
-                    "💳 إدارة المدفوعات",
-                    sync=False
-                )
-
-            elif collection_name == 'expenses':
-                category = document.get('category', 'مصروف')
-                amount = document.get('amount', 0)
-                notify_warning(
-                    f"تم {operation_text} مصروف '{category}' بقيمة {amount} جنيه",
-                    "💸 إدارة المصروفات",
-                    sync=False
-                )
-
-            elif collection_name in ['accounts', 'journal_entries']:
-                notify_info(
-                    f"تم {operation_text} بيانات محاسبية",
-                    "📊 المحاسبة",
-                    sync=False
-                )
-
-            elif collection_name in ['employees', 'departments', 'attendance', 'payroll']:
-                notify_info(
-                    f"تم {operation_text} بيانات الموارد البشرية",
-                    "👨‍💼 الموارد البشرية",
-                    sync=False
-                )
-
-            elif collection_name in ['inventory_items', 'stock_movements', 'suppliers']:
-                notify_info(
-                    f"تم {operation_text} بيانات المخزون",
-                    "📦 إدارة المخزون",
-                    sync=False
-                )
-
-            elif collection_name in ['tasks', 'reminders', 'calendar_events']:
-                notify_info(
-                    f"تم {operation_text} مهمة أو تذكير",
-                    "✅ المهام والتذكيرات",
-                    sync=False
-                )
-
-            elif collection_name in ['reports', 'dashboards', 'analytics_data']:
-                notify_info(
-                    f"تم {operation_text} تقرير أو تحليل",
-                    "📈 التقارير والتحليلات",
-                    sync=False
-                )
-
-            elif collection_name in ['users', 'user_permissions', 'system_settings']:
-                notify_warning(
-                    f"تم {operation_text} إعدادات النظام",
-                    "⚙️ إعدادات النظام",
-                    sync=False
-                )
-
-            else:
-                # إشعار عام للمجموعات الأخرى
-                section_names = {
-                    'invoices': '🧾 الفواتير',
-                    'quotes': '💼 عروض الأسعار',
-                    'contracts': '📄 العقود',
-                    'file_attachments': '📎 المرفقات',
-                    'document_templates': '📋 القوالب'
-                }
-
-                section_name = section_names.get(collection_name, f"📁 {collection_name}")
-                notify_info(
-                    f"تم {operation_text} بيانات",
-                    section_name,
-                    sync=False
-                )
-
+                
+                self.repo.sqlite_conn.commit()
+                logger.debug(f"[RealtimeSync] ✅ تم مزامنة {collection_name}/{mongo_id}")
+                
+            finally:
+                cursor.close()
+                
         except Exception as e:
-            safe_print(f"ERROR: [RealtimeDataManager] فشل معالجة التحديث: {e}")
-
-    def _on_connection_changed(self, is_connected: bool):
-        """معالجة تغيير حالة الاتصال"""
+            logger.debug(f"[RealtimeSync] خطأ في مزامنة المستند: {e}")
+    
+    def _delete_document_from_local(self, collection_name: str, mongo_id: str):
+        """حذف مستند من SQLite"""
+        if not mongo_id:
+            return
+        
         try:
-            from core.signals import app_signals
-            from ui.notification_system import notify_success, notify_warning
-
-            # إرسال إشارة حالة المزامنة
-            app_signals.emit_realtime_sync_status(is_connected)
-
-            if is_connected:
-                notify_success(
-                    "تم الاتصال بالخادم - المزامنة الفورية نشطة لجميع الأقسام",
-                    "🌐 المزامنة الفورية",
-                    sync=False
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute(
+                    f"DELETE FROM {collection_name} WHERE _mongo_id = ?",
+                    (mongo_id,)
                 )
-                safe_print("INFO: [RealtimeDataManager] ✅ المزامنة الفورية نشطة لجميع الأقسام")
-            else:
-                notify_warning(
-                    "فقدان الاتصال بالخادم - المزامنة الفورية متوقفة",
-                    "⚠️ المزامنة الفورية",
-                    sync=False
-                )
-                safe_print("WARNING: [RealtimeDataManager] ❌ المزامنة الفورية متوقفة")
-
+                self.repo.sqlite_conn.commit()
+                logger.debug(f"[RealtimeSync] 🗑️ تم حذف {collection_name}/{mongo_id}")
+            finally:
+                cursor.close()
         except Exception as e:
-            safe_print(f"ERROR: [RealtimeDataManager] فشل معالجة تغيير الاتصال: {e}")
+            logger.debug(f"[RealtimeSync] خطأ في حذف المستند: {e}")
+    
+    def _prepare_document_for_sqlite(self, document: dict) -> dict:
+        """تحضير مستند MongoDB للحفظ في SQLite"""
+        import json
+        
+        data = dict(document)
+        data.pop('_id', None)
+        data.pop('id', None)
+        
+        # تحويل التواريخ
+        date_fields = [
+            'created_at', 'last_modified', 'date', 'issue_date',
+            'due_date', 'start_date', 'end_date'
+        ]
+        for field in date_fields:
+            if field in data and hasattr(data[field], 'isoformat'):
+                data[field] = data[field].isoformat()
+        
+        # تحويل القوائم والكائنات إلى JSON
+        json_fields = ['items', 'lines', 'data', 'milestones']
+        for field in json_fields:
+            if field in data and isinstance(data[field], (list, dict)):
+                data[field] = json.dumps(data[field], ensure_ascii=False)
+        
+        # التأكد من الحقول المطلوبة
+        now = datetime.now().isoformat()
+        if not data.get('created_at'):
+            data['created_at'] = now
+        if not data.get('last_modified'):
+            data['last_modified'] = now
+        
+        return data
 
 
-# متغير عام للمدير
-_realtime_manager: RealtimeDataManager | None = None
+def setup_realtime_sync(repository) -> RealtimeSyncManager | None:
+    """
+    🚀 إعداد وتشغيل نظام المزامنة الفورية
+    
+    Args:
+        repository: مخزن البيانات
+        
+    Returns:
+        مدير المزامنة الفورية أو None إذا فشل
+    """
+    global _realtime_manager
+    
+    try:
+        if _realtime_manager is not None:
+            return _realtime_manager
+        
+        _realtime_manager = RealtimeSyncManager(repository)
+        _realtime_manager.start()
+        
+        logger.info("[RealtimeSync] ✅ تم إعداد نظام المزامنة الفورية")
+        return _realtime_manager
+        
+    except Exception as e:
+        logger.warning(f"[RealtimeSync] فشل إعداد المزامنة الفورية: {e}")
+        return None
 
-def get_realtime_manager() -> RealtimeDataManager | None:
+
+def shutdown_realtime_sync():
+    """⏹️ إيقاف نظام المزامنة الفورية"""
+    global _realtime_manager
+    
+    try:
+        if _realtime_manager is not None:
+            _realtime_manager.stop()
+            _realtime_manager = None
+            logger.info("[RealtimeSync] ✅ تم إيقاف نظام المزامنة الفورية")
+    except Exception as e:
+        logger.debug(f"[RealtimeSync] خطأ في إيقاف المزامنة: {e}")
+
+
+def get_realtime_manager() -> RealtimeSyncManager | None:
     """الحصول على مدير المزامنة الفورية"""
     return _realtime_manager
 
-def setup_realtime_sync(repository):
-    """إعداد نظام المزامنة الفورية"""
-    global _realtime_manager
 
-    try:
-        if _realtime_manager:
-            _realtime_manager.stop()
-
-        _realtime_manager = RealtimeDataManager(repository)
-        _realtime_manager.start()
-
-        safe_print("INFO: [RealtimeSync] ✅ تم إعداد نظام المزامنة الفورية")
-        return _realtime_manager
-
-    except Exception as e:
-        safe_print(f"ERROR: [RealtimeSync] فشل إعداد المزامنة الفورية: {e}")
-        return None
-
-def shutdown_realtime_sync():
-    """إغلاق نظام المزامنة الفورية"""
-    global _realtime_manager
-
-    if _realtime_manager:
-        _realtime_manager.stop()
-        _realtime_manager = None
-        safe_print("INFO: [RealtimeSync] تم إغلاق نظام المزامنة الفورية")
+# للتوافق مع الكود القديم
+class RealtimeSync(RealtimeSyncManager):
+    """Alias للتوافق مع الكود القديم"""
+    pass

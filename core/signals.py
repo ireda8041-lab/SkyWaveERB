@@ -58,8 +58,27 @@ class AppSignals(QObject):
 
     def emit_data_changed(self, data_type: str):
         """إرسال إشارة تحديث البيانات - محسّن للسرعة"""
-        # ⚡ إرسال الإشارة العامة فقط - بدون إشارات متعددة
+        # ⚡ إرسال الإشارة العامة
         self.data_changed.emit(data_type)
+        
+        # ⚡ إرسال الإشارة المحددة أيضاً للتوافق
+        if data_type == "clients":
+            self.clients_changed.emit()
+        elif data_type == "projects":
+            self.projects_changed.emit()
+        elif data_type == "expenses":
+            self.expenses_changed.emit()
+        elif data_type == "payments":
+            self.payments_changed.emit()
+        elif data_type == "services":
+            self.services_changed.emit()
+        elif data_type == "accounts" or data_type == "accounting":
+            self.accounts_changed.emit()
+            self.accounting_changed.emit()
+        elif data_type == "tasks":
+            self.tasks_changed.emit()
+        elif data_type == "invoices":
+            self.invoices_changed.emit()
 
         # ⚡ المزامنة الفورية معطّلة للسرعة
         # المزامنة تتم كل 5 دقائق تلقائياً

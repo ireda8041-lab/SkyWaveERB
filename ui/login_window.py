@@ -3,7 +3,6 @@
 نافذة تسجيل الدخول - تصميم احترافي
 """
 
-
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
@@ -45,10 +44,11 @@ class LoginWindow(QDialog):
             self.setFixedSize(520, 850)
 
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
-        # ⚡ إزالة WA_TranslucentBackground للسرعة
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self.init_ui()
@@ -81,11 +81,14 @@ class LoginWindow(QDialog):
         logo_label.setMinimumHeight(125)
         logo_pixmap = QPixmap(get_resource_path("logo.png"))
         if not logo_pixmap.isNull():
-            logo_label.setPixmap(logo_pixmap.scaled(
-                150, 150,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            ))
+            logo_label.setPixmap(
+                logo_pixmap.scaled(
+                    150,
+                    150,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
         layout.addWidget(logo_label)
         layout.addSpacing(50)
 
@@ -179,7 +182,7 @@ class LoginWindow(QDialog):
         return """
             #container {
                 background: #1e2139;
-                border-radius: 20px;
+                border-radius: 50px;
                 border: 1px solid #2a2d45;
             }
 
@@ -200,23 +203,19 @@ class LoginWindow(QDialog):
                 font-weight: 500;
             }
 
-            #input {
+            QLineEdit#input {
                 background: #252842;
                 border: 2px solid #353a55;
-                border-radius: 12px;
-                padding: 16px 20px;
+                border-radius: 20px;
+                padding: 16px 25px;
                 font-size: 15px;
                 color: #e0e3f0;
-                min-height: 20px;
+                min-height: 25px;
             }
 
-            #input:focus {
+            QLineEdit#input:focus {
                 border-color: #4da6ff;
                 background: #2a2f4a;
-            }
-
-            #input::placeholder {
-                color: #5a5f7a;
             }
 
             #error {

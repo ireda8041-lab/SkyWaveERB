@@ -177,33 +177,38 @@ class SyncWorker(QThread):
     def _get_pending_sync_items(self) -> list[SyncQueueItem]:
         """جلب العناصر المعلقة للمزامنة"""
         try:
-            self.repo.sqlite_cursor.execute("""
-                SELECT id, COALESCE(action, operation) as action, entity_type as table_name, data, entity_id, priority,
-                       created_at as timestamp, retry_count, status, error_message
-                FROM sync_queue
-                WHERE status = 'pending' AND retry_count < 3
-                ORDER BY priority DESC, created_at ASC
-                LIMIT 50
-            """)
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT id, COALESCE(action, operation) as action, entity_type as table_name, data, entity_id, priority,
+                           created_at as timestamp, retry_count, status, error_message
+                    FROM sync_queue
+                    WHERE status = 'pending' AND retry_count < 3
+                    ORDER BY priority DESC, created_at ASC
+                    LIMIT 50
+                """)
 
-            rows = self.repo.sqlite_cursor.fetchall()
-            items = []
+                rows = cursor.fetchall()
+                items = []
 
-            for row in rows:
-                item = SyncQueueItem(
-                    action=row['action'],
-                    table_name=row['table_name'],
-                    data=json.loads(row['data']),
-                    entity_id=row['entity_id'],
-                    priority=row['priority']
-                )
-                item.id = row['id']
-                item.retry_count = row['retry_count']
-                item.status = row['status']
-                item.error_message = row['error_message']
-                items.append(item)
+                for row in rows:
+                    item = SyncQueueItem(
+                        action=row['action'],
+                        table_name=row['table_name'],
+                        data=json.loads(row['data']),
+                        entity_id=row['entity_id'],
+                        priority=row['priority']
+                    )
+                    item.id = row['id']
+                    item.retry_count = row['retry_count']
+                    item.status = row['status']
+                    item.error_message = row['error_message']
+                    items.append(item)
 
-            return items
+                return items
+            finally:
+                cursor.close()
 
         except Exception as e:
             safe_print(f"ERROR: [SyncWorker] Failed to get pending items: {e}")
@@ -244,36 +249,51 @@ class SyncWorker(QThread):
     def _mark_item_completed(self, item_id: int):
         """تمييز العنصر كمكتمل"""
         try:
-            self.repo.sqlite_cursor.execute("""
-                UPDATE sync_queue
-                SET status = 'completed', last_attempt = ?
-                WHERE id = ?
-            """, (datetime.now().isoformat(), item_id))
-            self.repo.sqlite_conn.commit()
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    UPDATE sync_queue
+                    SET status = 'completed', last_attempt = ?
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), item_id))
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
         except Exception as e:
             safe_print(f"ERROR: [SyncWorker] Failed to mark item completed: {e}")
 
     def _mark_item_failed(self, item_id: int, error_message: str):
         """تمييز العنصر كفاشل"""
         try:
-            self.repo.sqlite_cursor.execute("""
-                UPDATE sync_queue
-                SET status = 'failed', error_message = ?, last_attempt = ?
-                WHERE id = ?
-            """, (error_message, datetime.now().isoformat(), item_id))
-            self.repo.sqlite_conn.commit()
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    UPDATE sync_queue
+                    SET status = 'failed', error_message = ?, last_attempt = ?
+                    WHERE id = ?
+                """, (error_message, datetime.now().isoformat(), item_id))
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
         except Exception as e:
             safe_print(f"ERROR: [SyncWorker] Failed to mark item failed: {e}")
 
     def _increment_retry_count(self, item_id: int):
         """زيادة عداد المحاولات"""
         try:
-            self.repo.sqlite_cursor.execute("""
-                UPDATE sync_queue
-                SET retry_count = retry_count + 1, last_attempt = ?
-                WHERE id = ?
-            """, (datetime.now().isoformat(), item_id))
-            self.repo.sqlite_conn.commit()
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    UPDATE sync_queue
+                    SET retry_count = retry_count + 1, last_attempt = ?
+                    WHERE id = ?
+                """, (datetime.now().isoformat(), item_id))
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
         except Exception as e:
             safe_print(f"ERROR: [SyncWorker] Failed to increment retry count: {e}")
 
@@ -356,13 +376,18 @@ class AdvancedSyncManagerV3(QObject):
         try:
             now = datetime.now().isoformat()
 
-            self.repo.sqlite_cursor.execute("""
-                INSERT INTO sync_queue
-                (operation, action, entity_type, data, entity_id, priority, created_at, last_modified, status, retry_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0)
-            """, (action, action, table_name, json.dumps(data), entity_id, priority, now, now))
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    INSERT INTO sync_queue
+                    (operation, action, entity_type, data, entity_id, priority, created_at, last_modified, status, retry_count)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0)
+                """, (action, action, table_name, json.dumps(data), entity_id, priority, now, now))
 
-            self.repo.sqlite_conn.commit()
+                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
             safe_print(f"INFO: [AdvancedSyncManager] Added to sync queue: {action} {table_name}")
 
@@ -376,12 +401,17 @@ class AdvancedSyncManagerV3(QObject):
     def get_pending_count(self) -> int:
         """الحصول على عدد العناصر المعلقة"""
         try:
-            self.repo.sqlite_cursor.execute("""
-                SELECT COUNT(*) FROM sync_queue
-                WHERE status = 'pending' AND retry_count < 3
-            """)
-            result = self.repo.sqlite_cursor.fetchone()
-            return int(result[0]) if result else 0
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM sync_queue
+                    WHERE status = 'pending' AND retry_count < 3
+                """)
+                result = cursor.fetchone()
+                return int(result[0]) if result else 0
+            finally:
+                cursor.close()
         except Exception as e:
             safe_print(f"ERROR: [AdvancedSyncManager] Failed to get pending count: {e}")
             return 0
@@ -406,16 +436,21 @@ class AdvancedSyncManagerV3(QObject):
         try:
             cutoff_date = (datetime.now() - timedelta(days=days_old)).isoformat()
 
-            self.repo.sqlite_cursor.execute("""
-                DELETE FROM sync_queue
-                WHERE status = 'completed' AND created_at < ?
-            """, (cutoff_date,))
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                cursor.execute("""
+                    DELETE FROM sync_queue
+                    WHERE status = 'completed' AND created_at < ?
+                """, (cutoff_date,))
 
-            deleted_count = self.repo.sqlite_cursor.rowcount
-            self.repo.sqlite_conn.commit()
+                deleted_count = cursor.rowcount
+                self.repo.sqlite_conn.commit()
 
-            if deleted_count > 0:
-                safe_print(f"INFO: [AdvancedSyncManager] Cleaned up {deleted_count} old sync items")
+                if deleted_count > 0:
+                    safe_print(f"INFO: [AdvancedSyncManager] Cleaned up {deleted_count} old sync items")
+            finally:
+                cursor.close()
 
         except Exception as e:
             safe_print(f"ERROR: [AdvancedSyncManager] Failed to cleanup: {e}")
@@ -443,7 +478,7 @@ class AdvancedSyncManagerV3(QObject):
 
         # تنظيف العناصر القديمة - فقط إذا كان الـ repo متاح
         try:
-            if self.repo and hasattr(self.repo, 'sqlite_cursor') and self.repo is not None is not None is not None.sqlite_cursor:
+            if self.repo and hasattr(self.repo, 'sqlite_cursor') and self.repo.sqlite_cursor:
                 self.cleanup_completed_items()
         except Exception as e:
             safe_print(f"WARNING: [AdvancedSyncManager] Cleanup skipped: {e}")

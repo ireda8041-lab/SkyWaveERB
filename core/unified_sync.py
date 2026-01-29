@@ -30,6 +30,11 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+# ==================== ثوابت التوقيت (بالمللي ثانية) ====================
+FULL_SYNC_INTERVAL_MS = 10 * 60 * 1000      # 10 دقائق - مزامنة كاملة (زيادة للأداء)
+QUICK_SYNC_INTERVAL_MS = 2 * 60 * 1000      # دقيقتين - رفع التغييرات (زيادة للأداء)
+CONNECTION_CHECK_INTERVAL_MS = 60 * 1000    # دقيقة واحدة - فحص الاتصال (زيادة للأداء)
+
 
 class UnifiedSyncManagerV3(QObject):
     """
@@ -77,10 +82,10 @@ class UnifiedSyncManagerV3(QObject):
         self._shutdown = False  # ⚡ علامة الإغلاق
 
         # ⚡ إعدادات المزامنة التلقائية - مفعّلة للمزامنة بين الأجهزة
-        self._auto_sync_enabled = True  # ⚡ مفعّلة للمزامنة
-        self._auto_sync_interval = 300 * 1000  # ⚡ 5 دقائق - مزامنة كاملة
-        self._quick_sync_interval = 60 * 1000  # ⚡ دقيقة - رفع التغييرات
-        self._connection_check_interval = 30 * 1000  # ⚡ 30 ثانية - فحص الاتصال
+        self._auto_sync_enabled = True
+        self._auto_sync_interval = FULL_SYNC_INTERVAL_MS
+        self._quick_sync_interval = QUICK_SYNC_INTERVAL_MS
+        self._connection_check_interval = CONNECTION_CHECK_INTERVAL_MS
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -94,13 +99,44 @@ class UnifiedSyncManagerV3(QObject):
     # ==========================================
 
     def instant_sync(self, table: str = None):
-        """⚡ مزامنة فورية - معطّلة للأداء (تستخدم المزامنة الدورية بدلاً منها)"""
-        # ⚡ معطّلة للأداء - المزامنة تتم كل 5 دقائق
-        pass
+        """
+        ⚡ مزامنة فورية لجدول واحد أو كل الجداول
+        
+        Args:
+            table: اسم الجدول (اختياري). إذا لم يُحدد، يتم مزامنة كل الجداول
+        """
+        if self._shutdown or not self.is_online:
+            return
+        
+        try:
+            if table:
+                # مزامنة جدول واحد
+                self._sync_single_table_to_cloud(table)
+                self._sync_single_table_from_cloud(table)
+                logger.debug(f"⚡ تم مزامنة {table} فوراً")
+            else:
+                # مزامنة كل الجداول
+                self._push_pending_changes()
+                logger.debug("⚡ تم رفع التغييرات المحلية فوراً")
+        except Exception as e:
+            logger.debug(f"خطأ في المزامنة الفورية: {e}")
+
+    def _sync_single_table_from_cloud(self, table: str):
+        """مزامنة جدول واحد من السحابة"""
+        if not self.is_online or self.repo is None or self.repo.mongo_db is None:
+            return
+        
+        if table not in self.TABLES:
+            return
+        
+        try:
+            self._sync_table_from_cloud(table)
+        except Exception as e:
+            logger.debug(f"خطأ في مزامنة {table} من السحابة: {e}")
 
     def _sync_single_table_to_cloud(self, table: str):
         """مزامنة جدول واحد فوراً"""
-        if not self.is_online or self.repo is not None is not None is not None is None or self.repo is not None is not None is not None.mongo_db is None:
+        if not self.is_online or self.repo is None or self.repo.mongo_db is None:
             return
 
         # ⚡ تجاهل الجداول غير الموجودة
@@ -108,43 +144,47 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         try:
-            cursor = self.repo.sqlite_cursor
-            # ⚡ التحقق من وجود الجدول أولاً
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
-            if not cursor.fetchone():
-                return  # الجدول غير موجود
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
+            try:
+                # ⚡ التحقق من وجود الجدول أولاً
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+                if not cursor.fetchone():
+                    return  # الجدول غير موجود
 
-            cursor.execute(f"SELECT * FROM {table} WHERE sync_status != 'synced' OR sync_status IS NULL")
-            rows = cursor.fetchall()
+                cursor.execute(f"SELECT * FROM {table} WHERE sync_status != 'synced' OR sync_status IS NULL")
+                rows = cursor.fetchall()
 
-            if not rows:
-                return
+                if not rows:
+                    return
 
-            columns = [desc[0] for desc in cursor.description]
-            collection = self.repo.mongo_db[table]
+                columns = [desc[0] for desc in cursor.description]
+                collection = self.repo.mongo_db[table]
 
-            for row in rows:
-                record = dict(zip(columns, row, strict=False))
-                mongo_id = record.get('_mongo_id')
+                for row in rows:
+                    record = dict(zip(columns, row, strict=False))
+                    mongo_id = record.get('_mongo_id')
 
-                # تنظيف البيانات
-                clean_record = {k: v for k, v in record.items() if k not in ['id', 'sync_status', 'last_synced']}
+                    # تنظيف البيانات
+                    clean_record = {k: v for k, v in record.items() if k not in ['id', 'sync_status', 'last_synced']}
 
-                if mongo_id:
-                    # تحديث
-                    from bson import ObjectId
-                    collection.update_one({'_id': ObjectId(mongo_id)}, {'$set': clean_record}, upsert=True)
-                else:
-                    # إضافة جديد
-                    result = collection.insert_one(clean_record)
-                    # تحديث الـ mongo_id محلياً
-                    cursor.execute(f"UPDATE {table} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
-                                   (str(result.inserted_id), record.get('id')))
+                    if mongo_id:
+                        # تحديث
+                        from bson import ObjectId
+                        collection.update_one({'_id': ObjectId(mongo_id)}, {'$set': clean_record}, upsert=True)
+                    else:
+                        # إضافة جديد
+                        result = collection.insert_one(clean_record)
+                        # تحديث الـ mongo_id محلياً
+                        cursor.execute(f"UPDATE {table} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                                       (str(result.inserted_id), record.get('id')))
+                        self.repo.sqlite_conn.commit()
+
+                    # تحديث حالة المزامنة
+                    cursor.execute(f"UPDATE {table} SET sync_status = 'synced' WHERE id = ?", (record.get('id'),))
                     self.repo.sqlite_conn.commit()
-
-                # تحديث حالة المزامنة
-                cursor.execute(f"UPDATE {table} SET sync_status = 'synced' WHERE id = ?", (record.get('id'),))
-                self.repo.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.debug(f"تجاهل خطأ مزامنة {table}: {e}")
@@ -226,7 +266,7 @@ class UnifiedSyncManagerV3(QObject):
 
         try:
             # ⚡ فحص أن MongoDB client لا يزال متاحاً قبل الاستخدام
-            if self.repo is None or self.repo is not None is not None is not None.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
+            if self.repo is None or self.repo.mongo_client is None or self.repo.mongo_db is None:
                 current_status = False
             else:
                 try:
@@ -357,7 +397,7 @@ class UnifiedSyncManagerV3(QObject):
             return False
         
         # ⚡ فحص أن MongoDB client متاح ولم يُغلق
-        if self.repo.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
+        if self.repo.mongo_client is None or self.repo.mongo_db is None:
             return False
             
         try:
@@ -394,7 +434,7 @@ class UnifiedSyncManagerV3(QObject):
             return {'success': False, 'reason': 'already_syncing'}
 
         # ⚡ فحص فعلي أن MongoDB client لا يزال متاحاً
-        if self.repo is None or self.repo is not None is not None is not None.mongo_client is None or self.repo is not None is not None is not None.mongo_db is None:
+        if self.repo is None or self.repo.mongo_client is None or self.repo.mongo_db is None:
             return {'success': False, 'reason': 'no_mongo_client'}
 
         try:
@@ -435,11 +475,24 @@ class UnifiedSyncManagerV3(QObject):
             logger.info(f"✅ اكتملت المزامنة: {results['total_synced']} سجل")
             self.sync_completed.emit(results)
 
+            # ⚡ إعادة حساب أرصدة الحسابات النقدية بعد المزامنة
+            try:
+                from services.accounting_service import AccountingService
+                # إبطال الـ cache أولاً
+                AccountingService._hierarchy_cache = None
+                AccountingService._hierarchy_cache_time = 0
+                logger.info("📊 تم إبطال cache الحسابات - سيتم إعادة الحساب عند فتح تاب المحاسبة")
+            except Exception as e:
+                logger.warning(f"⚠️ فشل إبطال cache الحسابات: {e}")
+
             # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
             try:
                 from core.signals import app_signals
                 app_signals.emit_data_changed('clients')
                 app_signals.emit_data_changed('projects')
+                app_signals.emit_data_changed('accounts')
+                app_signals.emit_data_changed('payments')
+                app_signals.emit_data_changed('expenses')
                 logger.info("📢 تم إرسال إشارات تحديث الواجهة")
             except Exception as e:
                 logger.warning(f"⚠️ فشل إرسال إشارات التحديث: {e}")
@@ -470,7 +523,7 @@ class UnifiedSyncManagerV3(QObject):
                 return stats
 
             # ⚡ فحص أن MongoDB client لا يزال متاحاً
-            if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
+            if self.repo.mongo_db is None or self.repo.mongo_client is None:
                 return stats
 
             # ⚡ فحص فعلي أن الـ client لم يُغلق
@@ -779,7 +832,7 @@ class UnifiedSyncManagerV3(QObject):
         if not self.is_online:
             return
 
-        if self.repo is None or self.repo is not None is not None is not None.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
+        if self.repo is None or self.repo.mongo_db is None or self.repo.mongo_client is None:
             logger.debug("تم تخطي رفع التغييرات - MongoDB client غير متاح")
             return
 
@@ -800,7 +853,7 @@ class UnifiedSyncManagerV3(QObject):
         if self.repo is None or not self.repo.online:
             return
 
-        if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
+        if self.repo.mongo_db is None or self.repo.mongo_client is None:
             logger.debug(f"تم تخطي رفع {table_name} - MongoDB client غير متاح")
             return
 
@@ -978,122 +1031,127 @@ class UnifiedSyncManagerV3(QObject):
     def _sync_users_from_cloud(self):
         """مزامنة المستخدمين ثنائية الاتجاه (من وإلى السحابة)"""
         try:
-            cursor = self.repo.sqlite_cursor
+            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+            cursor = self.repo.get_cursor()
             conn = self.repo.sqlite_conn
 
-            # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
-            logger.info("📤 جاري رفع المستخدمين المحليين إلى السحابة...")
-            cursor.execute("""
-                SELECT * FROM users
-                WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
-                   OR _mongo_id IS NULL
-            """)
-            local_pending = cursor.fetchall()
+            try:
+                # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
+                logger.info("📤 جاري رفع المستخدمين المحليين إلى السحابة...")
+                cursor.execute("""
+                    SELECT * FROM users
+                    WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
+                       OR _mongo_id IS NULL
+                """)
+                local_pending = cursor.fetchall()
 
-            uploaded_count = 0
-            for row in local_pending:
-                user_data = dict(row)
-                username = user_data.get('username')
-                local_id = user_data.get('id')
+                uploaded_count = 0
+                for row in local_pending:
+                    user_data = dict(row)
+                    username = user_data.get('username')
+                    local_id = user_data.get('id')
 
-                existing_cloud = self.repo.mongo_db.users.find_one({'username': username})
+                    existing_cloud = self.repo.mongo_db.users.find_one({'username': username})
 
-                if existing_cloud:
-                    mongo_id = str(existing_cloud['_id'])
-                    update_data = {
-                        'full_name': user_data.get('full_name'),
-                        'email': user_data.get('email'),
-                        'role': user_data.get('role'),
-                        'is_active': bool(user_data.get('is_active', 1)),
-                        'last_modified': datetime.now()
-                    }
-                    if user_data.get('password_hash'):
-                        update_data['password_hash'] = user_data['password_hash']
+                    if existing_cloud:
+                        mongo_id = str(existing_cloud['_id'])
+                        update_data = {
+                            'full_name': user_data.get('full_name'),
+                            'email': user_data.get('email'),
+                            'role': user_data.get('role'),
+                            'is_active': bool(user_data.get('is_active', 1)),
+                            'last_modified': datetime.now()
+                        }
+                        if user_data.get('password_hash'):
+                            update_data['password_hash'] = user_data['password_hash']
 
-                    self.repo.mongo_db.users.update_one(
-                        {'_id': existing_cloud['_id']},
-                        {'$set': update_data}
-                    )
+                        self.repo.mongo_db.users.update_one(
+                            {'_id': existing_cloud['_id']},
+                            {'$set': update_data}
+                        )
+                        cursor.execute(
+                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            (mongo_id, local_id)
+                        )
+                        uploaded_count += 1
+                    else:
+                        new_user = {
+                            'username': username,
+                            'password_hash': user_data.get('password_hash'),
+                            'full_name': user_data.get('full_name'),
+                            'email': user_data.get('email'),
+                            'role': user_data.get('role', 'sales'),
+                            'is_active': bool(user_data.get('is_active', 1)),
+                            'created_at': datetime.now(),
+                            'last_modified': datetime.now()
+                        }
+                        result = self.repo.mongo_db.users.insert_one(new_user)
+                        mongo_id = str(result.inserted_id)
+                        cursor.execute(
+                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            (mongo_id, local_id)
+                        )
+                        uploaded_count += 1
+
+                if uploaded_count > 0:
+                    conn.commit()
+                    logger.info(f"📤 تم رفع {uploaded_count} مستخدم للسحابة")
+
+                # === 2. تنزيل المستخدمين من السحابة ===
+                logger.info("📥 جاري تنزيل المستخدمين من السحابة...")
+                cloud_users = list(self.repo.mongo_db.users.find())
+                if not cloud_users:
+                    return
+
+                downloaded_count = 0
+                for u in cloud_users:
+                    mongo_id = str(u['_id'])
+                    username = u.get('username')
+
+                    for field in ['created_at', 'last_modified', 'last_login']:
+                        if field in u and hasattr(u[field], 'isoformat'):
+                            u[field] = u[field].isoformat()
+
                     cursor.execute(
-                        "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
-                        (mongo_id, local_id)
+                        "SELECT id, sync_status FROM users WHERE _mongo_id = ? OR username = ?",
+                        (mongo_id, username)
                     )
-                    uploaded_count += 1
-                else:
-                    new_user = {
-                        'username': username,
-                        'password_hash': user_data.get('password_hash'),
-                        'full_name': user_data.get('full_name'),
-                        'email': user_data.get('email'),
-                        'role': user_data.get('role', 'sales'),
-                        'is_active': bool(user_data.get('is_active', 1)),
-                        'created_at': datetime.now(),
-                        'last_modified': datetime.now()
-                    }
-                    result = self.repo.mongo_db.users.insert_one(new_user)
-                    mongo_id = str(result.inserted_id)
-                    cursor.execute(
-                        "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
-                        (mongo_id, local_id)
-                    )
-                    uploaded_count += 1
+                    exists = cursor.fetchone()
 
-            if uploaded_count > 0:
-                conn.commit()
-                logger.info(f"📤 تم رفع {uploaded_count} مستخدم للسحابة")
-
-            # === 2. تنزيل المستخدمين من السحابة ===
-            logger.info("📥 جاري تنزيل المستخدمين من السحابة...")
-            cloud_users = list(self.repo.mongo_db.users.find())
-            if not cloud_users:
-                return
-
-            downloaded_count = 0
-            for u in cloud_users:
-                mongo_id = str(u['_id'])
-                username = u.get('username')
-
-                for field in ['created_at', 'last_modified', 'last_login']:
-                    if field in u and hasattr(u[field], 'isoformat'):
-                        u[field] = u[field].isoformat()
-
-                cursor.execute(
-                    "SELECT id, sync_status FROM users WHERE _mongo_id = ? OR username = ?",
-                    (mongo_id, username)
-                )
-                exists = cursor.fetchone()
-
-                if exists:
-                    if exists[1] not in ('modified_offline', 'new_offline'):
+                    if exists:
+                        if exists[1] not in ('modified_offline', 'new_offline'):
+                            cursor.execute("""
+                                UPDATE users SET
+                                    full_name=?, email=?, role=?, is_active=?,
+                                    password_hash=?, _mongo_id=?, sync_status='synced',
+                                    last_modified=?
+                                WHERE id=?
+                            """, (
+                                u.get('full_name'), u.get('email'), u.get('role'),
+                                u.get('is_active', 1), u.get('password_hash'),
+                                mongo_id, u.get('last_modified', datetime.now().isoformat()),
+                                exists[0]
+                            ))
+                            downloaded_count += 1
+                    else:
                         cursor.execute("""
-                            UPDATE users SET
-                                full_name=?, email=?, role=?, is_active=?,
-                                password_hash=?, _mongo_id=?, sync_status='synced',
-                                last_modified=?
-                            WHERE id=?
+                            INSERT INTO users (
+                                _mongo_id, username, full_name, email, role,
+                                password_hash, is_active, sync_status, created_at, last_modified
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?, ?)
                         """, (
-                            u.get('full_name'), u.get('email'), u.get('role'),
-                            u.get('is_active', 1), u.get('password_hash'),
-                            mongo_id, u.get('last_modified', datetime.now().isoformat()),
-                            exists[0]
+                            mongo_id, username, u.get('full_name'), u.get('email'),
+                            u.get('role'), u.get('password_hash'), u.get('is_active', 1),
+                            u.get('created_at', datetime.now().isoformat()),
+                            u.get('last_modified', datetime.now().isoformat())
                         ))
                         downloaded_count += 1
-                else:
-                    cursor.execute("""
-                        INSERT INTO users (
-                            _mongo_id, username, full_name, email, role,
-                            password_hash, is_active, sync_status, created_at, last_modified
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?, ?)
-                    """, (
-                        mongo_id, username, u.get('full_name'), u.get('email'),
-                        u.get('role'), u.get('password_hash'), u.get('is_active', 1),
-                        u.get('created_at', datetime.now().isoformat()),
-                        u.get('last_modified', datetime.now().isoformat())
-                    ))
-                    downloaded_count += 1
 
-            conn.commit()
-            logger.info(f"✅ تم مزامنة المستخدمين (رفع: {uploaded_count}, تنزيل: {downloaded_count})")
+                conn.commit()
+                logger.info(f"✅ تم مزامنة المستخدمين (رفع: {uploaded_count}, تنزيل: {downloaded_count})")
+
+            finally:
+                cursor.close()
 
         except Exception as e:
             logger.error(f"❌ خطأ في مزامنة المستخدمين: {e}")
@@ -1110,44 +1168,48 @@ class UnifiedSyncManagerV3(QObject):
         tables = [table_name] if table_name else self.TABLES
         results = {}
 
-        cursor = self.repo.sqlite_cursor
+        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+        cursor = self.repo.get_cursor()
         conn = self.repo.sqlite_conn
 
-        for table in tables:
-            try:
-                unique_field = self.UNIQUE_FIELDS.get(table, 'name')
+        try:
+            for table in tables:
+                try:
+                    unique_field = self.UNIQUE_FIELDS.get(table, 'name')
 
-                # البحث عن التكرارات
-                cursor.execute(f"""
-                    SELECT {unique_field}, COUNT(*) as cnt, MIN(id) as keep_id
-                    FROM {table}
-                    WHERE {unique_field} IS NOT NULL
-                    GROUP BY {unique_field}
-                    HAVING cnt > 1
-                """)
-                duplicates = cursor.fetchall()
-
-                deleted = 0
-                for dup in duplicates:
-                    unique_value = dup[0]
-                    keep_id = dup[2]
-
-                    # حذف التكرارات (الاحتفاظ بالأقدم)
+                    # البحث عن التكرارات
                     cursor.execute(f"""
-                        DELETE FROM {table}
-                        WHERE {unique_field} = ? AND id != ?
-                    """, (unique_value, keep_id))
-                    deleted += cursor.rowcount
+                        SELECT {unique_field}, COUNT(*) as cnt, MIN(id) as keep_id
+                        FROM {table}
+                        WHERE {unique_field} IS NOT NULL
+                        GROUP BY {unique_field}
+                        HAVING cnt > 1
+                    """)
+                    duplicates = cursor.fetchall()
 
-                conn.commit()
-                results[table] = deleted
+                    deleted = 0
+                    for dup in duplicates:
+                        unique_value = dup[0]
+                        keep_id = dup[2]
 
-                if deleted > 0:
-                    logger.info(f"🗑️ {table}: حذف {deleted} سجل مكرر")
+                        # حذف التكرارات (الاحتفاظ بالأقدم)
+                        cursor.execute(f"""
+                            DELETE FROM {table}
+                            WHERE {unique_field} = ? AND id != ?
+                        """, (unique_value, keep_id))
+                        deleted += cursor.rowcount
 
-            except Exception as e:
-                logger.error(f"❌ خطأ في إزالة تكرارات {table}: {e}")
-                results[table] = 0
+                    conn.commit()
+                    results[table] = deleted
+
+                    if deleted > 0:
+                        logger.info(f"🗑️ {table}: حذف {deleted} سجل مكرر")
+
+                except Exception as e:
+                    logger.error(f"❌ خطأ في إزالة تكرارات {table}: {e}")
+                    results[table] = 0
+        finally:
+            cursor.close()
 
         return results
 
@@ -1162,49 +1224,57 @@ class UnifiedSyncManagerV3(QObject):
 
         logger.warning("⚠️ بدء إعادة المزامنة الكاملة القسرية...")
 
-        cursor = self.repo.sqlite_cursor
+        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+        cursor = self.repo.get_cursor()
         conn = self.repo.sqlite_conn
 
-        # حذف البيانات المحلية (ما عدا المستخدمين)
-        for table in self.TABLES:
-            try:
-                cursor.execute(f"DELETE FROM {table}")
-                logger.info(f"🗑️ تم مسح {table}")
-            except Exception as e:
-                logger.error(f"❌ خطأ في مسح {table}: {e}")
+        try:
+            # حذف البيانات المحلية (ما عدا المستخدمين)
+            for table in self.TABLES:
+                try:
+                    cursor.execute(f"DELETE FROM {table}")
+                    logger.info(f"🗑️ تم مسح {table}")
+                except Exception as e:
+                    logger.error(f"❌ خطأ في مسح {table}: {e}")
 
-        conn.commit()
+            conn.commit()
+        finally:
+            cursor.close()
 
         # إعادة التحميل من السحابة
         return self.full_sync_from_cloud()
 
     def get_sync_status(self) -> dict[str, Any]:
         """الحصول على حالة المزامنة"""
-        cursor = self.repo.sqlite_cursor
+        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
+        cursor = self.repo.get_cursor()
         status = {
             'is_online': self.is_online,
             'is_syncing': self._is_syncing,
             'tables': {}
         }
 
-        for table in self.TABLES:
-            try:
-                cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                total = cursor.fetchone()[0]
+        try:
+            for table in self.TABLES:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    total = cursor.fetchone()[0]
 
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM {table}
-                    WHERE sync_status != 'synced' OR sync_status IS NULL
-                """)
-                pending = cursor.fetchone()[0]
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM {table}
+                        WHERE sync_status != 'synced' OR sync_status IS NULL
+                    """)
+                    pending = cursor.fetchone()[0]
 
-                status['tables'][table] = {
-                    'total': total,
-                    'pending': pending,
-                    'synced': total - pending
-                }
-            except Exception:
-                status['tables'][table] = {'total': 0, 'pending': 0, 'synced': 0}
+                    status['tables'][table] = {
+                        'total': total,
+                        'pending': pending,
+                        'synced': total - pending
+                    }
+                except Exception:
+                    status['tables'][table] = {'total': 0, 'pending': 0, 'synced': 0}
+        finally:
+            cursor.close()
 
         return status
 
@@ -1302,7 +1372,7 @@ def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:
             if not self.is_online:
                 return False
             
-            if self.repo.mongo_db is None or self.repo is not None is not None is not None.mongo_client is None:
+            if self.repo.mongo_db is None or self.repo.mongo_client is None:
                 logger.warning("MongoDB client أو database غير متوفر")
                 return False
             

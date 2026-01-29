@@ -8,15 +8,21 @@
 import os
 import sys
 
+# ==================== ثوابت التوقيت (بالمللي ثانية) ====================
+MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000     # 10 دقائق - صيانة دورية (زيادة للأداء)
+SETTINGS_SYNC_INTERVAL_MS = 5 * 60 * 1000    # 5 دقائق - مزامنة الإعدادات (زيادة للأداء)
+UPDATE_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000  # ساعتين - فحص التحديثات (زيادة للأداء)
+PROJECT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000  # 24 ساعة - فحص المشاريع
+
 # ⚡ تحسين الأداء على Windows
-if os.name == 'nt':
-    os.environ['QT_QPA_PLATFORM'] = 'windows:darkmode=2'
+if os.name == "nt":
+    os.environ["QT_QPA_PLATFORM"] = "windows:darkmode=2"
     # 🔧 إصلاح مشكلة دقة الشاشة (High DPI Scaling) - الحل الأول
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     os.environ["QT_SCALE_FACTOR"] = "1"
     os.environ["QT_SCREEN_SCALE_FACTORS"] = "1"
-    os.environ['QT_ENABLE_HIGHDPI_SCALING'] = '0'  # تعطيل التكبير التلقائي
-    os.environ['PYTHONDONTWRITEBYTECODE'] = '1'  # تجنب إنشاء ملفات .pyc
+    os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"  # تعطيل التكبير التلقائي
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # تجنب إنشاء ملفات .pyc
 
 # ⚡ تفعيل WebEngine قبل إنشاء QApplication
 from PyQt6.QtCore import Qt
@@ -75,10 +81,11 @@ class SkyWaveERPApp:
     """
     ⚡ الكلاس الرئيسي - محسّن للسرعة
     """
+
     def __init__(self):
-        logger.info("="*80)
+        logger.info("=" * 80)
         logger.info("بدء تشغيل تطبيق Sky Wave ERP")
-        logger.info("="*80)
+        logger.info("=" * 80)
         logger.info("[MainApp] بدء تشغيل تطبيق Sky Wave ERP...")
 
         # --- 1. تجهيز "القلب" ---
@@ -87,93 +94,78 @@ class SkyWaveERPApp:
         # ⚡ الصيانة الشهرية التلقائية (تشغيل مرة واحدة عند البدء)
         try:
             from core.db_maintenance import run_monthly_maintenance_if_needed
+
             run_monthly_maintenance_if_needed()
         except Exception as e:
             logger.warning(f"[MainApp] تحذير: فشلت الصيانة الشهرية: {e}")
 
         # ✅ صيانة قاعدة البيانات التلقائية (في الخلفية لتسريع البدء)
-        def run_maintenance_background():
-            try:
-                from core.db_maintenance import run_maintenance
-                run_maintenance()
-            except Exception as e:
-                logger.warning(f"[MainApp] تحذير: فشلت الصيانة التلقائية: {e}")
-
-        # استخدام QTimer بدلاً من daemon thread للصيانة
+        # سيتم إنشاء الـ timers لاحقاً بعد بدء event loop
         from PyQt6.QtCore import QTimer
-        self.maintenance_timer = QTimer()
-        self.maintenance_timer.timeout.connect(self._run_maintenance_safe)
-        self.maintenance_timer.start(300000)  # كل 5 دقائق
+
+        self.maintenance_timer = None
+        self.settings_timer = None
+        self.update_timer = None
+
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
 
         # 🔄 نظام المزامنة الموحد - MongoDB First (النظام الرئيسي الوحيد)
         self.unified_sync = UnifiedSyncManagerV3(self.repository)
+        # ⚡ ربط مدير المزامنة بالـ repository لتتمكن واجهة الإعدادات من الوصول إليه
+        self.repository.unified_sync = self.unified_sync
+
+        # ⚡ ربط إشارة تغيير البيانات بنظام الإشارات المركزي (للمزامنة الفورية)
+        from core.signals import app_signals
+
+        # ملاحظة: الـ services تستخدم app_signals مباشرة، لا حاجة لربط Repository signal
 
         # 🔥 نظام المزامنة V3 - للتوافق مع الواجهة
         self.sync_manager = SyncManagerV3(self.repository)
 
         # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
         from core.signals import app_signals
+
         app_signals.set_sync_manager(self.unified_sync)
-
-        # ⚡ مزامنة إعدادات الشركة من السحابة (في الخلفية)
-        def sync_settings_background():
-            try:
-                import time
-                time.sleep(3)  # انتظار اتصال MongoDB
-                if self.repository.online is not None and self.repository.online:
-                    self.settings_service.sync_settings_from_cloud(self.repository)
-            except Exception as e:
-                logger.debug(f"[MainApp] فشل مزامنة الإعدادات: {e}")
-
-        # استخدام QTimer بدلاً من daemon thread للإعدادات
-        self.settings_timer = QTimer()
-        self.settings_timer.timeout.connect(self._sync_settings_safe)
-        self.settings_timer.start(60000)  # كل دقيقة
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
 
         # تعيين Repository لـ TaskService
         from ui.todo_manager import TaskService
+
         TaskService.set_repository(self.repository)
 
         # تعيين Repository لنظام الإشعارات
         from ui.notification_system import NotificationManager
+
         NotificationManager.set_repository(self.repository)
 
         # إعداد جسر الإشعارات (يربط الإشارات بالإشعارات)
         from core.notification_bridge import setup_notification_bridge
+
         setup_notification_bridge()
 
         # --- 2. تجهيز "الأقسام" (حقن الاعتمادية) ---
         self.accounting_service = AccountingService(
-            repository=self.repository,
-            event_bus=self.event_bus
+            repository=self.repository, event_bus=self.event_bus
         )
 
         self.client_service = ClientService(repository=self.repository)
         self.service_service = ServiceService(
             repository=self.repository,
             event_bus=self.event_bus,
-            settings_service=self.settings_service
+            settings_service=self.settings_service,
         )
-        self.expense_service = ExpenseService(
-            repository=self.repository,
-            event_bus=self.event_bus
-        )
+        self.expense_service = ExpenseService(repository=self.repository, event_bus=self.event_bus)
 
-        self.invoice_service = InvoiceService(
-            repository=self.repository,
-            event_bus=self.event_bus
-        )
+        self.invoice_service = InvoiceService(repository=self.repository, event_bus=self.event_bus)
 
         self.project_service = ProjectService(
             repository=self.repository,
             event_bus=self.event_bus,
             accounting_service=self.accounting_service,
-            settings_service=self.settings_service
+            settings_service=self.settings_service,
         )
 
         self.notification_service = NotificationService(
@@ -182,14 +174,14 @@ class SkyWaveERPApp:
 
         # Template Service (for invoice templates)
         from services.template_service import TemplateService
+
         self.template_service = TemplateService(
-            repository=self.repository,
-            settings_service=self.settings_service
+            repository=self.repository, settings_service=self.settings_service
         )
 
         self.printing_service = PrintingService(
             settings_service=self.settings_service,
-            template_service=self.template_service  # ✅ تمرير template_service
+            template_service=self.template_service,  # ✅ تمرير template_service
         )
 
         self.export_service = ExportService()
@@ -197,26 +189,49 @@ class SkyWaveERPApp:
         # Authentication Service
         self.auth_service = AuthService(repository=self.repository)
 
+        # ✅ HR Service - REMOVED (causing issues)
+        # HR functionality temporarily disabled
+        self.hr_service = None
+
         # Advanced Sync Manager
         self.advanced_sync_manager = AdvancedSyncManagerV3(repository=self.repository)
 
-        # ⚡ التحقق من التحديثات في Background (لا يعطل البرنامج)
-        def check_updates_background():
-            try:
-                from auto_updater import check_for_updates
-                has_update, latest_version, download_url, changelog = check_for_updates()
-                if has_update:
-                    logger.info(f"🆕 تحديث جديد متوفر: v{latest_version}")
-            except Exception as e:
-                logger.warning(f"فشل التحقق من التحديثات: {e}")
+        # ⚡ Live Data Watcher - Real-Time Updates System
+        from core.live_watcher import LiveDataWatcher
 
-        # استخدام QTimer بدلاً من daemon thread للتحديثات
-        self.update_timer = QTimer()
-        self.update_timer.timeout.connect(self._check_updates_safe)
-        self.update_timer.start(3600000)  # كل ساعة
+        self.live_watcher = LiveDataWatcher(repository=self.repository, check_interval=15)  # ⚡ 15 ثانية
+        self.live_router = None  # سيتم تهيئته بعد إنشاء النافذة الرئيسية
+        logger.info("🔴 تم تهيئة نظام التحديثات الحية (محسّن)")
+
+        # ⚡ الـ timers سيتم إنشاؤها لاحقاً بعد بدء event loop (في _init_background_timers)
 
         logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
         logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
+    
+    def _init_background_timers(self):
+        """تهيئة الـ timers في الخلفية - يجب استدعاؤها بعد بدء event loop"""
+        from PyQt6.QtCore import QTimer
+        
+        # مؤقت الصيانة
+        if self.maintenance_timer is None:
+            self.maintenance_timer = QTimer()
+            self.maintenance_timer.setSingleShot(False)
+            self.maintenance_timer.timeout.connect(self._run_maintenance_safe)
+            self.maintenance_timer.start(MAINTENANCE_INTERVAL_MS)
+        
+        # مؤقت مزامنة الإعدادات
+        if self.settings_timer is None:
+            self.settings_timer = QTimer()
+            self.settings_timer.setSingleShot(False)
+            self.settings_timer.timeout.connect(self._sync_settings_safe)
+            self.settings_timer.start(SETTINGS_SYNC_INTERVAL_MS)
+        
+        # مؤقت التحقق من التحديثات
+        if self.update_timer is None:
+            self.update_timer = QTimer()
+            self.update_timer.setSingleShot(False)
+            self.update_timer.timeout.connect(self._check_updates_safe)
+            self.update_timer.start(UPDATE_CHECK_INTERVAL_MS)
 
     def run(self):
         """
@@ -224,8 +239,9 @@ class SkyWaveERPApp:
         """
         # === منع الشاشة البيضاء على Windows ===
         import os
-        if os.name == 'nt':  # Windows
-            os.environ['QT_QPA_PLATFORM'] = 'windows:darkmode=2'
+
+        if os.name == "nt":  # Windows
+            os.environ["QT_QPA_PLATFORM"] = "windows:darkmode=2"
 
         app = QApplication(sys.argv)
 
@@ -244,10 +260,12 @@ class SkyWaveERPApp:
                 logger.warning(f"Qt Warning: {message}")
 
         from PyQt6.QtCore import qInstallMessageHandler
+
         qInstallMessageHandler(qt_message_handler)
 
         # === تعيين أيقونة التطبيق ===
         from PyQt6.QtGui import QIcon
+
         icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             app.setWindowIcon(QIcon(icon_path))
@@ -262,35 +280,35 @@ class SkyWaveERPApp:
 
         # تطبيق palette داكن على التطبيق كله
         dark_palette = QPalette()
-        dark_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS['bg_dark']))
-        dark_palette.setColor(QPalette.ColorRole.WindowText, QColor(COLORS['text_primary']))
-        dark_palette.setColor(QPalette.ColorRole.Base, QColor(COLORS['bg_medium']))
-        dark_palette.setColor(QPalette.ColorRole.AlternateBase, QColor(COLORS['bg_dark']))
-        dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLORS['bg_dark']))
-        dark_palette.setColor(QPalette.ColorRole.ToolTipText, QColor(COLORS['text_primary']))
-        dark_palette.setColor(QPalette.ColorRole.Text, QColor(COLORS['text_primary']))
-        dark_palette.setColor(QPalette.ColorRole.Button, QColor(COLORS['bg_medium']))
-        dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor(COLORS['text_primary']))
-        dark_palette.setColor(QPalette.ColorRole.Link, QColor(COLORS['primary']))
-        dark_palette.setColor(QPalette.ColorRole.Highlight, QColor(COLORS['primary']))
-        dark_palette.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
+        dark_palette.setColor(QPalette.ColorRole.Window, QColor(COLORS["bg_dark"]))
+        dark_palette.setColor(QPalette.ColorRole.WindowText, QColor(COLORS["text_primary"]))
+        dark_palette.setColor(QPalette.ColorRole.Base, QColor(COLORS["bg_medium"]))
+        dark_palette.setColor(QPalette.ColorRole.AlternateBase, QColor(COLORS["bg_dark"]))
+        dark_palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(COLORS["bg_dark"]))
+        dark_palette.setColor(QPalette.ColorRole.ToolTipText, QColor(COLORS["text_primary"]))
+        dark_palette.setColor(QPalette.ColorRole.Text, QColor(COLORS["text_primary"]))
+        dark_palette.setColor(QPalette.ColorRole.Button, QColor(COLORS["bg_medium"]))
+        dark_palette.setColor(QPalette.ColorRole.ButtonText, QColor(COLORS["text_primary"]))
+        dark_palette.setColor(QPalette.ColorRole.Link, QColor(COLORS["primary"]))
+        dark_palette.setColor(QPalette.ColorRole.Highlight, QColor(COLORS["primary"]))
+        dark_palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
         app.setPalette(dark_palette)
 
         # تطبيق stylesheet إضافي
         app.setStyleSheet(f"""
             * {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_primary']};
+                background-color: {COLORS["bg_dark"]};
+                color: {COLORS["text_primary"]};
             }}
             QWidget {{
-                background-color: {COLORS['bg_dark']};
-                color: {COLORS['text_primary']};
+                background-color: {COLORS["bg_dark"]};
+                color: {COLORS["text_primary"]};
             }}
             QDialog {{
-                background-color: {COLORS['bg_dark']};
+                background-color: {COLORS["bg_dark"]};
             }}
             QMainWindow {{
-                background-color: {COLORS['bg_dark']};
+                background-color: {COLORS["bg_dark"]};
             }}
         """)
 
@@ -299,6 +317,7 @@ class SkyWaveERPApp:
 
         # === عرض شاشة البداية العصرية فوراً (قبل أي حاجة تانية) ===
         from ui.modern_splash import ModernSplash
+
         splash = ModernSplash()
 
         # جعل الـ splash يملأ الشاشة كلها عشان يخفي أي شاشة بيضاء
@@ -306,11 +325,12 @@ class SkyWaveERPApp:
 
         # إنشاء widget أسود يغطي الشاشة كلها
         from PyQt6.QtWidgets import QWidget
+
         black_screen = QWidget()
         black_screen.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
         )
         black_screen.setStyleSheet("background-color: #0a1929;")
         black_screen.setGeometry(screen)
@@ -319,9 +339,9 @@ class SkyWaveERPApp:
 
         # عرض الـ splash فوق الشاشة السوداء
         splash.setWindowFlags(
-            Qt.WindowType.SplashScreen |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.SplashScreen
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint
         )
         splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         splash.show()
@@ -334,6 +354,7 @@ class SkyWaveERPApp:
 
         # === تحميل الخط العربي Cairo ===
         from PyQt6.QtGui import QFontDatabase
+
         splash.show_message("📝 جاري تحميل الخطوط...")
         app.processEvents()
 
@@ -353,6 +374,7 @@ class SkyWaveERPApp:
         app.processEvents()
 
         from ui.styles import apply_styles
+
         apply_styles(app)
 
         # === عرض نافذة تسجيل الدخول ===
@@ -379,7 +401,11 @@ class SkyWaveERPApp:
             logger.error("[MainApp] فشل في الحصول على بيانات المستخدم.")
             sys.exit(1)
 
-        role_display = current_user.role.value if hasattr(current_user.role, 'value') else str(current_user.role)
+        role_display = (
+            current_user.role.value
+            if hasattr(current_user.role, "value")
+            else str(current_user.role)
+        )
         logger.info(f"[MainApp] تم تسجيل دخول المستخدم: {current_user.username} ({role_display})")
 
         # === عرض splash screen مرة أخرى أثناء تحميل النافذة الرئيسية ===
@@ -392,7 +418,10 @@ class SkyWaveERPApp:
         app.processEvents()
 
         from ui.styles import COMPLETE_STYLESHEET
-        app.setStyleSheet(COMPLETE_STYLESHEET + """
+
+        app.setStyleSheet(
+            COMPLETE_STYLESHEET
+            + """
             * {
                 outline: none !important;
             }
@@ -405,7 +434,8 @@ class SkyWaveERPApp:
             QComboBox QAbstractItemView {
                 outline: none !important;
             }
-        """)
+        """
+        )
 
         # === إنشاء النافذة الرئيسية ===
         splash.show_message("🏗️ جاري بناء الواجهة الرئيسية...")
@@ -424,7 +454,7 @@ class SkyWaveERPApp:
             printing_service=self.printing_service,
             export_service=self.export_service,
             advanced_sync_manager=self.advanced_sync_manager,
-            sync_manager=self.sync_manager  # 🔥 نظام المزامنة الجديد
+            sync_manager=self.sync_manager,  # 🔥 نظام المزامنة الجديد
         )
 
         # === عرض النافذة الرئيسية ===
@@ -451,12 +481,14 @@ class SkyWaveERPApp:
         def apply_styles_later():
             try:
                 from ui.styles import apply_center_alignment_to_all_tables
+
                 apply_center_alignment_to_all_tables(main_window)
             except Exception as e:
                 logger.warning(f"فشل تطبيق التوسيط: {e}")
+
         QTimer.singleShot(2000, apply_styles_later)
 
-        # 🚀 تفعيل المزامنة عند بدء التشغيل (بعد 2 ثانية)
+        # 🚀 تفعيل المزامنة عند بدء التشغيل (بعد 15 ثانية)
         def start_auto_sync_system():
             """بدء نظام المزامنة التلقائية الاحترافي"""
             try:
@@ -469,9 +501,8 @@ class SkyWaveERPApp:
                 self.unified_sync.sync_completed.connect(
                     lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
                 )
-
             except Exception as e:
-                logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة التلقائية: {e}")
+                logger.error(f"[MainApp] فشل بدء المزامنة: {e}")
 
         # 🔄 تفعيل نظام المزامنة الفورية (Real-time Sync)
         def start_realtime_sync():
@@ -481,21 +512,66 @@ class SkyWaveERPApp:
 
                 # إعداد نظام المزامنة الفورية
                 from core.realtime_sync import setup_realtime_sync
+
                 realtime_manager = setup_realtime_sync(self.repository)
 
                 if realtime_manager:
                     logger.info("[MainApp] ✅ تم تفعيل نظام المزامنة الفورية بنجاح")
                     # حفظ المرجع لإغلاقه لاحقاً
                     self.realtime_manager = realtime_manager
+                    
+                    # ربط إشارات المزامنة الفورية بتحديث الواجهة
+                    realtime_manager.data_updated.connect(
+                        lambda table, data: main_window.refresh_table(table) if hasattr(main_window, 'refresh_table') else None
+                    )
+                    realtime_manager.sync_completed.connect(
+                        lambda table: logger.info(f"[RealtimeSync] ✅ تم مزامنة {table}")
+                    )
+                    
+                    logger.info("[MainApp] 🔗 تم ربط إشارات المزامنة الفورية بالواجهة")
 
             except Exception as e:
                 logger.warning(f"[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: {e}")
 
+        # ⚡ تهيئة الـ timers بعد بدء event loop
+        QTimer.singleShot(100, self._init_background_timers)
+        
         # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
-        QTimer.singleShot(15000, start_auto_sync_system)  # ⚡ 15 ثانية بدلاً من 10
-        # ⚡ المزامنة الفورية معطّلة للاستقرار
-        # QTimer.singleShot(8000, start_realtime_sync)
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 15 ثانية")
+        QTimer.singleShot(10000, start_auto_sync_system)  # ⚡ 10 ثواني للمزامنة التلقائية
+        # ⚡ تفعيل المزامنة الفورية بعد 15 ثانية
+        QTimer.singleShot(15000, start_realtime_sync)
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 10 ثواني")
+        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد 15 ثواني")
+
+        # 🔴 تفعيل نظام التحديثات الحية (Live Updates)
+        def start_live_updates():
+            """بدء نظام التحديثات الحية"""
+            try:
+                logger.info("[MainApp] 🔴 بدء نظام التحديثات الحية...")
+
+                # تهيئة الموجّه
+                from core.live_watcher import LiveUpdateRouter
+
+                self.live_router = LiveUpdateRouter(main_window)
+
+                # ربط الإشارات
+                self.live_watcher.data_changed.connect(self.live_router.handle_data_change)
+                self.live_watcher.refresh_all.connect(self.live_router.refresh_all)
+                
+                # ربط إشارة sync_needed إذا كانت موجودة
+                if hasattr(self.live_watcher, 'sync_needed'):
+                    self.live_watcher.sync_needed.connect(self.live_router.handle_sync_needed)
+
+                # بدء المراقبة
+                self.live_watcher.start()
+
+                logger.info("[MainApp] ✅ نظام التحديثات الحية يعمل الآن")
+            except Exception as e:
+                logger.warning(f"[MainApp] ⚠️ خطأ في بدء التحديثات الحية: {e}")
+
+        # بدء التحديثات الحية بعد 10 ثوانٍ
+        QTimer.singleShot(10000, start_live_updates)
+        logger.info("[MainApp] 🔴 نظام التحديثات الحية سيبدأ بعد 10 ثوانٍ")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -518,7 +594,6 @@ class SkyWaveERPApp:
         self._cleanup_on_exit()
 
         sys.exit(exit_code)
-
 
     def _setup_auto_update(self, main_window):
         """تفعيل نظام التحديث التلقائي"""
@@ -548,23 +623,55 @@ class SkyWaveERPApp:
     def _cleanup_on_exit(self):
         """✅ تنظيف جميع الموارد عند إغلاق البرنامج"""
         # منع الاستدعاء المتكرر
-        if hasattr(self, '_cleanup_done') and self._cleanup_done:
+        if not hasattr(self, "_cleanup_done"):
+            self._cleanup_done = False
+        if self._cleanup_done:
             return
         self._cleanup_done = True
 
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
+        # إيقاف جميع المؤقتات
+        try:
+            if hasattr(self, "maintenance_timer") and self.maintenance_timer:
+                self.maintenance_timer.stop()
+                logger.info("[MainApp] تم إيقاف مؤقت الصيانة")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مؤقت الصيانة: {e}")
+
+        try:
+            if hasattr(self, "settings_timer") and self.settings_timer:
+                self.settings_timer.stop()
+                logger.info("[MainApp] تم إيقاف مؤقت الإعدادات")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مؤقت الإعدادات: {e}")
+
+        try:
+            if hasattr(self, "update_timer") and self.update_timer:
+                self.update_timer.stop()
+                logger.info("[MainApp] تم إيقاف مؤقت التحديثات")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف مؤقت التحديثات: {e}")
+
         # إيقاف نظام المزامنة الفورية
         try:
-            if hasattr(self, 'realtime_manager') and self.realtime_manager:
+            if hasattr(self, "realtime_manager") and self.realtime_manager:
                 self.realtime_manager.stop()
                 logger.info("[MainApp] تم إيقاف نظام المزامنة الفورية")
         except Exception as e:
             logger.debug(f"[MainApp] تحذير عند إيقاف المزامنة الفورية: {e}")
 
+        # إيقاف نظام التحديثات الحية
+        try:
+            if hasattr(self, "live_watcher") and self.live_watcher:
+                self.live_watcher.stop()
+                logger.info("[MainApp] تم إيقاف نظام التحديثات الحية")
+        except Exception as e:
+            logger.debug(f"[MainApp] تحذير عند إيقاف التحديثات الحية: {e}")
+
         # إيقاف نظام المزامنة الموحد
         try:
-            if hasattr(self, 'unified_sync') and self.unified_sync:
+            if hasattr(self, "unified_sync") and self.unified_sync:
                 self.unified_sync.stop_auto_sync()
                 logger.info("[MainApp] تم إيقاف نظام المزامنة التلقائية")
         except Exception as e:
@@ -572,8 +679,8 @@ class SkyWaveERPApp:
 
         # إيقاف مدير المزامنة V3
         try:
-            if hasattr(self, 'sync_manager') and self.sync_manager:
-                if hasattr(self.sync_manager, 'stop'):
+            if hasattr(self, "sync_manager") and self.sync_manager:
+                if hasattr(self.sync_manager, "stop"):
                     self.sync_manager.stop()
                 logger.info("[MainApp] تم إيقاف مدير المزامنة V3")
         except Exception as e:
@@ -581,7 +688,7 @@ class SkyWaveERPApp:
 
         # إيقاف خدمة التحديث التلقائي
         try:
-            if hasattr(self, 'auto_update_service') and self.auto_update_service:
+            if hasattr(self, "auto_update_service") and self.auto_update_service:
                 self.auto_update_service.stop()
                 logger.info("[MainApp] تم إيقاف خدمة التحديث التلقائي")
         except Exception as e:
@@ -589,10 +696,10 @@ class SkyWaveERPApp:
 
         # إغلاق اتصال قاعدة البيانات
         try:
-            if hasattr(self, 'repository') and self.repository:
-                if hasattr(self.repository, 'close'):
+            if hasattr(self, "repository") and self.repository:
+                if hasattr(self.repository, "close"):
                     self.repository.close()
-                elif hasattr(self.repository, 'sqlite_conn'):
+                elif hasattr(self.repository, "sqlite_conn"):
                     self.repository.sqlite_conn.close()
                 logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
         except Exception as e:
@@ -600,8 +707,8 @@ class SkyWaveERPApp:
 
         # إيقاف مدير المزامنة المتقدم
         try:
-            if hasattr(self, 'advanced_sync_manager') and self.advanced_sync_manager:
-                if hasattr(self.advanced_sync_manager, 'shutdown'):
+            if hasattr(self, "advanced_sync_manager") and self.advanced_sync_manager:
+                if hasattr(self.advanced_sync_manager, "shutdown"):
                     self.advanced_sync_manager.shutdown()
                 logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
         except Exception as e:
@@ -613,7 +720,11 @@ class SkyWaveERPApp:
         """عند توفر تحديث جديد"""
         from PyQt6.QtWidgets import QMessageBox
 
-        changelog_text = "\n".join(f"• {item}" for item in changelog) if isinstance(changelog, list) else changelog
+        changelog_text = (
+            "\n".join(f"• {item}" for item in changelog)
+            if isinstance(changelog, list)
+            else changelog
+        )
 
         msg = QMessageBox(main_window)
         msg.setWindowTitle("🎉 تحديث جديد متاح!")
@@ -625,34 +736,45 @@ class SkyWaveERPApp:
 
         if msg.exec() == QMessageBox.StandardButton.Yes:
             import webbrowser
+
             webbrowser.open(url)
             logger.info(f"[MainApp] المستخدم وافق على التحديث للإصدار {version}")
         else:
             logger.info(f"[MainApp] المستخدم رفض التحديث للإصدار {version}")
 
-
-# --- Global Exception Hook ---
+    # --- Global Exception Hook ---
 
     def _run_maintenance_safe(self):
         """تشغيل الصيانة بشكل آمن"""
         try:
-            run_maintenance_background()
+            from core.db_maintenance import run_maintenance
+
+            run_maintenance()
         except Exception as e:
             logger.error(f"خطأ في الصيانة: {e}")
-    
+
     def _sync_settings_safe(self):
         """مزامنة الإعدادات بشكل آمن"""
         try:
-            sync_settings_background()
+            import time
+
+            time.sleep(3)  # انتظار اتصال MongoDB
+            if self.repository.online is not None and self.repository.online:
+                self.settings_service.sync_settings_from_cloud(self.repository)
         except Exception as e:
             logger.error(f"خطأ في مزامنة الإعدادات: {e}")
-    
+
     def _check_updates_safe(self):
         """فحص التحديثات بشكل آمن"""
         try:
-            check_updates_background()
+            from auto_updater import check_for_updates
+
+            has_update, latest_version, download_url, changelog = check_for_updates()
+            if has_update:
+                logger.info(f"🆕 تحديث جديد متوفر: v{latest_version}")
         except Exception as e:
             logger.error(f"خطأ في فحص التحديثات: {e}")
+
 
 def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
     """معالج الأخطاء غير المتوقعة - محسّن وآمن"""
@@ -661,33 +783,41 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         return
 
     # تسجيل الخطأ بشكل صحيح
-    logger.error(f"خطأ غير متوقع: {exc_type.__name__}: {exc_value}", 
-                 exc_info=(exc_type, exc_value, exc_traceback))
-    
+    logger.error(
+        f"خطأ غير متوقع: {exc_type.__name__}: {exc_value}",
+        exc_info=(exc_type, exc_value, exc_traceback),
+    )
+
     # أخطاء Qt التي يمكن تجاهلها بأمان
     error_msg = str(exc_value).lower() if exc_value else ""
     safe_to_ignore = [
-        "wrapped c/c++ object", "deleted", "destroyed", 
-        "qobject", "runtime error", "c/c++ object"
+        "wrapped c/c++ object",
+        "deleted",
+        "destroyed",
+        "qobject",
+        "runtime error",
+        "c/c++ object",
     ]
-    
+
     # تجاهل أخطاء Qt فقط
     if any(pattern in error_msg for pattern in safe_to_ignore):
         logger.debug(f"تجاهل خطأ Qt: {exc_value}")
         return
-    
+
     # للأخطاء الأخرى، نسجلها ونعرضها للمستخدم
     try:
         from core.error_handler import ErrorHandler
+
         ErrorHandler.handle_exception(
             exception=exc_value,
             context="uncaught_exception",
             user_message=f"حدث خطأ غير متوقع: {exc_value}",
-            show_dialog=False  # لا نعرض dialog لتجنب التعطل
+            show_dialog=False,  # لا نعرض dialog لتجنب التعطل
         )
     except Exception:
         # إذا فشل ErrorHandler، نطبع الخطأ على الأقل
         print(f"خطأ حرج: {exc_value}")
+
 
 # ⚡ معالج أخطاء الـ Threads
 def handle_thread_exception(args):
@@ -697,25 +827,29 @@ def handle_thread_exception(args):
         exc_value = args.exc_value
         exc_traceback = args.exc_traceback
         thread = args.thread
-        
+
         # تسجيل خطأ الـ thread
-        logger.error(f"خطأ في Thread '{thread.name}': {exc_type.__name__}: {exc_value}",
-                     exc_info=(exc_type, exc_value, exc_traceback))
-        
+        logger.error(
+            f"خطأ في Thread '{thread.name}': {exc_type.__name__}: {exc_value}",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
+
         # محاولة معالجة الخطأ
         try:
             from core.error_handler import ErrorHandler
+
             ErrorHandler.handle_exception(
                 exception=exc_value,
                 context=f"thread_{thread.name}",
                 user_message=f"حدث خطأ في العملية الخلفية: {exc_value}",
-                show_dialog=False
+                show_dialog=False,
             )
         except Exception:
             print(f"خطأ في Thread {thread.name}: {exc_value}")
-            
+
     except Exception as e:
         logger.error(f"فشل معالجة خطأ Thread: {e}")
+
 
 # تفعيل معالج الأخطاء العام
 sys.excepthook = handle_uncaught_exception
@@ -743,13 +877,14 @@ if __name__ == "__main__":
             exception=e,
             context="main_startup",
             user_message="فشل تشغيل البرنامج. يرجى التحقق من ملف الـ log للمزيد من التفاصيل.",
-            show_dialog=True
+            show_dialog=True,
         )
         sys.exit(1)
     finally:
         # إغلاق نظام الإشعارات
         try:
             from ui.notification_system import NotificationManager
+
             NotificationManager.shutdown()
         except Exception:
             pass
@@ -757,13 +892,11 @@ if __name__ == "__main__":
         # إغلاق نظام المزامنة الفورية
         try:
             from core.realtime_sync import shutdown_realtime_sync
+
             shutdown_realtime_sync()
         except Exception:
             pass
 
-        logger.info("="*80)
+        logger.info("=" * 80)
         logger.info("إغلاق التطبيق")
-        logger.info("="*80)
-
-if __name__ == '__main__':
-    main()
+        logger.info("=" * 80)

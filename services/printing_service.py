@@ -15,12 +15,14 @@ from typing import Any
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             # فشل الطباعة بسبب الترميز
             pass
+
 
 try:
     # Arabic text support
@@ -55,10 +57,8 @@ except ImportError as e:
 
 # Template support
 try:
-    from jinja2 import Environment, FileSystemLoader, Template  # noqa: F401
-    from PyQt6.QtCore import QUrl  # noqa: F401
-    from PyQt6.QtGui import QTextDocument  # noqa: F401
-    from PyQt6.QtPrintSupport import QPrinter  # noqa: F401
+    from jinja2 import Template  # noqa: F401
+
     TEMPLATE_SUPPORT = True
 except ImportError as e:
     safe_print(f"WARNING: [PrintingService] Template libraries not available: {e}")
@@ -71,6 +71,7 @@ from core import schemas
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -91,7 +92,9 @@ class PDFGenerator:
         self.accent_color = colors.Color(0.4, 0.4, 0.4)  # Gray
 
         if not PDF_AVAILABLE:
-            raise ImportError("PDF libraries not installed. Run: pip install reportlab arabic-reshaper python-bidi")
+            raise ImportError(
+                "PDF libraries not installed. Run: pip install reportlab arabic-reshaper python-bidi"
+            )
 
         # تسجيل الخطوط العربية
         self.arabic_font_name = self._register_arabic_fonts()
@@ -104,15 +107,16 @@ class PDFGenerator:
                 "tagline": "وكالة تسويق رقمي متكاملة",
                 "address": "القاهرة، مصر",
                 "phone": "+20 10 123 4567",
-                "email": "info@skywave.agency"
+                "email": "info@skywave.agency",
             }
 
         return {
             "name": self.settings_service.get_setting("company_name") or "Sky Wave",
-            "tagline": self.settings_service.get_setting("company_tagline") or "وكالة تسويق رقمي متكاملة",
+            "tagline": self.settings_service.get_setting("company_tagline")
+            or "وكالة تسويق رقمي متكاملة",
             "address": self.settings_service.get_setting("company_address") or "القاهرة، مصر",
             "phone": self.settings_service.get_setting("company_phone") or "+20 10 123 4567",
-            "email": self.settings_service.get_setting("company_email") or "info@skywave.agency"
+            "email": self.settings_service.get_setting("company_email") or "info@skywave.agency",
         }
 
     @staticmethod
@@ -134,19 +138,21 @@ class PDFGenerator:
             import sys
 
             # تحديد مسار خط Cairo
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 base_path = sys._MEIPASS
             else:
                 base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
             # مسار خط Cairo
-            cairo_font_path = os.path.join(base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf")
+            cairo_font_path = os.path.join(
+                base_path, "assets", "font", "Cairo-VariableFont_slnt,wght.ttf"
+            )
 
             if os.path.exists(cairo_font_path):
                 try:
-                    pdfmetrics.registerFont(TTFont('CairoFont', cairo_font_path))
+                    pdfmetrics.registerFont(TTFont("CairoFont", cairo_font_path))
                     safe_print(f"✅ [PDFGenerator] تم تحميل خط Cairo: {cairo_font_path}")
-                    return 'CairoFont'
+                    return "CairoFont"
                 except Exception as e:
                     safe_print(f"WARNING: [PDFGenerator] فشل تحميل خط Cairo: {e}")
             else:
@@ -154,17 +160,19 @@ class PDFGenerator:
 
             # إذا فشل تحميل الخط، استخدم الخط الافتراضي
             safe_print("⚠️ [PDFGenerator] سيتم استخدام الخط الافتراضي")
-            return 'Helvetica'
+            return "Helvetica"
 
         except Exception as e:
             safe_print(f"ERROR: [PDFGenerator] خطأ في تسجيل الخطوط: {e}")
-            return 'Helvetica'
+            return "Helvetica"
 
-    def _create_arabic_paragraph_style(self, name: str, font_size: int = 12,
-                                     alignment=None, color=None) -> ParagraphStyle:
+    def _create_arabic_paragraph_style(
+        self, name: str, font_size: int = 12, alignment=None, color=None
+    ) -> ParagraphStyle:
         # استخدام TA_RIGHT كـ default إذا لم يتم تحديد alignment
         if alignment is None:
             from reportlab.lib.enums import TA_RIGHT
+
             alignment = TA_RIGHT
         """إنشاء نمط فقرة للنص العربي"""
         return ParagraphStyle(
@@ -176,14 +184,11 @@ class PDFGenerator:
             rightIndent=0,
             leftIndent=0,
             spaceAfter=6,
-            spaceBefore=6
+            spaceBefore=6,
         )
 
     def generate_invoice_pdf(
-        self,
-        project: schemas.Project,
-        client_info: dict[str, str],
-        output_path: str | None = None
+        self, project: schemas.Project, client_info: dict[str, str], output_path: str | None = None
     ) -> str:
         """
         إنتاج فاتورة PDF احترافية
@@ -204,29 +209,29 @@ class PDFGenerator:
         doc = SimpleDocTemplate(
             output_path,
             pagesize=A4,
-            rightMargin=2*cm,
-            leftMargin=2*cm,
-            topMargin=2*cm,
-            bottomMargin=2*cm
+            rightMargin=2 * cm,
+            leftMargin=2 * cm,
+            topMargin=2 * cm,
+            bottomMargin=2 * cm,
         )
 
         story = []
 
         # --- HEADER SECTION ---
         story.append(self._create_invoice_header(project))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- CLIENT INFO ---
         story.append(self._create_client_info_section(client_info))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- ITEMS TABLE ---
         story.append(self._create_items_table(project))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- TOTALS SECTION ---
         story.append(self._create_totals_section(project))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- FOOTER ---
         story.append(self._create_invoice_footer())
@@ -242,7 +247,7 @@ class PDFGenerator:
         account: schemas.Account,
         transactions: list[dict[str, Any]],
         date_range: dict[str, datetime],
-        output_path: str | None = None
+        output_path: str | None = None,
     ) -> str:
         """
         إنتاج تقرير كشف حساب PDF
@@ -265,21 +270,21 @@ class PDFGenerator:
         doc = SimpleDocTemplate(
             output_path,
             pagesize=A4,
-            rightMargin=2*cm,
-            leftMargin=2*cm,
-            topMargin=2*cm,
-            bottomMargin=2*cm
+            rightMargin=2 * cm,
+            leftMargin=2 * cm,
+            topMargin=2 * cm,
+            bottomMargin=2 * cm,
         )
 
         story = []
 
         # --- HEADER ---
         story.append(self._create_ledger_header(account, date_range))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- TRANSACTIONS TABLE ---
         story.append(self._create_transactions_table(transactions))
-        story.append(Spacer(1, 0.5*cm))
+        story.append(Spacer(1, 0.5 * cm))
 
         # --- SUMMARY ---
         story.append(self._create_ledger_summary(transactions))
@@ -294,43 +299,43 @@ class PDFGenerator:
         """إنشاء رأس الفاتورة"""
         # بيانات الرأس
         header_data = [
-            [
-                self.fix_arabic_text(self.company_info["name"]),
-                "",
-                f"Invoice #{project.name}"
-            ],
+            [self.fix_arabic_text(self.company_info["name"]), "", f"Invoice #{project.name}"],
             [
                 self.fix_arabic_text(self.company_info["tagline"]),
                 "",
-                f"Date: {datetime.now().strftime('%Y-%m-%d')}"
+                f"Date: {datetime.now().strftime('%Y-%m-%d')}",
             ],
             [
-                self.fix_arabic_text(f"{self.company_info['phone']} | {self.company_info['email']}"),
+                self.fix_arabic_text(
+                    f"{self.company_info['phone']} | {self.company_info['email']}"
+                ),
                 "",
-                f"Due: {project.end_date.strftime('%Y-%m-%d') if project.end_date else 'N/A'}"
-            ]
+                f"Due: {project.end_date.strftime('%Y-%m-%d') if project.end_date else 'N/A'}",
+            ],
         ]
 
-        header_table = Table(header_data, colWidths=[6*cm, 2*cm, 6*cm])
-        header_table.setStyle(TableStyle([
-            # Company info (left) - استخدام الخط العربي
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (0, -1), self.arabic_font_name),
-            ('FONTSIZE', (0, 0), (0, 0), 16),
-            ('FONTSIZE', (0, 1), (0, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, 0), self.primary_color),
-
-            # Invoice info (right)
-            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-            ('FONTNAME', (2, 0), (2, -1), 'Helvetica'),
-            ('FONTSIZE', (2, 0), (2, 0), 14),
-            ('FONTSIZE', (2, 1), (2, -1), 10),
-            ('TEXTCOLOR', (2, 0), (2, 0), self.secondary_color),
-
-            # General
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-        ]))
+        header_table = Table(header_data, colWidths=[6 * cm, 2 * cm, 6 * cm])
+        header_table.setStyle(
+            TableStyle(
+                [
+                    # Company info (left) - استخدام الخط العربي
+                    ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                    ("FONTNAME", (0, 0), (0, -1), self.arabic_font_name),
+                    ("FONTSIZE", (0, 0), (0, 0), 16),
+                    ("FONTSIZE", (0, 1), (0, -1), 10),
+                    ("TEXTCOLOR", (0, 0), (0, 0), self.primary_color),
+                    # Invoice info (right)
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("FONTNAME", (2, 0), (2, -1), "Helvetica"),
+                    ("FONTSIZE", (2, 0), (2, 0), 14),
+                    ("FONTSIZE", (2, 1), (2, -1), 10),
+                    ("TEXTCOLOR", (2, 0), (2, 0), self.secondary_color),
+                    # General
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ]
+            )
+        )
 
         return header_table
 
@@ -340,18 +345,22 @@ class PDFGenerator:
             ["Bill To:", ""],
             [self.fix_arabic_text(client_info.get("name", "N/A")), ""],
             [self.fix_arabic_text(client_info.get("phone", "")), ""],
-            [self.fix_arabic_text(client_info.get("address", "")), ""]
+            [self.fix_arabic_text(client_info.get("address", "")), ""],
         ]
 
-        client_table = Table(client_data, colWidths=[8*cm, 6*cm])
-        client_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), self.arabic_font_name),
-            ('FONTSIZE', (0, 0), (0, 0), 12),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (0, 0), self.primary_color),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
+        client_table = Table(client_data, colWidths=[8 * cm, 6 * cm])
+        client_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                    ("FONTNAME", (0, 0), (-1, -1), self.arabic_font_name),
+                    ("FONTSIZE", (0, 0), (0, 0), 12),
+                    ("FONTSIZE", (0, 1), (-1, -1), 10),
+                    ("TEXTCOLOR", (0, 0), (0, 0), self.primary_color),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
 
         return client_table
 
@@ -368,35 +377,32 @@ class PDFGenerator:
                 f"{item.quantity:.1f}",
                 f"{item.unit_price:,.2f}",
                 f"{item.discount_rate:.1f}%",
-                f"{item.total:,.2f}"
+                f"{item.total:,.2f}",
             ]
             table_data.append(row)
 
         # إنشاء الجدول
-        items_table = Table(table_data, colWidths=[6*cm, 2*cm, 2.5*cm, 2*cm, 2.5*cm])
+        items_table = Table(table_data, colWidths=[6 * cm, 2 * cm, 2.5 * cm, 2 * cm, 2.5 * cm])
 
         # تنسيق الجدول
         style = [
             # Header
-            ('BACKGROUND', (0, 0), (-1, 0), self.primary_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 11),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-
+            ("BACKGROUND", (0, 0), (-1, 0), self.primary_color),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 11),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             # Data rows
-            ('FONTNAME', (0, 1), (0, -1), self.arabic_font_name),  # Arabic font for service names
-            ('FONTNAME', (1, 1), (-1, -1), 'Helvetica'),          # English font for numbers
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('ALIGN', (1, 1), (-1, -1), 'CENTER'),  # Numbers centered
-            ('ALIGN', (0, 1), (0, -1), 'LEFT'),     # Service names left
-
+            ("FONTNAME", (0, 1), (0, -1), self.arabic_font_name),  # Arabic font for service names
+            ("FONTNAME", (1, 1), (-1, -1), "Helvetica"),  # English font for numbers
+            ("FONTSIZE", (0, 1), (-1, -1), 10),
+            ("ALIGN", (1, 1), (-1, -1), "CENTER"),  # Numbers centered
+            ("ALIGN", (0, 1), (0, -1), "LEFT"),  # Service names left
             # Borders
-            ('GRID', (0, 0), (-1, -1), 1, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             # Alternating row colors
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
         ]
 
         items_table.setStyle(TableStyle(style))
@@ -415,58 +421,66 @@ class PDFGenerator:
             ["", "Subtotal:", f"{subtotal:,.2f} EGP"],
             ["", f"Discount ({project.discount_rate:.1f}%):", f"-{discount_amount:,.2f} EGP"],
             ["", f"Tax ({project.tax_rate:.1f}%):", f"{tax_amount:,.2f} EGP"],
-            ["", "TOTAL:", f"{total_amount:,.2f} EGP"]
+            ["", "TOTAL:", f"{total_amount:,.2f} EGP"],
         ]
 
-        totals_table = Table(totals_data, colWidths=[8*cm, 3*cm, 3*cm])
-        totals_table.setStyle(TableStyle([
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, -2), 10),
-            ('FONTSIZE', (0, -1), (-1, -1), 12),
-            ('TEXTCOLOR', (0, -1), (-1, -1), self.secondary_color),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('TOPPADDING', (0, -1), (-1, -1), 8),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
-        ]))
+        totals_table = Table(totals_data, colWidths=[8 * cm, 3 * cm, 3 * cm])
+        totals_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                    ("FONTSIZE", (0, 0), (-1, -2), 10),
+                    ("FONTSIZE", (0, -1), (-1, -1), 12),
+                    ("TEXTCOLOR", (0, -1), (-1, -1), self.secondary_color),
+                    ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                    ("TOPPADDING", (0, -1), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ]
+            )
+        )
 
         return totals_table
 
     def _create_invoice_footer(self) -> Paragraph:
         """إنشاء تذييل الفاتورة"""
-        footer_text = self.fix_arabic_text(
-            "شكراً لثقتكم في Sky Wave. نسعد بخدمتكم دائماً."
-        )
+        footer_text = self.fix_arabic_text("شكراً لثقتكم في Sky Wave. نسعد بخدمتكم دائماً.")
 
         style = ParagraphStyle(
-            'Footer',
-            fontSize=10,
-            textColor=self.accent_color,
-            alignment=TA_CENTER,
-            spaceAfter=12
+            "Footer", fontSize=10, textColor=self.accent_color, alignment=TA_CENTER, spaceAfter=12
         )
 
         return Paragraph(footer_text, style)
 
-    def _create_ledger_header(self, account: schemas.Account, date_range: dict[str, datetime]) -> Table:
+    def _create_ledger_header(
+        self, account: schemas.Account, date_range: dict[str, datetime]
+    ) -> Table:
         """إنشاء رأس كشف الحساب"""
-        start_date = date_range.get('start', datetime.now()).strftime('%Y-%m-%d')
-        end_date = date_range.get('end', datetime.now()).strftime('%Y-%m-%d')
+        start_date = date_range.get("start", datetime.now()).strftime("%Y-%m-%d")
+        end_date = date_range.get("end", datetime.now()).strftime("%Y-%m-%d")
 
         header_data = [
             ["Account Statement", "", f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"],
-            [self.fix_arabic_text(f"{account.code} - {account.name}"), "", f"Period: {start_date} to {end_date}"],
-            [self.fix_arabic_text(f"Type: {account.type.value}"), "", ""]
+            [
+                self.fix_arabic_text(f"{account.code} - {account.name}"),
+                "",
+                f"Period: {start_date} to {end_date}",
+            ],
+            [self.fix_arabic_text(f"Type: {account.type.value}"), "", ""],
         ]
 
-        header_table = Table(header_data, colWidths=[6*cm, 2*cm, 6*cm])
-        header_table.setStyle(TableStyle([
-            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
-            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, 0), 14),
-            ('FONTSIZE', (0, 1), (-1, -1), 10),
-            ('TEXTCOLOR', (0, 0), (-1, 0), self.primary_color),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ]))
+        header_table = Table(header_data, colWidths=[6 * cm, 2 * cm, 6 * cm])
+        header_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                    ("ALIGN", (2, 0), (2, -1), "RIGHT"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 14),
+                    ("FONTSIZE", (0, 1), (-1, -1), 10),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), self.primary_color),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
 
         return header_table
 
@@ -479,38 +493,39 @@ class PDFGenerator:
         # المعاملات
         for txn in transactions:
             row = [
-                txn.get('date', '').strftime('%Y-%m-%d') if isinstance(txn.get('date'), datetime) else str(txn.get('date', '')),
-                self.fix_arabic_text(txn.get('description', '')),
-                txn.get('reference', ''),
-                f"{txn.get('debit', 0):,.2f}" if txn.get('debit', 0) > 0 else "",
-                f"{txn.get('credit', 0):,.2f}" if txn.get('credit', 0) > 0 else "",
-                f"{txn.get('balance', 0):,.2f}"
+                txn.get("date", "").strftime("%Y-%m-%d")
+                if isinstance(txn.get("date"), datetime)
+                else str(txn.get("date", "")),
+                self.fix_arabic_text(txn.get("description", "")),
+                txn.get("reference", ""),
+                f"{txn.get('debit', 0):,.2f}" if txn.get("debit", 0) > 0 else "",
+                f"{txn.get('credit', 0):,.2f}" if txn.get("credit", 0) > 0 else "",
+                f"{txn.get('balance', 0):,.2f}",
             ]
             table_data.append(row)
 
         # إنشاء الجدول
-        txn_table = Table(table_data, colWidths=[2*cm, 4*cm, 2*cm, 2.5*cm, 2.5*cm, 2*cm])
+        txn_table = Table(
+            table_data, colWidths=[2 * cm, 4 * cm, 2 * cm, 2.5 * cm, 2.5 * cm, 2 * cm]
+        )
 
         # تنسيق الجدول
         style = [
             # Header
-            ('BACKGROUND', (0, 0), (-1, 0), self.primary_color),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-            ('FONTSIZE', (0, 0), (-1, 0), 10),
-            ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-
+            ("BACKGROUND", (0, 0), (-1, 0), self.primary_color),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("ALIGN", (0, 0), (-1, 0), "CENTER"),
             # Data
-            ('FONTSIZE', (0, 1), (-1, -1), 9),
-            ('ALIGN', (0, 1), (0, -1), 'CENTER'),  # Date
-            ('ALIGN', (1, 1), (1, -1), 'LEFT'),    # Description
-            ('ALIGN', (2, 1), (-1, -1), 'RIGHT'),  # Numbers
-
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("ALIGN", (0, 1), (0, -1), "CENTER"),  # Date
+            ("ALIGN", (1, 1), (1, -1), "LEFT"),  # Description
+            ("ALIGN", (2, 1), (-1, -1), "RIGHT"),  # Numbers
             # Borders
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             # Alternating rows
-            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.Color(0.95, 0.95, 0.95)]),
         ]
 
         txn_table.setStyle(TableStyle(style))
@@ -518,25 +533,29 @@ class PDFGenerator:
 
     def _create_ledger_summary(self, transactions: list[dict[str, Any]]) -> Table:
         """إنشاء ملخص كشف الحساب"""
-        total_debit = sum(txn.get('debit', 0) for txn in transactions)
-        total_credit = sum(txn.get('credit', 0) for txn in transactions)
-        ending_balance = transactions[-1].get('balance', 0) if transactions else 0
+        total_debit = sum(txn.get("debit", 0) for txn in transactions)
+        total_credit = sum(txn.get("credit", 0) for txn in transactions)
+        ending_balance = transactions[-1].get("balance", 0) if transactions else 0
 
         summary_data = [
             ["", "Total Debits:", f"{total_debit:,.2f} EGP"],
             ["", "Total Credits:", f"{total_credit:,.2f} EGP"],
-            ["", "Ending Balance:", f"{ending_balance:,.2f} EGP"]
+            ["", "Ending Balance:", f"{ending_balance:,.2f} EGP"],
         ]
 
-        summary_table = Table(summary_data, colWidths=[8*cm, 3*cm, 3*cm])
-        summary_table.setStyle(TableStyle([
-            ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-            ('FONTSIZE', (0, 0), (-1, -2), 10),
-            ('FONTSIZE', (0, -1), (-1, -1), 12),
-            ('TEXTCOLOR', (0, -1), (-1, -1), self.secondary_color),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('TOPPADDING', (0, 0), (-1, -1), 6),
-        ]))
+        summary_table = Table(summary_data, colWidths=[8 * cm, 3 * cm, 3 * cm])
+        summary_table.setStyle(
+            TableStyle(
+                [
+                    ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                    ("FONTSIZE", (0, 0), (-1, -2), 10),
+                    ("FONTSIZE", (0, -1), (-1, -1), 12),
+                    ("TEXTCOLOR", (0, -1), (-1, -1), self.secondary_color),
+                    ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
 
         return summary_table
 
@@ -544,12 +563,12 @@ class PDFGenerator:
     def open_pdf(file_path: str):
         """فتح ملف PDF في العارض الافتراضي"""
         try:
-            if platform.system() == 'Windows':
+            if platform.system() == "Windows":
                 os.startfile(file_path)
-            elif platform.system() == 'Darwin':  # macOS
-                subprocess.run(['open', file_path])
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.run(["open", file_path])
             else:  # Linux
-                subprocess.run(['xdg-open', file_path])
+                subprocess.run(["xdg-open", file_path])
 
             safe_print(f"INFO: [PDFGenerator] Opened PDF: {file_path}")
         except Exception as e:
@@ -580,7 +599,7 @@ class PrintingService:
         client_info: dict[str, str],
         payments: list[dict[str, Any]] | None = None,
         background_image_path: str | None = None,
-        auto_open: bool = True
+        auto_open: bool = True,
     ) -> str | None:
         """
         طباعة فاتورة مشروع مع الدفعات
@@ -602,19 +621,17 @@ class PrintingService:
                 client_info=client_info,
                 template_service=self.template_service,
                 payments=payments,
-                auto_open=auto_open
+                auto_open=auto_open,
             )
         except Exception as e:
             safe_print(f"ERROR: [PrintingService] Failed to print project invoice: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
     def print_invoice(
-        self,
-        project: schemas.Project,
-        client_info: dict[str, str],
-        auto_open: bool = True
+        self, project: schemas.Project, client_info: dict[str, str], auto_open: bool = True
     ) -> str | None:
         """طباعة فاتورة مشروع"""
         if not self.is_available():
@@ -637,7 +654,7 @@ class PrintingService:
         account: schemas.Account,
         transactions: list[dict[str, Any]],
         date_range: dict[str, datetime],
-        auto_open: bool = True
+        auto_open: bool = True,
     ) -> str | None:
         """طباعة كشف حساب"""
         if not self.is_available():
@@ -663,8 +680,8 @@ class PrintingService:
 
         templates = []
         for file in os.listdir(templates_dir):
-            if file.endswith('.html'):
-                template_name = file.replace('.html', '')
+            if file.endswith(".html"):
+                template_name = file.replace(".html", "")
                 templates.append(template_name)
 
         return templates
@@ -675,35 +692,44 @@ class PrintingService:
         client_info: dict[str, str],
         template_service=None,
         payments: list[dict[str, Any]] | None = None,
-        auto_open: bool = True
+        auto_open: bool = True,
     ) -> str | None:
         """طباعة فاتورة باستخدام قالب HTML من خدمة القوالب"""
         try:
             # استخدام خدمة القوالب الجديدة إذا كانت متوفرة
             if template_service:
                 safe_print("INFO: [PrintingService] Using template service for invoice generation")
-                safe_print(f"INFO: [PrintingService] عدد الدفعات المستلمة: {len(payments) if payments else 0}")
+                safe_print(
+                    f"INFO: [PrintingService] عدد الدفعات المستلمة: {len(payments) if payments else 0}"
+                )
                 if payments:
                     for i, p in enumerate(payments):
-                        safe_print(f"  - دفعة {i+1}: {p}")
+                        safe_print(f"  - دفعة {i + 1}: {p}")
 
                 # إنتاج HTML باستخدام خدمة القوالب مع الدفعات
-                html_content = template_service.generate_invoice_html(project, client_info, payments=payments)
+                html_content = template_service.generate_invoice_html(
+                    project, client_info, payments=payments
+                )
 
                 if html_content and not html_content.startswith("<html><body><h1>خطأ"):
                     # حفظ HTML
-                    client_phone = client_info.get('phone', '') if client_info else ''
+                    client_phone = client_info.get("phone", "") if client_info else ""
                     html_path = self._html_to_pdf(html_content, project.name, client_phone)
 
                     if auto_open and html_path:
                         # فتح HTML في المتصفح
                         import webbrowser
-                        webbrowser.open(f'file://{os.path.abspath(html_path)}')
 
-                    safe_print(f"INFO: [PrintingService] Invoice created using template: {html_path}")
+                        webbrowser.open(f"file://{os.path.abspath(html_path)}")
+
+                    safe_print(
+                        f"INFO: [PrintingService] Invoice created using template: {html_path}"
+                    )
                     return html_path
                 else:
-                    safe_print("ERROR: [PrintingService] Failed to generate HTML from template service")
+                    safe_print(
+                        "ERROR: [PrintingService] Failed to generate HTML from template service"
+                    )
 
             # Fallback: استخدام النظام القديم
             safe_print("INFO: [PrintingService] Falling back to default PDF generation")
@@ -714,81 +740,107 @@ class PrintingService:
             # Fallback to default PDF
             return self.print_invoice(project, client_info, auto_open)
 
-    def _prepare_template_data(self, project: schemas.Project, client_info: dict[str, str]) -> dict[str, Any]:
+    def _prepare_template_data(
+        self, project: schemas.Project, client_info: dict[str, str]
+    ) -> dict[str, Any]:
         """تحضير البيانات للقالب"""
         # معلومات الشركة
         company_data = {
-            'company_name': self.settings_service.get_setting("company_name") if self.settings_service else "SkyWave ERP",
-            'company_tagline': "نظام إدارة المشاريع الذكي",
-            'company_phone': self.settings_service.get_setting("company_phone") if self.settings_service else "01000000000",
-            'company_email': self.settings_service.get_setting("company_email") if self.settings_service else "info@skywave.com",
-            'company_website': self.settings_service.get_setting("company_website") if self.settings_service else "www.skywave.com",
-            'company_address': self.settings_service.get_setting("company_address") if self.settings_service else "القاهرة، مصر",
+            "company_name": self.settings_service.get_setting("company_name")
+            if self.settings_service
+            else "SkyWave ERP",
+            "company_tagline": "نظام إدارة المشاريع الذكي",
+            "company_phone": self.settings_service.get_setting("company_phone")
+            if self.settings_service
+            else "01000000000",
+            "company_email": self.settings_service.get_setting("company_email")
+            if self.settings_service
+            else "info@skywave.com",
+            "company_website": self.settings_service.get_setting("company_website")
+            if self.settings_service
+            else "www.skywave.com",
+            "company_address": self.settings_service.get_setting("company_address")
+            if self.settings_service
+            else "القاهرة، مصر",
         }
 
         # معلومات الفاتورة
         # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
-        invoice_number = getattr(project, 'invoice_number', None)
+        invoice_number = getattr(project, "invoice_number", None)
         if not invoice_number:
-            local_id = getattr(project, 'id', None) or 1
+            local_id = getattr(project, "id", None) or 1
             invoice_number = f"SW-{97161 + int(local_id)}"
         invoice_data = {
-            'invoice_number': invoice_number,
-            'invoice_date': datetime.now().strftime("%Y-%m-%d"),
-            'due_date': project.due_date.strftime("%Y-%m-%d") if hasattr(project, 'due_date') and project.due_date else "غير محدد",
+            "invoice_number": invoice_number,
+            "invoice_date": datetime.now().strftime("%Y-%m-%d"),
+            "due_date": project.due_date.strftime("%Y-%m-%d")
+            if hasattr(project, "due_date") and project.due_date
+            else "غير محدد",
         }
 
         # معلومات العميل
         client_data = {
-            'client_name': client_info.get('name', 'عميل'),
-            'client_phone': client_info.get('phone', 'غير محدد'),
-            'client_address': client_info.get('address', 'غير محدد'),
-            'client_email': client_info.get('email', 'غير محدد'),
+            "client_name": client_info.get("name", "عميل"),
+            "client_phone": client_info.get("phone", "غير محدد"),
+            "client_address": client_info.get("address", "غير محدد"),
+            "client_email": client_info.get("email", "غير محدد"),
         }
 
         # معلومات المشروع
         project_data = {
-            'project_name': project.name,
-            'project_status': getattr(project, 'status', None) or "نشط",
-            'project_duration': f"{getattr(project, 'duration_days', 0)} يوم" if getattr(project, 'duration_days', None) else "غير محدد",
+            "project_name": project.name,
+            "project_status": getattr(project, "status", None) or "نشط",
+            "project_duration": f"{getattr(project, 'duration_days', 0)} يوم"
+            if getattr(project, "duration_days", None)
+            else "غير محدد",
         }
 
         # بنود المشروع
         items = []
-        if hasattr(project, 'items') and project.items:
+        if hasattr(project, "items") and project.items:
             for item in project.items:
                 if isinstance(item, dict):
                     # البند عبارة عن dictionary
-                    items.append({
-                        'name': item.get('service_name', 'خدمة'),
-                        'quantity': item.get('quantity', 1),
-                        'price': float(item.get('unit_price', 0)),
-                        'discount': float(item.get('discount_rate', 0)),
-                        'total': float(item.get('total_price', 0))
-                    })
+                    items.append(
+                        {
+                            "name": item.get("service_name", "خدمة"),
+                            "quantity": item.get("quantity", 1),
+                            "price": float(item.get("unit_price", 0)),
+                            "discount": float(item.get("discount_rate", 0)),
+                            "total": float(item.get("total_price", 0)),
+                        }
+                    )
                 else:
                     # البند عبارة عن object (ProjectItem)
-                    items.append({
-                        'name': getattr(item, 'description', 'خدمة'),
-                        'quantity': getattr(item, 'quantity', 1),
-                        'price': float(getattr(item, 'unit_price', 0)),
-                        'discount': float(getattr(item, 'discount_rate', 0)),
-                        'total': float(getattr(item, 'total', 0))
-                    })
+                    items.append(
+                        {
+                            "name": getattr(item, "description", "خدمة"),
+                            "quantity": getattr(item, "quantity", 1),
+                            "price": float(getattr(item, "unit_price", 0)),
+                            "discount": float(getattr(item, "discount_rate", 0)),
+                            "total": float(getattr(item, "total", 0)),
+                        }
+                    )
         else:
             # إذا لم تكن هناك بنود، أنشئ بند واحد للمشروع كاملاً
-            items.append({
-                'name': project.name,
-                'quantity': 1,
-                'price': float(project.total_amount),
-                'discount': 0,
-                'total': float(project.total_amount)
-            })
+            items.append(
+                {
+                    "name": project.name,
+                    "quantity": 1,
+                    "price": float(project.total_amount),
+                    "discount": 0,
+                    "total": float(project.total_amount),
+                }
+            )
 
         # الحسابات المالية
-        subtotal = sum(float(item['total']) for item in items)
+        subtotal = sum(float(item["total"]) for item in items)
         discount_rate = 0  # يمكن إضافتها لاحقاً
-        tax_rate = float(self.settings_service.get_setting("default_tax_rate") or 0) if self.settings_service else 0
+        tax_rate = (
+            float(self.settings_service.get_setting("default_tax_rate") or 0)
+            if self.settings_service
+            else 0
+        )
 
         discount_amount = subtotal * (discount_rate / 100)
         tax_amount = (subtotal - discount_amount) * (tax_rate / 100)
@@ -798,7 +850,8 @@ class PrintingService:
         try:
             # جلب الدفعات من قاعدة البيانات
             from core.repository import Repository
-            if hasattr(self, 'repo') and self.repo is not None is not None is not None:
+
+            if hasattr(self, "repo") and self.repo is not None:
                 payments = self.repo.get_payments_for_project(project.name)
                 amount_paid = sum(payment.amount for payment in payments)
             else:
@@ -809,18 +862,18 @@ class PrintingService:
         except Exception as e:
             safe_print(f"WARNING: [PrintingService] فشل جلب الدفعات: {e}")
             # استخدام القيمة من المشروع إذا كانت متوفرة
-            amount_paid = getattr(project, 'amount_paid', 0) or 0
+            amount_paid = getattr(project, "amount_paid", 0) or 0
 
         financial_data = {
-            'items': items,
-            'subtotal': subtotal,
-            'discount_rate': discount_rate,
-            'discount_amount': discount_amount,
-            'tax_rate': tax_rate,
-            'tax_amount': tax_amount,
-            'total_amount': total_amount,
-            'amount_paid': amount_paid,
-            'remaining_amount': total_amount - amount_paid,
+            "items": items,
+            "subtotal": subtotal,
+            "discount_rate": discount_rate,
+            "discount_amount": discount_amount,
+            "tax_rate": tax_rate,
+            "tax_amount": tax_amount,
+            "total_amount": total_amount,
+            "amount_paid": amount_paid,
+            "remaining_amount": total_amount - amount_paid,
         }
 
         # دمج كل البيانات
@@ -829,16 +882,18 @@ class PrintingService:
             **invoice_data,
             **client_data,
             **project_data,
-            **financial_data
+            **financial_data,
         }
 
         return template_data
 
-    def _html_to_pdf(self, html_content: str, filename_prefix: str, client_phone: str | None = None) -> str | None:
+    def _html_to_pdf(
+        self, html_content: str, filename_prefix: str, client_phone: str | None = None
+    ) -> str | None:
         """تحويل HTML إلى PDF"""
         try:
             # ⚡ حفظ الفواتير في مجلد exports داخل مسار التثبيت
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
                 install_path = os.path.dirname(sys.executable)
             else:
@@ -850,38 +905,37 @@ class PrintingService:
                 os.makedirs(exports_dir)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_filename = "".join(c for c in filename_prefix if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_filename = "".join(
+                c for c in filename_prefix if c.isalnum() or c in (" ", "-", "_")
+            ).rstrip()
             pdf_path = os.path.join(exports_dir, f"invoice_{safe_filename}_{timestamp}.pdf")
-            html_path = pdf_path.replace('.pdf', '.html')
+            html_path = pdf_path.replace(".pdf", ".html")
 
             # حفظ HTML أولاً
-            with open(html_path, 'w', encoding='utf-8') as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
 
             # محاولة 1: استخدام pdfkit مع wkhtmltopdf
             try:
                 import pdfkit
+
                 # البحث عن wkhtmltopdf
                 wkhtmltopdf_paths = [
-                    r'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe',
-                    r'C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe',
-                    'wkhtmltopdf'
+                    r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe",
+                    r"C:\Program Files (x86)\wkhtmltopdf\bin\wkhtmltopdf.exe",
+                    "wkhtmltopdf",
                 ]
 
                 config = None
                 for path in wkhtmltopdf_paths:
-                    if os.path.exists(path) or path == 'wkhtmltopdf':
+                    if os.path.exists(path) or path == "wkhtmltopdf":
                         try:
                             config = pdfkit.configuration(wkhtmltopdf=path)
                             break
                         except OSError:
                             continue
 
-                options = {
-                    'page-size': 'A4',
-                    'encoding': 'UTF-8',
-                    'enable-local-file-access': None
-                }
+                options = {"page-size": "A4", "encoding": "UTF-8", "enable-local-file-access": None}
 
                 if config:
                     pdfkit.from_file(html_path, pdf_path, configuration=config, options=options)
@@ -906,10 +960,10 @@ class PrintingService:
             # محاولة 2: استخدام Chrome/Edge headless
             try:
                 chrome_paths = [
-                    r'C:\Program Files\Google\Chrome\Application\chrome.exe',
-                    r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-                    r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',
-                    r'C:\Program Files\Microsoft\Edge\Application\msedge.exe',
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
                 ]
 
                 browser_path = None
@@ -924,17 +978,19 @@ class PrintingService:
 
                     cmd = [
                         browser_path,
-                        '--headless',
-                        '--disable-gpu',
-                        '--print-to-pdf=' + abs_pdf_path,
-                        '--no-margins',
-                        'file:///' + abs_html_path.replace('\\', '/')
+                        "--headless",
+                        "--disable-gpu",
+                        "--print-to-pdf=" + abs_pdf_path,
+                        "--no-margins",
+                        "file:///" + abs_html_path.replace("\\", "/"),
                     ]
 
                     subprocess.run(cmd, capture_output=True, timeout=30)
 
                     if os.path.exists(pdf_path):
-                        safe_print(f"INFO: [PrintingService] Invoice PDF created with browser: {pdf_path}")
+                        safe_print(
+                            f"INFO: [PrintingService] Invoice PDF created with browser: {pdf_path}"
+                        )
                         os.remove(html_path)
                         safe_print(f"🗑️ Cleaned up temp HTML file: {html_path}")
 
@@ -960,6 +1016,7 @@ class PrintingService:
         except Exception as e:
             safe_print(f"ERROR: [PrintingService] Failed to create PDF: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -967,7 +1024,7 @@ class PrintingService:
         """فتح مجلد exports تلقائياً"""
         try:
             # ⚡ فتح مجلد exports داخل مسار التثبيت
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 install_path = os.path.dirname(sys.executable)
             else:
                 install_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -975,19 +1032,17 @@ class PrintingService:
             exports_dir = os.path.join(install_path, "exports")
 
             if os.path.exists(exports_dir):
-                if platform.system() == 'Windows':
+                if platform.system() == "Windows":
                     os.startfile(exports_dir)
-                elif platform.system() == 'Darwin':  # macOS
-                    subprocess.run(['open', exports_dir])
+                elif platform.system() == "Darwin":  # macOS
+                    subprocess.run(["open", exports_dir])
                 else:  # Linux
-                    subprocess.run(['xdg-open', exports_dir])
+                    subprocess.run(["xdg-open", exports_dir])
                 safe_print(f"INFO: [PrintingService] Opened exports folder: {exports_dir}")
             else:
                 safe_print(f"WARNING: [PrintingService] Exports folder not found: {exports_dir}")
         except Exception as e:
             safe_print(f"ERROR: [PrintingService] Failed to open exports folder: {e}")
-
-
 
 
 class TemplateManager:
@@ -1005,21 +1060,17 @@ class TemplateManager:
             return templates
 
         template_names = {
-            'modern_blue': '🌟 أزرق عصري',
-            'classic_professional': '📋 كلاسيكي احترافي',
-            'skywave_ads_invoice_template': '🚀 SkyWave Ads',
+            "modern_blue": "🌟 أزرق عصري",
+            "classic_professional": "📋 كلاسيكي احترافي",
+            "skywave_ads_invoice_template": "🚀 SkyWave Ads",
         }
 
         for file in os.listdir(self.templates_dir):
-            if file.endswith('.html'):
-                template_id = file.replace('.html', '')
+            if file.endswith(".html"):
+                template_id = file.replace(".html", "")
                 template_name = template_names.get(template_id, template_id)
 
-                templates.append({
-                    'id': template_id,
-                    'name': template_name,
-                    'file': file
-                })
+                templates.append({"id": template_id, "name": template_name, "file": file})
 
         return templates
 
@@ -1049,7 +1100,9 @@ class TemplateManager:
             safe_print(f"ERROR: [TemplateManager] Failed to set active template: {e}")
             return False
 
-    def preview_template(self, template_id: str, sample_data: dict[str, Any] | None = None) -> str | None:
+    def preview_template(
+        self, template_id: str, sample_data: dict[str, Any] | None = None
+    ) -> str | None:
         """معاينة القالب مع بيانات تجريبية"""
         try:
             template_path = os.path.join(self.templates_dir, f"{template_id}.html")
@@ -1060,48 +1113,48 @@ class TemplateManager:
             # بيانات تجريبية
             if not sample_data:
                 sample_data = {
-                    'company_name': 'SkyWave ERP',
-                    'company_tagline': 'نظام إدارة المشاريع الذكي',
-                    'company_phone': '01000000000',
-                    'company_email': 'info@skywave.com',
-                    'company_website': 'www.skywave.com',
-                    'company_address': 'القاهرة، مصر',
-                    'invoice_number': 'INV-000001',
-                    'invoice_date': '2025-12-01',
-                    'due_date': '2025-12-15',
-                    'client_name': 'عميل تجريبي',
-                    'client_phone': '01111111111',
-                    'client_address': 'عنوان العميل',
-                    'client_email': 'client@example.com',
-                    'project_name': 'مشروع تجريبي',
-                    'project_status': 'نشط',
-                    'project_duration': '30 يوم',
-                    'items': [
+                    "company_name": "SkyWave ERP",
+                    "company_tagline": "نظام إدارة المشاريع الذكي",
+                    "company_phone": "01000000000",
+                    "company_email": "info@skywave.com",
+                    "company_website": "www.skywave.com",
+                    "company_address": "القاهرة، مصر",
+                    "invoice_number": "INV-000001",
+                    "invoice_date": "2025-12-01",
+                    "due_date": "2025-12-15",
+                    "client_name": "عميل تجريبي",
+                    "client_phone": "01111111111",
+                    "client_address": "عنوان العميل",
+                    "client_email": "client@example.com",
+                    "project_name": "مشروع تجريبي",
+                    "project_status": "نشط",
+                    "project_duration": "30 يوم",
+                    "items": [
                         {
-                            'name': 'تطوير موقع إلكتروني',
-                            'quantity': 1,
-                            'price': 5000.00,
-                            'discount': 10.0,
-                            'total': 4500.00
+                            "name": "تطوير موقع إلكتروني",
+                            "quantity": 1,
+                            "price": 5000.00,
+                            "discount": 10.0,
+                            "total": 4500.00,
                         },
                         {
-                            'name': 'تصميم هوية بصرية',
-                            'quantity': 1,
-                            'price': 2000.00,
-                            'discount': 0.0,
-                            'total': 2000.00
-                        }
+                            "name": "تصميم هوية بصرية",
+                            "quantity": 1,
+                            "price": 2000.00,
+                            "discount": 0.0,
+                            "total": 2000.00,
+                        },
                     ],
-                    'subtotal': 6500.00,
-                    'discount_rate': 7.69,
-                    'discount_amount': 500.00,
-                    'tax_rate': 14.0,
-                    'tax_amount': 840.00,
-                    'total_amount': 6840.00
+                    "subtotal": 6500.00,
+                    "discount_rate": 7.69,
+                    "discount_amount": 500.00,
+                    "tax_rate": 14.0,
+                    "tax_amount": 840.00,
+                    "total_amount": 6840.00,
                 }
 
             # تحميل وتصيير القالب
-            with open(template_path, encoding='utf-8') as f:
+            with open(template_path, encoding="utf-8") as f:
                 template_content = f.read()
 
             template = Template(template_content)

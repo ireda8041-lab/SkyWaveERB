@@ -34,7 +34,7 @@ class CursorContext:
                     from core.logger import logger
                     logger.warning(f"فشل إغلاق cursor: {e}")
                 except Exception:
-                    print(f"فشل إغلاق cursor: {e}")
+                    pass  # تجاهل أخطاء الطباعة
         
         # لا نمنع انتشار الاستثناءات الأصلية
         return False

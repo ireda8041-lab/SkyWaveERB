@@ -1,0 +1,13 @@
+{
+  "app_mode": "hybrid",
+  "sync_enabled": true,
+  "live_updates_enabled": true,
+  "auto_update_enabled": true,
+  "maintenance_enabled": true,
+  "cloud_sync": true,
+  "mongodb_enabled": true,
+  "realtime_sync": false,
+  "simple_sync_enabled": true,
+  "mongo_uri": "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db",
+  "mongo_db_name": "skywave_erp_db"
+}

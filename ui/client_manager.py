@@ -339,30 +339,12 @@ class ClientManagerTab(QWidget):
                 client_payments_total = {}
 
                 try:
-                    # ⚡ استخدام cursor منفصل لتجنب مشكلة Recursive cursor
-                    cursor = self.client_service.repo.get_cursor()
-                    try:
-                        cursor.execute("""
-                            SELECT client_id, SUM(total_amount) as total_projects
-                            FROM projects
-                            WHERE status != 'مؤرشف' AND status != 'ملغي'
-                            GROUP BY client_id
-                        """)
-                        client_invoices_total = {str(row[0]): float(row[1]) if row[1] else 0.0
-                                                for row in cursor.fetchall()}
-
-                        cursor.execute("""
-                            SELECT client_id, SUM(amount) as total_paid
-                            FROM payments
-                            WHERE client_id IS NOT NULL AND client_id != ''
-                            GROUP BY client_id
-                        """)
-                        client_payments_total = {str(row[0]): float(row[1]) if row[1] else 0.0
-                                                for row in cursor.fetchall()}
-                    finally:
-                        cursor.close()
+                    # ✅ استخدام ClientService بدلاً من الوصول المباشر للـ cursor
+                    client_invoices_total, client_payments_total = self.client_service.get_client_financial_totals()
                 except Exception as e:
                     safe_print(f"ERROR: فشل حساب الإجماليات: {e}")
+                    client_invoices_total = {}
+                    client_payments_total = {}
 
                 return {
                     'clients': clients,
