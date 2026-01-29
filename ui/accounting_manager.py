@@ -109,26 +109,23 @@ class AccountingManagerTab(QWidget):
 
     def _connect_realtime_signals(self):
         """⚡ ربط جميع الإشارات للتحديث الفوري التلقائي - محسّن لتجنب التكرار"""
-        # ⚡ ربط إشارة واحدة فقط لتجنب التكرار
-        # data_changed تغطي كل الحالات
-        app_signals.data_changed.connect(self._on_any_data_changed)
+        # ⚡ ربط إشارة accounting_changed فقط (لأن data_changed مربوطة في MainWindow)
+        # هذا يمنع التحديث المزدوج
+        app_signals.accounting_changed.connect(self._on_accounting_changed)
         
         # ⚡ إشارة القيود المحاسبية فقط (لأنها خاصة)
         app_signals.journal_entry_created.connect(self._on_journal_entry_created)
 
         safe_print("INFO: ✅ [AccManager] تم ربط إشارات التحديث (محسّن)")
 
+    def _on_accounting_changed(self):
+        """⚡ معالج التحديث الفوري عند تغيير بيانات المحاسبة"""
+        self.load_accounts_data()
+
     def _on_any_data_changed(self, data_type: str = None):
-        """⚡ معالج التحديث الفوري عند تغيير أي بيانات"""
-        # تحديث فقط إذا كان التغيير متعلق بالمحاسبة
-        relevant_types = [
-            "accounts",
-            "accounting",
-            "payments",
-            "expenses",
-        ]
-        if data_type in relevant_types:
-            self.load_accounts_data()
+        """⚡ معالج التحديث الفوري عند تغيير أي بيانات - معطل لتجنب التكرار"""
+        # ⚡ معطل - التحديث يتم من MainWindow مباشرة
+        pass
 
     def _on_journal_entry_created(self, entry_id: str = None):
         """⚡ معالج إنشاء قيد محاسبي جديد - تحديث فوري"""

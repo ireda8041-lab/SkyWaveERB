@@ -127,7 +127,7 @@ class RealtimeSyncManager(QObject):
             while not self._stop_event.is_set() and not self._shutdown:
                 try:
                     if self.repo.mongo_db is None or self.repo.mongo_client is None:
-                        time.sleep(5)
+                        time.sleep(10)  # ⚡ زيادة الانتظار عند عدم الاتصال
                         continue
                     
                     # مراقبة كل collection بالتناوب
@@ -141,7 +141,7 @@ class RealtimeSyncManager(QObject):
                             # مراقبة التغييرات مع timeout قصير جداً
                             with collection.watch(
                                 full_document='updateLookup',
-                                max_await_time_ms=1000  # ⚡ 1 ثانية فقط
+                                max_await_time_ms=500  # ⚡ تقليل الـ timeout لـ 500ms
                             ) as stream:
                                 for change in stream:
                                     if self._stop_event.is_set() or self._shutdown:
@@ -164,14 +164,14 @@ class RealtimeSyncManager(QObject):
                         except Exception:
                             pass
                     
-                    # ⚡ انتظار قصير بين الدورات
-                    time.sleep(2)
+                    # ⚡ زيادة الانتظار بين الدورات لـ 5 ثواني
+                    time.sleep(5)
                     
                 except Exception as e:
                     if self._shutdown:
                         break
                     logger.debug(f"[RealtimeSync] خطأ في المراقبة الموحدة: {e}")
-                    time.sleep(5)
+                    time.sleep(10)  # ⚡ زيادة الانتظار عند الخطأ
             
             logger.debug("[RealtimeSync] انتهاء المراقبة الموحدة")
         

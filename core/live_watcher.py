@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 class LiveDataWatcher(QObject):
     """
     🔴 مراقب البيانات الحية - نظام احترافي للمزامنة الفورية
-    ⚡ محسّن للأداء - فحص كل 15 ثانية بدلاً من 10
+    ⚡ محسّن للأداء - فحص كل 30 ثانية بدلاً من 15
     
     يراقب التغييرات في:
     - قاعدة البيانات المحلية (SQLite)
@@ -50,11 +50,11 @@ class LiveDataWatcher(QObject):
         'expenses', 'accounts'
     ]
     
-    def __init__(self, repository, check_interval: int = 15):
+    def __init__(self, repository, check_interval: int = 30):
         """
         Args:
             repository: مخزن البيانات
-            check_interval: فترة الفحص (بالثواني) - افتراضي 15 ثانية
+            check_interval: فترة الفحص (بالثواني) - افتراضي 30 ثانية
         """
         super().__init__()
         self.repository = repository
@@ -78,7 +78,7 @@ class LiveDataWatcher(QObject):
             self._last_counts[table] = 0
             self._last_modified[table] = None
         
-        logger.info("[LiveWatcher] ✅ تم تهيئة مراقب البيانات الحية (محسّن)")
+        logger.info("[LiveWatcher] ✅ تم تهيئة مراقب البيانات الحية (محسّن - كل 30 ثانية)")
     
     def start(self):
         """🚀 بدء المراقبة"""
@@ -193,8 +193,8 @@ class LiveDataWatcher(QObject):
             self._debounce_timer.setSingleShot(True)
             self._debounce_timer.timeout.connect(self._emit_pending_changes)
         
-        # إعادة تشغيل المؤقت (1000ms تأخير - زيادة للأداء)
-        self._debounce_timer.start(1000)
+        # إعادة تشغيل المؤقت (2000ms تأخير - زيادة للأداء)
+        self._debounce_timer.start(2000)
 
     def _emit_pending_changes(self):
         """⚡ إرسال الإشارات المجمعة"""

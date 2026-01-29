@@ -1452,15 +1452,23 @@ class MainWindow(QMainWindow):
             safe_print(f"❌ [MainWindow] خطأ في معالجة إشارة {table_name}: {e}")
 
     # 🔥 دوال تحديث الواجهة الفورية (INSTANT UI REFRESH)
-    # ⚡ حماية من التحديث المتكرر
+    # ⚡ حماية من التحديث المتكرر - زيادة الفترة لـ 2 ثانية
     _last_refresh_times = {}
+    _refresh_in_progress = {}  # ⚡ حماية إضافية من التحديث المتزامن
     
-    def _can_refresh(self, tab_name: str, min_interval: float = 1.0) -> bool:
+    def _can_refresh(self, tab_name: str, min_interval: float = 2.0) -> bool:
         """⚡ فحص إذا كان يمكن تحديث التاب (حماية من التكرار)"""
         import time
         current_time = time.time()
+        
+        # ⚡ فحص إذا كان التحديث جاري بالفعل
+        if self._refresh_in_progress.get(tab_name, False):
+            safe_print(f"⏳ [MainWindow] تحديث {tab_name} جاري بالفعل - تم تجاهل الطلب")
+            return False
+        
         last_time = self._last_refresh_times.get(tab_name, 0)
         if (current_time - last_time) < min_interval:
+            safe_print(f"⏳ [MainWindow] تحديث {tab_name} متكرر سريع - تم تجاهل الطلب")
             return False
         self._last_refresh_times[tab_name] = current_time
         return True
@@ -1470,11 +1478,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('clients'):
             return
         try:
+            self._refresh_in_progress['clients'] = True
             if hasattr(self, 'clients_tab') and self.clients_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.clients_tab, 'load_clients_data'):
-                    QTimer.singleShot(0, self.clients_tab.load_clients_data)
+                    def do_refresh():
+                        try:
+                            self.clients_tab.load_clients_data()
+                        finally:
+                            self._refresh_in_progress['clients'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['clients'] = False
+            else:
+                self._refresh_in_progress['clients'] = False
         except Exception as e:
+            self._refresh_in_progress['clients'] = False
             safe_print(f"خطأ في تحديث تاب العملاء: {e}")
 
     def _refresh_projects_tab(self):
@@ -1482,11 +1501,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('projects'):
             return
         try:
+            self._refresh_in_progress['projects'] = True
             if hasattr(self, 'projects_tab') and self.projects_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.projects_tab, 'load_projects_data'):
-                    QTimer.singleShot(0, self.projects_tab.load_projects_data)
+                    def do_refresh():
+                        try:
+                            self.projects_tab.load_projects_data()
+                        finally:
+                            self._refresh_in_progress['projects'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['projects'] = False
+            else:
+                self._refresh_in_progress['projects'] = False
         except Exception as e:
+            self._refresh_in_progress['projects'] = False
             safe_print(f"خطأ في تحديث تاب المشاريع: {e}")
 
     def _refresh_expenses_tab(self):
@@ -1494,10 +1524,23 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('expenses'):
             return
         try:
+            self._refresh_in_progress['expenses'] = True
             if hasattr(self, 'expense_tab') and self.expense_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.expense_tab, 'load_expenses_data'):
-                    QTimer.singleShot(0, self.expense_tab.load_expenses_data)
+                    def do_refresh():
+                        try:
+                            self.expense_tab.load_expenses_data()
+                        finally:
+                            self._refresh_in_progress['expenses'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['expenses'] = False
+            else:
+                self._refresh_in_progress['expenses'] = False
+        except Exception as e:
+            self._refresh_in_progress['expenses'] = False
+            safe_print(f"خطأ في تحديث تاب المصروفات: {e}")
         except Exception as e:
             safe_print(f"خطأ في تحديث تاب المصروفات: {e}")
 
@@ -1506,11 +1549,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('payments'):
             return
         try:
+            self._refresh_in_progress['payments'] = True
             if hasattr(self, 'payments_tab') and self.payments_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.payments_tab, 'load_payments_data'):
-                    QTimer.singleShot(0, self.payments_tab.load_payments_data)
+                    def do_refresh():
+                        try:
+                            self.payments_tab.load_payments_data()
+                        finally:
+                            self._refresh_in_progress['payments'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['payments'] = False
+            else:
+                self._refresh_in_progress['payments'] = False
         except Exception as e:
+            self._refresh_in_progress['payments'] = False
             safe_print(f"خطأ في تحديث تاب الدفعات: {e}")
 
     def _refresh_services_tab(self):
@@ -1518,11 +1572,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('services'):
             return
         try:
+            self._refresh_in_progress['services'] = True
             if hasattr(self, 'services_tab') and self.services_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.services_tab, 'load_services_data'):
-                    QTimer.singleShot(0, self.services_tab.load_services_data)
+                    def do_refresh():
+                        try:
+                            self.services_tab.load_services_data()
+                        finally:
+                            self._refresh_in_progress['services'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['services'] = False
+            else:
+                self._refresh_in_progress['services'] = False
         except Exception as e:
+            self._refresh_in_progress['services'] = False
             safe_print(f"خطأ في تحديث تاب الخدمات: {e}")
 
     def _refresh_accounting_tab(self):
@@ -1530,13 +1595,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('accounting'):
             return
         try:
+            self._refresh_in_progress['accounting'] = True
             if hasattr(self, 'accounting_tab') and self.accounting_tab:
                 from PyQt6.QtCore import QTimer
-                if hasattr(self.accounting_tab, 'load_accounts_data'):
-                    QTimer.singleShot(0, self.accounting_tab.load_accounts_data)
-                elif hasattr(self.accounting_tab, 'refresh_accounts'):
-                    QTimer.singleShot(0, self.accounting_tab.refresh_accounts)
+                def do_refresh():
+                    try:
+                        if hasattr(self.accounting_tab, 'load_accounts_data'):
+                            self.accounting_tab.load_accounts_data()
+                        elif hasattr(self.accounting_tab, 'refresh_accounts'):
+                            self.accounting_tab.refresh_accounts()
+                    finally:
+                        self._refresh_in_progress['accounting'] = False
+                QTimer.singleShot(50, do_refresh)
+            else:
+                self._refresh_in_progress['accounting'] = False
         except Exception as e:
+            self._refresh_in_progress['accounting'] = False
             safe_print(f"خطأ في تحديث تاب المحاسبة: {e}")
 
     def _refresh_tasks_tab(self):
@@ -1544,11 +1618,22 @@ class MainWindow(QMainWindow):
         if not self._can_refresh('tasks'):
             return
         try:
+            self._refresh_in_progress['tasks'] = True
             if hasattr(self, 'todo_tab') and self.todo_tab:
                 from PyQt6.QtCore import QTimer
                 if hasattr(self.todo_tab, 'load_tasks'):
-                    QTimer.singleShot(0, self.todo_tab.load_tasks)
+                    def do_refresh():
+                        try:
+                            self.todo_tab.load_tasks()
+                        finally:
+                            self._refresh_in_progress['tasks'] = False
+                    QTimer.singleShot(50, do_refresh)
+                else:
+                    self._refresh_in_progress['tasks'] = False
+            else:
+                self._refresh_in_progress['tasks'] = False
         except Exception as e:
+            self._refresh_in_progress['tasks'] = False
             safe_print(f"خطأ في تحديث تاب المهام: {e}")
 
     def closeEvent(self, event):
