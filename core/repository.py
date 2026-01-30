@@ -832,6 +832,47 @@ class Repository:
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول أقساط السلف جاهز")
 
+        # جدول عروض الأسعار (quotations) - نظام العروض
+        self.sqlite_cursor.execute("""
+        CREATE TABLE IF NOT EXISTS quotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            _mongo_id TEXT,
+            sync_status TEXT NOT NULL DEFAULT 'new_offline',
+            created_at TEXT NOT NULL,
+            last_modified TEXT NOT NULL,
+            quotation_number TEXT UNIQUE NOT NULL,
+            client_id TEXT NOT NULL,
+            client_name TEXT,
+            issue_date TEXT NOT NULL,
+            valid_until TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            scope_of_work TEXT,
+            items TEXT,
+            subtotal REAL DEFAULT 0.0,
+            discount_rate REAL DEFAULT 0.0,
+            discount_amount REAL DEFAULT 0.0,
+            tax_rate REAL DEFAULT 0.0,
+            tax_amount REAL DEFAULT 0.0,
+            total_amount REAL DEFAULT 0.0,
+            currency TEXT DEFAULT 'EGP',
+            status TEXT DEFAULT 'مسودة',
+            terms_and_conditions TEXT,
+            payment_terms TEXT,
+            delivery_time TEXT,
+            warranty TEXT,
+            notes TEXT,
+            internal_notes TEXT,
+            converted_to_project_id TEXT,
+            conversion_date TEXT,
+            sent_date TEXT,
+            viewed_date TEXT,
+            response_date TEXT,
+            FOREIGN KEY (client_id) REFERENCES clients(id)
+        )""")
+        self.sqlite_conn.commit()
+        safe_print("INFO: [Repository] ✅ جدول عروض الأسعار جاهز")
+
         # جدول المهام (tasks) - نظام TODO
         self.sqlite_cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -3053,6 +3094,10 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل مزامنة الدفعة الجديدة: {e}")
 
+        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+        Repository._dashboard_cache = None
+        Repository._dashboard_cache_time = 0
+
         return payment_data
 
     def get_payments_for_project(self, project_name: str) -> list[schemas.Payment]:
@@ -3162,9 +3207,6 @@ class Repository:
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
-        safe_print(f"DEBUG: [Repo] update_payment called with payment_id={payment_id}, type={type(payment_id)}")
-        safe_print(f"DEBUG: [Repo] payment_data.account_id={payment_data.account_id}")
-
         try:
             # ⚡ تحديد نوع الـ ID والبحث المناسب
             if isinstance(payment_id, int) or (isinstance(payment_id, str) and payment_id.isdigit()):
@@ -3174,10 +3216,15 @@ class Repository:
                 where_clause = "WHERE _mongo_id = ?"
                 where_params = (str(payment_id),)
 
+            # ⚡ جلب الحقول بأمان
+            client_id = getattr(payment_data, 'client_id', '') or ''
+            project_id = getattr(payment_data, 'project_id', '') or ''
+
             sql = f"""
                 UPDATE payments SET
                     last_modified = ?, date = ?, amount = ?,
-                    account_id = ?, method = ?, sync_status = ?
+                    account_id = ?, method = ?,
+                    client_id = ?, project_id = ?, sync_status = ?
                 {where_clause}
             """
             params = (
@@ -3185,18 +3232,17 @@ class Repository:
                 payment_data.date.isoformat(),
                 payment_data.amount,
                 payment_data.account_id,
-                payment_data.method,
+                payment_data.method or '',
+                client_id,
+                project_id,
                 "modified",
             ) + where_params
             
             self.sqlite_cursor.execute(sql, params)
             rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
-            
-            safe_print(f"INFO: [Repo] تم تعديل الدفعة محلياً (ID: {payment_id}), rows_affected={rows_affected}")
 
             if rows_affected == 0:
-                safe_print(f"WARNING: [Repo] لم يتم تحديث أي صف! payment_id={payment_id}")
                 return False
 
             if self.online:
@@ -3208,12 +3254,14 @@ class Repository:
                         "date": payment_data.date,
                         "amount": payment_data.amount,
                         "account_id": payment_data.account_id,
-                        "method": payment_data.method,
+                        "method": payment_data.method or '',
+                        "client_id": client_id,
+                        "project_id": project_id,
                         "sync_status": "synced",
                     }
 
                     result = None
-                    mongo_id = payment_data._mongo_id
+                    mongo_id = getattr(payment_data, '_mongo_id', None)
                     if mongo_id:
                         result = self.mongo_db.payments.update_one(
                             {"_id": ObjectId(mongo_id)}, {"$set": payment_dict}
@@ -3225,9 +3273,12 @@ class Repository:
                             ("synced",) + where_params,
                         )
                         self.sqlite_conn.commit()
-                        safe_print("INFO: [Repo] تم مزامنة تعديل الدفعة أونلاين.")
                 except Exception as e:
-                    safe_print(f"ERROR: [Repo] فشل مزامنة تعديل الدفعة: {e}")
+                    pass  # Ignore sync errors
+
+            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
 
             return True
         except Exception as e:
@@ -3278,6 +3329,10 @@ class Repository:
                     safe_print("INFO: [Repo] تم حذف الدفعة من MongoDB.")
                 except Exception as e:
                     safe_print(f"ERROR: [Repo] فشل حذف الدفعة من MongoDB: {e}")
+
+            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
 
             return True
         except Exception as e:
@@ -3834,6 +3889,10 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل مزامنة المصروف الجديد '{expense_data.category}': {e}")
 
+        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+        Repository._dashboard_cache = None
+        Repository._dashboard_cache_time = 0
+
         return expense_data
 
     def get_all_expenses(self) -> list[schemas.Expense]:
@@ -3865,18 +3924,10 @@ class Repository:
 
         return []
 
-    def update_expense(self, expense_id, expense_data: schemas.Expense) -> bool:
-        """تعديل مصروف موجود"""
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
-
-        safe_print(f"DEBUG: [Repo] update_expense called with expense_id={expense_id}, type={type(expense_id)}")
-        safe_print(f"DEBUG: [Repo] expense_data.account_id={expense_data.account_id}")
-
+    def get_expense_by_id(self, expense_id) -> schemas.Expense | None:
+        """⚡ جلب مصروف واحد بالـ ID"""
         try:
             # ⚡ تحديد نوع الـ ID والبحث المناسب
-            # إذا كان رقم، نبحث بالـ id
-            # إذا كان نص، نبحث بالـ _mongo_id
             if isinstance(expense_id, int) or (isinstance(expense_id, str) and expense_id.isdigit()):
                 where_clause = "WHERE id = ?"
                 where_params = (int(expense_id),)
@@ -3884,7 +3935,37 @@ class Repository:
                 where_clause = "WHERE _mongo_id = ?"
                 where_params = (str(expense_id),)
 
-            # تحديث في SQLite
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(f"SELECT * FROM expenses {where_clause}", where_params)
+                row = cursor.fetchone()
+                if row:
+                    return schemas.Expense(**dict(row))
+            finally:
+                cursor.close()
+        except Exception as e:
+            safe_print(f"ERROR: فشل جلب المصروف (ID: {expense_id}): {e}")
+        return None
+
+    def update_expense(self, expense_id, expense_data: schemas.Expense) -> bool:
+        """تعديل مصروف موجود"""
+        now_dt = datetime.now()
+        now_iso = now_dt.isoformat()
+
+        try:
+            # ⚡ تحديد نوع الـ ID والبحث المناسب
+            if isinstance(expense_id, int) or (isinstance(expense_id, str) and expense_id.isdigit()):
+                where_clause = "WHERE id = ?"
+                where_params = (int(expense_id),)
+            else:
+                where_clause = "WHERE _mongo_id = ?"
+                where_params = (str(expense_id),)
+
+            # ⚡ جلب الحقول بأمان
+            category = getattr(expense_data, 'category', '') or ''
+            description = getattr(expense_data, 'description', '') or ''
+            project_id = getattr(expense_data, 'project_id', '') or ''
+
             sql = f"""
                 UPDATE expenses SET
                     last_modified = ?, date = ?, category = ?, amount = ?,
@@ -3894,22 +3975,19 @@ class Repository:
             params = (
                 now_iso,
                 expense_data.date.isoformat(),
-                expense_data.category,
+                category,
                 expense_data.amount,
-                expense_data.description,
+                description,
                 expense_data.account_id,
-                expense_data.project_id,
+                project_id,
                 "modified",
             ) + where_params
             
             self.sqlite_cursor.execute(sql, params)
             rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
-            
-            safe_print(f"INFO: [Repo] تم تعديل المصروف محلياً (ID: {expense_id}), rows_affected={rows_affected}")
 
             if rows_affected == 0:
-                safe_print(f"WARNING: [Repo] لم يتم تحديث أي صف! expense_id={expense_id}")
                 return False
 
             # تحديث في MongoDB
@@ -3920,17 +3998,16 @@ class Repository:
                     expense_dict = {
                         "last_modified": now_dt,
                         "date": expense_data.date,
-                        "category": expense_data.category,
+                        "category": category,
                         "amount": expense_data.amount,
-                        "description": expense_data.description,
+                        "description": description,
                         "account_id": expense_data.account_id,
-                        "project_id": expense_data.project_id,
+                        "project_id": project_id,
                         "sync_status": "synced",
                     }
 
-                    # محاولة التحديث بـ _mongo_id
                     result = None
-                    mongo_id = expense_data._mongo_id
+                    mongo_id = getattr(expense_data, '_mongo_id', None)
                     if mongo_id:
                         result = self.mongo_db.expenses.update_one(
                             {"_id": ObjectId(mongo_id)}, {"$set": expense_dict}
@@ -3942,15 +4019,16 @@ class Repository:
                             ("synced",) + where_params,
                         )
                         self.sqlite_conn.commit()
-                        safe_print("INFO: [Repo] تم مزامنة تعديل المصروف أونلاين.")
-                except Exception as e:
-                    safe_print(f"ERROR: [Repo] فشل مزامنة تعديل المصروف: {e}")
+                except Exception:
+                    pass  # Ignore sync errors
+
+            # ⚡ إبطال cache الداشبورد
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
 
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تعديل المصروف: {e}")
-            import traceback
-            traceback.print_exc()
             return False
 
     def delete_expense(self, expense_id) -> bool:
@@ -3980,6 +4058,10 @@ class Repository:
                     safe_print("INFO: تم حذف المصروف من الأونلاين.")
                 except Exception as e:
                     safe_print(f"ERROR: فشل حذف المصروف من Mongo: {e}")
+
+            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
 
             return True
         except Exception as e:
@@ -4179,6 +4261,10 @@ class Repository:
         if CACHE_ENABLED and hasattr(self, '_projects_cache'):
             self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الإضافة")
+
+        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+        Repository._dashboard_cache = None
+        Repository._dashboard_cache_time = 0
 
         return project_data
 
@@ -4407,6 +4493,10 @@ class Repository:
             self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد التحديث")
 
+        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+        Repository._dashboard_cache = None
+        Repository._dashboard_cache_time = 0
+
         return project_data
 
     def delete_project(self, project_id: str) -> bool:
@@ -4459,6 +4549,10 @@ class Repository:
             if CACHE_ENABLED and hasattr(self, '_projects_cache'):
                 self._projects_cache.invalidate()
                 safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الحذف")
+
+            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
             
             return True
 
@@ -5718,6 +5812,956 @@ class Repository:
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل استعادة أرقام الفواتير: {e}")
             return False
+
+    # ==================== نظام عروض الأسعار (Quotations System) ====================
+
+    def get_all_quotations(self) -> list[dict]:
+        """جلب جميع عروض الأسعار"""
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT q.*, c.name as client_display_name, c.company_name
+                FROM quotations q
+                LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
+                ORDER BY q.created_at DESC
+            """)
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_quotation_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب عروض الأسعار: {e}")
+            return []
+
+    def get_quotation_by_id(self, quotation_id: int) -> dict | None:
+        """جلب عرض سعر بالمعرف"""
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT q.*, c.name as client_display_name, c.company_name
+                FROM quotations q
+                LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
+                WHERE q.id = ?
+            """, (quotation_id,))
+            row = self.sqlite_cursor.fetchone()
+            return self._row_to_quotation_dict(row) if row else None
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب عرض السعر: {e}")
+            return None
+
+    def get_quotations_by_client(self, client_id: str) -> list[dict]:
+        """جلب عروض أسعار عميل"""
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT * FROM quotations 
+                WHERE client_id = ? OR client_id = ?
+                ORDER BY created_at DESC
+            """, (client_id, str(client_id)))
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_quotation_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب عروض العميل: {e}")
+            return []
+
+    def get_quotations_by_status(self, status: str) -> list[dict]:
+        """جلب عروض الأسعار حسب الحالة"""
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT q.*, c.name as client_display_name, c.company_name
+                FROM quotations q
+                LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
+                WHERE q.status = ?
+                ORDER BY q.created_at DESC
+            """, (status,))
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_quotation_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب العروض: {e}")
+            return []
+
+    def create_quotation(self, data: dict) -> dict | None:
+        """إنشاء عرض سعر جديد"""
+        try:
+            now = datetime.now().isoformat()
+            items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+            
+            self.sqlite_cursor.execute("""
+                INSERT INTO quotations (
+                    quotation_number, client_id, client_name, issue_date, valid_until,
+                    title, description, scope_of_work, items,
+                    subtotal, discount_rate, discount_amount, tax_rate, tax_amount, total_amount,
+                    currency, status, terms_and_conditions, payment_terms, delivery_time,
+                    warranty, notes, internal_notes,
+                    created_at, last_modified, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
+            """, (
+                data.get("quotation_number"),
+                data.get("client_id"),
+                data.get("client_name"),
+                data.get("issue_date"),
+                data.get("valid_until"),
+                data.get("title"),
+                data.get("description"),
+                data.get("scope_of_work"),
+                items_json,
+                data.get("subtotal", 0),
+                data.get("discount_rate", 0),
+                data.get("discount_amount", 0),
+                data.get("tax_rate", 0),
+                data.get("tax_amount", 0),
+                data.get("total_amount", 0),
+                data.get("currency", "EGP"),
+                data.get("status", "مسودة"),
+                data.get("terms_and_conditions"),
+                data.get("payment_terms"),
+                data.get("delivery_time"),
+                data.get("warranty"),
+                data.get("notes"),
+                data.get("internal_notes"),
+                now, now
+            ))
+            self.sqlite_conn.commit()
+            quotation_id = self.sqlite_cursor.lastrowid
+            safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء عرض سعر: {data.get('quotation_number')}")
+            return self.get_quotation_by_id(quotation_id)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل إنشاء عرض السعر: {e}")
+            return None
+
+    def update_quotation(self, quotation_id: int, data: dict) -> dict | None:
+        """تحديث عرض سعر"""
+        try:
+            now = datetime.now().isoformat()
+            items_json = json.dumps(data.get("items", []), ensure_ascii=False)
+            
+            self.sqlite_cursor.execute("""
+                UPDATE quotations SET
+                    client_id = ?, client_name = ?, issue_date = ?, valid_until = ?,
+                    title = ?, description = ?, scope_of_work = ?, items = ?,
+                    subtotal = ?, discount_rate = ?, discount_amount = ?,
+                    tax_rate = ?, tax_amount = ?, total_amount = ?,
+                    currency = ?, status = ?, terms_and_conditions = ?,
+                    payment_terms = ?, delivery_time = ?, warranty = ?,
+                    notes = ?, internal_notes = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (
+                data.get("client_id"),
+                data.get("client_name"),
+                data.get("issue_date"),
+                data.get("valid_until"),
+                data.get("title"),
+                data.get("description"),
+                data.get("scope_of_work"),
+                items_json,
+                data.get("subtotal", 0),
+                data.get("discount_rate", 0),
+                data.get("discount_amount", 0),
+                data.get("tax_rate", 0),
+                data.get("tax_amount", 0),
+                data.get("total_amount", 0),
+                data.get("currency", "EGP"),
+                data.get("status"),
+                data.get("terms_and_conditions"),
+                data.get("payment_terms"),
+                data.get("delivery_time"),
+                data.get("warranty"),
+                data.get("notes"),
+                data.get("internal_notes"),
+                now, quotation_id
+            ))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث عرض السعر: {quotation_id}")
+            return self.get_quotation_by_id(quotation_id)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث عرض السعر: {e}")
+            return None
+
+    def update_quotation_status(self, quotation_id: int, status: str, extra_data: dict = None) -> bool:
+        """تحديث حالة عرض السعر"""
+        try:
+            now = datetime.now().isoformat()
+            extra = extra_data or {}
+            
+            # تحديث الحقول الإضافية حسب الحالة
+            sent_date = extra.get("sent_date") or (now if status == "مرسل" else None)
+            viewed_date = extra.get("viewed_date") or (now if status == "تم الاطلاع" else None)
+            response_date = extra.get("response_date") or (now if status in ["مقبول", "مرفوض"] else None)
+            
+            self.sqlite_cursor.execute("""
+                UPDATE quotations SET
+                    status = ?,
+                    sent_date = COALESCE(?, sent_date),
+                    viewed_date = COALESCE(?, viewed_date),
+                    response_date = COALESCE(?, response_date),
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (status, sent_date, viewed_date, response_date, now, quotation_id))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث حالة العرض: {status}")
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث حالة العرض: {e}")
+            return False
+
+    def convert_quotation_to_project(self, quotation_id: int, project_id: str) -> bool:
+        """تحويل عرض سعر إلى مشروع"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                UPDATE quotations SET
+                    status = 'تم التحويل لمشروع',
+                    converted_to_project_id = ?,
+                    conversion_date = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (project_id, now, now, quotation_id))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحويل العرض لمشروع: {project_id}")
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحويل العرض: {e}")
+            return False
+
+    def delete_quotation(self, quotation_id: int) -> bool:
+        """حذف عرض سعر"""
+        try:
+            self.sqlite_cursor.execute("DELETE FROM quotations WHERE id = ?", (quotation_id,))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم حذف عرض السعر: {quotation_id}")
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حذف عرض السعر: {e}")
+            return False
+
+    def generate_quotation_number(self) -> str:
+        """توليد رقم عرض سعر جديد"""
+        try:
+            year = datetime.now().strftime("%Y")
+            self.sqlite_cursor.execute("""
+                SELECT COUNT(*) FROM quotations WHERE quotation_number LIKE ?
+            """, (f"QT-{year}-%",))
+            count = self.sqlite_cursor.fetchone()[0]
+            return f"QT-{year}-{count + 1:04d}"
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل توليد رقم العرض: {e}")
+            return f"QT-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+    def get_quotation_statistics(self) -> dict:
+        """جلب إحصائيات عروض الأسعار"""
+        try:
+            stats = {}
+            
+            # إجمالي العروض
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations")
+            stats["total"] = self.sqlite_cursor.fetchone()[0]
+            
+            # حسب الحالة
+            self.sqlite_cursor.execute("""
+                SELECT status, COUNT(*), COALESCE(SUM(total_amount), 0)
+                FROM quotations GROUP BY status
+            """)
+            stats["by_status"] = {row[0]: {"count": row[1], "amount": row[2]} for row in self.sqlite_cursor.fetchall()}
+            
+            # العروض المقبولة هذا الشهر
+            month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
+            self.sqlite_cursor.execute("""
+                SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM quotations
+                WHERE status = 'مقبول' AND response_date >= ?
+            """, (month_start,))
+            row = self.sqlite_cursor.fetchone()
+            stats["accepted_this_month"] = {"count": row[0], "amount": row[1]}
+            
+            # معدل القبول
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations WHERE status IN ('مقبول', 'مرفوض')")
+            responded = self.sqlite_cursor.fetchone()[0]
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations WHERE status = 'مقبول'")
+            accepted = self.sqlite_cursor.fetchone()[0]
+            stats["acceptance_rate"] = (accepted / responded * 100) if responded > 0 else 0
+            
+            return stats
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب إحصائيات العروض: {e}")
+            return {}
+
+    def _row_to_quotation_dict(self, row) -> dict:
+        """تحويل صف عرض السعر إلى dict"""
+        items = []
+        try:
+            items_str = row["items"]
+            if items_str:
+                items = json.loads(items_str)
+        except (json.JSONDecodeError, TypeError):
+            pass
+        
+        result = {
+            "id": row["id"],
+            "_mongo_id": row["_mongo_id"],
+            "quotation_number": row["quotation_number"],
+            "client_id": row["client_id"],
+            "client_name": row["client_name"],
+            "issue_date": row["issue_date"],
+            "valid_until": row["valid_until"],
+            "title": row["title"],
+            "description": row["description"],
+            "scope_of_work": row["scope_of_work"],
+            "items": items,
+            "subtotal": row["subtotal"] or 0,
+            "discount_rate": row["discount_rate"] or 0,
+            "discount_amount": row["discount_amount"] or 0,
+            "tax_rate": row["tax_rate"] or 0,
+            "tax_amount": row["tax_amount"] or 0,
+            "total_amount": row["total_amount"] or 0,
+            "currency": row["currency"],
+            "status": row["status"],
+            "terms_and_conditions": row["terms_and_conditions"],
+            "payment_terms": row["payment_terms"],
+            "delivery_time": row["delivery_time"],
+            "warranty": row["warranty"],
+            "notes": row["notes"],
+            "internal_notes": row["internal_notes"],
+            "converted_to_project_id": row["converted_to_project_id"],
+            "conversion_date": row["conversion_date"],
+            "sent_date": row["sent_date"],
+            "viewed_date": row["viewed_date"],
+            "response_date": row["response_date"],
+            "created_at": row["created_at"],
+            "last_modified": row["last_modified"],
+            "sync_status": row["sync_status"],
+        }
+        
+        # إضافة اسم العميل من الجدول المرتبط
+        if "client_display_name" in row.keys():
+            result["client_display_name"] = row["client_display_name"]
+        if "company_name" in row.keys():
+            result["company_name"] = row["company_name"]
+        
+        return result
+
+
+    # ==================== نظام الموارد البشرية (HR System) ====================
+
+    # --- الموظفين (Employees) ---
+    def get_all_employees(self) -> list[dict]:
+        """جلب جميع الموظفين"""
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM employees ORDER BY name")
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_employee_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب الموظفين: {e}")
+            return []
+
+    def get_employee_by_id(self, employee_id: int) -> dict | None:
+        """جلب موظف بالمعرف"""
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM employees WHERE id = ?", (employee_id,))
+            row = self.sqlite_cursor.fetchone()
+            return self._row_to_employee_dict(row) if row else None
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب الموظف: {e}")
+            return None
+
+    def get_active_employees(self) -> list[dict]:
+        """جلب الموظفين النشطين فقط"""
+        try:
+            self.sqlite_cursor.execute("SELECT * FROM employees WHERE status = 'نشط' ORDER BY name")
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_employee_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب الموظفين النشطين: {e}")
+            return []
+
+    def create_employee(self, data: dict) -> dict | None:
+        """إنشاء موظف جديد"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                INSERT INTO employees (
+                    employee_id, name, national_id, email, phone, department, position,
+                    hire_date, salary, status, address, bank_account, notes,
+                    created_at, last_modified, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
+            """, (
+                data.get("employee_id"),
+                data.get("name"),
+                data.get("national_id"),
+                data.get("email"),
+                data.get("phone"),
+                data.get("department"),
+                data.get("position"),
+                data.get("hire_date"),
+                data.get("salary", 0),
+                data.get("status", "نشط"),
+                data.get("address"),
+                data.get("bank_account"),
+                data.get("notes"),
+                now, now
+            ))
+            self.sqlite_conn.commit()
+            employee_id = self.sqlite_cursor.lastrowid
+            safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء موظف: {data.get('name')}")
+            return self.get_employee_by_id(employee_id)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل إنشاء الموظف: {e}")
+            return None
+
+    def update_employee(self, employee_id: int, data: dict) -> dict | None:
+        """تحديث بيانات موظف"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                UPDATE employees SET
+                    employee_id = ?, name = ?, national_id = ?, email = ?, phone = ?,
+                    department = ?, position = ?, hire_date = ?, salary = ?, status = ?,
+                    address = ?, bank_account = ?, notes = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (
+                data.get("employee_id"),
+                data.get("name"),
+                data.get("national_id"),
+                data.get("email"),
+                data.get("phone"),
+                data.get("department"),
+                data.get("position"),
+                data.get("hire_date"),
+                data.get("salary", 0),
+                data.get("status", "نشط"),
+                data.get("address"),
+                data.get("bank_account"),
+                data.get("notes"),
+                now, employee_id
+            ))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث موظف: {data.get('name')}")
+            return self.get_employee_by_id(employee_id)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث الموظف: {e}")
+            return None
+
+    def delete_employee(self, employee_id: int) -> bool:
+        """حذف موظف"""
+        try:
+            self.sqlite_cursor.execute("DELETE FROM employees WHERE id = ?", (employee_id,))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم حذف موظف: {employee_id}")
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حذف الموظف: {e}")
+            return False
+
+    def _row_to_employee_dict(self, row) -> dict:
+        """تحويل صف قاعدة البيانات إلى dict"""
+        return {
+            "id": row["id"],
+            "_mongo_id": row["_mongo_id"],
+            "employee_id": row["employee_id"],
+            "name": row["name"],
+            "national_id": row["national_id"],
+            "email": row["email"],
+            "phone": row["phone"],
+            "department": row["department"],
+            "position": row["position"],
+            "hire_date": row["hire_date"],
+            "salary": row["salary"] or 0,
+            "status": row["status"],
+            "address": row["address"],
+            "bank_account": row["bank_account"],
+            "notes": row["notes"],
+            "created_at": row["created_at"],
+            "last_modified": row["last_modified"],
+            "sync_status": row["sync_status"],
+        }
+
+    # --- الحضور والانصراف (Attendance) ---
+    def get_employee_attendance(self, employee_id: int, month: str = None) -> list[dict]:
+        """جلب سجل حضور موظف"""
+        try:
+            if month:
+                self.sqlite_cursor.execute("""
+                    SELECT * FROM employee_attendance 
+                    WHERE employee_id = ? AND date LIKE ?
+                    ORDER BY date DESC
+                """, (employee_id, f"{month}%"))
+            else:
+                self.sqlite_cursor.execute("""
+                    SELECT * FROM employee_attendance 
+                    WHERE employee_id = ?
+                    ORDER BY date DESC LIMIT 31
+                """, (employee_id,))
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_attendance_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب سجل الحضور: {e}")
+            return []
+
+    def get_all_attendance_for_date(self, date: str) -> list[dict]:
+        """جلب حضور جميع الموظفين ليوم معين"""
+        try:
+            self.sqlite_cursor.execute("""
+                SELECT a.*, e.name as employee_name, e.department
+                FROM employee_attendance a
+                JOIN employees e ON a.employee_id = e.id
+                WHERE date(a.date) = date(?)
+                ORDER BY e.name
+            """, (date,))
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_attendance_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب حضور اليوم: {e}")
+            return []
+
+    def record_attendance(self, data: dict) -> dict | None:
+        """تسجيل حضور موظف"""
+        try:
+            now = datetime.now().isoformat()
+            # تحقق من وجود سجل لنفس اليوم
+            self.sqlite_cursor.execute("""
+                SELECT id FROM employee_attendance 
+                WHERE employee_id = ? AND date(date) = date(?)
+            """, (data.get("employee_id"), data.get("date")))
+            existing = self.sqlite_cursor.fetchone()
+            
+            if existing:
+                # تحديث السجل الموجود
+                self.sqlite_cursor.execute("""
+                    UPDATE employee_attendance SET
+                        check_in_time = COALESCE(?, check_in_time),
+                        check_out_time = COALESCE(?, check_out_time),
+                        work_hours = ?, overtime_hours = ?, status = ?, notes = ?,
+                        last_modified = ?, sync_status = 'modified_offline'
+                    WHERE id = ?
+                """, (
+                    data.get("check_in_time"),
+                    data.get("check_out_time"),
+                    data.get("work_hours", 0),
+                    data.get("overtime_hours", 0),
+                    data.get("status", "حاضر"),
+                    data.get("notes"),
+                    now, existing["id"]
+                ))
+            else:
+                # إنشاء سجل جديد
+                self.sqlite_cursor.execute("""
+                    INSERT INTO employee_attendance (
+                        employee_id, date, check_in_time, check_out_time,
+                        work_hours, overtime_hours, status, notes,
+                        created_at, last_modified, sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
+                """, (
+                    data.get("employee_id"),
+                    data.get("date"),
+                    data.get("check_in_time"),
+                    data.get("check_out_time"),
+                    data.get("work_hours", 0),
+                    data.get("overtime_hours", 0),
+                    data.get("status", "حاضر"),
+                    data.get("notes"),
+                    now, now
+                ))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تسجيل الحضور")
+            return data
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تسجيل الحضور: {e}")
+            return None
+
+    def _row_to_attendance_dict(self, row) -> dict:
+        """تحويل صف الحضور إلى dict"""
+        result = {
+            "id": row["id"],
+            "employee_id": row["employee_id"],
+            "date": row["date"],
+            "check_in_time": row["check_in_time"],
+            "check_out_time": row["check_out_time"],
+            "work_hours": row["work_hours"] or 0,
+            "overtime_hours": row["overtime_hours"] or 0,
+            "status": row["status"],
+            "notes": row["notes"],
+        }
+        # إضافة اسم الموظف إذا كان موجوداً
+        if "employee_name" in row.keys():
+            result["employee_name"] = row["employee_name"]
+        if "department" in row.keys():
+            result["department"] = row["department"]
+        return result
+
+    # --- الإجازات (Leaves) ---
+    def get_employee_leaves(self, employee_id: int = None, status: str = None) -> list[dict]:
+        """جلب طلبات الإجازات"""
+        try:
+            query = """
+                SELECT l.*, e.name as employee_name, e.department
+                FROM employee_leaves l
+                JOIN employees e ON l.employee_id = e.id
+                WHERE 1=1
+            """
+            params = []
+            if employee_id:
+                query += " AND l.employee_id = ?"
+                params.append(employee_id)
+            if status:
+                query += " AND l.status = ?"
+                params.append(status)
+            query += " ORDER BY l.created_at DESC"
+            
+            self.sqlite_cursor.execute(query, params)
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_leave_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب الإجازات: {e}")
+            return []
+
+    def create_leave_request(self, data: dict) -> dict | None:
+        """إنشاء طلب إجازة"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                INSERT INTO employee_leaves (
+                    employee_id, leave_type, start_date, end_date, days_count,
+                    reason, status, notes, created_at, last_modified, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'معلق', ?, ?, ?, 'new_offline')
+            """, (
+                data.get("employee_id"),
+                data.get("leave_type", "سنوية"),
+                data.get("start_date"),
+                data.get("end_date"),
+                data.get("days_count", 1),
+                data.get("reason"),
+                data.get("notes"),
+                now, now
+            ))
+            self.sqlite_conn.commit()
+            leave_id = self.sqlite_cursor.lastrowid
+            safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء طلب إجازة")
+            return {"id": leave_id, **data}
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل إنشاء طلب الإجازة: {e}")
+            return None
+
+    def update_leave_status(self, leave_id: int, status: str, approved_by: str = None) -> bool:
+        """تحديث حالة طلب إجازة"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                UPDATE employee_leaves SET
+                    status = ?, approved_by = ?, approval_date = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (status, approved_by, now if status in ["موافق عليه", "مرفوض"] else None, now, leave_id))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث حالة الإجازة: {status}")
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث حالة الإجازة: {e}")
+            return False
+
+    def _row_to_leave_dict(self, row) -> dict:
+        """تحويل صف الإجازة إلى dict"""
+        result = {
+            "id": row["id"],
+            "employee_id": row["employee_id"],
+            "leave_type": row["leave_type"],
+            "start_date": row["start_date"],
+            "end_date": row["end_date"],
+            "days_count": row["days_count"],
+            "reason": row["reason"],
+            "status": row["status"],
+            "approved_by": row["approved_by"],
+            "approval_date": row["approval_date"],
+            "notes": row["notes"],
+        }
+        if "employee_name" in row.keys():
+            result["employee_name"] = row["employee_name"]
+        if "department" in row.keys():
+            result["department"] = row["department"]
+        return result
+
+    # --- السلف (Loans) ---
+    def get_employee_loans(self, employee_id: int = None, status: str = None) -> list[dict]:
+        """جلب سلف الموظفين"""
+        try:
+            query = """
+                SELECT l.*, e.name as employee_name, e.department
+                FROM employee_loans l
+                JOIN employees e ON l.employee_id = e.id
+                WHERE 1=1
+            """
+            params = []
+            if employee_id:
+                query += " AND l.employee_id = ?"
+                params.append(employee_id)
+            if status:
+                query += " AND l.status = ?"
+                params.append(status)
+            query += " ORDER BY l.created_at DESC"
+            
+            self.sqlite_cursor.execute(query, params)
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_loan_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب السلف: {e}")
+            return []
+
+    def create_loan(self, data: dict) -> dict | None:
+        """إنشاء سلفة جديدة"""
+        try:
+            now = datetime.now().isoformat()
+            amount = data.get("amount", 0)
+            self.sqlite_cursor.execute("""
+                INSERT INTO employee_loans (
+                    employee_id, loan_type, amount, remaining_amount, monthly_deduction,
+                    start_date, end_date, status, reason, approved_by, notes,
+                    created_at, last_modified, sync_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'نشط', ?, ?, ?, ?, ?, 'new_offline')
+            """, (
+                data.get("employee_id"),
+                data.get("loan_type", "سلفة"),
+                amount,
+                amount,  # remaining = amount initially
+                data.get("monthly_deduction", 0),
+                data.get("start_date"),
+                data.get("end_date"),
+                data.get("reason"),
+                data.get("approved_by"),
+                data.get("notes"),
+                now, now
+            ))
+            self.sqlite_conn.commit()
+            loan_id = self.sqlite_cursor.lastrowid
+            safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء سلفة: {amount}")
+            return {"id": loan_id, **data}
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل إنشاء السلفة: {e}")
+            return None
+
+    def update_loan(self, loan_id: int, data: dict) -> bool:
+        """تحديث سلفة"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                UPDATE employee_loans SET
+                    remaining_amount = ?, monthly_deduction = ?, status = ?, notes = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (
+                data.get("remaining_amount"),
+                data.get("monthly_deduction"),
+                data.get("status"),
+                data.get("notes"),
+                now, loan_id
+            ))
+            self.sqlite_conn.commit()
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث السلفة: {e}")
+            return False
+
+    def _row_to_loan_dict(self, row) -> dict:
+        """تحويل صف السلفة إلى dict"""
+        result = {
+            "id": row["id"],
+            "employee_id": row["employee_id"],
+            "loan_type": row["loan_type"],
+            "amount": row["amount"] or 0,
+            "remaining_amount": row["remaining_amount"] or 0,
+            "monthly_deduction": row["monthly_deduction"] or 0,
+            "start_date": row["start_date"],
+            "end_date": row["end_date"],
+            "status": row["status"],
+            "reason": row["reason"],
+            "approved_by": row["approved_by"],
+            "notes": row["notes"],
+        }
+        if "employee_name" in row.keys():
+            result["employee_name"] = row["employee_name"]
+        if "department" in row.keys():
+            result["department"] = row["department"]
+        return result
+
+    # --- المرتبات (Salaries) ---
+    def get_employee_salaries(self, employee_id: int = None, month: str = None) -> list[dict]:
+        """جلب مرتبات الموظفين"""
+        try:
+            query = """
+                SELECT s.*, e.name as employee_name, e.department, e.position
+                FROM employee_salaries s
+                JOIN employees e ON s.employee_id = e.id
+                WHERE 1=1
+            """
+            params = []
+            if employee_id:
+                query += " AND s.employee_id = ?"
+                params.append(employee_id)
+            if month:
+                query += " AND s.month = ?"
+                params.append(month)
+            query += " ORDER BY s.month DESC, e.name"
+            
+            self.sqlite_cursor.execute(query, params)
+            rows = self.sqlite_cursor.fetchall()
+            return [self._row_to_salary_dict(row) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب المرتبات: {e}")
+            return []
+
+    def create_or_update_salary(self, data: dict) -> dict | None:
+        """إنشاء أو تحديث راتب شهري"""
+        try:
+            now = datetime.now().isoformat()
+            employee_id = data.get("employee_id")
+            month = data.get("month")
+            
+            # تحقق من وجود راتب لنفس الشهر
+            self.sqlite_cursor.execute("""
+                SELECT id FROM employee_salaries WHERE employee_id = ? AND month = ?
+            """, (employee_id, month))
+            existing = self.sqlite_cursor.fetchone()
+            
+            # حساب الإجماليات
+            basic = data.get("basic_salary", 0)
+            allowances = data.get("allowances", 0)
+            bonuses = data.get("bonuses", 0)
+            overtime = data.get("overtime_amount", 0)
+            gross = basic + allowances + bonuses + overtime
+            
+            loan_ded = data.get("loan_deductions", 0)
+            insurance = data.get("insurance_deduction", 0)
+            tax = data.get("tax_deduction", 0)
+            other_ded = data.get("other_deductions", 0)
+            total_deductions = loan_ded + insurance + tax + other_ded
+            
+            net = gross - total_deductions
+            
+            if existing:
+                self.sqlite_cursor.execute("""
+                    UPDATE employee_salaries SET
+                        basic_salary = ?, allowances = ?, bonuses = ?,
+                        overtime_hours = ?, overtime_rate = ?, overtime_amount = ?,
+                        loan_deductions = ?, insurance_deduction = ?, tax_deduction = ?,
+                        other_deductions = ?, gross_salary = ?, net_salary = ?,
+                        payment_status = ?, payment_date = ?, payment_method = ?, notes = ?,
+                        last_modified = ?, sync_status = 'modified_offline'
+                    WHERE id = ?
+                """, (
+                    basic, allowances, bonuses,
+                    data.get("overtime_hours", 0), data.get("overtime_rate", 0), overtime,
+                    loan_ded, insurance, tax, other_ded, gross, net,
+                    data.get("payment_status", "معلق"),
+                    data.get("payment_date"),
+                    data.get("payment_method"),
+                    data.get("notes"),
+                    now, existing["id"]
+                ))
+            else:
+                self.sqlite_cursor.execute("""
+                    INSERT INTO employee_salaries (
+                        employee_id, month, basic_salary, allowances, bonuses,
+                        overtime_hours, overtime_rate, overtime_amount,
+                        loan_deductions, insurance_deduction, tax_deduction, other_deductions,
+                        gross_salary, net_salary, payment_status, payment_date, payment_method, notes,
+                        created_at, last_modified, sync_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
+                """, (
+                    employee_id, month, basic, allowances, bonuses,
+                    data.get("overtime_hours", 0), data.get("overtime_rate", 0), overtime,
+                    loan_ded, insurance, tax, other_ded, gross, net,
+                    data.get("payment_status", "معلق"),
+                    data.get("payment_date"),
+                    data.get("payment_method"),
+                    data.get("notes"),
+                    now, now
+                ))
+            self.sqlite_conn.commit()
+            safe_print(f"SUCCESS: [Repo] ✅ تم حفظ راتب شهر {month}")
+            return data
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حفظ الراتب: {e}")
+            return None
+
+    def update_salary_status(self, salary_id: int, status: str, payment_date: str = None, payment_method: str = None) -> bool:
+        """تحديث حالة الراتب"""
+        try:
+            now = datetime.now().isoformat()
+            self.sqlite_cursor.execute("""
+                UPDATE employee_salaries SET
+                    payment_status = ?, payment_date = ?, payment_method = ?,
+                    last_modified = ?, sync_status = 'modified_offline'
+                WHERE id = ?
+            """, (status, payment_date, payment_method, now, salary_id))
+            self.sqlite_conn.commit()
+            return True
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل تحديث حالة الراتب: {e}")
+            return False
+
+    def _row_to_salary_dict(self, row) -> dict:
+        """تحويل صف الراتب إلى dict"""
+        result = {
+            "id": row["id"],
+            "employee_id": row["employee_id"],
+            "month": row["month"],
+            "basic_salary": row["basic_salary"] or 0,
+            "allowances": row["allowances"] or 0,
+            "bonuses": row["bonuses"] or 0,
+            "overtime_hours": row["overtime_hours"] or 0,
+            "overtime_rate": row["overtime_rate"] or 0,
+            "overtime_amount": row["overtime_amount"] or 0,
+            "loan_deductions": row["loan_deductions"] or 0,
+            "insurance_deduction": row["insurance_deduction"] or 0,
+            "tax_deduction": row["tax_deduction"] or 0,
+            "other_deductions": row["other_deductions"] or 0,
+            "gross_salary": row["gross_salary"] or 0,
+            "net_salary": row["net_salary"] or 0,
+            "payment_status": row["payment_status"],
+            "payment_date": row["payment_date"],
+            "payment_method": row["payment_method"],
+            "notes": row["notes"],
+        }
+        if "employee_name" in row.keys():
+            result["employee_name"] = row["employee_name"]
+        if "department" in row.keys():
+            result["department"] = row["department"]
+        if "position" in row.keys():
+            result["position"] = row["position"]
+        return result
+
+    # --- إحصائيات HR ---
+    def get_hr_statistics(self) -> dict:
+        """جلب إحصائيات الموارد البشرية"""
+        try:
+            stats = {}
+            
+            # عدد الموظفين
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM employees")
+            stats["total_employees"] = self.sqlite_cursor.fetchone()[0]
+            
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM employees WHERE status = 'نشط'")
+            stats["active_employees"] = self.sqlite_cursor.fetchone()[0]
+            
+            # إجمالي الرواتب
+            self.sqlite_cursor.execute("SELECT COALESCE(SUM(salary), 0) FROM employees WHERE status = 'نشط'")
+            stats["total_salaries"] = self.sqlite_cursor.fetchone()[0]
+            
+            # السلف النشطة
+            self.sqlite_cursor.execute("SELECT COUNT(*), COALESCE(SUM(remaining_amount), 0) FROM employee_loans WHERE status = 'نشط'")
+            row = self.sqlite_cursor.fetchone()
+            stats["active_loans_count"] = row[0]
+            stats["active_loans_amount"] = row[1]
+            
+            # طلبات الإجازات المعلقة
+            self.sqlite_cursor.execute("SELECT COUNT(*) FROM employee_leaves WHERE status = 'معلق'")
+            stats["pending_leaves"] = self.sqlite_cursor.fetchone()[0]
+            
+            # الموظفين حسب القسم
+            self.sqlite_cursor.execute("""
+                SELECT department, COUNT(*) FROM employees 
+                WHERE status = 'نشط' AND department IS NOT NULL
+                GROUP BY department
+            """)
+            stats["by_department"] = {row[0]: row[1] for row in self.sqlite_cursor.fetchall()}
+            
+            return stats
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب إحصائيات HR: {e}")
+            return {}
 
 
 # --- كود للاختبار (اختياري) ---

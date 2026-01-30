@@ -16,15 +16,19 @@ from core.sync_manager_v3 import SyncManagerV3  # (الجديد) مدير الم
 from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.expense_service import ExpenseService
+from services.hr_service import HRService  # 🏢 خدمة الموارد البشرية
 from services.invoice_service import InvoiceService
 from services.notification_service import NotificationService  # (الجديد) خدمة الإشعارات
 from services.project_service import ProjectService
+from services.quotation_service import QuotationService  # 📋 خدمة عروض الأسعار
 from services.service_service import ServiceService
 
 # (الأقسام اللي شغالين بيها)
 from services.settings_service import SettingsService
 from ui.accounting_manager import AccountingManagerTab  # (التاب الجديد أبو تابات داخلية)
 from ui.client_manager import ClientManagerTab
+from ui.hr_manager import HRManagerTab  # 🏢 تاب الموارد البشرية
+from ui.quotation_manager import QuotationManagerTab  # 📋 تاب عروض الأسعار
 
 # (تم مسح PaymentService لأنه بقى جوه ProjectService)
 # (استيراد التابات الجديدة)
@@ -102,6 +106,13 @@ class MainWindow(QMainWindow):
         
         # 🔥 الحصول على Repository للاتصال المباشر
         self.repository = self.accounting_service.repo
+
+        # 🏢 إنشاء خدمة الموارد البشرية
+        from core.event_bus import EventBus
+        self.hr_service = HRService(self.repository, EventBus())
+        
+        # 📋 إنشاء خدمة عروض الأسعار
+        self.quotation_service = QuotationService(self.repository, EventBus())
 
         role_display = (
             current_user.role.value
@@ -444,11 +455,20 @@ class MainWindow(QMainWindow):
         self.clients_tab = ClientManagerTab(self.client_service)
         self.tabs.addTab(self.clients_tab, "👤 العملاء")
 
-        # 6. Services
+        # 6. Quotations - عروض الأسعار
+        self.quotations_tab = QuotationManagerTab(
+            self.quotation_service,
+            client_service=self.client_service,
+            service_service=self.service_service,
+            project_service=self.project_service
+        )
+        self.tabs.addTab(self.quotations_tab, "📋 عروض الأسعار")
+
+        # 7. Services
         self.services_tab = ServiceManagerTab(self.service_service)
         self.tabs.addTab(self.services_tab, "🛠️ الخدمات والباقات")
 
-        # 7. Accounting
+        # 8. Accounting
         self.accounting_tab = AccountingManagerTab(
             self.expense_service,
             self.accounting_service,
@@ -456,7 +476,11 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.accounting_tab, "📊 المحاسبة")
 
-        # 8. Todo
+        # 9. HR - الموارد البشرية
+        self.hr_tab = HRManagerTab(self.hr_service, current_user=self.current_user)
+        self.tabs.addTab(self.hr_tab, "🏢 الموارد البشرية")
+
+        # 10. Todo
         from ui.todo_manager import TaskService, TodoManagerWidget
 
         TaskService._repository = self.accounting_service.repo
@@ -467,7 +491,7 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.todo_tab, "📋 المهام")
 
-        # 9. Settings
+        # 10. Settings
         self.settings_tab = SettingsTab(
             self.settings_service,
             repository=self.accounting_service.repo,
@@ -774,6 +798,7 @@ class MainWindow(QMainWindow):
             elif table_name == 'projects':
                 if hasattr(self, 'projects_tab') and hasattr(self.projects_tab, 'load_projects'):
                     QTimer.singleShot(100, self.projects_tab.load_projects)
+                # ⚡ ملاحظة: المحاسبة تُحدث تلقائياً عبر signals.py
                     
             elif table_name == 'services':
                 if hasattr(self, 'services_tab') and hasattr(self.services_tab, 'load_services'):
@@ -782,20 +807,20 @@ class MainWindow(QMainWindow):
             elif table_name == 'payments':
                 if hasattr(self, 'payments_tab') and hasattr(self.payments_tab, 'load_payments'):
                     QTimer.singleShot(100, self.payments_tab.load_payments)
-                # تحديث الحسابات أيضاً
-                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts'):
-                    QTimer.singleShot(200, self.accounting_tab.load_accounts)
+                # ⚡ تحديث الحسابات أيضاً (الأرصدة تتغير)
+                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts_data'):
+                    QTimer.singleShot(300, self.accounting_tab.load_accounts_data)
                     
             elif table_name == 'expenses':
-                if hasattr(self, 'expenses_tab') and hasattr(self.expenses_tab, 'load_expenses'):
-                    QTimer.singleShot(100, self.expenses_tab.load_expenses)
-                # تحديث الحسابات أيضاً
-                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts'):
-                    QTimer.singleShot(200, self.accounting_tab.load_accounts)
+                if hasattr(self, 'expense_tab') and hasattr(self.expense_tab, 'load_expenses'):
+                    QTimer.singleShot(100, self.expense_tab.load_expenses)
+                # ⚡ تحديث الحسابات أيضاً (الأرصدة تتغير)
+                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts_data'):
+                    QTimer.singleShot(300, self.accounting_tab.load_accounts_data)
                     
             elif table_name == 'accounts':
-                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts'):
-                    QTimer.singleShot(100, self.accounting_tab.load_accounts)
+                if hasattr(self, 'accounting_tab') and hasattr(self.accounting_tab, 'load_accounts_data'):
+                    QTimer.singleShot(100, self.accounting_tab.load_accounts_data)
                     
             elif table_name == 'tasks':
                 if hasattr(self, 'todo_tab') and hasattr(self.todo_tab, 'load_tasks'):
@@ -803,7 +828,7 @@ class MainWindow(QMainWindow):
             
             # تحديث Dashboard دائماً
             if hasattr(self, 'dashboard_tab') and hasattr(self.dashboard_tab, 'refresh_data'):
-                QTimer.singleShot(300, self.dashboard_tab.refresh_data)
+                QTimer.singleShot(500, self.dashboard_tab.refresh_data)
                 
         except Exception as e:
             safe_print(f"ERROR: [MainWindow] خطأ في تحديث جدول {table_name}: {e}")
@@ -1452,11 +1477,11 @@ class MainWindow(QMainWindow):
             safe_print(f"❌ [MainWindow] خطأ في معالجة إشارة {table_name}: {e}")
 
     # 🔥 دوال تحديث الواجهة الفورية (INSTANT UI REFRESH)
-    # ⚡ حماية من التحديث المتكرر - زيادة الفترة لـ 2 ثانية
+    # ⚡ حماية من التحديث المتكرر - تقليل الفترة لـ 0.5 ثانية
     _last_refresh_times = {}
     _refresh_in_progress = {}  # ⚡ حماية إضافية من التحديث المتزامن
     
-    def _can_refresh(self, tab_name: str, min_interval: float = 2.0) -> bool:
+    def _can_refresh(self, tab_name: str, min_interval: float = 0.5) -> bool:
         """⚡ فحص إذا كان يمكن تحديث التاب (حماية من التكرار)"""
         import time
         current_time = time.time()
@@ -1507,7 +1532,15 @@ class MainWindow(QMainWindow):
                 if hasattr(self.projects_tab, 'load_projects_data'):
                     def do_refresh():
                         try:
+                            # ⚡ إبطال الـ cache أولاً
+                            if hasattr(self.projects_tab, 'project_service'):
+                                if hasattr(self.projects_tab.project_service, 'invalidate_cache'):
+                                    self.projects_tab.project_service.invalidate_cache()
                             self.projects_tab.load_projects_data()
+                            # ⚡ تحديث المحاسبة أيضاً
+                            if hasattr(self, 'accounting_tab') and self.accounting_tab:
+                                if hasattr(self.accounting_tab, 'invalidate_cache'):
+                                    self.accounting_tab.invalidate_cache()
                         finally:
                             self._refresh_in_progress['projects'] = False
                     QTimer.singleShot(50, do_refresh)
@@ -1530,7 +1563,15 @@ class MainWindow(QMainWindow):
                 if hasattr(self.expense_tab, 'load_expenses_data'):
                     def do_refresh():
                         try:
+                            # ⚡ إبطال الـ cache أولاً
+                            if hasattr(self.expense_tab, 'expense_service'):
+                                if hasattr(self.expense_tab.expense_service, 'invalidate_cache'):
+                                    self.expense_tab.expense_service.invalidate_cache()
                             self.expense_tab.load_expenses_data()
+                            # ⚡ تحديث المحاسبة أيضاً
+                            if hasattr(self, 'accounting_tab') and self.accounting_tab:
+                                if hasattr(self.accounting_tab, 'invalidate_cache'):
+                                    self.accounting_tab.invalidate_cache()
                         finally:
                             self._refresh_in_progress['expenses'] = False
                     QTimer.singleShot(50, do_refresh)
@@ -1540,8 +1581,6 @@ class MainWindow(QMainWindow):
                 self._refresh_in_progress['expenses'] = False
         except Exception as e:
             self._refresh_in_progress['expenses'] = False
-            safe_print(f"خطأ في تحديث تاب المصروفات: {e}")
-        except Exception as e:
             safe_print(f"خطأ في تحديث تاب المصروفات: {e}")
 
     def _refresh_payments_tab(self):
@@ -1555,7 +1594,17 @@ class MainWindow(QMainWindow):
                 if hasattr(self.payments_tab, 'load_payments_data'):
                     def do_refresh():
                         try:
+                            # ⚡ إبطال الـ cache أولاً
+                            if hasattr(self.payments_tab, 'project_service'):
+                                if hasattr(self.payments_tab.project_service, 'invalidate_cache'):
+                                    self.payments_tab.project_service.invalidate_cache()
                             self.payments_tab.load_payments_data()
+                            # ⚡ تحديث المحاسبة أيضاً لأن الأرصدة تغيرت
+                            if hasattr(self, 'accounting_tab') and self.accounting_tab:
+                                if hasattr(self.accounting_tab, 'invalidate_cache'):
+                                    self.accounting_tab.invalidate_cache()
+                                if hasattr(self.accounting_tab, 'load_accounts_data'):
+                                    self.accounting_tab.load_accounts_data()
                         finally:
                             self._refresh_in_progress['payments'] = False
                     QTimer.singleShot(50, do_refresh)
@@ -1600,6 +1649,19 @@ class MainWindow(QMainWindow):
                 from PyQt6.QtCore import QTimer
                 def do_refresh():
                     try:
+                        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة
+                        if hasattr(self.accounting_tab, 'invalidate_cache'):
+                            self.accounting_tab.invalidate_cache()
+                        
+                        # ⚡ إبطال cache الـ service أيضاً
+                        if hasattr(self, 'accounting_service') and self.accounting_service:
+                            if hasattr(self.accounting_service, '_hierarchy_cache'):
+                                self.accounting_service._hierarchy_cache = None
+                                self.accounting_service._hierarchy_cache_time = 0
+                            # ⚡ إعادة حساب الأرصدة
+                            self.accounting_service._recalculate_cash_balances()
+                        
+                        # ⚡ تحميل البيانات الجديدة
                         if hasattr(self.accounting_tab, 'load_accounts_data'):
                             self.accounting_tab.load_accounts_data()
                         elif hasattr(self.accounting_tab, 'refresh_accounts'):
@@ -1611,7 +1673,6 @@ class MainWindow(QMainWindow):
                 self._refresh_in_progress['accounting'] = False
         except Exception as e:
             self._refresh_in_progress['accounting'] = False
-            safe_print(f"خطأ في تحديث تاب المحاسبة: {e}")
 
     def _refresh_tasks_tab(self):
         """تحديث تاب المهام فوراً"""

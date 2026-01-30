@@ -650,6 +650,9 @@ class ProjectService:
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
             self._auto_update_project_status(project.name, force_update=True)
+            
+            # ⚡ إبطال الـ cache لضمان تحديث البيانات
+            self.invalidate_cache()
 
             # ⚡ إرسال إشارات التحديث للـ UI (مع حماية من الأخطاء)
             try:

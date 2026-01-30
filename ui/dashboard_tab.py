@@ -903,6 +903,11 @@ class DashboardTab(QWidget):
         super().__init__(parent)
         self.accounting_service = accounting_service
 
+        # ⚡ حماية من التحديث المتكرر
+        self._last_refresh_time = 0
+        self._is_refreshing = False
+        self._MIN_REFRESH_INTERVAL = 5  # 5 ثواني بين كل تحديث
+
         # سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -1096,7 +1101,20 @@ class DashboardTab(QWidget):
             self.bottom_splitter.setOrientation(Qt.Orientation.Horizontal)
 
     def refresh_data(self):
-        """تحديث البيانات من المصدر الموحد"""
+        """تحديث البيانات من المصدر الموحد (مع حماية من التحديث المتكرر)"""
+        import time
+
+        # ⚡ حماية من التحديث المتكرر
+        current_time = time.time()
+        if self._is_refreshing:
+            safe_print("WARNING: [Dashboard] ⏳ تحديث جاري بالفعل - تم تجاهل الطلب")
+            return
+        if (current_time - self._last_refresh_time) < self._MIN_REFRESH_INTERVAL:
+            safe_print("WARNING: [Dashboard] ⏳ تحديث متكرر سريع - تم تجاهل الطلب")
+            return
+
+        self._is_refreshing = True
+        self._last_refresh_time = current_time
         safe_print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
 
         from core.data_loader import get_data_loader
@@ -1154,9 +1172,12 @@ class DashboardTab(QWidget):
                 safe_print(f"ERROR: [Dashboard] فشل تحديث الواجهة: {e}")
                 import traceback
                 traceback.print_exc()
+            finally:
+                self._is_refreshing = False
 
         def on_error(error_msg):
             safe_print(f"ERROR: [Dashboard] {error_msg}")
+            self._is_refreshing = False
 
         data_loader = get_data_loader()
         data_loader.load_async(

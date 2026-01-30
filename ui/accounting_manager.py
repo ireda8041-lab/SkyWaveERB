@@ -70,6 +70,11 @@ except ImportError:
 class AccountingManagerTab(QWidget):
     """تاب المحاسبة الرئيسي"""
 
+    # ⚡ Cache للحسابات على مستوى الكلاس
+    _accounts_cache = None
+    _accounts_cache_time = 0
+    _ACCOUNTS_CACHE_TTL = 60  # 60 ثانية
+
     def __init__(
         self,
         expense_service: ExpenseService,
@@ -87,6 +92,7 @@ class AccountingManagerTab(QWidget):
         # ⚡ حماية من التحديث المتكرر
         self._is_loading = False
         self._last_refresh_time = 0
+        self._force_next_refresh = False  # ⚡ للتحديث الإجباري عند الحاجة
 
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(5, 5, 5, 5)
@@ -120,6 +126,12 @@ class AccountingManagerTab(QWidget):
 
     def _on_accounting_changed(self):
         """⚡ معالج التحديث الفوري عند تغيير بيانات المحاسبة"""
+        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة
+        self.invalidate_cache()
+        # ⚡ إبطال cache الـ service أيضاً
+        if hasattr(self.accounting_service, '_hierarchy_cache'):
+            self.accounting_service._hierarchy_cache = None
+            self.accounting_service._hierarchy_cache_time = 0
         self.load_accounts_data()
 
     def _on_any_data_changed(self, data_type: str = None):
@@ -342,30 +354,64 @@ class AccountingManagerTab(QWidget):
 
         return tree_map
 
+    def _apply_cached_data(self, data):
+        """⚡ تطبيق البيانات المخزنة في الـ cache على الواجهة"""
+        try:
+            tree_map = data.get("tree_map", {})
+            self.all_accounts_list = data.get("all_accounts", [])
+
+            if tree_map:
+                tree_map = self._recalculate_hierarchy_tree(tree_map)
+
+            self._render_accounts_tree(tree_map)
+            self.update_summary_labels(tree_map)
+            safe_print(f"INFO: [AccManager] ⚡ تم تطبيق cache الحسابات ({len(self.all_accounts_list)} حساب)")
+        except Exception as e:
+            safe_print(f"ERROR: [AccManager] فشل تطبيق cache: {e}")
+
+    def invalidate_cache(self):
+        """⚡ إبطال الـ cache لإجبار التحديث في المرة القادمة"""
+        AccountingManagerTab._accounts_cache = None
+        AccountingManagerTab._accounts_cache_time = 0
+        self._force_next_refresh = True
+        safe_print("INFO: [AccManager] ⚡ تم إبطال cache الحسابات")
+
     def load_accounts_data(self):
-        """⚡ تحميل الحسابات في الخلفية لمنع التجميد (مع حماية من التحديث المتكرر)"""
+        """⚡ تحميل الحسابات في الخلفية لمنع التجميد (مع cache ذكي)"""
         import time
 
         from core.data_loader import get_data_loader
 
-        # ⚡ حماية من التحديث المتكرر (الحد الأدنى 3 ثواني بين كل تحديث)
+        # ⚡ حماية من التحديث المتكرر (الحد الأدنى 0.5 ثانية بين كل تحديث)
         current_time = time.time()
         if self._is_loading:
             safe_print("WARNING: [AccManager] ⏳ تحميل جاري بالفعل - تم تجاهل الطلب")
             return
-        if (current_time - self._last_refresh_time) < 3.0:
+        if (current_time - self._last_refresh_time) < 0.5:
             safe_print("WARNING: [AccManager] ⏳ تحديث متكرر سريع - تم تجاهل الطلب")
+            return
+
+        # ⚡ استخدام الـ cache إذا كان صالحاً (ولم يُطلب تحديث إجباري)
+        if (
+            not self._force_next_refresh
+            and AccountingManagerTab._accounts_cache
+            and (current_time - AccountingManagerTab._accounts_cache_time) < AccountingManagerTab._ACCOUNTS_CACHE_TTL
+        ):
+            safe_print("INFO: [AccManager] ⚡ استخدام cache الحسابات (سريع)")
+            self._apply_cached_data(AccountingManagerTab._accounts_cache)
+            self._last_refresh_time = current_time
             return
 
         self._is_loading = True
         self._last_refresh_time = current_time
+        self._force_next_refresh = False  # إعادة تعيين
         safe_print("INFO: [AccManager] جاري تحميل شجرة الحسابات...")
 
-        # دالة جلب البيانات (مع إجبار التحديث من قاعدة البيانات)
+        # دالة جلب البيانات (مع استخدام cache الـ service)
         def fetch_accounts():
             try:
-                # ⚡ إجبار التحديث من قاعدة البيانات (بدون cache)
-                tree_map = self.accounting_service.get_hierarchy_with_balances(force_refresh=True)
+                # ⚡ استخدام cache الـ service (بدون force_refresh)
+                tree_map = self.accounting_service.get_hierarchy_with_balances(force_refresh=False)
                 all_accounts = self.accounting_service.repo.get_all_accounts()
                 return {"tree_map": tree_map, "all_accounts": all_accounts}
             except Exception as e:
@@ -374,6 +420,7 @@ class AccountingManagerTab(QWidget):
 
         # دالة تحديث الواجهة
         def on_data_loaded(data):
+            import time
             try:
                 tree_map = data["tree_map"]
                 self.all_accounts_list = data["all_accounts"]
@@ -382,6 +429,10 @@ class AccountingManagerTab(QWidget):
                 if tree_map:
                     # هذه الخطوة تضمن أن الأب = مجموع الأبناء دائماً
                     tree_map = self._recalculate_hierarchy_tree(tree_map)
+
+                # ⚡ حفظ في الـ cache
+                AccountingManagerTab._accounts_cache = data
+                AccountingManagerTab._accounts_cache_time = time.time()
 
                 self._render_accounts_tree(tree_map)
 

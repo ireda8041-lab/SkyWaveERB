@@ -667,16 +667,17 @@ class PaymentEditorDialog(QDialog):
             return
 
         try:
+            # حفظ الحساب القديم لإعادة حساب رصيده
+            old_account_id = self.original_account_id
+            new_account_id = selected_account.code
+            
             # تحديث بيانات الدفعة
             self.payment.amount = float(new_amount)
-            self.payment.account_id = selected_account.code
+            self.payment.account_id = new_account_id
             self.payment.date = self.date_input.dateTime().toPyDateTime()
             self.payment.method = self.method_combo.currentText()
 
-            # ⚡ استخدام الـ id الرقمي أولاً (أكثر موثوقية للـ SQLite)
             payment_id = self.payment.id or self.payment._mongo_id
-            
-            safe_print(f"DEBUG: [PaymentEditor] تعديل دفعة - id={payment_id}, account_id={self.payment.account_id}")
 
             if self.project_service:
                 result = self.project_service.update_payment_for_project(payment_id, self.payment)
@@ -684,15 +685,20 @@ class PaymentEditorDialog(QDialog):
                 result = self.accounting_service.repo.update_payment(payment_id, self.payment)
 
             if result:
-                # ⚡ القيد المحاسبي يتم تحديثه تلقائياً عبر EventBus (PAYMENT_UPDATED)
-                QMessageBox.information(self, "تم", "تم تعديل الدفعة وتحديث القيود المحاسبية وحالة المشروع.")
+                # ⚡ إعادة حساب أرصدة الحسابات المتأثرة فوراً
+                if self.accounting_service:
+                    self.accounting_service._recalculate_cash_balances()
+                
+                # ⚡ إرسال إشارات التحديث
+                from core.signals import app_signals
+                app_signals.emit_data_changed("payments")
+                app_signals.emit_data_changed("accounting")
+                
+                QMessageBox.information(self, "تم", "تم تعديل الدفعة بنجاح")
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل حفظ التعديلات.")
         except Exception as e:
-            safe_print(f"ERROR: [PaymentEditor] فشل تعديل الدفعة: {e}")
-            import traceback
-            traceback.print_exc()
             QMessageBox.critical(self, "خطأ", f"فشل تعديل الدفعة: {e}")
 
     # ⚡ تم إزالة _reverse_and_repost_journal_entry - القيود تُدار عبر EventBus

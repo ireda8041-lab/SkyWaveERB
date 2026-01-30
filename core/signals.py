@@ -66,10 +66,16 @@ class AppSignals(QObject):
             self.clients_changed.emit()
         elif data_type == "projects":
             self.projects_changed.emit()
+            # ⚡ تحديث المحاسبة أيضاً عند تغيير المشاريع (القيود المحاسبية)
+            self.accounting_changed.emit()
         elif data_type == "expenses":
             self.expenses_changed.emit()
+            # ⚡ تحديث المحاسبة أيضاً عند تغيير المصروفات
+            self.accounting_changed.emit()
         elif data_type == "payments":
             self.payments_changed.emit()
+            # ⚡ تحديث المحاسبة أيضاً عند تغيير الدفعات
+            self.accounting_changed.emit()
         elif data_type == "services":
             self.services_changed.emit()
         elif data_type == "accounts" or data_type == "accounting":
@@ -79,6 +85,8 @@ class AppSignals(QObject):
             self.tasks_changed.emit()
         elif data_type == "invoices":
             self.invoices_changed.emit()
+            # ⚡ تحديث المحاسبة أيضاً عند تغيير الفواتير (القيود المحاسبية)
+            self.accounting_changed.emit()
 
         # ⚡ المزامنة الفورية معطّلة للسرعة
         # المزامنة تتم كل 5 دقائق تلقائياً

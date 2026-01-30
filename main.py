@@ -9,9 +9,9 @@ import os
 import sys
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
-MAINTENANCE_INTERVAL_MS = 10 * 60 * 1000     # 10 دقائق - صيانة دورية (زيادة للأداء)
-SETTINGS_SYNC_INTERVAL_MS = 5 * 60 * 1000    # 5 دقائق - مزامنة الإعدادات (زيادة للأداء)
-UPDATE_CHECK_INTERVAL_MS = 2 * 60 * 60 * 1000  # ساعتين - فحص التحديثات (زيادة للأداء)
+MAINTENANCE_INTERVAL_MS = 30 * 60 * 1000     # 30 دقيقة - صيانة دورية (زيادة للأداء)
+SETTINGS_SYNC_INTERVAL_MS = 10 * 60 * 1000   # 10 دقائق - مزامنة الإعدادات (زيادة للأداء)
+UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000  # 4 ساعات - فحص التحديثات (زيادة للأداء)
 PROJECT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000  # 24 ساعة - فحص المشاريع
 
 # ⚡ تحسين الأداء على Windows
@@ -199,7 +199,7 @@ class SkyWaveERPApp:
         # ⚡ Live Data Watcher - Real-Time Updates System
         from core.live_watcher import LiveDataWatcher
 
-        self.live_watcher = LiveDataWatcher(repository=self.repository, check_interval=15)  # ⚡ 15 ثانية
+        self.live_watcher = LiveDataWatcher(repository=self.repository, check_interval=30)  # ⚡ 30 ثانية للأداء
         self.live_router = None  # سيتم تهيئته بعد إنشاء النافذة الرئيسية
         logger.info("🔴 تم تهيئة نظام التحديثات الحية (محسّن)")
 

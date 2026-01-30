@@ -119,16 +119,6 @@ class SettingsTab(QWidget):
         self.tabs.addTab(self.update_tab, "🆕 التحديثات")
         self.setup_update_tab()
 
-        # 🏢 تاب الموارد البشرية - REMOVED (causing issues)
-        # HR functionality temporarily disabled
-        hr_placeholder = QWidget()
-        hr_layout = QVBoxLayout(hr_placeholder)
-        hr_label = QLabel("🚧 قسم الموارد البشرية معطل مؤقتاً")
-        hr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hr_label.setStyleSheet("font-size: 18px; color: #666; padding: 50px;")
-        hr_layout.addWidget(hr_label)
-        self.tabs.addTab(hr_placeholder, "🏢 الموارد البشرية")
-
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
 

@@ -57,7 +57,7 @@ class ExpenseService:
         # ⚡ Cache للمصروفات
         self._cache_time: float = 0
         self._cached_expenses: list[schemas.Expense] | None = None
-        self._cache_ttl = 30  # 30 ثانية
+        self._cache_ttl = 120  # ⚡ دقيقتين للتوازن بين الأداء والتحديث
 
         logger.info("⚡ قسم المصروفات (ExpenseService) جاهز")
 
@@ -163,7 +163,8 @@ class ExpenseService:
             if result:
                 # ⚡ إبطال الـ cache
                 self.invalidate_cache()
-                self.bus.publish('EXPENSE_UPDATED', expense_data)
+                # ⚡ إرسال البيانات بالشكل الصحيح
+                self.bus.publish('EXPENSE_UPDATED', {'expense': expense_data})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
                 # 🔔 إشعار
@@ -189,11 +190,15 @@ class ExpenseService:
         """
         logger.info(f"[ExpenseService] استلام طلب حذف مصروف: {expense_id}")
         try:
+            # ⚡ جلب بيانات المصروف قبل الحذف لمعرفة الحساب
+            expense = self.repo.get_expense_by_id(expense_id)
+            
             result = self.repo.delete_expense(expense_id)
             if result:
                 # ⚡ إبطال الـ cache
                 self.invalidate_cache()
-                self.bus.publish('EXPENSE_DELETED', {'id': expense_id})
+                # ⚡ إرسال البيانات مع المصروف المحذوف
+                self.bus.publish('EXPENSE_DELETED', {'id': expense_id, 'expense': expense})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed('expenses')
                 # 🔔 إشعار - تحويل expense_id لـ string

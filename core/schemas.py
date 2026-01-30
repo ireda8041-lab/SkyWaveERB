@@ -582,3 +582,234 @@ class Task(BaseSchema):
     reminder: bool = False  # هل التذكير مفعل
     reminder_minutes: int = 30  # دقائق قبل الموعد للتذكير
     assigned_to: str | None = None  # المستخدم المسؤول
+
+
+# ==================== نظام الموارد البشرية (HR System) ====================
+
+class EmployeeStatus(str, Enum):
+    """حالات الموظف"""
+    ACTIVE = "نشط"
+    INACTIVE = "غير نشط"
+    ON_LEAVE = "إجازة"
+    RESIGNED = "مستقيل"
+    PROBATION = "تحت التجربة"
+    TERMINATED = "منتهي الخدمة"
+
+
+class LeaveType(str, Enum):
+    """أنواع الإجازات"""
+    ANNUAL = "سنوية"
+    SICK = "مرضية"
+    EMERGENCY = "طارئة"
+    UNPAID = "بدون راتب"
+    MATERNITY = "أمومة"
+    PATERNITY = "أبوة"
+    HAJJ = "حج"
+    MARRIAGE = "زواج"
+    BEREAVEMENT = "وفاة"
+
+
+class LeaveStatus(str, Enum):
+    """حالات طلب الإجازة"""
+    PENDING = "معلق"
+    APPROVED = "موافق عليه"
+    REJECTED = "مرفوض"
+    CANCELLED = "ملغي"
+
+
+class LoanStatus(str, Enum):
+    """حالات السلفة"""
+    ACTIVE = "نشط"
+    PAID = "مسدد"
+    CANCELLED = "ملغي"
+
+
+class AttendanceStatus(str, Enum):
+    """حالات الحضور"""
+    PRESENT = "حاضر"
+    ABSENT = "غائب"
+    LATE = "متأخر"
+    EARLY_LEAVE = "انصراف مبكر"
+    ON_LEAVE = "إجازة"
+    HOLIDAY = "عطلة"
+
+
+class SalaryStatus(str, Enum):
+    """حالات الراتب"""
+    PENDING = "معلق"
+    CALCULATED = "محسوب"
+    APPROVED = "معتمد"
+    PAID = "مدفوع"
+
+
+class Employee(BaseSchema):
+    """نموذج الموظف"""
+    employee_id: str  # رقم الموظف (فريد)
+    name: str  # الاسم الكامل
+    national_id: str | None = None  # الرقم القومي
+    email: str | None = None
+    phone: str | None = None
+    phone2: str | None = None  # هاتف احتياطي
+    department: str | None = None  # القسم
+    position: str | None = None  # الوظيفة
+    hire_date: datetime | None = None  # تاريخ التعيين
+    salary: float = 0.0  # الراتب الأساسي
+    status: EmployeeStatus = EmployeeStatus.ACTIVE
+    address: str | None = None
+    bank_account: str | None = None  # الحساب البنكي
+    notes: str | None = None
+    # رصيد الإجازات
+    annual_leave_balance: int = 21  # رصيد الإجازات السنوية
+    sick_leave_balance: int = 7  # رصيد الإجازات المرضية
+
+
+class EmployeeLeave(BaseSchema):
+    """نموذج طلب إجازة"""
+    employee_id: int  # معرف الموظف
+    leave_type: LeaveType = LeaveType.ANNUAL
+    start_date: datetime
+    end_date: datetime
+    days_count: int = 1
+    reason: str | None = None
+    status: LeaveStatus = LeaveStatus.PENDING
+    approved_by: str | None = None
+    approval_date: datetime | None = None
+    notes: str | None = None
+
+
+class EmployeeLoan(BaseSchema):
+    """نموذج سلفة موظف"""
+    employee_id: int  # معرف الموظف
+    loan_type: str = "سلفة"  # نوع السلفة
+    amount: float  # مبلغ السلفة
+    remaining_amount: float  # المبلغ المتبقي
+    monthly_deduction: float = 0.0  # الخصم الشهري
+    start_date: datetime | None = None
+    end_date: datetime | None = None
+    status: LoanStatus = LoanStatus.ACTIVE
+    reason: str | None = None
+    approved_by: str | None = None
+    notes: str | None = None
+
+
+class EmployeeAttendance(BaseSchema):
+    """نموذج حضور موظف"""
+    employee_id: int  # معرف الموظف
+    date: datetime
+    check_in_time: str | None = None  # وقت الحضور (HH:MM)
+    check_out_time: str | None = None  # وقت الانصراف (HH:MM)
+    work_hours: float = 0.0  # ساعات العمل
+    overtime_hours: float = 0.0  # ساعات إضافية
+    status: AttendanceStatus = AttendanceStatus.PRESENT
+    notes: str | None = None
+
+
+class EmployeeSalary(BaseSchema):
+    """نموذج راتب شهري"""
+    employee_id: int  # معرف الموظف
+    month: str  # الشهر (YYYY-MM)
+    basic_salary: float = 0.0  # الراتب الأساسي
+    allowances: float = 0.0  # البدلات
+    bonuses: float = 0.0  # المكافآت
+    overtime_hours: float = 0.0  # ساعات إضافية
+    overtime_rate: float = 0.0  # سعر الساعة الإضافية
+    overtime_amount: float = 0.0  # قيمة الساعات الإضافية
+    loan_deductions: float = 0.0  # خصم السلف
+    insurance_deduction: float = 0.0  # خصم التأمينات
+    tax_deduction: float = 0.0  # خصم الضرائب
+    other_deductions: float = 0.0  # خصومات أخرى
+    gross_salary: float = 0.0  # إجمالي الراتب
+    net_salary: float = 0.0  # صافي الراتب
+    payment_status: SalaryStatus = SalaryStatus.PENDING
+    payment_date: datetime | None = None
+    payment_method: str | None = None
+    notes: str | None = None
+
+
+
+# ==================== نظام عروض الأسعار (Quotations System) ====================
+
+class QuotationStatus(str, Enum):
+    """حالات عرض السعر"""
+    DRAFT = "مسودة"
+    SENT = "مرسل"
+    VIEWED = "تم الاطلاع"
+    ACCEPTED = "مقبول"
+    REJECTED = "مرفوض"
+    EXPIRED = "منتهي"
+    CONVERTED = "تم التحويل لمشروع"
+
+
+class QuotationItem(BaseModel):
+    """نموذج بند في عرض السعر"""
+    service_id: str | None = None
+    description: str
+    quantity: float = 1.0
+    unit_price: float = 0.0
+    discount_rate: float = 0.0
+    discount_amount: float = 0.0
+    total: float = 0.0
+    notes: str | None = None
+
+
+class Quotation(BaseSchema):
+    """
+    📋 نموذج عرض السعر (Quotation/Proposal)
+    يستخدم لإنشاء عروض أسعار احترافية للعملاء
+    """
+    quotation_number: str  # رقم العرض (فريد)
+    client_id: str  # معرف العميل
+    client_name: str | None = None  # اسم العميل (للعرض)
+    
+    # التواريخ
+    issue_date: datetime  # تاريخ الإصدار
+    valid_until: datetime  # صالح حتى
+    
+    # العنوان والوصف
+    title: str  # عنوان العرض
+    description: str | None = None  # وصف تفصيلي
+    scope_of_work: str | None = None  # نطاق العمل
+    
+    # البنود
+    items: list[QuotationItem] = Field(default_factory=list)
+    
+    # الحسابات
+    subtotal: float = 0.0
+    discount_rate: float = 0.0
+    discount_amount: float = 0.0
+    tax_rate: float = 0.0
+    tax_amount: float = 0.0
+    total_amount: float = 0.0
+    
+    # العملة
+    currency: CurrencyCode = CurrencyCode.EGP
+    
+    # الحالة
+    status: QuotationStatus = QuotationStatus.DRAFT
+    
+    # الشروط والأحكام
+    terms_and_conditions: str | None = None
+    payment_terms: str | None = None  # شروط الدفع
+    delivery_time: str | None = None  # مدة التسليم
+    warranty: str | None = None  # الضمان
+    
+    # ملاحظات
+    notes: str | None = None
+    internal_notes: str | None = None  # ملاحظات داخلية (لا تظهر للعميل)
+    
+    # التحويل لمشروع
+    converted_to_project_id: str | None = None
+    conversion_date: datetime | None = None
+    
+    # المتابعة
+    sent_date: datetime | None = None
+    viewed_date: datetime | None = None
+    response_date: datetime | None = None
+    
+    @field_validator('items', mode='before')
+    @classmethod
+    def convert_none_to_list(cls, v):
+        if v is None:
+            return []
+        return v
+

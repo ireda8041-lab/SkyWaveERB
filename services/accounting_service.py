@@ -112,9 +112,38 @@ class AccountingService:
 
             # ⚡ إعادة حساب أرصدة الحسابات النقدية من الدفعات والمصروفات
             self._recalculate_cash_balances()
+            
+            # ⚠️ معطل: لا يتم إنشاء حسابات عملاء وإيرادات للمشاريع
+            # self._recalculate_project_accounts()
 
         except Exception as e:
             safe_print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
+
+    def _recalculate_project_accounts(self) -> None:
+        """
+        ⚡ إعادة حساب أرصدة حسابات العملاء والإيرادات من إجمالي المشاريع
+        - حساب العملاء (112100) = إجمالي قيمة المشاريع
+        - حساب الإيرادات (410100) = إجمالي قيمة المشاريع
+        """
+        try:
+            cursor = self.repo.sqlite_conn.cursor()
+            try:
+                # حساب إجمالي المشاريع
+                cursor.execute('SELECT COALESCE(SUM(total_amount), 0) FROM projects')
+                total_projects = cursor.fetchone()[0]
+                
+                # تحديث حساب العملاء
+                cursor.execute('UPDATE accounts SET balance = ? WHERE code = ?', (total_projects, self.ACC_RECEIVABLE_CODE))
+                
+                # تحديث حساب الإيرادات
+                cursor.execute('UPDATE accounts SET balance = ? WHERE code = ?', (total_projects, self.SERVICE_REVENUE_CODE))
+                
+                self.repo.sqlite_conn.commit()
+                safe_print(f"INFO: [AccountingService] ✅ تم تحديث حسابات المشاريع: {total_projects}")
+            finally:
+                cursor.close()
+        except Exception as e:
+            safe_print(f"WARNING: [AccountingService] فشل تحديث حسابات المشاريع: {e}")
 
     def _recalculate_cash_balances(self) -> None:
         """
@@ -182,6 +211,9 @@ class AccountingService:
             
             if updated_count > 0:
                 safe_print(f"INFO: [AccountingService] ✅ تم تحديث {updated_count} رصيد حساب نقدي")
+                # ⚡ إبطال الـ cache بعد التحديث
+                AccountingService._hierarchy_cache = None
+                AccountingService._hierarchy_cache_time = 0
 
         except Exception as e:
             safe_print(f"WARNING: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
@@ -319,47 +351,51 @@ class AccountingService:
             
             try:
                 # ⚡ جلب كل الحسابات مع أرصدتها باستخدام SQL
-                cursor.execute("SELECT code, balance FROM accounts WHERE code IS NOT NULL")
-                accounts_data = {row[0]: row[1] or 0 for row in cursor.fetchall()}
+                # العمود اسمه parent_id مش parent_code
+                cursor.execute("SELECT code, balance, parent_id FROM accounts WHERE code IS NOT NULL")
+                rows = cursor.fetchall()
+                accounts_data = {row[0]: row[1] or 0 for row in rows}
+                parent_ids = {row[0]: row[2] for row in rows}
             finally:
                 cursor.close()
             
-            # تحديث المجموعات (111000, 112000, etc.)
-            for acc_code, current_balance in accounts_data.items():
-                if not acc_code.endswith('000'):
-                    continue
+            # ⚡ تحديث المجموعات بناءً على parent_id الفعلي
+            # جمع الأبناء لكل أب
+            children_by_parent: dict[str, list[str]] = {}
+            for code, parent_id in parent_ids.items():
+                if parent_id and parent_id in accounts_data:
+                    if parent_id not in children_by_parent:
+                        children_by_parent[parent_id] = []
+                    children_by_parent[parent_id].append(code)
+            
+            # تحديث رصيد كل أب = مجموع أرصدة أبنائه
+            for parent_code, children in children_by_parent.items():
+                children_balance = sum(accounts_data.get(child, 0) for child in children)
+                current_balance = accounts_data.get(parent_code, 0)
                 
-                # جمع أرصدة الأبناء
-                prefix = acc_code[:3]  # مثل 111
-                children_balance = sum(
-                    balance for code, balance in accounts_data.items()
-                    if code.startswith(prefix) and code != acc_code and not code.endswith('000')
-                )
-                
-                # تحديث رصيد المجموعة إذا تغير
                 if abs(current_balance - children_balance) > 0.01:
-                    self.repo.update_account_balance(acc_code, children_balance)
-                    safe_print(f"INFO: [AccountingService] تحديث مجموعة {acc_code}: {children_balance}")
+                    self.repo.update_account_balance(parent_code, children_balance)
+                    safe_print(f"INFO: [AccountingService] تحديث مجموعة {parent_code}: {children_balance}")
 
         except Exception as e:
             safe_print(f"WARNING: [AccountingService] فشل تحديث أرصدة المجموعات: {e}")
 
     def _subscribe_to_events(self) -> None:
         """
-        دالة داخلية للاشتراك في كل الأحداث المالية.
+        الاشتراك في أحداث الدفعات والمصروفات فقط
+        ⚠️ مبسط: بدون قيود يومية - فقط تحديث أرصدة الحسابات النقدية
         """
-        self.bus.subscribe("INVOICE_CREATED", self.handle_new_invoice)
         self.bus.subscribe("EXPENSE_CREATED", self.handle_new_expense)
-        self.bus.subscribe("EXPENSE_UPDATED", self.handle_updated_expense)  # ✅ تعديل مصروف
-        self.bus.subscribe("EXPENSE_DELETED", self.handle_deleted_expense)  # ✅ حذف مصروف
+        self.bus.subscribe("EXPENSE_UPDATED", self.handle_updated_expense)
+        self.bus.subscribe("EXPENSE_DELETED", self.handle_deleted_expense)
         self.bus.subscribe("PAYMENT_RECEIVED", self.handle_new_payment)
-        self.bus.subscribe("PAYMENT_UPDATED", self.handle_updated_payment)  # ✅ تعديل دفعة
-        self.bus.subscribe("PAYMENT_DELETED", self.handle_deleted_payment)  # ✅ حذف دفعة
-        self.bus.subscribe("INVOICE_VOIDED", self.handle_voided_invoice)
-        self.bus.subscribe("INVOICE_EDITED", self.handle_edited_invoice)
-        self.bus.subscribe("PROJECT_CREATED", self.handle_new_project)  # ✅ المشاريع = الفواتير
-        self.bus.subscribe("PROJECT_EDITED", self.handle_edited_project)  # ✅ تعديل المشروع
-        logger.info("[AccountingService] تم الاشتراك في جميع الأحداث المالية")
+        self.bus.subscribe("PAYMENT_UPDATED", self.handle_updated_payment)
+        self.bus.subscribe("PAYMENT_DELETED", self.handle_deleted_payment)
+        # ⚠️ معطل: لا قيود للمشاريع والفواتير
+        # self.bus.subscribe("PROJECT_CREATED", self.handle_new_project)
+        # self.bus.subscribe("PROJECT_EDITED", self.handle_edited_project)
+        # self.bus.subscribe("INVOICE_CREATED", self.handle_new_invoice)
+        logger.info("[AccountingService] تم الاشتراك في أحداث الدفعات والمصروفات")
 
     def get_all_journal_entries(self) -> list[schemas.JournalEntry]:
         """
@@ -741,141 +777,23 @@ class AccountingService:
 
     def handle_new_project(self, data: dict):
         """
-        ✅ معالج إنشاء مشروع جديد (المشروع = الفاتورة في النظام)
-        ينشئ قيد يومية تلقائياً عند إنشاء مشروع جديد
-
-        القيد المحاسبي للمشروع:
-        - مدين: حساب العملاء (1200) - يزيد المستحقات
-        - دائن: حساب الإيرادات (4100) - يزيد الإيرادات
+        ✅ معالج إنشاء مشروع جديد
+        ⚠️ معطل: لا يتم إنشاء قيود محاسبية للمشاريع
         """
         project: schemas.Project = data["project"]
         safe_print(f"INFO: [AccountingService] تم استقبال حدث مشروع جديد: {project.name}")
-
-        try:
-            # تجاهل المشاريع بدون قيمة
-            if not project.total_amount or project.total_amount <= 0:
-                safe_print(
-                    f"INFO: [AccountingService] المشروع {project.name} بدون قيمة - لن يتم إنشاء قيد"
-                )
-                return
-
-            # إنشاء معرف المشروع
-            project_id = (
-                getattr(project, "_mongo_id", None)
-                or str(getattr(project, "id", ""))
-                or project.name
-            )
-
-            # إنشاء القيد المحاسبي الرئيسي (العملاء مدين، الإيرادات دائن)
-            success = self.post_journal_entry(
-                date=project.start_date or datetime.now(),
-                description=f"مشروع/فاتورة: {project.name}",
-                ref_type="project",
-                ref_id=project_id,
-                debit_account_code=self.ACC_RECEIVABLE_CODE,  # حساب العملاء (مدين)
-                credit_account_code=self.SERVICE_REVENUE_CODE,  # حساب الإيرادات (دائن)
-                amount=project.total_amount,
-            )
-
-            if success:
-                safe_print(
-                    f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للمشروع {project.name}"
-                )
-                # ⚡ إرسال إشارات التحديث الفوري (Real-time Sync)
-                try:
-                    app_signals.emit_data_changed("accounting")
-                    app_signals.emit_data_changed("projects")
-                    safe_print(
-                        "INFO: [AccountingService] ✅ تم إرسال إشارات التحديث الفوري للمشروع"
-                    )
-                except Exception as sig_err:
-                    safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-            else:
-                safe_print(
-                    f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للمشروع {project.name}"
-                )
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل معالجة المشروع {project.name}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        # ⚠️ معطل - لا يتم إنشاء قيود محاسبية
+        pass
 
     def handle_edited_project(self, data: dict):
         """
-        ✅ معالج تعديل مشروع - يحدث القيد المحاسبي
-
-        عند تعديل قيمة المشروع، يتم:
-        1. البحث عن القيد الأصلي
-        2. تحديث القيد بالقيمة الجديدة
+        ✅ معالج تعديل مشروع
+        ⚠️ معطل: لا يتم تحديث قيود محاسبية للمشاريع
         """
         project: schemas.Project = data["project"]
         safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل مشروع: {project.name}")
-
-        try:
-            project_id = (
-                getattr(project, "_mongo_id", None)
-                or str(getattr(project, "id", ""))
-                or project.name
-            )
-
-            # البحث عن القيد الأصلي
-            original_entry = self.repo.get_journal_entry_by_doc_id(project_id)
-
-            if not original_entry:
-                # لا يوجد قيد أصلي - إنشاء قيد جديد إذا كان المشروع له قيمة
-                if project.total_amount and project.total_amount > 0:
-                    safe_print(
-                        f"INFO: [AccountingService] لا يوجد قيد أصلي للمشروع {project.name} - إنشاء قيد جديد"
-                    )
-                    self.handle_new_project(data)
-                return
-
-            # تحديث القيد بالقيمة الجديدة
-            ar_account = self.repo.get_account_by_code(self.ACC_RECEIVABLE_CODE)
-            rev_account = self.repo.get_account_by_code(self.SERVICE_REVENUE_CODE)
-
-            if not ar_account or not rev_account:
-                safe_print("ERROR: [AccountingService] لم يتم العثور على الحسابات المطلوبة")
-                return
-
-            new_lines = [
-                schemas.JournalEntryLine(
-                    account_id=ar_account.code,
-                    account_code=ar_account.code,
-                    account_name=ar_account.name,
-                    debit=project.total_amount,
-                    credit=0.0,
-                    description=f"مدين: {ar_account.name}",
-                ),
-                schemas.JournalEntryLine(
-                    account_id=rev_account.code,
-                    account_code=rev_account.code,
-                    account_name=rev_account.name,
-                    debit=0.0,
-                    credit=project.total_amount,
-                    description=f"دائن: {rev_account.name}",
-                ),
-            ]
-
-            success = self.repo.update_journal_entry_by_doc_id(
-                doc_id=project_id,
-                new_lines=new_lines,
-                new_description=f"تعديل مشروع/فاتورة: {project.name}",
-            )
-
-            if success:
-                safe_print(
-                    f"SUCCESS: [AccountingService] تم تحديث القيد المحاسبي للمشروع {project.name}"
-                )
-            else:
-                safe_print(f"WARNING: [AccountingService] فشل تحديث القيد للمشروع {project.name}")
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل تعديل قيد المشروع {project.name}: {e}")
-            import traceback
-
-            traceback.print_exc()
+        # ⚠️ معطل - لا يتم تحديث قيود محاسبية
+        pass
 
     def handle_new_expense(self, data):
         """
@@ -897,6 +815,10 @@ class AccountingService:
         )
 
         try:
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            
             # تحديد حساب الدفع
             payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
 
@@ -923,177 +845,88 @@ class AccountingService:
 
     def handle_updated_expense(self, data):
         """
-        ✅ معالج تعديل مصروف - يعيد حساب رصيد الحساب
+        ✅ معالج تعديل مصروف - يعيد حساب أرصدة جميع الحسابات النقدية
         """
         try:
-            if isinstance(data, dict):
-                expense = data.get("expense", data)
-                if isinstance(expense, dict):
-                    expense = schemas.Expense(**expense)
-            else:
-                expense = data
-
-            safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل مصروف: {expense.category}")
-
-            # تحديد حساب الدفع
-            payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
-
-            if payment_account_code:
-                # ⚡ إعادة حساب رصيد الحساب
-                new_balance = self.recalculate_account_balance(payment_account_code)
-                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {payment_account_code} = {new_balance}")
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            
+            # ⚡ إعادة حساب جميع الحسابات النقدية (لأن الحساب القديم قد يكون مختلفاً)
+            self._recalculate_cash_balances()
 
             # ⚡ إرسال إشارات التحديث
             try:
                 app_signals.emit_data_changed("accounting")
                 app_signals.emit_data_changed("expenses")
-            except Exception as sig_err:
-                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
+            except:
+                pass
 
         except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل تعديل المصروف: {e}")
-            import traceback
-            traceback.print_exc()
+            pass
 
     def handle_deleted_expense(self, data: dict):
         """
-        ✅ معالج حذف مصروف - يعيد حساب رصيد الحساب
+        ✅ معالج حذف مصروف - يعيد حساب أرصدة جميع الحسابات النقدية
         """
         try:
-            expense_id = data.get("id")
-            expense = data.get("expense")
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
             
-            safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف مصروف: {expense_id}")
-
-            # تحديد حساب الدفع
-            payment_account_code = None
-            if expense:
-                payment_account_code = getattr(expense, "account_id", None) or getattr(expense, "payment_account_id", None)
-
-            if payment_account_code:
-                # ⚡ إعادة حساب رصيد الحساب
-                new_balance = self.recalculate_account_balance(payment_account_code)
-                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {payment_account_code} = {new_balance}")
-            else:
-                # إعادة حساب جميع الحسابات النقدية
-                self._recalculate_cash_balances()
-
-            # ⚡ إرسال إشارات التحديث
+            self._recalculate_cash_balances()
             try:
                 app_signals.emit_data_changed("accounting")
                 app_signals.emit_data_changed("expenses")
-            except Exception as sig_err:
-                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل حذف المصروف: {e}")
-            import traceback
-            traceback.print_exc()
+            except:
+                pass
+        except:
+            pass
 
     def handle_new_payment(self, data: dict):
-        """
-        معالج استلام دفعة جديدة - يعيد حساب رصيد الحساب
-
-        عند استلام دفعة:
-        - يتم إعادة حساب رصيد حساب الاستلام من جميع الدفعات والمصروفات
-        """
-        safe_print("INFO: [AccountingService] ⚡ تم استدعاء handle_new_payment!")
-
+        """معالج استلام دفعة جديدة"""
         try:
-            payment: schemas.Payment = data["payment"]
-        except (KeyError, TypeError) as e:
-            safe_print(f"ERROR: [AccountingService] فشل استخراج بيانات الدفعة: {e}")
-            return
-
-        safe_print(f"INFO: [AccountingService] تم استقبال حدث دفعة جديدة: {payment.amount} جنيه")
-
-        try:
-            # تحديد حساب الاستلام
-            receiving_account_code = getattr(payment, "account_id", None)
-            
-            if not receiving_account_code:
-                safe_print("WARNING: [AccountingService] لم يتم تحديد حساب الاستلام!")
-                return
-
-            # ⚡ إعادة حساب رصيد الحساب من جميع الدفعات والمصروفات
-            new_balance = self.recalculate_account_balance(receiving_account_code)
-
-            safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
-
-            # ⚡ إرسال إشارات التحديث الفوري
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            self._recalculate_cash_balances()
             try:
                 app_signals.emit_data_changed("accounting")
                 app_signals.emit_data_changed("payments")
-            except Exception as sig_err:
-                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل معالجة الدفعة: {e}")
-            import traceback
-            traceback.print_exc()
+            except:
+                pass
+        except:
+            pass
 
     def handle_updated_payment(self, data: dict):
-        """
-        ✅ معالج تعديل دفعة - يعيد حساب رصيد الحساب
-        """
+        """معالج تعديل دفعة"""
         try:
-            payment: schemas.Payment = data["payment"]
-            safe_print(f"INFO: [AccountingService] تم استقبال حدث تعديل دفعة: {payment.amount} جنيه")
-
-            # تحديد حساب الاستلام
-            receiving_account_code = getattr(payment, "account_id", None)
-
-            if receiving_account_code:
-                # ⚡ إعادة حساب رصيد الحساب
-                new_balance = self.recalculate_account_balance(receiving_account_code)
-                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
-
-            # ⚡ إرسال إشارات التحديث
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            self._recalculate_cash_balances()
             try:
                 app_signals.emit_data_changed("accounting")
                 app_signals.emit_data_changed("payments")
-            except Exception as sig_err:
-                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل تعديل الدفعة: {e}")
-            import traceback
-            traceback.print_exc()
+            except:
+                pass
+        except:
+            pass
 
     def handle_deleted_payment(self, data: dict):
-        """
-        ✅ معالج حذف دفعة - يعيد حساب رصيد الحساب
-        """
+        """معالج حذف دفعة"""
         try:
-            payment_id = data.get("payment_id")
-            payment = data.get("payment")
-
-            safe_print(f"INFO: [AccountingService] تم استقبال حدث حذف دفعة: {payment_id}")
-
-            # تحديد حساب الاستلام
-            receiving_account_code = None
-            if payment:
-                receiving_account_code = getattr(payment, "account_id", None)
-
-            if receiving_account_code:
-                # ⚡ إعادة حساب رصيد الحساب
-                new_balance = self.recalculate_account_balance(receiving_account_code)
-                safe_print(f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {receiving_account_code} = {new_balance}")
-            else:
-                # إعادة حساب جميع الحسابات النقدية
-                self._recalculate_cash_balances()
-
-            # ⚡ إرسال إشارات التحديث
+            # ⚡ إبطال الـ cache أولاً
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            self._recalculate_cash_balances()
             try:
                 app_signals.emit_data_changed("accounting")
                 app_signals.emit_data_changed("payments")
-            except Exception as sig_err:
-                safe_print(f"WARNING: [AccountingService] فشل إرسال الإشارات: {sig_err}")
-
-        except Exception as e:
-            safe_print(f"ERROR: [AccountingService] فشل حذف الدفعة: {e}")
-            import traceback
-            traceback.print_exc()
+            except:
+                pass
+        except:
+            pass
 
     def _update_account_balance(self, account, amount: float, is_debit: bool):
         """تحديث رصيد الحساب"""
@@ -1102,19 +935,27 @@ class AccountingService:
 
             # الأصول والمصروفات: المدين يزيد، الدائن ينقص
             # الخصوم والإيرادات وحقوق الملكية: الدائن يزيد، المدين ينقص
-            asset_types = [
-                schemas.AccountType.ASSET,
-                schemas.AccountType.CASH,
-                schemas.AccountType.EXPENSE,
-            ]
+            
+            # ⚡ دعم كل من enum و string
+            account_type = account.type
+            if hasattr(account_type, 'value'):
+                account_type_str = account_type.value
+            else:
+                account_type_str = str(account_type)
+            
+            # الأنواع التي تزيد بالمدين
+            debit_increase_types = ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']
+            
+            is_debit_increase_type = account_type_str in debit_increase_types
 
-            if account.type in asset_types:
+            if is_debit_increase_type:
                 new_balance = old_balance + amount if is_debit else old_balance - amount
             else:
+                # الإيرادات والخصوم تزيد بالدائن
                 new_balance = old_balance - amount if is_debit else old_balance + amount
 
             safe_print(f"DEBUG: [AccountingService] تحديث رصيد {account.name} ({account.code}):")
-            safe_print(f"  - نوع الحساب: {account.type.value}")
+            safe_print(f"  - نوع الحساب: {account_type_str}")
             safe_print(f"  - الرصيد القديم: {old_balance}")
             safe_print(f"  - المبلغ: {amount} ({'مدين' if is_debit else 'دائن'})")
             safe_print(f"  - الرصيد الجديد: {new_balance}")

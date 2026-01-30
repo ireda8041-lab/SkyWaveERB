@@ -270,7 +270,7 @@ class NotificationSyncWorker(QThread):
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
-        self._check_interval = 120000  # ⚡ دقيقتين بدلاً من 30 ثانية
+        self._check_interval = 180000  # ⚡ 3 دقائق بدلاً من دقيقتين
 
     def set_repository(self, repo):
         self.repo = repo

@@ -393,7 +393,6 @@ class ExpenseEditorDialog(QDialog):
 
     def save_expense(self):
         """حفظ المصروف"""
-        # الحصول على الفئة - إما من القائمة أو مكتوبة يدوياً
         category_text = self.category_combo.currentText().strip()
         selected_payment_code = self.account_combo.currentData()
         selected_project = self.project_combo.currentData()
@@ -410,30 +409,29 @@ class ExpenseEditorDialog(QDialog):
             self._show_validation_error("⚠️ الرجاء إدخال مبلغ صحيح")
             return
 
-        # استخدام حساب الدفع كـ account_id أيضاً (لأنه لا توجد حسابات مصروفات منفصلة)
         expense_data = schemas.Expense(
             date=self.date_input.dateTime().toPyDateTime(),
             category=category_text,
             amount=self.amount_input.value(),
             description=self.description_input.toPlainText(),
-            account_id=selected_payment_code,  # نفس حساب الدفع
+            account_id=selected_payment_code,
             payment_account_id=selected_payment_code,
             project_id=selected_project.name if selected_project else None,
         )
 
         try:
             if self.is_editing:
-                # ⚡ نقل الـ IDs من المصروف الأصلي
                 expense_data._mongo_id = self.expense_to_edit._mongo_id
                 expense_data.id = self.expense_to_edit.id
-                
-                # ⚡ استخدام الـ id الرقمي أولاً (أكثر موثوقية للـ SQLite)
                 expense_id = self.expense_to_edit.id or self.expense_to_edit._mongo_id
-                
-                safe_print(f"DEBUG: [ExpenseEditor] تعديل مصروف - id={expense_id}, account_id={expense_data.account_id}")
                 
                 result = self.expense_service.update_expense(expense_id, expense_data)
                 if result:
+                    # ⚡ إرسال إشارات التحديث
+                    from core.signals import app_signals
+                    app_signals.emit_data_changed("expenses")
+                    app_signals.emit_data_changed("accounting")
+                    
                     QMessageBox.information(self, "تم", "تم حفظ التعديلات بنجاح.")
                     self.accept()
                 else:
@@ -443,7 +441,6 @@ class ExpenseEditorDialog(QDialog):
                 QMessageBox.information(self, "تم", "تم حفظ المصروف بنجاح.")
                 self.accept()
         except Exception as e:
-            safe_print(f"ERROR: [ExpenseEditorDialog] فشل حفظ المصروف: {e}")
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
 
 

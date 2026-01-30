@@ -31,9 +31,9 @@ except ImportError:
 logger = get_logger(__name__)
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
-FULL_SYNC_INTERVAL_MS = 10 * 60 * 1000      # 10 دقائق - مزامنة كاملة (زيادة للأداء)
-QUICK_SYNC_INTERVAL_MS = 2 * 60 * 1000      # دقيقتين - رفع التغييرات (زيادة للأداء)
-CONNECTION_CHECK_INTERVAL_MS = 60 * 1000    # دقيقة واحدة - فحص الاتصال (زيادة للأداء)
+FULL_SYNC_INTERVAL_MS = 15 * 60 * 1000      # 15 دقيقة - مزامنة كاملة (زيادة للأداء)
+QUICK_SYNC_INTERVAL_MS = 3 * 60 * 1000      # 3 دقائق - رفع التغييرات (زيادة للأداء)
+CONNECTION_CHECK_INTERVAL_MS = 90 * 1000    # 90 ثانية - فحص الاتصال (زيادة للأداء)
 
 
 class UnifiedSyncManagerV3(QObject):
