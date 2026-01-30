@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.0.4"
+#define MyAppVersion "2.0.5"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -33,7 +33,7 @@ DisableProgramGroupPage=yes
 DisableDirPage=no
 
 ; ملفات الإخراج
-OutputDir=dist
+OutputDir=installer_output
 OutputBaseFilename=SkyWaveERP-Setup-{#MyAppVersion}
 SetupIconFile=icon.ico
 

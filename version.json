@@ -1,16 +1,16 @@
 {
-  "version": "2.0.4",
-  "version_name": "Sky Wave ERP v2.0.4",
+  "version": "2.0.5",
+  "version_name": "Sky Wave ERP v2.0.5",
   "release_date": "2026-01-30",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.0.4/SkyWaveERP-Setup-2.0.4.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.0.5/SkyWaveERP-Setup-2.0.5.exe",
   "changelog": [
-    "⚡ تحسين سرعة البرنامج بشكل كبير",
-    "🚀 تحسين أداء تحميل البيانات",
-    "✅ تحسين نظام الـ Cache للسرعة القصوى",
-    "🔧 إصلاحات وتحسينات عامة"
+    "🔧 إصلاح مشكلة التحديث التلقائي",
+    "✅ إضافة updater.exe للتحديث الصحيح",
+    "⚡ تحسين عملية التثبيت الصامت",
+    "🚀 إعادة تشغيل البرنامج تلقائياً بعد التحديث"
   ],
   "min_version": "1.0.0",
-  "mandatory": false,
-  "notes_ar": "تحسين سرعة البرنامج وأداء تحميل البيانات.",
-  "notes_en": "Performance improvements and faster data loading."
+  "mandatory": true,
+  "notes_ar": "إصلاح مشكلة التحديث التلقائي - يجب التحديث لهذا الإصدار.",
+  "notes_en": "Fixed auto-update issue - mandatory update."
 }
