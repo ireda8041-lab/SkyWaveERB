@@ -201,11 +201,13 @@ class Repository:
         self._lock = threading.RLock()
         self._mongo_connecting = False
 
-        # ⚡ Cache للبيانات المتكررة
+        # ⚡ Cache للبيانات المتكررة - TTL محسّن للسرعة
         if CACHE_ENABLED:
-            self._clients_cache = LRUCache(maxsize=500, ttl_seconds=60)
-            self._projects_cache = LRUCache(maxsize=500, ttl_seconds=60)
-            self._services_cache = LRUCache(maxsize=200, ttl_seconds=120)
+            self._clients_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # ⚡ 5 دقائق
+            self._projects_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # ⚡ 5 دقائق
+            self._services_cache = LRUCache(maxsize=500, ttl_seconds=600)  # ⚡ 10 دقائق
+            self._accounts_cache = LRUCache(maxsize=500, ttl_seconds=600)  # ⚡ 10 دقائق
+            self._expenses_cache = LRUCache(maxsize=500, ttl_seconds=180)  # ⚡ 3 دقائق
 
         # ⚡ 1. SQLite أولاً (سريع جداً) - لا ننتظر MongoDB
         self.sqlite_conn = sqlite3.connect(

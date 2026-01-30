@@ -9,10 +9,15 @@ import os
 import sys
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
-MAINTENANCE_INTERVAL_MS = 30 * 60 * 1000     # 30 دقيقة - صيانة دورية (زيادة للأداء)
-SETTINGS_SYNC_INTERVAL_MS = 10 * 60 * 1000   # 10 دقائق - مزامنة الإعدادات (زيادة للأداء)
-UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000  # 4 ساعات - فحص التحديثات (زيادة للأداء)
+MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000     # ⚡ ساعة - صيانة دورية (زيادة للأداء)
+SETTINGS_SYNC_INTERVAL_MS = 15 * 60 * 1000   # ⚡ 15 دقيقة - مزامنة الإعدادات (زيادة للأداء)
+UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000  # ⚡ 6 ساعات - فحص التحديثات (زيادة للأداء)
 PROJECT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000  # 24 ساعة - فحص المشاريع
+
+# ⚡ إعدادات تحسين الأداء
+LAZY_LOAD_DELAY_MS = 100  # تأخير التحميل الكسول
+CACHE_WARMUP_DELAY_MS = 5000  # تأخير تسخين الـ cache
+SYNC_START_DELAY_MS = 15000  # ⚡ تأخير بدء المزامنة (15 ثانية)
 
 # ⚡ تحسين الأداء على Windows
 if os.name == "nt":

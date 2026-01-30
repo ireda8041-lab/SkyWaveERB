@@ -22,9 +22,9 @@ except ImportError:
             pass
 
 # ⚡ إعدادات الأداء - محسّنة للسرعة القصوى
-DEFAULT_CACHE_SIZE = 2000
-DEFAULT_TTL_SECONDS = 300  # 5 دقائق
-MAX_CACHE_MEMORY_MB = 100
+DEFAULT_CACHE_SIZE = 5000  # ⚡ زيادة حجم الـ cache
+DEFAULT_TTL_SECONDS = 600  # ⚡ 10 دقائق - زيادة مدة الصلاحية
+MAX_CACHE_MEMORY_MB = 200  # ⚡ زيادة الذاكرة المخصصة
 
 
 class LRUCache:
@@ -125,8 +125,8 @@ class LRUCache:
 
 
 # ⚡ Cache عام للبيانات - محسّن للسرعة
-_data_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # 5 دقائق
-_query_cache = LRUCache(maxsize=500, ttl_seconds=120)  # دقيقتين
+_data_cache = LRUCache(maxsize=2000, ttl_seconds=600)  # ⚡ 10 دقائق
+_query_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # ⚡ 5 دقائق
 
 
 def cached(cache_key: str | None = None, ttl: int = 60):

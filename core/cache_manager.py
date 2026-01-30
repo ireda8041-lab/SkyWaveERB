@@ -301,15 +301,17 @@ class CacheManager:
     _instance: CacheManager | None = None
     _lock = threading.Lock()
     
-    # إعدادات TTL الافتراضية لكل نوع بيانات
+    # إعدادات TTL الافتراضية لكل نوع بيانات - محسّنة للسرعة
     DEFAULT_TTL = {
-        'clients': 300,      # 5 دقائق
-        'projects': 300,     # 5 دقائق
-        'services': 600,     # 10 دقائق
-        'accounts': 600,     # 10 دقائق
-        'settings': 1800,    # 30 دقيقة
-        'currencies': 3600,  # ساعة
-        'default': 300       # 5 دقائق
+        'clients': 600,      # ⚡ 10 دقائق
+        'projects': 600,     # ⚡ 10 دقائق
+        'services': 900,     # ⚡ 15 دقيقة
+        'accounts': 900,     # ⚡ 15 دقيقة
+        'settings': 3600,    # ⚡ ساعة
+        'currencies': 7200,  # ⚡ ساعتين
+        'expenses': 300,     # ⚡ 5 دقائق
+        'payments': 300,     # ⚡ 5 دقائق
+        'default': 600       # ⚡ 10 دقائق
     }
     
     def __new__(cls) -> CacheManager:
