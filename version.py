@@ -2,8 +2,8 @@
 معلومات الإصدار - Sky Wave ERP
 """
 
-__version__ = "2.0.2"
-__version_name__ = "Sky Wave ERP v2.0.2"
+__version__ = "2.0.4"
+__version_name__ = "Sky Wave ERP v2.0.4"
 __release_date__ = "2026-01-30"
 __author__ = "Sky Wave Team"
 __email__ = "dev@skywave.agency"
@@ -14,6 +14,11 @@ CURRENT_VERSION = __version__
 APP_NAME = "Sky Wave ERP"
 VERSION_NAME = __version_name__
 RELEASE_DATE = __release_date__
+
+# ⚡ إعدادات تحسين الأداء
+PERFORMANCE_MODE = True  # تفعيل وضع الأداء العالي
+LAZY_LOADING = True  # تحميل كسول للبيانات
+CACHE_ENABLED = True  # تفعيل الـ cache
 
 # رابط التحقق من التحديثات
 UPDATE_CHECK_URL = "https://raw.githubusercontent.com/ireda8041-lab/SkyWaveERB/main/version.json"

@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.0.2"
+#define MyAppVersion "2.0.4"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -33,7 +33,7 @@ DisableProgramGroupPage=yes
 DisableDirPage=no
 
 ; ملفات الإخراج
-OutputDir=installer_output
+OutputDir=dist
 OutputBaseFilename=SkyWaveERP-Setup-{#MyAppVersion}
 SetupIconFile=icon.ico
 
@@ -73,6 +73,9 @@ Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 
 ; نسخ قاعدة البيانات الأولية من المجلد الجذري كاحتياطي (لو مش موجودة في _internal)
 Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
+
+; ✅ نسخ ملف الإعدادات البيئية (مهم للاتصال بـ MongoDB)
+Source: ".env"; DestDir: "{app}"; Flags: ignoreversion
 
 ; نسخ الأيقونة
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
