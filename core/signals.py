@@ -2,6 +2,8 @@
 """
 نظام الإشارات (Signals) للتحديث الفوري للواجهة
 يستخدم لإرسال إشارات التحديث بين المكونات المختلفة
+
+⚡ محسّن لمنع التكرارات والـ Memory Leaks
 """
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -11,6 +13,9 @@ class AppSignals(QObject):
     """
     كلاس الإشارات العامة للتطبيق - محسّن لجميع أقسام البرنامج
     يستخدم لإرسال إشارات التحديث بين الخدمات والواجهة
+    
+    ⚡ ملاحظة: استخدم emit_data_changed() بدلاً من الإشارات المحددة مباشرة
+    لتجنب التكرارات
     """
 
     # إشارة عامة لتحديث البيانات
@@ -50,46 +55,65 @@ class AppSignals(QObject):
 
     # ⚡ مرجع لمدير المزامنة (يُعيّن من main.py)
     _sync_manager = None
+    
+    # ⚡ منع التكرارات - تتبع آخر إشارة مرسلة
+    _last_emitted = {}
+    _emit_cooldown_ms = 100  # الحد الأدنى بين الإشارات المتكررة
 
     @classmethod
     def set_sync_manager(cls, sync_manager):
         """تعيين مدير المزامنة للمزامنة الفورية"""
         cls._sync_manager = sync_manager
 
+    def _should_emit(self, signal_name: str) -> bool:
+        """
+        ⚡ فحص إذا كان يجب إرسال الإشارة (منع التكرارات)
+        """
+        import time
+        current_time = time.time() * 1000  # بالمللي ثانية
+        
+        last_time = self._last_emitted.get(signal_name, 0)
+        if current_time - last_time < self._emit_cooldown_ms:
+            return False
+        
+        self._last_emitted[signal_name] = current_time
+        return True
+
     def emit_data_changed(self, data_type: str):
-        """إرسال إشارة تحديث البيانات - محسّن للسرعة"""
-        # ⚡ إرسال الإشارة العامة
+        """
+        إرسال إشارة تحديث البيانات - محسّن لمنع التكرارات
+        
+        ⚡ هذه الدالة هي الطريقة المفضلة لإرسال إشارات التحديث
+        """
+        # ⚡ فحص التكرارات
+        if not self._should_emit(f"data_{data_type}"):
+            return
+        
+        # ⚡ إرسال الإشارة العامة فقط
         self.data_changed.emit(data_type)
         
-        # ⚡ إرسال الإشارة المحددة أيضاً للتوافق
+        # ⚡ إرسال الإشارة المحددة (بدون تكرار accounting_changed)
         if data_type == "clients":
             self.clients_changed.emit()
         elif data_type == "projects":
             self.projects_changed.emit()
-            # ⚡ تحديث المحاسبة أيضاً عند تغيير المشاريع (القيود المحاسبية)
-            self.accounting_changed.emit()
         elif data_type == "expenses":
             self.expenses_changed.emit()
-            # ⚡ تحديث المحاسبة أيضاً عند تغيير المصروفات
-            self.accounting_changed.emit()
         elif data_type == "payments":
             self.payments_changed.emit()
-            # ⚡ تحديث المحاسبة أيضاً عند تغيير الدفعات
-            self.accounting_changed.emit()
         elif data_type == "services":
             self.services_changed.emit()
-        elif data_type == "accounts" or data_type == "accounting":
+        elif data_type == "accounts":
             self.accounts_changed.emit()
-            self.accounting_changed.emit()
         elif data_type == "tasks":
             self.tasks_changed.emit()
         elif data_type == "invoices":
             self.invoices_changed.emit()
-            # ⚡ تحديث المحاسبة أيضاً عند تغيير الفواتير (القيود المحاسبية)
-            self.accounting_changed.emit()
-
-        # ⚡ المزامنة الفورية معطّلة للسرعة
-        # المزامنة تتم كل 5 دقائق تلقائياً
+        
+        # ⚡ تحديث المحاسبة للعمليات المالية فقط (مرة واحدة)
+        if data_type in ("projects", "expenses", "payments", "invoices", "accounts", "accounting"):
+            if self._should_emit("accounting"):
+                self.accounting_changed.emit()
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""
@@ -107,6 +131,24 @@ class AppSignals(QObject):
     def emit_realtime_sync_status(self, is_connected: bool):
         """إرسال إشارة حالة المزامنة الفورية"""
         self.realtime_sync_status.emit(is_connected)
+    
+    def safe_connect(self, signal, slot, connection_type=None):
+        """
+        ⚡ ربط آمن للإشارات - يفصل أولاً ثم يربط
+        يمنع التكرارات والـ Memory Leaks
+        
+        الاستخدام:
+            app_signals.safe_connect(app_signals.tasks_changed, self._on_tasks_changed)
+        """
+        try:
+            signal.disconnect(slot)
+        except (TypeError, RuntimeError):
+            pass  # لم يكن مربوطاً
+        
+        if connection_type:
+            signal.connect(slot, connection_type)
+        else:
+            signal.connect(slot)
 
 
 # إنشاء نسخة واحدة من الإشارات (Singleton)

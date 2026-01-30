@@ -32,16 +32,20 @@ class LoginWindow(QDialog):
 
         self.setWindowTitle("Sky Wave ERP - تسجيل الدخول")
 
-        # 📱 تصميم متجاوب - حساب الحجم بناءً على الشاشة
+        # 📱 تصميم متجاوب - حجم ديناميكي بدلاً من ثابت
         screen = QApplication.primaryScreen()
         if screen:
             screen_size = screen.availableGeometry()
             # حجم مناسب للشاشات المختلفة
             width = min(520, int(screen_size.width() * 0.4))
             height = min(850, int(screen_size.height() * 0.9))
-            self.setFixedSize(width, height)
+            # ⚡ استخدام setMinimumSize و setMaximumSize بدلاً من setFixedSize
+            self.setMinimumSize(400, 600)
+            self.setMaximumSize(600, 900)
+            self.resize(width, height)
         else:
-            self.setFixedSize(520, 850)
+            self.setMinimumSize(400, 600)
+            self.resize(520, 850)
 
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)

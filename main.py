@@ -50,14 +50,11 @@ from version import APP_NAME, CURRENT_VERSION
 logger.info(f"⚡ {APP_NAME} v{CURRENT_VERSION}")
 
 # --- 1. استيراد "القلب" ---
-# Advanced Sync
-from core.advanced_sync_manager import AdvancedSyncManagerV3
-
 # Authentication
 from core.auth_models import AuthService
 from core.event_bus import EventBus
 from core.repository import Repository
-from core.sync_manager_v3 import SyncManagerV3
+# 🔄 نظام المزامنة الموحد - المصدر الوحيد للمزامنة
 from core.unified_sync import UnifiedSyncManagerV3
 
 # --- 2. استيراد "الأقسام" (العقل) ---
@@ -120,13 +117,11 @@ class SkyWaveERPApp:
 
         # ملاحظة: الـ services تستخدم app_signals مباشرة، لا حاجة لربط Repository signal
 
-        # 🔥 نظام المزامنة V3 - للتوافق مع الواجهة
-        self.sync_manager = SyncManagerV3(self.repository)
-
         # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
-        from core.signals import app_signals
-
         app_signals.set_sync_manager(self.unified_sync)
+
+        # 🔥 للتوافق مع الواجهة - نستخدم unified_sync كـ sync_manager
+        self.sync_manager = self.unified_sync
 
         logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
         logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
@@ -188,9 +183,6 @@ class SkyWaveERPApp:
 
         # Authentication Service
         self.auth_service = AuthService(repository=self.repository)
-
-        # Advanced Sync Manager
-        self.advanced_sync_manager = AdvancedSyncManagerV3(repository=self.repository)
 
         # ⚡ Live Data Watcher - Real-Time Updates System
         from core.live_watcher import LiveDataWatcher
@@ -449,8 +441,7 @@ class SkyWaveERPApp:
             notification_service=self.notification_service,
             printing_service=self.printing_service,
             export_service=self.export_service,
-            advanced_sync_manager=self.advanced_sync_manager,
-            sync_manager=self.sync_manager,  # 🔥 نظام المزامنة الجديد
+            sync_manager=self.sync_manager,  # 🔥 نظام المزامنة الموحد
         )
 
         # === عرض النافذة الرئيسية ===
@@ -676,11 +667,13 @@ class SkyWaveERPApp:
         # إيقاف مدير المزامنة V3
         try:
             if hasattr(self, "sync_manager") and self.sync_manager:
-                if hasattr(self.sync_manager, "stop"):
+                if hasattr(self.sync_manager, "stop_auto_sync"):
+                    self.sync_manager.stop_auto_sync()
+                elif hasattr(self.sync_manager, "stop"):
                     self.sync_manager.stop()
-                logger.info("[MainApp] تم إيقاف مدير المزامنة V3")
+                logger.info("[MainApp] تم إيقاف مدير المزامنة")
         except Exception as e:
-            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة V3: {e}")
+            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة: {e}")
 
         # إيقاف خدمة التحديث التلقائي
         try:
@@ -700,15 +693,6 @@ class SkyWaveERPApp:
                 logger.info("[MainApp] تم إغلاق اتصال قاعدة البيانات")
         except Exception as e:
             logger.debug(f"[MainApp] تحذير عند إغلاق قاعدة البيانات: {e}")
-
-        # إيقاف مدير المزامنة المتقدم
-        try:
-            if hasattr(self, "advanced_sync_manager") and self.advanced_sync_manager:
-                if hasattr(self.advanced_sync_manager, "shutdown"):
-                    self.advanced_sync_manager.shutdown()
-                logger.info("[MainApp] تم إيقاف مدير المزامنة المتقدم")
-        except Exception as e:
-            logger.debug(f"[MainApp] تحذير عند إيقاف مدير المزامنة المتقدم: {e}")
 
         logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
 

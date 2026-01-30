@@ -130,6 +130,62 @@ def _copy_initial_db():
 _copy_initial_db()
 
 
+class CursorContextManager:
+    """
+    ⚡ Context Manager للـ cursor لضمان إغلاقه تلقائياً
+    
+    الاستخدام:
+        with repo.get_cursor() as cursor:
+            cursor.execute("SELECT * FROM table")
+            rows = cursor.fetchall()
+        # الـ cursor يُغلق تلقائياً هنا
+    """
+    
+    def __init__(self, cursor):
+        self._cursor = cursor
+    
+    def __enter__(self):
+        return self._cursor
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            self._cursor.close()
+        except Exception:
+            pass
+        return False  # لا نبتلع الاستثناءات
+    
+    # تمرير كل الدوال للـ cursor الأصلي
+    def execute(self, *args, **kwargs):
+        return self._cursor.execute(*args, **kwargs)
+    
+    def executemany(self, *args, **kwargs):
+        return self._cursor.executemany(*args, **kwargs)
+    
+    def fetchone(self):
+        return self._cursor.fetchone()
+    
+    def fetchall(self):
+        return self._cursor.fetchall()
+    
+    def fetchmany(self, size=None):
+        return self._cursor.fetchmany(size)
+    
+    def close(self):
+        return self._cursor.close()
+    
+    @property
+    def description(self):
+        return self._cursor.description
+    
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+    
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+
 class Repository:
     """
     ⚡ المخزن الذكي مع Caching للسرعة القصوى.
@@ -176,12 +232,16 @@ class Repository:
         """
         ⚡ الحصول على cursor منفصل لتجنب مشكلة Recursive cursor
         يجب إغلاق الـ cursor بعد الاستخدام: cursor.close()
+        
+        يمكن استخدامه كـ context manager:
+            with self.get_cursor() as cursor:
+                cursor.execute(...)
         """
         with self._lock:
             try:
                 cursor = self.sqlite_conn.cursor()
                 cursor.row_factory = sqlite3.Row  # تأكد من تطبيق row_factory
-                return cursor
+                return CursorContextManager(cursor)
             except Exception as e:
                 safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
                 raise

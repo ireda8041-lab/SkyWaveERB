@@ -37,13 +37,31 @@ class UpdateChecker(QThread):
     def run(self):
         """التحقق من التحديثات"""
         try:
-            # تنزيل ملف version.json
-            response = requests.get(self.check_url, timeout=10)
+            # إضافة headers لـ GitHub API
+            headers = {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'SkyWaveERP-Updater'
+            }
+            
+            response = requests.get(self.check_url, headers=headers, timeout=10)
             response.raise_for_status()
 
             data = response.json()
-            remote_version = data.get("version", "")
-            download_url = data.get("url", "")
+            
+            # دعم كلا الصيغتين: GitHub API و version.json العادي
+            if 'tag_name' in data:
+                # GitHub API format
+                remote_version = data.get("tag_name", "").lstrip('v')  # إزالة 'v' من البداية
+                # البحث عن ملف exe في assets
+                download_url = ""
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".exe"):
+                        download_url = asset.get("browser_download_url", "")
+                        break
+            else:
+                # version.json format
+                remote_version = data.get("version", "")
+                download_url = data.get("url", "")
 
             if not remote_version or not download_url:
                 self.error_occurred.emit("ملف التحديث غير صحيح")

@@ -38,13 +38,32 @@ class BackgroundUpdateChecker(QThread):
     def run(self):
         """التحقق من التحديثات"""
         try:
-            response = requests.get(self.check_url, timeout=15)
+            # إضافة headers لـ GitHub API
+            headers = {
+                'Accept': 'application/vnd.github.v3+json',
+                'User-Agent': 'SkyWaveERP-Updater'
+            }
+            
+            response = requests.get(self.check_url, headers=headers, timeout=15)
             response.raise_for_status()
 
             data = response.json()
-            remote_version = data.get("version", "")
-            download_url = data.get("url", "")
-            changelog = data.get("changelog", "")
+            
+            # دعم كلا الصيغتين: GitHub API و version.json العادي
+            if 'tag_name' in data:
+                # GitHub API format
+                remote_version = data.get("tag_name", "").lstrip('v')
+                download_url = ""
+                for asset in data.get("assets", []):
+                    if asset.get("name", "").endswith(".exe"):
+                        download_url = asset.get("browser_download_url", "")
+                        break
+                changelog = data.get("body", "")
+            else:
+                # version.json format
+                remote_version = data.get("version", "")
+                download_url = data.get("url", "")
+                changelog = data.get("changelog", "")
 
             if remote_version and compare_versions(remote_version, self.current_version) > 0:
                 logger.info(f"تحديث جديد متاح: {remote_version}")

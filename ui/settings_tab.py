@@ -16,6 +16,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QTableWidget,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -114,6 +116,16 @@ class SettingsTab(QWidget):
         self.template_tab = TemplateSettings(self.settings_service)
         self.tabs.addTab(self.template_tab, "🎨 قوالب الفواتير")
 
+        # تاب طرق الدفع
+        self.payment_methods_tab = QWidget()
+        self.tabs.addTab(self.payment_methods_tab, "💳 طرق الدفع")
+        self.setup_payment_methods_tab()
+
+        # تاب ملاحظات المشاريع
+        self.project_notes_tab = QWidget()
+        self.tabs.addTab(self.project_notes_tab, "📝 ملاحظات المشاريع")
+        self.setup_project_notes_tab()
+
         # تاب التحديثات
         self.update_tab = QWidget()
         self.tabs.addTab(self.update_tab, "🆕 التحديثات")
@@ -155,6 +167,12 @@ class SettingsTab(QWidget):
         elif "الحسابات الافتراضية" in tab_text:
             if self.default_treasury_combo.count() == 0:
                 self.load_default_accounts()
+        elif "طرق الدفع" in tab_text:
+            if self.payment_methods_table.rowCount() == 0:
+                self.load_payment_methods()
+        elif "ملاحظات المشاريع" in tab_text:
+            if self.note_templates_table.rowCount() == 0:
+                self.load_note_templates()
 
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
@@ -311,35 +329,6 @@ class SettingsTab(QWidget):
         bank_layout.setColumnStretch(0, 1)
         bank_layout.setColumnStretch(1, 1)
 
-        # اسم البنك
-        bank_name_lbl = QLabel("🏦 اسم البنك")
-        bank_name_lbl.setStyleSheet(label_style)
-        self.bank_name_input = QLineEdit()
-        self.bank_name_input.setPlaceholderText("البنك الأهلي المصري")
-        self.bank_name_input.setStyleSheet(input_style)
-        bank_layout.addWidget(bank_name_lbl, 0, 0)
-        bank_layout.addWidget(self.bank_name_input, 1, 0)
-
-        # رقم الحساب
-        bank_acc_lbl = QLabel("💳 رقم الحساب")
-        bank_acc_lbl.setStyleSheet(label_style)
-        self.bank_account_input = QLineEdit()
-        self.bank_account_input.setPlaceholderText("XXXX-XXXX-XXXX-XXXX")
-        self.bank_account_input.setStyleSheet(input_style)
-        bank_layout.addWidget(bank_acc_lbl, 0, 1)
-        bank_layout.addWidget(self.bank_account_input, 1, 1)
-
-        # فودافون كاش
-        vcash_lbl = QLabel("📲 فودافون كاش")
-        vcash_lbl.setStyleSheet(label_style)
-        self.vodafone_cash_input = QLineEdit()
-        self.vodafone_cash_input.setPlaceholderText("010-XXXX-XXXX")
-        self.vodafone_cash_input.setStyleSheet(input_style)
-        bank_layout.addWidget(vcash_lbl, 2, 0)
-        bank_layout.addWidget(self.vodafone_cash_input, 3, 0)
-
-        fields_container.addLayout(bank_layout)
-        main_h.addWidget(fields_frame, 3)
 
         # === الجانب الأيمن: اللوجو ===
         logo_frame = QFrame()
@@ -2722,6 +2711,349 @@ class SettingsTab(QWidget):
             QMessageBox.critical(self, "❌ خطأ", f"حدث خطأ أثناء المزامنة:\n{e}")
             safe_print(f"ERROR: [SyncTab] فشل المزامنة اليدوية: {e}")
 
+    def setup_payment_methods_tab(self):
+        """إعداد تاب طرق الدفع - CRUD لطرق الدفع في الفواتير"""
+        layout = QVBoxLayout(self.payment_methods_tab)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
+
+        # معلومات
+        info_label = QLabel("💳 إدارة طرق الدفع التي تظهر في الفواتير والمشاريع")
+        info_label.setStyleSheet("""
+            background-color: #0A6CF1;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 13px;
+        """)
+        layout.addWidget(info_label)
+
+        # أزرار التحكم
+        buttons_layout = QHBoxLayout()
+
+        self.add_payment_method_btn = QPushButton("➕ إضافة طريقة دفع")
+        self.add_payment_method_btn.setStyleSheet(BUTTON_STYLES["success"])
+        self.add_payment_method_btn.clicked.connect(self.add_payment_method)
+
+        self.edit_payment_method_btn = QPushButton("✏️ تعديل")
+        self.edit_payment_method_btn.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_payment_method_btn.clicked.connect(self.edit_payment_method)
+
+        self.delete_payment_method_btn = QPushButton("🗑️ حذف")
+        self.delete_payment_method_btn.setStyleSheet(BUTTON_STYLES["danger"])
+        self.delete_payment_method_btn.clicked.connect(self.delete_payment_method)
+
+        self.refresh_payment_methods_btn = QPushButton("🔄 تحديث")
+        self.refresh_payment_methods_btn.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_payment_methods_btn.clicked.connect(self.load_payment_methods)
+
+        buttons_layout.addWidget(self.add_payment_method_btn)
+        buttons_layout.addWidget(self.edit_payment_method_btn)
+        buttons_layout.addWidget(self.delete_payment_method_btn)
+        buttons_layout.addWidget(self.refresh_payment_methods_btn)
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        # جدول طرق الدفع
+        self.payment_methods_table = QTableWidget()
+        self.payment_methods_table.setColumnCount(4)
+        self.payment_methods_table.setHorizontalHeaderLabels(["#", "اسم طريقة الدفع", "الوصف", "الحالة"])
+        h_header = self.payment_methods_table.horizontalHeader()
+        if h_header:
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.payment_methods_table.setAlternatingRowColors(True)
+        self.payment_methods_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.payment_methods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.payment_methods_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.payment_methods_table.setStyleSheet(self._get_table_style())
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.payment_methods_table)
+        self.payment_methods_table.doubleClicked.connect(self.edit_payment_method)
+        layout.addWidget(self.payment_methods_table)
+
+        # تحميل البيانات
+        self.load_payment_methods()
+
+    def load_payment_methods(self):
+        """تحميل طرق الدفع من قاعدة البيانات"""
+        try:
+            self.payment_methods_table.setRowCount(0)
+            
+            # جلب طرق الدفع من الإعدادات
+            payment_methods = self.settings_service.get_setting("payment_methods") or []
+            
+            # إذا لم تكن موجودة، إنشاء قائمة افتراضية
+            if not payment_methods:
+                payment_methods = [
+                    {"name": "نقدي", "description": "الدفع النقدي", "active": True},
+                    {"name": "تحويل بنكي", "description": "تحويل عبر البنك", "active": True},
+                    {"name": "فودافون كاش", "description": "محفظة فودافون كاش", "active": True},
+                    {"name": "انستاباي", "description": "تحويل عبر انستاباي", "active": True},
+                ]
+                self.settings_service.save_setting("payment_methods", payment_methods)
+
+            self.payment_methods_table.setRowCount(len(payment_methods))
+            for i, method in enumerate(payment_methods):
+                self.payment_methods_table.setItem(i, 0, create_centered_item(str(i + 1)))
+                self.payment_methods_table.setItem(i, 1, create_centered_item(method.get("name", "")))
+                self.payment_methods_table.setItem(i, 2, create_centered_item(method.get("description", "")))
+                status = "✅ مفعّل" if method.get("active", True) else "❌ معطّل"
+                self.payment_methods_table.setItem(i, 3, create_centered_item(status))
+
+            safe_print(f"INFO: [SettingsTab] تم تحميل {len(payment_methods)} طريقة دفع")
+        except Exception as e:
+            safe_print(f"ERROR: [SettingsTab] فشل تحميل طرق الدفع: {e}")
+
+    def add_payment_method(self):
+        """إضافة طريقة دفع جديدة"""
+        from PyQt6.QtWidgets import QInputDialog
+        
+        name, ok = QInputDialog.getText(self, "إضافة طريقة دفع", "اسم طريقة الدفع:")
+        if ok and name.strip():
+            desc, _ = QInputDialog.getText(self, "إضافة طريقة دفع", "الوصف (اختياري):")
+            
+            payment_methods = self.settings_service.get_setting("payment_methods") or []
+            payment_methods.append({
+                "name": name.strip(),
+                "description": desc.strip() if desc else "",
+                "active": True
+            })
+            self.settings_service.save_setting("payment_methods", payment_methods)
+            self.load_payment_methods()
+            QMessageBox.information(self, "✅ نجاح", f"تم إضافة طريقة الدفع: {name}")
+
+    def edit_payment_method(self):
+        """تعديل طريقة دفع"""
+        from PyQt6.QtWidgets import QInputDialog
+        
+        selected = self.payment_methods_table.selectedIndexes()
+        if not selected:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار طريقة دفع للتعديل")
+            return
+        
+        row = selected[0].row()
+        payment_methods = self.settings_service.get_setting("payment_methods") or []
+        
+        if row >= len(payment_methods):
+            return
+        
+        method = payment_methods[row]
+        
+        name, ok = QInputDialog.getText(self, "تعديل طريقة دفع", "اسم طريقة الدفع:", text=method.get("name", ""))
+        if ok and name.strip():
+            desc, _ = QInputDialog.getText(self, "تعديل طريقة دفع", "الوصف:", text=method.get("description", ""))
+            
+            payment_methods[row] = {
+                "name": name.strip(),
+                "description": desc.strip() if desc else "",
+                "active": method.get("active", True)
+            }
+            self.settings_service.save_setting("payment_methods", payment_methods)
+            self.load_payment_methods()
+            QMessageBox.information(self, "✅ نجاح", "تم تعديل طريقة الدفع")
+
+    def delete_payment_method(self):
+        """حذف طريقة دفع"""
+        selected = self.payment_methods_table.selectedIndexes()
+        if not selected:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار طريقة دفع للحذف")
+            return
+        
+        row = selected[0].row()
+        payment_methods = self.settings_service.get_setting("payment_methods") or []
+        
+        if row >= len(payment_methods):
+            return
+        
+        method_name = payment_methods[row].get("name", "")
+        
+        reply = QMessageBox.question(
+            self, "تأكيد الحذف",
+            f"هل أنت متأكد من حذف طريقة الدفع: {method_name}؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            payment_methods.pop(row)
+            self.settings_service.save_setting("payment_methods", payment_methods)
+            self.load_payment_methods()
+            QMessageBox.information(self, "✅ نجاح", "تم حذف طريقة الدفع")
+
+    def setup_project_notes_tab(self):
+        """إعداد تاب ملاحظات المشاريع - قوالب الملاحظات الافتراضية"""
+        layout = QVBoxLayout(self.project_notes_tab)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
+
+        # معلومات
+        info_label = QLabel("📝 إدارة قوالب الملاحظات الافتراضية للمشاريع والفواتير")
+        info_label.setStyleSheet("""
+            background-color: #10b981;
+            color: white;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 13px;
+        """)
+        layout.addWidget(info_label)
+
+        # أزرار التحكم
+        buttons_layout = QHBoxLayout()
+
+        self.add_note_template_btn = QPushButton("➕ إضافة قالب")
+        self.add_note_template_btn.setStyleSheet(BUTTON_STYLES["success"])
+        self.add_note_template_btn.clicked.connect(self.add_note_template)
+
+        self.edit_note_template_btn = QPushButton("✏️ تعديل")
+        self.edit_note_template_btn.setStyleSheet(BUTTON_STYLES["warning"])
+        self.edit_note_template_btn.clicked.connect(self.edit_note_template)
+
+        self.delete_note_template_btn = QPushButton("🗑️ حذف")
+        self.delete_note_template_btn.setStyleSheet(BUTTON_STYLES["danger"])
+        self.delete_note_template_btn.clicked.connect(self.delete_note_template)
+
+        self.refresh_note_templates_btn = QPushButton("🔄 تحديث")
+        self.refresh_note_templates_btn.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.refresh_note_templates_btn.clicked.connect(self.load_note_templates)
+
+        buttons_layout.addWidget(self.add_note_template_btn)
+        buttons_layout.addWidget(self.edit_note_template_btn)
+        buttons_layout.addWidget(self.delete_note_template_btn)
+        buttons_layout.addWidget(self.refresh_note_templates_btn)
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        # جدول قوالب الملاحظات
+        self.note_templates_table = QTableWidget()
+        self.note_templates_table.setColumnCount(3)
+        self.note_templates_table.setHorizontalHeaderLabels(["#", "اسم القالب", "المحتوى"])
+        h_header = self.note_templates_table.horizontalHeader()
+        if h_header:
+            h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.note_templates_table.setAlternatingRowColors(True)
+        self.note_templates_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.note_templates_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.note_templates_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.note_templates_table.setStyleSheet(self._get_table_style())
+        from ui.styles import fix_table_rtl
+        fix_table_rtl(self.note_templates_table)
+        self.note_templates_table.doubleClicked.connect(self.edit_note_template)
+        layout.addWidget(self.note_templates_table)
+
+        # تحميل البيانات
+        self.load_note_templates()
+
+    def load_note_templates(self):
+        """تحميل قوالب الملاحظات من قاعدة البيانات"""
+        try:
+            self.note_templates_table.setRowCount(0)
+            
+            # جلب قوالب الملاحظات من الإعدادات
+            note_templates = self.settings_service.get_setting("project_note_templates") or []
+            
+            # إذا لم تكن موجودة، إنشاء قائمة افتراضية
+            if not note_templates:
+                note_templates = [
+                    {
+                        "name": "القالب الافتراضي",
+                        "content": """• مدة التنفيذ: ___ يوم عمل.
+• تبدأ المدة من تاريخ استلام الداتا.
+• التسليم حسب الجدول الزمني المتفق عليه.
+
+• الدفعة المقدمة: 50% عند التعاقد.
+• الدفعة الثانية: 25% عند التسليم الأولي.
+• الدفعة النهائية: 25% عند التسليم النهائي.
+
+• يبدأ التنفيذ بعد استلام الدفعة الأولى."""
+                    },
+                    {
+                        "name": "قالب مختصر",
+                        "content": "• مدة التنفيذ: ___ يوم.\n• الدفع: 50% مقدم - 50% عند التسليم."
+                    },
+                ]
+                self.settings_service.save_setting("project_note_templates", note_templates)
+
+            self.note_templates_table.setRowCount(len(note_templates))
+            for i, template in enumerate(note_templates):
+                self.note_templates_table.setItem(i, 0, create_centered_item(str(i + 1)))
+                self.note_templates_table.setItem(i, 1, create_centered_item(template.get("name", "")))
+                # عرض أول 50 حرف من المحتوى
+                content_preview = template.get("content", "")[:50] + "..." if len(template.get("content", "")) > 50 else template.get("content", "")
+                self.note_templates_table.setItem(i, 2, create_centered_item(content_preview))
+
+            safe_print(f"INFO: [SettingsTab] تم تحميل {len(note_templates)} قالب ملاحظات")
+        except Exception as e:
+            safe_print(f"ERROR: [SettingsTab] فشل تحميل قوالب الملاحظات: {e}")
+
+    def add_note_template(self):
+        """إضافة قالب ملاحظات جديد"""
+        dialog = NoteTemplateDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name, content = dialog.get_data()
+            if name and content:
+                note_templates = self.settings_service.get_setting("project_note_templates") or []
+                note_templates.append({"name": name, "content": content})
+                self.settings_service.save_setting("project_note_templates", note_templates)
+                self.load_note_templates()
+                QMessageBox.information(self, "✅ نجاح", f"تم إضافة القالب: {name}")
+
+    def edit_note_template(self):
+        """تعديل قالب ملاحظات"""
+        selected = self.note_templates_table.selectedIndexes()
+        if not selected:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار قالب للتعديل")
+            return
+        
+        row = selected[0].row()
+        note_templates = self.settings_service.get_setting("project_note_templates") or []
+        
+        if row >= len(note_templates):
+            return
+        
+        template = note_templates[row]
+        
+        dialog = NoteTemplateDialog(self, template.get("name", ""), template.get("content", ""))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name, content = dialog.get_data()
+            if name and content:
+                note_templates[row] = {"name": name, "content": content}
+                self.settings_service.save_setting("project_note_templates", note_templates)
+                self.load_note_templates()
+                QMessageBox.information(self, "✅ نجاح", "تم تعديل القالب")
+
+    def delete_note_template(self):
+        """حذف قالب ملاحظات"""
+        selected = self.note_templates_table.selectedIndexes()
+        if not selected:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار قالب للحذف")
+            return
+        
+        row = selected[0].row()
+        note_templates = self.settings_service.get_setting("project_note_templates") or []
+        
+        if row >= len(note_templates):
+            return
+        
+        template_name = note_templates[row].get("name", "")
+        
+        reply = QMessageBox.question(
+            self, "تأكيد الحذف",
+            f"هل أنت متأكد من حذف القالب: {template_name}؟",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            note_templates.pop(row)
+            self.settings_service.save_setting("project_note_templates", note_templates)
+            self.load_note_templates()
+            QMessageBox.information(self, "✅ نجاح", "تم حذف القالب")
+
     def setup_update_tab(self):
         """إعداد تاب التحديثات"""
         layout = QVBoxLayout(self.update_tab)
@@ -3077,3 +3409,114 @@ class SettingsTab(QWidget):
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل تثبيت التحديث:\n{e}")
+
+
+class NoteTemplateDialog(QDialog):
+    """نافذة إضافة/تعديل قالب ملاحظات"""
+
+    def __init__(self, parent=None, name: str = "", content: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("📝 قالب ملاحظات" if not name else f"📝 تعديل: {name}")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(400)
+
+        # تطبيق شريط العنوان المخصص
+        try:
+            from ui.styles import setup_custom_title_bar
+            setup_custom_title_bar(self)
+        except (ImportError, AttributeError):
+            pass
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # اسم القالب
+        name_label = QLabel("اسم القالب:")
+        name_label.setStyleSheet("color: #60a5fa; font-weight: bold;")
+        layout.addWidget(name_label)
+
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("مثال: قالب الشروط والأحكام")
+        self.name_input.setText(name)
+        self.name_input.setStyleSheet("""
+            QLineEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #0A6CF1;
+            }
+        """)
+        layout.addWidget(self.name_input)
+
+        # محتوى القالب
+        content_label = QLabel("محتوى القالب:")
+        content_label.setStyleSheet("color: #60a5fa; font-weight: bold;")
+        layout.addWidget(content_label)
+
+        self.content_input = QTextEdit()
+        self.content_input.setPlaceholderText("اكتب محتوى القالب هنا...")
+        self.content_input.setText(content)
+        self.content_input.setStyleSheet("""
+            QTextEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }
+            QTextEdit:focus {
+                border: 2px solid #0A6CF1;
+            }
+        """)
+        layout.addWidget(self.content_input, 1)
+
+        # أزرار
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+
+        save_btn = QPushButton("💾 حفظ")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #34d399);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 30px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: #059669;
+            }
+        """)
+        save_btn.clicked.connect(self.accept)
+
+        cancel_btn = QPushButton("إلغاء")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(107, 114, 128, 0.3);
+                color: #9CA3AF;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                padding: 10px 30px;
+            }
+            QPushButton:hover {
+                background: rgba(107, 114, 128, 0.5);
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        buttons_layout.addWidget(save_btn)
+        buttons_layout.addWidget(cancel_btn)
+        layout.addLayout(buttons_layout)
+
+    def get_data(self) -> tuple[str, str]:
+        """الحصول على البيانات المدخلة"""
+        return self.name_input.text().strip(), self.content_input.toPlainText().strip()

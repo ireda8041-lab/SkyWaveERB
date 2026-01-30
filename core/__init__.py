@@ -11,8 +11,8 @@ from .logger import LoggerSetup
 from .repository import Repository
 from .schemas import *  # noqa: F403
 
-# 🔥 نظام المزامنة الجديد - الإصدار الثالث
-from .sync_manager_v3 import SyncManagerV3, create_sync_manager_v3
+# 🔥 نظام المزامنة الموحد
+from .unified_sync import UnifiedSyncManagerV3
 
 __all__ = [
     # Config
@@ -31,7 +31,6 @@ __all__ = [
     # Repository
     'Repository',
 
-    # 🔥 نظام المزامنة الجديد - الإصدار الثالث
-    'SyncManagerV3',
-    'create_sync_manager_v3',
+    # 🔥 نظام المزامنة الموحد
+    'UnifiedSyncManagerV3',
 ]

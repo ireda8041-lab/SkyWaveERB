@@ -217,24 +217,25 @@ class UpdateManager:
             return False
 
     def run_installer_and_wait(self, setup_path, signals=None):
-        """Run installer in VERYSILENT mode and wait for completion"""
+        """Run installer in SILENT mode and wait for completion"""
         try:
             if not os.path.exists(setup_path):
                 self.emit_detail(f"File not found: {setup_path}")
                 return False
 
-            # Use VERYSILENT to hide the installer window completely
-            # /SUPPRESSMSGBOXES suppresses message boxes
-            # /NORESTART prevents automatic restart
+            # ⚡ Use VERYSILENT mode - no UI at all, faster
+            # /CLOSEAPPLICATIONS closes running apps
+            # /FORCECLOSEAPPLICATIONS forces close without asking
             args = [
                 setup_path,
                 "/VERYSILENT",
-                "/SUPPRESSMSGBOXES",
-                "/NORESTART",
                 "/CLOSEAPPLICATIONS",
+                "/FORCECLOSEAPPLICATIONS",
+                "/NOCANCEL",
+                "/NORESTART",  # Don't restart Windows
             ]
 
-            self.emit_detail("Running silent installation...")
+            self.emit_detail("Running installation...")
             self.emit_status("Installing... Please wait")
 
             # Run and wait for completion
@@ -251,8 +252,8 @@ class UpdateManager:
                 self.emit_detail(f"Installing... ({elapsed}s)")
                 time.sleep(1)
 
-                # Timeout after 5 minutes
-                if elapsed > 300:
+                # Timeout after 10 minutes (large installer)
+                if elapsed > 600:
                     self.emit_detail("Installation timeout!")
                     process.terminate()
                     return False
@@ -264,7 +265,8 @@ class UpdateManager:
                 return True
             else:
                 self.emit_detail(f"Installer exited with code: {exit_code}")
-                return False
+                # Even with non-zero exit, installation might have succeeded
+                return exit_code in [0, 1]  # 1 = restart required
 
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
@@ -450,6 +452,7 @@ if HAS_GUI:
             self.speed_label.setText(f"Speed: {text}")
 
         def _on_finished(self, success, message):
+            self._update_success = success  # ⚡ Store success state
             if success:
                 self.status_label.setText("✓ " + message)
                 self.status_label.setStyleSheet(
@@ -467,10 +470,14 @@ if HAS_GUI:
                     "color: #EF4444; background: transparent; border: none;"
                 )
                 self.cancel_btn.setText("Close")
+                # ⚡ Disconnect old handler and connect new one for closing
+                self.cancel_btn.clicked.disconnect()
+                self.cancel_btn.clicked.connect(lambda: os._exit(0))
 
         def _on_cancel(self):
             self.update_manager.cancel()
-            self.close()
+            # ⚡ Force close the updater
+            os._exit(0)
 
         def _start_update(self):
             threading.Thread(target=self._run_update, daemon=True).start()
@@ -509,34 +516,71 @@ if HAS_GUI:
                     return
 
                 self.signals.progress.emit(90)
-                self.signals.status.emit("Installing update...")
-                self.signals.detail.emit("Starting silent installation...")
+                self.signals.status.emit("Starting installer...")
+                self.signals.detail.emit("Launching installer and closing updater...")
 
-                # Run installer in SILENT mode and WAIT for it to complete
-                if not self.update_manager.run_installer_and_wait(self.setup_path, self.signals):
-                    self.signals.finished.emit(False, "Installation failed")
-                    return
-
+                # ⚡ NEW APPROACH: Start installer and exit immediately
+                # The installer will handle closing apps and restarting
+                args = [
+                    self.setup_path,
+                    "/SILENT",
+                    "/CLOSEAPPLICATIONS",
+                    "/FORCECLOSEAPPLICATIONS",
+                ]
+                
+                # Start installer as detached process
+                subprocess.Popen(
+                    args, 
+                    shell=False,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                )
+                
                 self.signals.progress.emit(100)
-                self.signals.finished.emit(True, "Update completed! Restarting...")
-
-                # Restart the app after successful update
-                QTimer.singleShot(2000, self._restart_app)
+                self.signals.detail.emit("Installer started! Closing updater...")
+                
+                # ⚡ Exit updater immediately so installer can proceed
+                time.sleep(1)
+                os._exit(0)
 
             except Exception as e:
                 self.signals.finished.emit(False, str(e))
 
-        def _restart_app(self):
-            """Restart Sky Wave ERP after update"""
+        def _do_restart_app(self):
+            """Restart Sky Wave ERP after update (called from thread)"""
             try:
-                app_exe = os.path.join(self.app_folder, "SkyWaveERP.exe")
-                if os.path.exists(app_exe):
-                    subprocess.Popen([app_exe], shell=False)
-                    self.signals.detail.emit("App restarted successfully!")
+                # Try multiple possible locations for the app
+                possible_paths = [
+                    os.path.join(self.app_folder, "SkyWaveERP.exe"),
+                    os.path.join(self.app_folder, "..", "SkyWaveERP.exe"),
+                    r"D:\Sky Wave ERP\SkyWaveERP.exe",
+                    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Sky Wave ERP', 'SkyWaveERP.exe'),
+                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Sky Wave ERP', 'SkyWaveERP.exe'),
+                ]
+                
+                app_exe = None
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        app_exe = path
+                        break
+                
+                if app_exe:
+                    self.signals.detail.emit(f"Starting app from: {app_exe}")
+                    # Use START_NEW_SESSION to detach the process completely
+                    subprocess.Popen(
+                        [app_exe], 
+                        shell=False, 
+                        cwd=os.path.dirname(app_exe),
+                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                    self.signals.detail.emit("App started successfully!")
+                else:
+                    self.signals.detail.emit("Could not find SkyWaveERP.exe - please start manually")
             except Exception as e:
                 self.signals.detail.emit(f"Could not restart app: {e}")
             finally:
-                QTimer.singleShot(1000, self.close)
+                # ⚡ Force exit the updater process completely
+                time.sleep(1)
+                os._exit(0)  # Force exit without cleanup - ensures updater closes
 
 
 def run_console_updater(setup_path=None, app_folder=None, download_url=None):

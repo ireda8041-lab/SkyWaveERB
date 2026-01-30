@@ -48,7 +48,9 @@ class ExpenseEditorDialog(QDialog):
         project_service: ProjectService,
         settings_service: SettingsService | None = None,
         expense_to_edit: schemas.Expense | None = None,
-        parent=None
+        parent=None,
+        pre_selected_project_id: str | None = None,
+        pre_selected_project_name: str | None = None
     ):
         super().__init__(parent)
 
@@ -58,6 +60,8 @@ class ExpenseEditorDialog(QDialog):
         self.settings_service = settings_service
         self.expense_to_edit = expense_to_edit
         self.is_editing = expense_to_edit is not None
+        self.pre_selected_project_id = pre_selected_project_id
+        self.pre_selected_project_name = pre_selected_project_name
 
         if self.is_editing:
             self.setWindowTitle("تعديل المصروف")
@@ -77,6 +81,10 @@ class ExpenseEditorDialog(QDialog):
         # جلب البيانات
         self.load_data()
         self.init_ui()
+        
+        # تحديد المشروع المسبق إذا تم تمريره
+        if self.pre_selected_project_id and hasattr(self, 'project_combo'):
+            self._select_pre_selected_project()
 
     def load_data(self):
         """جلب الحسابات والمشاريع والفئات من قاعدة البيانات"""
@@ -341,6 +349,26 @@ class ExpenseEditorDialog(QDialog):
         # تحميل البيانات إذا كان تعديل
         if self.is_editing:
             self.load_expense_data()
+        
+        # تحديد المشروع المسبق إذا تم تمريره
+        if self.pre_selected_project_id:
+            self._select_pre_selected_project()
+
+    def _select_pre_selected_project(self):
+        """تحديد المشروع المسبق في القائمة"""
+        try:
+            for i in range(self.project_combo.count()):
+                project = self.project_combo.itemData(i)
+                if project:
+                    project_id = getattr(project, "_mongo_id", None) or str(getattr(project, "id", ""))
+                    project_name = getattr(project, "name", "")
+                    
+                    if (project_id == self.pre_selected_project_id or 
+                        project_name == self.pre_selected_project_name):
+                        self.project_combo.setCurrentIndex(i)
+                        break
+        except Exception as e:
+            pass  # تجاهل الأخطاء في التحديد المسبق
 
     def _validate_amount(self):
         """Real-time amount validation"""

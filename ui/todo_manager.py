@@ -1410,9 +1410,10 @@ class TodoManagerWidget(QWidget):
 
         QTimer.singleShot(100, self._load_cache_and_tasks)
 
+        # ⚡ ربط آمن للإشارات (يفصل أولاً ثم يربط لمنع التكرارات)
         try:
             from core.signals import app_signals
-            app_signals.tasks_changed.connect(self._on_tasks_changed)
+            app_signals.safe_connect(app_signals.tasks_changed, self._on_tasks_changed)
         except Exception as e:
             safe_print(f"WARNING: [TodoManager] فشل ربط الإشارات: {e}")
 

@@ -11,13 +11,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.keyboard_shortcuts import KeyboardShortcutManager  # (الجديد) مدير الاختصارات
-from core.sync_manager_v3 import SyncManagerV3  # (الجديد) مدير المزامنة المحسن
+from core.keyboard_shortcuts import KeyboardShortcutManager  # مدير الاختصارات
 from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.expense_service import ExpenseService
 from services.invoice_service import InvoiceService
-from services.notification_service import NotificationService  # (الجديد) خدمة الإشعارات
+from services.notification_service import NotificationService  # خدمة الإشعارات
 from services.project_service import ProjectService
 from services.service_service import ServiceService
 
@@ -71,9 +70,8 @@ class MainWindow(QMainWindow):
         notification_service: NotificationService | None = None,
         printing_service=None,
         export_service=None,
-        advanced_sync_manager=None,
         smart_scan_service=None,
-        sync_manager=None,  # 🔥 نظام المزامنة الجديد
+        sync_manager=None,  # 🔥 نظام المزامنة الموحد
     ):
         super().__init__()
 
@@ -92,13 +90,11 @@ class MainWindow(QMainWindow):
         self.expense_service = expense_service
         self.invoice_service = invoice_service
         self.project_service = project_service
-        self.sync_manager = sync_manager
         self.notification_service = notification_service
         self.printing_service = printing_service
         self.export_service = export_service
-        self.advanced_sync_manager = advanced_sync_manager
         self.smart_scan_service = smart_scan_service
-        self.sync_manager = sync_manager  # 🔥 نظام المزامنة الجديد
+        self.sync_manager = sync_manager  # 🔥 نظام المزامنة الموحد
         
         # 🔥 الحصول على Repository للاتصال المباشر
         self.repository = self.accounting_service.repo
@@ -293,30 +289,23 @@ class MainWindow(QMainWindow):
         # تعيين المستخدم الحالي في شريط الحالة
         self.status_bar.set_current_user(self.current_user)
 
-        # ربط مدير المزامنة المتقدم بشريط الحالة
-        if self.advanced_sync_manager:
-            self.advanced_sync_manager.connection_status_changed.connect(
-                lambda online: self.status_bar.update_sync_status("synced" if online else "offline")
-            )
-            self.advanced_sync_manager.sync_status_changed.connect(
-                self.status_bar.update_sync_status
-            )
-            self.advanced_sync_manager.sync_progress.connect(self.status_bar.update_sync_progress)
-            self.advanced_sync_manager.notification_ready.connect(self.status_bar.show_notification)
-
-        # ⚡ ربط unified_sync بشريط الحالة
-        if self.sync_manager and hasattr(self.sync_manager, 'repo') and self.sync_manager.repo:
-            repo = self.sync_manager.repo
-            if hasattr(repo, 'unified_sync') and repo.unified_sync:
-                repo.unified_sync.connection_changed.connect(
+        # ⚡ ربط sync_manager (UnifiedSyncManager) بشريط الحالة
+        if self.sync_manager:
+            # ربط إشارات المزامنة الموحدة
+            if hasattr(self.sync_manager, 'connection_changed'):
+                self.sync_manager.connection_changed.connect(
                     lambda online: self.status_bar.update_sync_status("synced" if online else "offline")
                 )
-                repo.unified_sync.sync_started.connect(
+            if hasattr(self.sync_manager, 'sync_started'):
+                self.sync_manager.sync_started.connect(
                     lambda: self.status_bar.update_sync_status("syncing")
                 )
-                repo.unified_sync.sync_completed.connect(
+            if hasattr(self.sync_manager, 'sync_completed'):
+                self.sync_manager.sync_completed.connect(
                     lambda result: self.status_bar.update_sync_status("synced" if result.get('success') else "error")
                 )
+            if hasattr(self.sync_manager, 'sync_progress'):
+                self.sync_manager.sync_progress.connect(self.status_bar.update_sync_progress)
 
         # ⚡ تحديث حالة الاتصال الأولية بعد 5 ثواني (لإعطاء MongoDB وقت للاتصال)
         QTimer.singleShot(5000, self._update_initial_connection_status)
@@ -823,11 +812,15 @@ class MainWindow(QMainWindow):
             def do_sync():
                 """تنفيذ المزامنة في thread منفصل"""
                 try:
-                    # استخدام advanced_sync_manager إذا كان متاحاً
-                    if self.advanced_sync_manager:
-                        self.advanced_sync_manager.sync_now()
-                    elif self.sync_manager:
-                        self.sync_manager.start_sync()
+                    # استخدام sync_manager (UnifiedSyncManager)
+                    if self.sync_manager:
+                        if hasattr(self.sync_manager, 'instant_sync'):
+                            self.sync_manager.instant_sync()
+                        elif hasattr(self.sync_manager, 'start_sync'):
+                            self.sync_manager.start_sync()
+                        else:
+                            safe_print("WARNING: لا توجد دالة مزامنة متاحة")
+                            return
                     else:
                         safe_print("WARNING: لا يوجد مدير مزامنة متاح")
                         return
@@ -1106,9 +1099,10 @@ class MainWindow(QMainWindow):
             safe_print("INFO: [MainWindow] جاري تسجيل الخروج...")
 
             # إيقاف أي عمليات خلفية
-            if hasattr(self, "advanced_sync_manager") and self.advanced_sync_manager:
+            if hasattr(self, "sync_manager") and self.sync_manager:
                 try:
-                    self.advanced_sync_manager.stop_auto_sync()
+                    if hasattr(self.sync_manager, 'stop_auto_sync'):
+                        self.sync_manager.stop_auto_sync()
                 except Exception:
                     pass
 
@@ -1708,15 +1702,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     safe_print(f"تحذير: فشل إيقاف المزامنة: {e}")
 
-            # 4. إيقاف خدمة المزامنة المتقدمة
-            if hasattr(self, "advanced_sync_manager") and self.advanced_sync_manager:
-                try:
-                    self.advanced_sync_manager.stop()
-                    safe_print("✅ تم إيقاف خدمة المزامنة المتقدمة")
-                except Exception as e:
-                    safe_print(f"تحذير: فشل إيقاف المزامنة المتقدمة: {e}")
-
-            # 5. إيقاف نظام المزامنة الفورية
+            # 4. إيقاف نظام المزامنة الفورية
             try:
                 from core.realtime_sync import shutdown_realtime_sync
 
@@ -1725,7 +1711,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 safe_print(f"تحذير: فشل إيقاف المزامنة الفورية: {e}")
 
-            # 6. إيقاف نظام الإشعارات
+            # 5. إيقاف نظام الإشعارات
             try:
                 from ui.notification_system import NotificationManager
 
@@ -1734,7 +1720,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 safe_print(f"تحذير: فشل إيقاف الإشعارات: {e}")
 
-            # 7. إغلاق قاعدة البيانات بشكل آمن
+            # 6. إغلاق قاعدة البيانات بشكل آمن
             if hasattr(self, "accounting_service") and hasattr(self.accounting_service, "repo"):
                 try:
                     self.accounting_service.repo.close()
@@ -1742,7 +1728,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     safe_print(f"تحذير: فشل إغلاق قاعدة البيانات: {e}")
 
-            # 8. تنظيف الذاكرة
+            # 7. تنظيف الذاكرة
             import gc
 
             gc.collect()

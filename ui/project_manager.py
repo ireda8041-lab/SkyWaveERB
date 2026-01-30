@@ -1344,6 +1344,23 @@ class ProjectEditorDialog(QDialog):
         except Exception as e:
             notify_error(f"فشل الحفظ: {e}", "خطأ")
 
+    def closeEvent(self, event):
+        """⚡ معالجة إغلاق النافذة - تنظيف الموارد"""
+        try:
+            # فصل الإشارات لمنع memory leaks
+            try:
+                self.items_table.cellChanged.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            
+            # تنظيف أي موارد أخرى
+            self.project_items.clear()
+            
+        except Exception as e:
+            pass  # تجاهل الأخطاء عند الإغلاق
+        
+        event.accept()
+
 
 class ProjectManagerTab(QWidget):
     def __init__(
@@ -1892,6 +1909,10 @@ class ProjectManagerTab(QWidget):
         payment_action.triggered.connect(self.open_payment_dialog)
         menu.addAction(payment_action)
 
+        expense_action = QAction("💸 إضافة مصروف", self.projects_table)
+        expense_action.triggered.connect(self._add_expense_for_project)
+        menu.addAction(expense_action)
+
         profit_action = QAction("📊 عرض الربحية", self.projects_table)
         profit_action.triggered.connect(self._show_profit_dialog)
         menu.addAction(profit_action)
@@ -1937,6 +1958,45 @@ class ProjectManagerTab(QWidget):
             project = self.project_service.get_project_by_id(project_name)
             if project and hasattr(self, "printing_service") and self.printing_service:
                 self.printing_service.print_invoice(project)
+
+    def _add_expense_for_project(self):
+        """إضافة مصروف للمشروع المحدد"""
+        if not self.selected_project:
+            QMessageBox.warning(self, "تنبيه", "الرجاء اختيار مشروع أولاً")
+            return
+        
+        try:
+            from ui.expense_editor_dialog import ExpenseEditorDialog
+            
+            # الحصول على project_id
+            project_id = getattr(self.selected_project, "_mongo_id", None) or str(self.selected_project.id)
+            project_name = self.selected_project.name
+            
+            # فتح نافذة إضافة مصروف مع تعبئة المشروع تلقائياً
+            dialog = ExpenseEditorDialog(
+                expense_service=self.expense_service,
+                project_service=self.project_service,
+                accounting_service=self.accounting_service,
+                parent=self,
+                pre_selected_project_id=project_id,
+                pre_selected_project_name=project_name
+            )
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # تحديث البيانات
+                self.load_projects_data()
+                # تحديث المعاينة
+                if self.selected_project:
+                    self.on_project_selection_changed()
+                    
+                from ui.notification_system import notify_success
+                notify_success(f"تم إضافة مصروف للمشروع: {project_name}")
+                
+        except ImportError:
+            QMessageBox.warning(self, "خطأ", "لم يتم العثور على نافذة إضافة المصروفات")
+        except Exception as e:
+            safe_print(f"ERROR: [ProjectManager] فشل إضافة مصروف: {e}")
+            QMessageBox.critical(self, "خطأ", f"فشل إضافة المصروف:\n{e}")
 
     def on_project_selection_changed(self):
         """(معدلة) تملى لوحة المعاينة بكل التفاصيل - ⚡ محسّنة للسرعة"""
@@ -1995,13 +2055,24 @@ class ProjectManagerTab(QWidget):
         self.preview_groupbox.setVisible(False)
 
     def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
-        """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى (بدون debug logs)"""
+        """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى مع بيانات حديثة"""
         from core.data_loader import get_data_loader
 
         data_loader = get_data_loader()
 
-        # ⚡ تحميل كل البيانات في طلب واحد (أسرع)
+        # ⚡ تحميل كل البيانات في طلب واحد (أسرع) - مع تجاوز الـ cache
         def fetch_all_data():
+            # ⚡ إبطال الـ cache للمشروع الحالي لضمان بيانات حديثة
+            try:
+                from core.cache_manager import CacheManager
+                cache = CacheManager.get_instance()
+                cache.invalidate(f"project_{project_name}")
+                cache.invalidate(f"payments_{project_name}")
+                cache.invalidate(f"expenses_{project_name}")
+            except Exception:
+                pass  # تجاهل إذا لم يكن الـ cache متاحاً
+            
+            # ⚡ جلب البيانات مباشرة من قاعدة البيانات (bypass cache)
             profit_data = self.project_service.get_project_profitability(project_name)
             payments = self.project_service.get_payments_for_project(project_name)
             expenses = self.project_service.get_expenses_for_project(project_name)
@@ -2011,6 +2082,8 @@ class ProjectManagerTab(QWidget):
             try:
                 from ui.todo_manager import TaskService
                 task_service = TaskService()
+                # ⚡ تحديث المهام من قاعدة البيانات
+                task_service.refresh()
                 tasks = task_service.get_tasks_by_project(str(project_id_for_tasks))
             except Exception:
                 pass
@@ -2709,17 +2782,44 @@ class ProjectManagerTab(QWidget):
         return str(value)
 
     def open_editor(self, project_to_edit: schemas.Project | None = None):
-        """(معدلة) يفتح نافذة الحوار ويمرر "قسم المحاسبة" """
+        """(معدلة) يفتح نافذة الحوار - غير مشروطة للمشاريع الجديدة"""
         dialog = ProjectEditorDialog(
             project_service=self.project_service,
             client_service=self.client_service,
             service_service=self.service_service,
             accounting_service=self.accounting_service,
             project_to_edit=project_to_edit,
-            parent=self,
+            parent=None,  # ⚡ بدون parent لجعلها نافذة مستقلة
         )
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_projects_data()
+        
+        # ⚡ جعل النافذة غير مشروطة (Non-Modal) للمشاريع الجديدة
+        if project_to_edit is None:
+            # نافذة مستقلة يمكن تصغيرها
+            dialog.setWindowFlags(
+                Qt.WindowType.Window |
+                Qt.WindowType.WindowMinimizeButtonHint |
+                Qt.WindowType.WindowMaximizeButtonHint |
+                Qt.WindowType.WindowCloseButtonHint
+            )
+            dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+            
+            # ربط إشارة الإغلاق بتحديث البيانات
+            dialog.finished.connect(lambda result: self.load_projects_data() if result == QDialog.DialogCode.Accepted else None)
+            
+            # عرض النافذة بدون انتظار (Non-Modal)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            
+            # حفظ مرجع للنافذة لمنع garbage collection
+            if not hasattr(self, '_open_dialogs'):
+                self._open_dialogs = []
+            self._open_dialogs.append(dialog)
+            dialog.destroyed.connect(lambda: self._open_dialogs.remove(dialog) if dialog in self._open_dialogs else None)
+        else:
+            # للتعديل: نافذة مشروطة (Modal) كالمعتاد
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self.load_projects_data()
 
     def open_editor_for_selected(self):
         if not self.selected_project:

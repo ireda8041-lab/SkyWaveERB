@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.0.6"
+#define MyAppVersion "2.1.0"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -51,6 +51,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
 WizardSizePercent=120
 DisableWelcomePage=no
+
+; ⚡ إغلاق التطبيقات تلقائياً
+CloseApplications=force
+CloseApplicationsFilter=*.exe
+RestartApplications=yes
 
 ; صلاحيات - lowest لأن التثبيت في D: مش محتاج Admin
 PrivilegesRequired=lowest
@@ -95,8 +100,10 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilen
 Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: quicklaunchicon
 
 [Run]
-; تشغيل البرنامج بعد التثبيت
-Filename: "{app}\{#MyAppExeName}"; Description: "تشغيل {#MyAppName}"; Flags: nowait postinstall skipifsilent
+; تشغيل البرنامج بعد التثبيت (حتى في الوضع الصامت)
+Filename: "{app}\{#MyAppExeName}"; Description: "تشغيل {#MyAppName}"; Flags: nowait postinstall runasoriginaluser
+; ⚡ تشغيل البرنامج في الوضع الصامت (بدون سؤال المستخدم)
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent runasoriginaluser shellexec
 
 [UninstallDelete]
 ; حذف ملفات إضافية عند إلغاء التثبيت
@@ -107,6 +114,23 @@ Type: files; Name: "{app}\*.db-shm"
 Type: files; Name: "{app}\*.db-wal"
 
 [Code]
+// ⚡ إغلاق التطبيقات قبل التثبيت
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+  
+  // إغلاق SkyWaveERP.exe
+  Exec('taskkill', '/F /IM SkyWaveERP.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  
+  // إغلاق updater.exe
+  Exec('taskkill', '/F /IM updater.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  
+  // انتظار قليلاً للتأكد من إغلاق العمليات
+  Sleep(1000);
+end;
+
 // التحقق من وجود إصدار سابق
 function InitializeSetup(): Boolean;
 var
