@@ -189,10 +189,6 @@ class SkyWaveERPApp:
         # Authentication Service
         self.auth_service = AuthService(repository=self.repository)
 
-        # ✅ HR Service - REMOVED (causing issues)
-        # HR functionality temporarily disabled
-        self.hr_service = None
-
         # Advanced Sync Manager
         self.advanced_sync_manager = AdvancedSyncManagerV3(repository=self.repository)
 

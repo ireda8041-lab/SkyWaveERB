@@ -1995,7 +1995,7 @@ class ProjectManagerTab(QWidget):
         self.preview_groupbox.setVisible(False)
 
     def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
-        """⚡ تحميل بيانات المعاينة في الخلفية - محسّن للسرعة القصوى"""
+        """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى (بدون debug logs)"""
         from core.data_loader import get_data_loader
 
         data_loader = get_data_loader()
@@ -2006,21 +2006,10 @@ class ProjectManagerTab(QWidget):
             payments = self.project_service.get_payments_for_project(project_name)
             expenses = self.project_service.get_expenses_for_project(project_name)
 
-            # 🔍 Debug: طباعة عدد الدفعات
-            safe_print(
-                f"DEBUG: [ProjectManager] تم جلب {len(payments) if payments else 0} دفعة للمشروع {project_name}"
-            )
-            if payments:
-                for i, pay in enumerate(payments):
-                    safe_print(
-                        f"  - دفعة {i + 1}: {pay.amount:,.2f} ج.م في {pay.date} (حساب: {pay.account_id})"
-                    )
-
             # جلب المهام
             tasks = []
             try:
                 from ui.todo_manager import TaskService
-
                 task_service = TaskService()
                 tasks = task_service.get_tasks_by_project(str(project_id_for_tasks))
             except Exception:
@@ -2038,20 +2027,16 @@ class ProjectManagerTab(QWidget):
             if not self.selected_project or self.selected_project.name != project_name:
                 return
 
-            # تحديث الكروت
+            # ⚡ تحديث الكروت فوراً
             profit_data = data.get("profit", {})
             self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
             self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
             self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
 
-            # تحديث الجداول
-            payments_data = data.get("payments", [])
-            safe_print(
-                f"DEBUG: [ProjectManager] جاري عرض {len(payments_data) if payments_data else 0} دفعة في الجدول"
-            )
-            self._populate_payments_table(payments_data)
-            self._populate_expenses_table(data.get("expenses", []))
-            self._populate_tasks_table(data.get("tasks", []))
+            # ⚡ تحديث الجداول بسرعة
+            self._populate_payments_table_fast(data.get("payments", []))
+            self._populate_expenses_table_fast(data.get("expenses", []))
+            self._populate_tasks_table_fast(data.get("tasks", []))
 
         data_loader.load_async(
             operation_name=f"preview_{project_name}",
@@ -2059,6 +2044,152 @@ class ProjectManagerTab(QWidget):
             on_success=on_all_data_loaded,
             use_thread_pool=True,
         )
+
+    def _populate_payments_table_fast(self, payments):
+        """⚡⚡ ملء جدول الدفعات - نسخة فائقة السرعة"""
+        try:
+            table = self.preview_payments_table
+            table.setUpdatesEnabled(False)
+            table.clearContents()
+            table.setRowCount(0)
+
+            if payments and len(payments) > 0:
+                table.setRowCount(len(payments))
+                
+                # ⚡ تخزين الحسابات مؤقتاً
+                accounts_cache = {}
+                
+                for i, pay in enumerate(payments):
+                    # معالجة التاريخ
+                    try:
+                        date_str = pay.date.strftime("%Y-%m-%d") if hasattr(pay.date, "strftime") else str(pay.date)[:10]
+                    except:
+                        date_str = "N/A"
+
+                    # اسم الحساب
+                    account_name = "نقدي"
+                    if pay.account_id:
+                        if pay.account_id in accounts_cache:
+                            account_name = accounts_cache[pay.account_id]
+                        else:
+                            try:
+                                account = self.accounting_service.repo.get_account_by_code(pay.account_id)
+                                account_name = account.name if account else str(pay.account_id)
+                                accounts_cache[pay.account_id] = account_name
+                            except:
+                                account_name = str(pay.account_id)
+
+                    # إنشاء العناصر
+                    account_item = QTableWidgetItem(account_name)
+                    account_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    
+                    amount_item = QTableWidgetItem(f"{pay.amount:,.2f} ج.م")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(QColor("#10b981"))
+                    
+                    date_item = QTableWidgetItem(date_str)
+                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                    table.setItem(i, 0, account_item)
+                    table.setItem(i, 1, amount_item)
+                    table.setItem(i, 2, date_item)
+            else:
+                table.setRowCount(1)
+                no_data = QTableWidgetItem("لا توجد دفعات مسجلة")
+                no_data.setForeground(QColor("gray"))
+                no_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(0, 0, no_data)
+                table.setSpan(0, 0, 1, 3)
+        except Exception as e:
+            safe_print(f"ERROR: فشل ملء جدول الدفعات: {e}")
+        finally:
+            table.setUpdatesEnabled(True)
+
+    def _populate_expenses_table_fast(self, expenses):
+        """⚡⚡ ملء جدول المصروفات - نسخة فائقة السرعة"""
+        try:
+            table = self.preview_expenses_table
+            table.setUpdatesEnabled(False)
+            table.clearContents()
+            table.setRowCount(0)
+
+            if expenses and len(expenses) > 0:
+                table.setRowCount(len(expenses))
+                
+                for i, exp in enumerate(expenses):
+                    try:
+                        date_str = exp.date.strftime("%Y-%m-%d") if hasattr(exp.date, "strftime") else str(exp.date)[:10]
+                    except:
+                        date_str = "N/A"
+
+                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(QColor("#ef4444"))
+                    
+                    desc_item = QTableWidgetItem(exp.description or exp.category or "-")
+                    desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    
+                    date_item = QTableWidgetItem(date_str)
+                    date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                    table.setItem(i, 0, amount_item)
+                    table.setItem(i, 1, desc_item)
+                    table.setItem(i, 2, date_item)
+            else:
+                table.setRowCount(1)
+                no_data = QTableWidgetItem("لا توجد مصروفات مسجلة")
+                no_data.setForeground(QColor("gray"))
+                no_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                table.setItem(0, 0, no_data)
+                table.setSpan(0, 0, 1, 3)
+        except Exception as e:
+            safe_print(f"ERROR: فشل ملء جدول المصروفات: {e}")
+        finally:
+            table.setUpdatesEnabled(True)
+
+    def _populate_tasks_table_fast(self, tasks):
+        """⚡⚡ ملء جدول المهام - نسخة فائقة السرعة"""
+        try:
+            table = self.preview_tasks_table
+            table.setUpdatesEnabled(False)
+            table.clearContents()
+            table.setRowCount(0)
+
+            if tasks and len(tasks) > 0:
+                table.setRowCount(len(tasks))
+                
+                priority_colors = {
+                    "منخفضة": "#10B981", "متوسطة": "#0A6CF1",
+                    "عالية": "#FF6636", "عاجلة": "#FF4FD8",
+                }
+                status_colors = {
+                    "قيد الانتظار": "#B0C4DE", "قيد التنفيذ": "#FF6636",
+                    "مكتملة": "#10B981", "ملغاة": "#FF4FD8",
+                }
+                
+                for i, task in enumerate(tasks):
+                    table.setItem(i, 0, QTableWidgetItem(task.title))
+                    
+                    priority_item = QTableWidgetItem(task.priority.value)
+                    priority_item.setForeground(QColor(priority_colors.get(task.priority.value, "white")))
+                    table.setItem(i, 1, priority_item)
+                    
+                    status_item = QTableWidgetItem(task.status.value)
+                    status_item.setForeground(QColor(status_colors.get(task.status.value, "white")))
+                    table.setItem(i, 2, status_item)
+                    
+                    due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
+                    table.setItem(i, 3, QTableWidgetItem(due_str))
+            else:
+                table.setRowCount(1)
+                no_data = QTableWidgetItem("لا توجد مهام مرتبطة")
+                no_data.setForeground(QColor("gray"))
+                table.setItem(0, 0, no_data)
+                table.setSpan(0, 0, 1, 4)
+        except Exception as e:
+            safe_print(f"ERROR: فشل ملء جدول المهام: {e}")
+        finally:
+            table.setUpdatesEnabled(True)
 
     def _populate_payments_table(self, payments):
         """⚡ ملء جدول الدفعات - محسّن مع عرض اسم الحساب"""

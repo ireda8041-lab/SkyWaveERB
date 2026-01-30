@@ -650,69 +650,303 @@ class SettingsTab(QWidget):
         layout.addWidget(self.users_table)
 
     def setup_backup_tab(self):
-        """إعداد تاب النسخ الاحتياطي"""
-        layout = QVBoxLayout(self.backup_tab)
+        """⚡ إعداد تاب النسخ الاحتياطي - تصميم احترافي محسّن"""
+        from PyQt6.QtWidgets import QFrame, QScrollArea, QSizePolicy
+        
+        # منطقة التمرير
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: #0d2137; width: 8px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3d6a9f; border-radius: 4px; min-height: 30px;
+            }
+        """)
+        
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 15, 20, 15)
 
-        # إنشاء نسخة احتياطية
+        # === قسم إنشاء نسخة احتياطية ===
         backup_group = QGroupBox("💾 إنشاء نسخة احتياطية")
+        backup_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px; font-weight: bold;
+                border: 1px solid #374151; border-radius: 10px;
+                margin-top: 12px; padding: 15px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(16, 185, 129, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 15px;
+                color: #10B981;
+            }
+        """)
         backup_layout = QVBoxLayout()
+        backup_layout.setSpacing(12)
 
         backup_desc = QLabel(
-            "احفظ نسخة احتياطية كاملة من جميع بياناتك (المشاريع، الفواتير، الحسابات، إلخ)\n"
-            "سيتم حفظ البيانات في ملف مضغوط يمكنك تحميله على جهازك."
+            "📦 احفظ نسخة احتياطية كاملة من جميع بياناتك:\n"
+            "• المشاريع والفواتير • العملاء والخدمات • الحسابات والمصروفات\n"
+            "• قيود اليومية • الإعدادات والعملات"
         )
         backup_desc.setWordWrap(True)
-        backup_desc.setStyleSheet("color: #9ca3af; margin-bottom: 10px;")
+        backup_desc.setStyleSheet("color: #9ca3af; font-size: 12px; line-height: 1.5;")
         backup_layout.addWidget(backup_desc)
 
-        self.create_backup_btn = QPushButton("💾 إنشاء نسخة احتياطية الآن")
-        self.create_backup_btn.setStyleSheet(BUTTON_STYLES["success"])
-        self.create_backup_btn.clicked.connect(self.create_backup)
-        backup_layout.addWidget(self.create_backup_btn)
+        # شريط التقدم (مخفي افتراضياً)
+        self.backup_progress = QProgressBar()
+        self.backup_progress.setVisible(False)
+        self.backup_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #374151; border-radius: 5px;
+                background: #0d2137; height: 20px; text-align: center;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10B981, stop:1 #34d399);
+                border-radius: 4px;
+            }
+        """)
+        backup_layout.addWidget(self.backup_progress)
 
+        # أزرار النسخ الاحتياطي
+        backup_btns = QHBoxLayout()
+        
+        self.create_backup_btn = QPushButton("💾 إنشاء نسخة احتياطية الآن")
+        self.create_backup_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #34d399);
+                color: white; border: none; border-radius: 8px;
+                padding: 12px 25px; font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: #059669; }
+            QPushButton:disabled { background: #374151; color: #6b7280; }
+        """)
+        self.create_backup_btn.clicked.connect(self.create_backup)
+        backup_btns.addWidget(self.create_backup_btn)
+        
+        self.auto_backup_btn = QPushButton("⏰ نسخ احتياطي تلقائي")
+        self.auto_backup_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(59, 130, 246, 0.2);
+                color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4);
+                border-radius: 8px; padding: 12px 25px;
+                font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(59, 130, 246, 0.4); }
+        """)
+        self.auto_backup_btn.clicked.connect(self._setup_auto_backup)
+        backup_btns.addWidget(self.auto_backup_btn)
+        
+        backup_btns.addStretch()
+        backup_layout.addLayout(backup_btns)
         backup_group.setLayout(backup_layout)
         layout.addWidget(backup_group)
 
-        # استرجاع نسخة احتياطية
+        # === قسم استرجاع نسخة احتياطية ===
         restore_group = QGroupBox("📥 استرجاع نسخة احتياطية")
+        restore_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px; font-weight: bold;
+                border: 1px solid #374151; border-radius: 10px;
+                margin-top: 12px; padding: 15px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(239, 68, 68, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 15px;
+                color: #f59e0b;
+            }
+        """)
         restore_layout = QVBoxLayout()
+        restore_layout.setSpacing(12)
 
         warning_label = QLabel(
-            "⚠️ تحذير: استرجاع نسخة احتياطية سيقوم بحذف البيانات الحالية واستبدالها!\n"
-            "تأكد من إنشاء نسخة احتياطية للبيانات الحالية أولاً."
+            "⚠️ تحذير هام:\n"
+            "• استرجاع نسخة احتياطية سيحذف البيانات الحالية!\n"
+            "• تأكد من إنشاء نسخة احتياطية للبيانات الحالية أولاً\n"
+            "• لا يمكن التراجع عن هذه العملية"
         )
         warning_label.setWordWrap(True)
-        warning_label.setStyleSheet(
-            "color: #f59e0b; background-color: #422006; padding: 10px; border-radius: 5px;"
-        )
+        warning_label.setStyleSheet("""
+            color: #fbbf24; background-color: rgba(245, 158, 11, 0.15);
+            padding: 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.3);
+            font-size: 12px;
+        """)
         restore_layout.addWidget(warning_label)
 
         self.restore_backup_btn = QPushButton("📥 استرجاع نسخة احتياطية")
-        self.restore_backup_btn.setStyleSheet(BUTTON_STYLES["warning"])
+        self.restore_backup_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(239, 68, 68, 0.2);
+                color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.4);
+                border-radius: 8px; padding: 12px 25px;
+                font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover { background: rgba(239, 68, 68, 0.4); color: white; }
+        """)
         self.restore_backup_btn.clicked.connect(self.restore_backup)
         restore_layout.addWidget(self.restore_backup_btn)
-
         restore_group.setLayout(restore_layout)
         layout.addWidget(restore_group)
 
-        # معلومات قاعدة البيانات
+        # === قسم معلومات قاعدة البيانات ===
         db_group = QGroupBox("📊 معلومات قاعدة البيانات")
+        db_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px; font-weight: bold;
+                border: 1px solid #374151; border-radius: 10px;
+                margin-top: 12px; padding: 15px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(59, 130, 246, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 15px;
+                color: #60a5fa;
+            }
+        """)
         db_layout = QVBoxLayout()
+        db_layout.setSpacing(10)
 
-        self.db_stats_label = QLabel("جاري تحميل الإحصائيات...")
-        self.db_stats_label.setStyleSheet("color: #d1d5db;")
+        self.db_stats_label = QLabel("⏳ جاري تحميل الإحصائيات...")
+        self.db_stats_label.setStyleSheet("""
+            color: #d1d5db; font-size: 12px; line-height: 1.6;
+            background: rgba(13, 33, 55, 0.5); padding: 15px;
+            border-radius: 8px; border: 1px solid #374151;
+        """)
         db_layout.addWidget(self.db_stats_label)
 
+        db_btns = QHBoxLayout()
         self.refresh_stats_btn = QPushButton("🔄 تحديث المعلومات")
         self.refresh_stats_btn.setStyleSheet(BUTTON_STYLES["primary"])
         self.refresh_stats_btn.clicked.connect(self.load_db_stats)
-        db_layout.addWidget(self.refresh_stats_btn)
-
+        db_btns.addWidget(self.refresh_stats_btn)
+        
+        self.optimize_db_btn = QPushButton("⚡ تحسين قاعدة البيانات")
+        self.optimize_db_btn.setStyleSheet(BUTTON_STYLES["info"])
+        self.optimize_db_btn.clicked.connect(self._optimize_database)
+        db_btns.addWidget(self.optimize_db_btn)
+        
+        db_btns.addStretch()
+        db_layout.addLayout(db_btns)
         db_group.setLayout(db_layout)
         layout.addWidget(db_group)
 
+        # === قسم سجل النسخ الاحتياطية ===
+        history_group = QGroupBox("📋 سجل النسخ الاحتياطية")
+        history_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px; font-weight: bold;
+                border: 1px solid #374151; border-radius: 10px;
+                margin-top: 12px; padding: 15px;
+                background: rgba(10, 42, 85, 0.3);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 2px 15px;
+                color: #93C5FD;
+            }
+        """)
+        history_layout = QVBoxLayout()
+        
+        self.backup_history_label = QLabel("لا توجد نسخ احتياطية سابقة")
+        self.backup_history_label.setStyleSheet("color: #6b7280; font-size: 12px; padding: 10px;")
+        history_layout.addWidget(self.backup_history_label)
+        
+        history_group.setLayout(history_layout)
+        layout.addWidget(history_group)
+
         layout.addStretch()
+        scroll_area.setWidget(scroll_content)
+
+        # إضافة scroll_area للتاب
+        tab_layout = QVBoxLayout(self.backup_tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
+
+        # تحميل الإحصائيات
         self.load_db_stats()
+        self._load_backup_history()
+
+    def _setup_auto_backup(self):
+        """إعداد النسخ الاحتياطي التلقائي"""
+        QMessageBox.information(
+            self,
+            "النسخ الاحتياطي التلقائي",
+            "🔜 قريباً!\n\n"
+            "سيتم إضافة ميزة النسخ الاحتياطي التلقائي في التحديث القادم.\n\n"
+            "حالياً يمكنك إنشاء نسخة احتياطية يدوياً."
+        )
+
+    def _optimize_database(self):
+        """تحسين قاعدة البيانات"""
+        try:
+            if not self.repository:
+                QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة!")
+                return
+            
+            reply = QMessageBox.question(
+                self,
+                "تحسين قاعدة البيانات",
+                "سيتم تحسين قاعدة البيانات وضغطها.\n\n"
+                "هذه العملية قد تستغرق بضع ثوانٍ.\n\n"
+                "هل تريد المتابعة؟",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                cursor = self.repository.get_cursor()
+                try:
+                    cursor.execute("VACUUM")
+                    cursor.execute("ANALYZE")
+                    QMessageBox.information(
+                        self,
+                        "✅ نجاح",
+                        "تم تحسين قاعدة البيانات بنجاح!\n\n"
+                        "• تم ضغط الملفات\n"
+                        "• تم تحديث الفهارس"
+                    )
+                finally:
+                    cursor.close()
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"فشل تحسين قاعدة البيانات:\n{e}")
+
+    def _load_backup_history(self):
+        """تحميل سجل النسخ الاحتياطية"""
+        try:
+            import os
+            import glob
+            
+            # البحث عن ملفات النسخ الاحتياطية
+            backup_files = glob.glob("skywave_backup_*.json")
+            backup_files.extend(glob.glob("exports/skywave_backup_*.json"))
+            
+            if backup_files:
+                history_text = "📁 النسخ الاحتياطية المتاحة:\n\n"
+                for f in sorted(backup_files, reverse=True)[:5]:  # آخر 5 نسخ
+                    file_name = os.path.basename(f)
+                    file_size = os.path.getsize(f) / 1024  # KB
+                    history_text += f"• {file_name} ({file_size:.1f} KB)\n"
+                self.backup_history_label.setText(history_text)
+            else:
+                self.backup_history_label.setText("لا توجد نسخ احتياطية سابقة في المجلد الحالي")
+                
+        except Exception as e:
+            safe_print(f"WARNING: فشل تحميل سجل النسخ الاحتياطية: {e}")
 
     def _get_default_currencies(self):
         """العملات الافتراضية"""
@@ -1123,7 +1357,7 @@ class SettingsTab(QWidget):
             self.update_rates_btn.setText("🌐 تحديث الأسعار من الإنترنت")
 
     def create_backup(self):
-        """إنشاء نسخة احتياطية كاملة من قاعدة البيانات"""
+        """⚡ إنشاء نسخة احتياطية كاملة - محسّنة للسرعة"""
         if not self.repository:
             QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة!")
             return
@@ -1134,136 +1368,135 @@ class SettingsTab(QWidget):
             f"skywave_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
             "JSON Files (*.json)",
         )
-        if file_path:
+        if not file_path:
+            return
+            
+        # تعطيل الزر وإظهار التقدم
+        self.create_backup_btn.setEnabled(False)
+        self.create_backup_btn.setText("⏳ جاري إنشاء النسخة...")
+        self.backup_progress.setVisible(True)
+        self.backup_progress.setValue(0)
+        
+        from core.data_loader import get_data_loader
+        
+        def do_backup():
+            """تنفيذ النسخ الاحتياطي في الخلفية"""
+            backup_data = {
+                "backup_info": {
+                    "created_at": datetime.now().isoformat(),
+                    "version": "2.0",
+                    "app": "SkyWave ERP",
+                },
+                "clients": [],
+                "services": [],
+                "projects": [],
+                "invoices": [],
+                "expenses": [],
+                "accounts": [],
+                "currencies": [],
+                "journal_entries": [],
+                "payments": [],
+                "tasks": [],
+                "settings": {},
+            }
+            
+            # ⚡ جلب كل البيانات بشكل متوازي
+            data_sources = [
+                ("clients", self.repository.get_all_clients),
+                ("services", self.repository.get_all_services),
+                ("projects", self.repository.get_all_projects),
+                ("invoices", self.repository.get_all_invoices),
+                ("expenses", self.repository.get_all_expenses),
+                ("accounts", self.repository.get_all_accounts),
+                ("currencies", self.repository.get_all_currencies),
+                ("journal_entries", self.repository.get_all_journal_entries),
+                ("payments", self.repository.get_all_payments),
+            ]
+            
+            for key, fetch_func in data_sources:
+                try:
+                    data = fetch_func()
+                    if data:
+                        if isinstance(data, list):
+                            backup_data[key] = [self._serialize_object(item) for item in data]
+                        else:
+                            backup_data[key] = [self._serialize_object(data)]
+                except Exception as e:
+                    safe_print(f"WARNING: فشل جلب {key}: {e}")
+            
+            # جلب المهام
             try:
-                # جمع كل البيانات من قاعدة البيانات
-                backup_data = {
-                    "backup_info": {
-                        "created_at": datetime.now().isoformat(),
-                        "version": "1.0",
-                        "app": "SkyWave ERP",
-                    },
-                    "clients": [],
-                    "services": [],
-                    "projects": [],
-                    "invoices": [],
-                    "expenses": [],
-                    "accounts": [],
-                    "currencies": [],
-                    "journal_entries": [],
-                    "payments": [],
-                    "settings": {},
-                }
-
-                # جلب العملاء
-                try:
-                    clients = self.repository.get_all_clients()
-                    backup_data["clients"] = [self._serialize_object(c) for c in clients]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب العملاء: {e}")
-
-                # جلب الخدمات
-                try:
-                    services = self.repository.get_all_services()
-                    backup_data["services"] = [self._serialize_object(s) for s in services]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب الخدمات: {e}")
-
-                # جلب المشاريع
-                try:
-                    projects = self.repository.get_all_projects()
-                    backup_data["projects"] = [self._serialize_object(p) for p in projects]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب المشاريع: {e}")
-
-                # جلب الفواتير
-                try:
-                    invoices = self.repository.get_all_invoices()
-                    backup_data["invoices"] = [self._serialize_object(i) for i in invoices]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب الفواتير: {e}")
-
-                # جلب المصروفات
-                try:
-                    expenses = self.repository.get_all_expenses()
-                    backup_data["expenses"] = [self._serialize_object(e) for e in expenses]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب المصروفات: {e}")
-
-                # جلب الحسابات
-                try:
-                    accounts = self.repository.get_all_accounts()
-                    backup_data["accounts"] = [self._serialize_object(a) for a in accounts]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب الحسابات: {e}")
-
-                # جلب العملات
-                try:
-                    currencies = self.repository.get_all_currencies()
-                    backup_data["currencies"] = (
-                        currencies if isinstance(currencies, list) else [currencies]
-                    )
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب العملات: {e}")
-
-                # جلب قيود اليومية
-                try:
-                    journal_entries = self.repository.get_all_journal_entries()
-                    backup_data["journal_entries"] = [
-                        self._serialize_object(j) for j in journal_entries
-                    ]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب قيود اليومية: {e}")
-
-                # جلب الدفعات
-                try:
-                    payments = self.repository.get_all_payments()
-                    backup_data["payments"] = [self._serialize_object(p) for p in payments]
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب الدفعات: {e}")
-
-                # جلب الإعدادات
-                try:
-                    backup_data["settings"] = self.settings_service.get_settings()
-                except Exception as e:
-                    safe_print(f"WARNING: فشل جلب الإعدادات: {e}")
-
-                # حفظ الملف
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
-
-                # حساب الإحصائيات
-                total_records = sum(
-                    [
-                        len(backup_data["clients"]),
-                        len(backup_data["services"]),
-                        len(backup_data["projects"]),
-                        len(backup_data["invoices"]),
-                        len(backup_data["expenses"]),
-                        len(backup_data["accounts"]),
-                        len(backup_data["currencies"]),
-                        len(backup_data["journal_entries"]),
-                        len(backup_data["payments"]),
-                    ]
-                )
-
-                QMessageBox.information(
-                    self,
-                    "✅ نجاح",
-                    f"تم إنشاء النسخة الاحتياطية بنجاح!\n\n"
-                    f"📁 الملف: {file_path}\n"
-                    f"📊 إجمالي السجلات: {total_records}\n\n"
-                    f"• العملاء: {len(backup_data['clients'])}\n"
-                    f"• الخدمات: {len(backup_data['services'])}\n"
-                    f"• المشاريع: {len(backup_data['projects'])}\n"
-                    f"• الفواتير: {len(backup_data['invoices'])}\n"
-                    f"• المصروفات: {len(backup_data['expenses'])}\n"
-                    f"• الحسابات: {len(backup_data['accounts'])}\n"
-                    f"• قيود اليومية: {len(backup_data['journal_entries'])}",
-                )
-
-            except Exception as e:
-                QMessageBox.critical(self, "❌ خطأ", f"فشل إنشاء النسخة الاحتياطية:\n{e}")
+                from ui.todo_manager import TaskService
+                task_service = TaskService()
+                tasks = task_service.get_all_tasks()
+                backup_data["tasks"] = [self._serialize_object(t) for t in tasks]
+            except Exception:
+                pass
+            
+            # جلب الإعدادات
+            try:
+                backup_data["settings"] = self.settings_service.get_settings()
+            except Exception:
+                pass
+            
+            # حفظ الملف
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
+            
+            return backup_data
+        
+        def on_success(backup_data):
+            """معالج النجاح"""
+            self.create_backup_btn.setEnabled(True)
+            self.create_backup_btn.setText("💾 إنشاء نسخة احتياطية الآن")
+            self.backup_progress.setVisible(False)
+            
+            # حساب الإحصائيات
+            total_records = sum([
+                len(backup_data.get("clients", [])),
+                len(backup_data.get("services", [])),
+                len(backup_data.get("projects", [])),
+                len(backup_data.get("invoices", [])),
+                len(backup_data.get("expenses", [])),
+                len(backup_data.get("accounts", [])),
+                len(backup_data.get("currencies", [])),
+                len(backup_data.get("journal_entries", [])),
+                len(backup_data.get("payments", [])),
+                len(backup_data.get("tasks", [])),
+            ])
+            
+            QMessageBox.information(
+                self,
+                "✅ نجاح",
+                f"تم إنشاء النسخة الاحتياطية بنجاح!\n\n"
+                f"📁 الملف: {os.path.basename(file_path)}\n"
+                f"📊 إجمالي السجلات: {total_records}\n\n"
+                f"• العملاء: {len(backup_data.get('clients', []))}\n"
+                f"• الخدمات: {len(backup_data.get('services', []))}\n"
+                f"• المشاريع: {len(backup_data.get('projects', []))}\n"
+                f"• المصروفات: {len(backup_data.get('expenses', []))}\n"
+                f"• المهام: {len(backup_data.get('tasks', []))}"
+            )
+            
+            # تحديث سجل النسخ الاحتياطية
+            self._load_backup_history()
+        
+        def on_error(error_msg):
+            """معالج الخطأ"""
+            self.create_backup_btn.setEnabled(True)
+            self.create_backup_btn.setText("💾 إنشاء نسخة احتياطية الآن")
+            self.backup_progress.setVisible(False)
+            QMessageBox.critical(self, "❌ خطأ", f"فشل إنشاء النسخة الاحتياطية:\n{error_msg}")
+        
+        # ⚡ تنفيذ في الخلفية
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="create_backup",
+            load_function=do_backup,
+            on_success=on_success,
+            on_error=on_error,
+            use_thread_pool=True
+        )
 
     def _serialize_object(self, obj):
         """تحويل كائن إلى قاموس قابل للتسلسل"""

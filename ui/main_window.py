@@ -16,19 +16,15 @@ from core.sync_manager_v3 import SyncManagerV3  # (الجديد) مدير الم
 from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.expense_service import ExpenseService
-from services.hr_service import HRService  # 🏢 خدمة الموارد البشرية
 from services.invoice_service import InvoiceService
 from services.notification_service import NotificationService  # (الجديد) خدمة الإشعارات
 from services.project_service import ProjectService
-from services.quotation_service import QuotationService  # 📋 خدمة عروض الأسعار
 from services.service_service import ServiceService
 
 # (الأقسام اللي شغالين بيها)
 from services.settings_service import SettingsService
 from ui.accounting_manager import AccountingManagerTab  # (التاب الجديد أبو تابات داخلية)
 from ui.client_manager import ClientManagerTab
-from ui.hr_manager import HRManagerTab  # 🏢 تاب الموارد البشرية
-from ui.quotation_manager import QuotationManagerTab  # 📋 تاب عروض الأسعار
 
 # (تم مسح PaymentService لأنه بقى جوه ProjectService)
 # (استيراد التابات الجديدة)
@@ -106,13 +102,6 @@ class MainWindow(QMainWindow):
         
         # 🔥 الحصول على Repository للاتصال المباشر
         self.repository = self.accounting_service.repo
-
-        # 🏢 إنشاء خدمة الموارد البشرية
-        from core.event_bus import EventBus
-        self.hr_service = HRService(self.repository, EventBus())
-        
-        # 📋 إنشاء خدمة عروض الأسعار
-        self.quotation_service = QuotationService(self.repository, EventBus())
 
         role_display = (
             current_user.role.value
@@ -455,20 +444,11 @@ class MainWindow(QMainWindow):
         self.clients_tab = ClientManagerTab(self.client_service)
         self.tabs.addTab(self.clients_tab, "👤 العملاء")
 
-        # 6. Quotations - عروض الأسعار
-        self.quotations_tab = QuotationManagerTab(
-            self.quotation_service,
-            client_service=self.client_service,
-            service_service=self.service_service,
-            project_service=self.project_service
-        )
-        self.tabs.addTab(self.quotations_tab, "📋 عروض الأسعار")
-
-        # 7. Services
+        # 6. Services
         self.services_tab = ServiceManagerTab(self.service_service)
         self.tabs.addTab(self.services_tab, "🛠️ الخدمات والباقات")
 
-        # 8. Accounting
+        # 7. Accounting
         self.accounting_tab = AccountingManagerTab(
             self.expense_service,
             self.accounting_service,
@@ -476,11 +456,7 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.accounting_tab, "📊 المحاسبة")
 
-        # 9. HR - الموارد البشرية
-        self.hr_tab = HRManagerTab(self.hr_service, current_user=self.current_user)
-        self.tabs.addTab(self.hr_tab, "🏢 الموارد البشرية")
-
-        # 10. Todo
+        # 8. Todo
         from ui.todo_manager import TaskService, TodoManagerWidget
 
         TaskService._repository = self.accounting_service.repo
@@ -491,7 +467,7 @@ class MainWindow(QMainWindow):
         )
         self.tabs.addTab(self.todo_tab, "📋 المهام")
 
-        # 10. Settings
+        # 9. Settings
         self.settings_tab = SettingsTab(
             self.settings_service,
             repository=self.accounting_service.repo,

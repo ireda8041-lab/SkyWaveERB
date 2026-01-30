@@ -223,7 +223,10 @@ class UpdateService:
                 updater_path = updater_py
                 command = [sys.executable, updater_path, current_dir, setup_path]
             else:
-                raise FileNotFoundError("لم يتم العثور على updater.exe أو updater.py")
+                # updater.exe غير موجود - شغّل ملف Setup مباشرة
+                safe_print("updater.exe غير موجود - تشغيل Setup مباشرة...")
+                subprocess.Popen([setup_path], shell=False)
+                return True
 
             # تشغيل المحدث في عملية منفصلة
             subprocess.Popen(
