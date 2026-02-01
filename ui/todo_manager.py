@@ -7,14 +7,18 @@ Professional TODO Management System
 
 import json
 import os
+import sys
+import traceback
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any
 
 from PyQt6.QtCore import QDate, Qt, QTime, QTimer
-from PyQt6.QtGui import QColor, QCursor
+from PyQt6.QtGui import QAction, QColor, QCursor
 from PyQt6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -26,6 +30,7 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -33,6 +38,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -41,24 +47,32 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.context_menu import is_right_click_active
+from core.signals import app_signals
+from ui.responsive_toolbar import ResponsiveToolbar
 from ui.smart_combobox import SmartFilterComboBox
 from ui.styles import (
     BUTTON_STYLES,
     COLORS,
     TABLE_STYLE_DARK,
     create_centered_item,
+    fix_table_rtl,
     get_arrow_url,
+    setup_custom_title_bar,
 )
+from ui.universal_search import UniversalSearchBar
 
 # استيراد دالة الطباعة الآمنة
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
+
 
 # مسار ملف إعدادات المهام
 TASK_SETTINGS_FILE = "task_settings.json"
@@ -66,6 +80,7 @@ TASK_SETTINGS_FILE = "task_settings.json"
 
 class TaskPriority(Enum):
     """أولوية المهمة"""
+
     LOW = "منخفضة"
     MEDIUM = "متوسطة"
     HIGH = "عالية"
@@ -74,6 +89,7 @@ class TaskPriority(Enum):
 
 class TaskStatus(Enum):
     """حالة المهمة"""
+
     TODO = "قيد الانتظار"
     IN_PROGRESS = "قيد التنفيذ"
     COMPLETED = "مكتملة"
@@ -82,6 +98,7 @@ class TaskStatus(Enum):
 
 class TaskCategory(Enum):
     """فئة المهمة"""
+
     GENERAL = "عامة"
     PROJECT = "مشروع"
     CLIENT = "عميل"
@@ -93,6 +110,7 @@ class TaskCategory(Enum):
 
 class DueDateAction(Enum):
     """ما يحدث عند انتهاء تاريخ المهمة"""
+
     KEEP_VISIBLE = "keep_visible"
     MOVE_TO_COMPLETED = "move_to_completed"
     AUTO_DELETE = "auto_delete"
@@ -102,6 +120,7 @@ class DueDateAction(Enum):
 @dataclass
 class TaskSettings:
     """إعدادات نظام المهام"""
+
     due_date_action: DueDateAction = DueDateAction.KEEP_VISIBLE
     auto_delete_after_days: int = 7
     show_completed_tasks: bool = True
@@ -126,7 +145,7 @@ class TaskSettings:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'TaskSettings':
+    def from_dict(cls, data: dict) -> "TaskSettings":
         return cls(
             due_date_action=DueDateAction(data.get("due_date_action", "keep_visible")),
             auto_delete_after_days=data.get("auto_delete_after_days", 7),
@@ -140,11 +159,11 @@ class TaskSettings:
         )
 
     @classmethod
-    def load(cls) -> 'TaskSettings':
+    def load(cls) -> "TaskSettings":
         """تحميل الإعدادات من الملف"""
         try:
             if os.path.exists(TASK_SETTINGS_FILE):
-                with open(TASK_SETTINGS_FILE, encoding='utf-8') as f:
+                with open(TASK_SETTINGS_FILE, encoding="utf-8") as f:
                     data = json.load(f)
                     return cls.from_dict(data)
         except Exception as e:
@@ -154,7 +173,7 @@ class TaskSettings:
     def save(self):
         """حفظ الإعدادات في الملف"""
         try:
-            with open(TASK_SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            with open(TASK_SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.to_dict(), f, ensure_ascii=False, indent=2)
             safe_print("INFO: [TaskSettings] تم حفظ الإعدادات")
         except Exception as e:
@@ -164,6 +183,7 @@ class TaskSettings:
 @dataclass
 class Task:
     """نموذج المهمة"""
+
     id: str
     title: str
     description: str = ""
@@ -202,7 +222,7 @@ class Task:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'Task':
+    def from_dict(cls, data: dict) -> "Task":
         return cls(
             id=data["id"],
             title=data["title"],
@@ -212,8 +232,14 @@ class Task:
             category=TaskCategory[data.get("category", "GENERAL")],
             due_date=datetime.fromisoformat(data["due_date"]) if data.get("due_date") else None,
             due_time=data.get("due_time"),
-            created_at=datetime.fromisoformat(data["created_at"]) if data.get("created_at") else datetime.now(),
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            created_at=(
+                datetime.fromisoformat(data["created_at"])
+                if data.get("created_at")
+                else datetime.now()
+            ),
+            completed_at=(
+                datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None
+            ),
             related_project=data.get("related_project", ""),
             related_client=data.get("related_client", ""),
             tags=data.get("tags", []),
@@ -249,6 +275,7 @@ class TaskService:
 
     _instance = None
     _repository = None
+    _initialized = False
 
     def __new__(cls, repository=None):
         if cls._instance is None:
@@ -307,7 +334,7 @@ class TaskService:
         storage_path = "tasks.json"
         try:
             if os.path.exists(storage_path):
-                with open(storage_path, encoding='utf-8') as f:
+                with open(storage_path, encoding="utf-8") as f:
                     data = json.load(f)
                     self.tasks = [Task.from_dict(t) for t in data]
         except Exception as e:
@@ -318,47 +345,49 @@ class TaskService:
         """تحويل dict من قاعدة البيانات إلى Task"""
         try:
             due_date = None
-            if data.get('due_date'):
-                if isinstance(data['due_date'], str):
-                    due_date = datetime.fromisoformat(data['due_date'].replace('Z', '+00:00'))
+            if data.get("due_date"):
+                if isinstance(data["due_date"], str):
+                    due_date = datetime.fromisoformat(data["due_date"].replace("Z", "+00:00"))
                 else:
-                    due_date = data['due_date']
+                    due_date = data["due_date"]
 
             completed_at = None
-            if data.get('completed_at'):
-                if isinstance(data['completed_at'], str):
-                    completed_at = datetime.fromisoformat(data['completed_at'].replace('Z', '+00:00'))
+            if data.get("completed_at"):
+                if isinstance(data["completed_at"], str):
+                    completed_at = datetime.fromisoformat(
+                        data["completed_at"].replace("Z", "+00:00")
+                    )
                 else:
-                    completed_at = data['completed_at']
+                    completed_at = data["completed_at"]
 
             created_at = datetime.now()
-            if data.get('created_at'):
-                if isinstance(data['created_at'], str):
-                    created_at = datetime.fromisoformat(data['created_at'].replace('Z', '+00:00'))
+            if data.get("created_at"):
+                if isinstance(data["created_at"], str):
+                    created_at = datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
                 else:
-                    created_at = data['created_at']
+                    created_at = data["created_at"]
 
             return Task(
-                id=str(data.get('id', '')),
-                title=data.get('title', ''),
-                description=data.get('description', ''),
-                priority=TaskPriority[data.get('priority', 'MEDIUM')],
-                status=TaskStatus[data.get('status', 'TODO')],
-                category=TaskCategory[data.get('category', 'GENERAL')],
+                id=str(data.get("id", "")),
+                title=data.get("title", ""),
+                description=data.get("description", ""),
+                priority=TaskPriority[data.get("priority", "MEDIUM")],
+                status=TaskStatus[data.get("status", "TODO")],
+                category=TaskCategory[data.get("category", "GENERAL")],
                 due_date=due_date,
-                due_time=data.get('due_time'),
+                due_time=data.get("due_time"),
                 created_at=created_at,
                 completed_at=completed_at,
-                related_project=data.get('related_project_id', ''),
-                related_client=data.get('related_client_id', ''),
-                tags=data.get('tags', []) if isinstance(data.get('tags'), list) else [],
-                reminder=data.get('reminder', False),
-                reminder_minutes=data.get('reminder_minutes', 30),
-                is_archived=data.get('is_archived', False),
+                related_project=data.get("related_project_id", ""),
+                related_client=data.get("related_client_id", ""),
+                tags=data.get("tags", []) if isinstance(data.get("tags"), list) else [],
+                reminder=data.get("reminder", False),
+                reminder_minutes=data.get("reminder_minutes", 30),
+                is_archived=data.get("is_archived", False),
             )
         except Exception as e:
             safe_print(f"ERROR: [TaskService] فشل تحويل المهمة: {e}")
-            return Task(id=str(data.get('id', '')), title=data.get('title', 'مهمة'))
+            return Task(id=str(data.get("id", "")), title=data.get("title", "مهمة"))
 
     def _task_to_dict(self, task: Task) -> dict:
         """تحويل Task إلى dict لقاعدة البيانات"""
@@ -367,23 +396,22 @@ class TaskService:
         related_client = task.related_client if task.related_client else None
 
         return {
-            'id': task.id,
-            'title': task.title,
-            'description': task.description or None,
-            'priority': task.priority.name,
-            'status': task.status.name,
-            'category': task.category.name,
-            'due_date': task.due_date.isoformat() if task.due_date else None,
-            'due_time': task.due_time if task.due_time else None,
-            'completed_at': task.completed_at.isoformat() if task.completed_at else None,
-            'related_project_id': related_project,
-            'related_client_id': related_client,
-            'tags': json.dumps(task.tags, ensure_ascii=False) if task.tags else '[]',
-            'reminder': task.reminder,
-            'reminder_minutes': task.reminder_minutes,
-            'is_archived': task.is_archived,
+            "id": task.id,
+            "title": task.title,
+            "description": task.description or None,
+            "priority": task.priority.name,
+            "status": task.status.name,
+            "category": task.category.name,
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "due_time": task.due_time if task.due_time else None,
+            "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+            "related_project_id": related_project,
+            "related_client_id": related_client,
+            "tags": json.dumps(task.tags, ensure_ascii=False) if task.tags else "[]",
+            "reminder": task.reminder,
+            "reminder_minutes": task.reminder_minutes,
+            "is_archived": task.is_archived,
         }
-
 
     def add_task(self, task: Task) -> Task:
         """إضافة مهمة جديدة"""
@@ -391,7 +419,7 @@ class TaskService:
             if self._repository:
                 task_dict = self._task_to_dict(task)
                 result = self._repository.create_task(task_dict)
-                task.id = str(result.get('id', task.id))
+                task.id = str(result.get("id", task.id))
                 safe_print(f"INFO: [TaskService] تم حفظ المهمة: {task.title}")
 
             self.tasks.append(task)
@@ -399,7 +427,8 @@ class TaskService:
             return task
         except Exception as e:
             safe_print(f"ERROR: [TaskService] فشل إضافة المهمة: {e}")
-            import traceback
+
+
             traceback.print_exc()
             return task
 
@@ -435,8 +464,9 @@ class TaskService:
     def _emit_change_signal(self):
         """إرسال إشارة تغيير البيانات"""
         try:
-            from core.signals import app_signals
-            app_signals.emit_data_changed('tasks')
+
+
+            app_signals.emit_data_changed("tasks")
         except Exception:
             pass
 
@@ -453,9 +483,11 @@ class TaskService:
 
     def get_active_tasks(self) -> list[Task]:
         """الحصول على المهام النشطة"""
-        return [t for t in self.tasks
-                if t.status not in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
-                and not t.is_archived]
+        return [
+            t
+            for t in self.tasks
+            if t.status not in [TaskStatus.COMPLETED, TaskStatus.CANCELLED] and not t.is_archived
+        ]
 
     def get_completed_tasks(self) -> list[Task]:
         """الحصول على المهام المكتملة"""
@@ -485,10 +517,14 @@ class TaskService:
         """الحصول على المهام القادمة"""
         now = datetime.now()
         end_date = now + timedelta(days=days)
-        return [t for t in self.tasks
-                if t.due_date and now <= t.due_date <= end_date
-                and t.status not in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
-                and not t.is_archived]
+        return [
+            t
+            for t in self.tasks
+            if t.due_date
+            and now <= t.due_date <= end_date
+            and t.status not in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
+            and not t.is_archived
+        ]
 
     def get_tasks_by_project(self, project_id: str) -> list[Task]:
         """الحصول على المهام المرتبطة بمشروع"""
@@ -501,8 +537,12 @@ class TaskService:
     def get_statistics(self) -> dict:
         """الحصول على إحصائيات المهام"""
         total = len([t for t in self.tasks if not t.is_archived])
-        completed = len([t for t in self.tasks if t.status == TaskStatus.COMPLETED and not t.is_archived])
-        in_progress = len([t for t in self.tasks if t.status == TaskStatus.IN_PROGRESS and not t.is_archived])
+        completed = len(
+            [t for t in self.tasks if t.status == TaskStatus.COMPLETED and not t.is_archived]
+        )
+        in_progress = len(
+            [t for t in self.tasks if t.status == TaskStatus.IN_PROGRESS and not t.is_archived]
+        )
         todo = len([t for t in self.tasks if t.status == TaskStatus.TODO and not t.is_archived])
         overdue = len(self.get_overdue_tasks())
         today = len(self.get_today_tasks())
@@ -516,18 +556,18 @@ class TaskService:
             "overdue": overdue,
             "today": today,
             "archived": archived,
-            "completion_rate": (completed / total * 100) if total > 0 else 0
+            "completion_rate": (completed / total * 100) if total > 0 else 0,
         }
 
     def generate_id(self) -> str:
         """توليد ID فريد"""
-        import uuid
+
+
         return str(uuid.uuid4())[:8]
 
     def refresh(self):
         """تحديث المهام من قاعدة البيانات"""
         self.load_tasks()
-
 
     def process_due_date_actions(self):
         """معالجة المهام حسب إعدادات تاريخ الانتهاء"""
@@ -566,7 +606,9 @@ class TaskService:
             self.delete_task(task_id)
 
         if tasks_to_update or tasks_to_delete:
-            safe_print(f"INFO: [TaskService] معالجة {len(tasks_to_update)} مهمة، حذف {len(tasks_to_delete)} مهمة")
+            safe_print(
+                f"INFO: [TaskService] معالجة {len(tasks_to_update)} مهمة، حذف {len(tasks_to_delete)} مهمة"
+            )
 
     def archive_old_completed_tasks(self):
         """أرشفة المهام المكتملة القديمة"""
@@ -620,7 +662,8 @@ class TaskSettingsDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         try:
-            from ui.styles import setup_custom_title_bar
+
+
             setup_custom_title_bar(self)
         except (ImportError, AttributeError):
             pass
@@ -687,7 +730,8 @@ class TaskSettingsDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -702,7 +746,8 @@ class TaskSettingsDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -712,7 +757,9 @@ class TaskSettingsDialog(QDialog):
 
         # === إعدادات تاريخ الانتهاء ===
         due_date_label = QLabel("📅 عند انتهاء تاريخ المهمة:")
-        due_date_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        due_date_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;"
+        )
         layout.addWidget(due_date_label)
 
         self.due_date_action_group = QButtonGroup(self)
@@ -754,7 +801,9 @@ class TaskSettingsDialog(QDialog):
 
         # === إعدادات التذكيرات ===
         reminder_label = QLabel("⏰ التذكيرات:")
-        reminder_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        reminder_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;"
+        )
         layout.addWidget(reminder_label)
 
         self.reminder_enabled = QCheckBox("🔔 تفعيل التذكيرات")
@@ -786,7 +835,9 @@ class TaskSettingsDialog(QDialog):
 
         # === إعدادات العرض ===
         display_label = QLabel("👁️ العرض:")
-        display_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        display_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;"
+        )
         layout.addWidget(display_label)
 
         self.show_completed = QCheckBox("✅ عرض المهام المكتملة في القائمة الرئيسية")
@@ -802,7 +853,9 @@ class TaskSettingsDialog(QDialog):
 
         # === الأرشفة التلقائية ===
         archive_label = QLabel("📦 الأرشفة التلقائية:")
-        archive_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;")
+        archive_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 12px; font-weight: bold;"
+        )
         layout.addWidget(archive_label)
 
         self.auto_archive = QCheckBox("📁 أرشفة المهام المكتملة تلقائياً")
@@ -832,12 +885,14 @@ class TaskSettingsDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -911,7 +966,14 @@ class TaskSettingsDialog(QDialog):
 class TaskEditorDialog(QDialog):
     """نافذة إضافة/تعديل مهمة - تصميم متوافق مع باقي الأقسام"""
 
-    def __init__(self, task: Task | None = None, parent=None, project_service=None, client_service=None, default_settings: TaskSettings = None):
+    def __init__(
+        self,
+        task: Task | None = None,
+        parent=None,
+        project_service=None,
+        client_service=None,
+        default_settings: TaskSettings = None,
+    ):
         super().__init__(parent)
         self.task = task
         self.is_editing = task is not None
@@ -930,7 +992,8 @@ class TaskEditorDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         try:
-            from ui.styles import setup_custom_title_bar
+
+
             setup_custom_title_bar(self)
         except (ImportError, AttributeError):
             pass
@@ -945,14 +1008,18 @@ class TaskEditorDialog(QDialog):
         try:
             if self.project_service:
                 projects = self.project_service.get_all_projects()
-                self.projects_list = [(str(p.id), p.name) for p in projects if hasattr(p, 'id') and hasattr(p, 'name')]
+                self.projects_list = [
+                    (str(p.id), p.name) for p in projects if hasattr(p, "id") and hasattr(p, "name")
+                ]
         except Exception as e:
             safe_print(f"WARNING: [TaskEditor] فشل تحميل المشاريع: {e}")
 
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
-                self.clients_list = [(str(c.id), c.name) for c in clients if hasattr(c, 'id') and hasattr(c, 'name')]
+                self.clients_list = [
+                    (str(c.id), c.name) for c in clients if hasattr(c, "id") and hasattr(c, "name")
+                ]
         except Exception as e:
             safe_print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
 
@@ -1065,7 +1132,8 @@ class TaskEditorDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -1080,7 +1148,8 @@ class TaskEditorDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -1119,7 +1188,15 @@ class TaskEditorDialog(QDialog):
         self.priority_combo = QComboBox()
         self.priority_combo.setStyleSheet(field_style)
         for priority in TaskPriority:
-            icon = '🔴' if priority == TaskPriority.URGENT else '🟠' if priority == TaskPriority.HIGH else '🟡' if priority == TaskPriority.MEDIUM else '🟢'
+            icon = (
+                "🔴"
+                if priority == TaskPriority.URGENT
+                else (
+                    "🟠"
+                    if priority == TaskPriority.HIGH
+                    else "🟡" if priority == TaskPriority.MEDIUM else "🟢"
+                )
+            )
             self.priority_combo.addItem(f"{icon} {priority.value}", priority)
         self.priority_combo.setCurrentIndex(1)
         priority_cont.addWidget(self.priority_combo)
@@ -1176,7 +1253,15 @@ class TaskEditorDialog(QDialog):
             self.status_combo = QComboBox()
             self.status_combo.setStyleSheet(field_style)
             for status in TaskStatus:
-                icon = "⏳" if status == TaskStatus.TODO else "🔄" if status == TaskStatus.IN_PROGRESS else "✅" if status == TaskStatus.COMPLETED else "❌"
+                icon = (
+                    "⏳"
+                    if status == TaskStatus.TODO
+                    else (
+                        "🔄"
+                        if status == TaskStatus.IN_PROGRESS
+                        else "✅" if status == TaskStatus.COMPLETED else "❌"
+                    )
+                )
                 self.status_combo.addItem(f"{icon} {status.value}", status)
             layout.addWidget(self.status_combo)
 
@@ -1239,12 +1324,14 @@ class TaskEditorDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -1290,14 +1377,16 @@ class TaskEditorDialog(QDialog):
                 self.category_combo.setCurrentIndex(i)
                 break
 
-        if hasattr(self, 'status_combo'):
+        if hasattr(self, "status_combo"):
             for i in range(self.status_combo.count()):
                 if self.status_combo.itemData(i) == self.task.status:
                     self.status_combo.setCurrentIndex(i)
                     break
 
         if self.task.due_date:
-            self.due_date_input.setDate(QDate(self.task.due_date.year, self.task.due_date.month, self.task.due_date.day))
+            self.due_date_input.setDate(
+                QDate(self.task.due_date.year, self.task.due_date.month, self.task.due_date.day)
+            )
         if self.task.due_time:
             parts = self.task.due_time.split(":")
             if len(parts) >= 2:
@@ -1320,7 +1409,7 @@ class TaskEditorDialog(QDialog):
 
     def _quick_complete(self):
         """إكمال المهمة بسرعة"""
-        if hasattr(self, 'status_combo'):
+        if hasattr(self, "status_combo"):
             for i in range(self.status_combo.count()):
                 if self.status_combo.itemData(i) == TaskStatus.COMPLETED:
                     self.status_combo.setCurrentIndex(i)
@@ -1337,7 +1426,11 @@ class TaskEditorDialog(QDialog):
         if self.is_editing:
             task_id = self.task.id
             created_at = self.task.created_at
-            status = self.status_combo.currentData() if hasattr(self, 'status_combo') else self.task.status
+            status = (
+                self.status_combo.currentData()
+                if hasattr(self, "status_combo")
+                else self.task.status
+            )
             completed_at = self.task.completed_at
             is_archived = self.task.is_archived
 
@@ -1346,7 +1439,8 @@ class TaskEditorDialog(QDialog):
             elif status != TaskStatus.COMPLETED:
                 completed_at = None
         else:
-            import uuid
+
+
             task_id = str(uuid.uuid4())[:8]
             created_at = datetime.now()
             status = TaskStatus.TODO
@@ -1412,7 +1506,8 @@ class TodoManagerWidget(QWidget):
 
         # ⚡ ربط آمن للإشارات (يفصل أولاً ثم يربط لمنع التكرارات)
         try:
-            from core.signals import app_signals
+
+
             app_signals.safe_connect(app_signals.tasks_changed, self._on_tasks_changed)
         except Exception as e:
             safe_print(f"WARNING: [TodoManager] فشل ربط الإشارات: {e}")
@@ -1433,13 +1528,17 @@ class TodoManagerWidget(QWidget):
         try:
             if self.project_service:
                 projects = self.project_service.get_all_projects()
-                self._projects_cache = {str(p.id): p.name for p in projects if hasattr(p, 'id') and hasattr(p, 'name')}
+                self._projects_cache = {
+                    str(p.id): p.name for p in projects if hasattr(p, "id") and hasattr(p, "name")
+                }
         except Exception as e:
             safe_print(f"WARNING: [TodoManager] فشل تحميل المشاريع: {e}")
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
-                self._clients_cache = {str(c.id): c.name for c in clients if hasattr(c, 'id') and hasattr(c, 'name')}
+                self._clients_cache = {
+                    str(c.id): c.name for c in clients if hasattr(c, "id") and hasattr(c, "name")
+                }
         except Exception as e:
             safe_print(f"WARNING: [TodoManager] فشل تحميل العملاء: {e}")
         self._cache_loaded = True
@@ -1460,22 +1559,24 @@ class TodoManagerWidget(QWidget):
         self.check_reminders()
         self.update_statistics()
 
-
     def init_ui(self):
         """تهيئة الواجهة الرئيسية - تصميم متوافق مع ProjectManagerTab"""
-        from PyQt6.QtWidgets import QSizePolicy
 
-        main_layout = QHBoxLayout()
+        main_layout = QVBoxLayout()
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(main_layout)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+
         # === الجزء الأيسر (الجدول والأزرار) ===
         left_panel = QVBoxLayout()
 
         # === شريط الأزرار المتجاوب ===
-        from ui.responsive_toolbar import ResponsiveToolbar
+
+
         self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ مهمة جديدة")
@@ -1560,21 +1661,22 @@ class TodoManagerWidget(QWidget):
         table_groupbox.setLayout(table_layout)
 
         # شريط البحث
-        from ui.universal_search import UniversalSearchBar
+
+
         self.tasks_table = QTableWidget()
         self.tasks_table.setColumnCount(6)
-        self.tasks_table.setHorizontalHeaderLabels(["المهمة", "الأولوية", "الحالة", "الفئة", "تاريخ الاستحقاق", "المشروع"])
-
-        self.search_bar = UniversalSearchBar(
-            self.tasks_table,
-            placeholder="🔍 بحث في المهام..."
+        self.tasks_table.setHorizontalHeaderLabels(
+            ["المهمة", "الأولوية", "الحالة", "الفئة", "تاريخ الاستحقاق", "المشروع"]
         )
+
+        self.search_bar = UniversalSearchBar(self.tasks_table, placeholder="🔍 بحث في المهام...")
         table_layout.addWidget(self.search_bar)
 
         # إعدادات الجدول
         self.tasks_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
-        from ui.styles import fix_table_rtl
+
+
         fix_table_rtl(self.tasks_table)
         self.tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tasks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -1588,7 +1690,9 @@ class TodoManagerWidget(QWidget):
             h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # الأولوية
             h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # الحالة
             h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # الفئة
-            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # تاريخ الاستحقاق
+            h_header.setSectionResizeMode(
+                4, QHeaderView.ResizeMode.ResizeToContents
+            )  # تاريخ الاستحقاق
             h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # المشروع - يتمدد
             h_header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         if v_header:
@@ -1603,16 +1707,19 @@ class TodoManagerWidget(QWidget):
         table_layout.addWidget(self.tasks_table)
         left_panel.addWidget(table_groupbox, 1)
 
-        main_layout.addLayout(left_panel, 3)
-
+        left_widget = QWidget()
+        left_widget.setLayout(left_panel)
+        left_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        splitter.addWidget(left_widget)
 
         # === الجزء الأيمن (لوحة المعاينة والإحصائيات) ===
-        from PyQt6.QtWidgets import QSizePolicy
 
         self.preview_groupbox = QGroupBox("📊 معاينة المهمة والإحصائيات")
         self.preview_groupbox.setMinimumWidth(280)
         # ⚡ إزالة setMaximumWidth للتجاوب التلقائي
-        self.preview_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self.preview_groupbox.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
         preview_layout = QVBoxLayout()
         preview_layout.setSpacing(8)
         preview_layout.setContentsMargins(10, 10, 10, 10)
@@ -1655,7 +1762,8 @@ class TodoManagerWidget(QWidget):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFixedHeight(16)
-        self.progress_bar.setStyleSheet(f"""
+        self.progress_bar.setStyleSheet(
+            f"""
             QProgressBar {{
                 border: none;
                 border-radius: 6px;
@@ -1670,13 +1778,15 @@ class TodoManagerWidget(QWidget):
                     stop:0 {COLORS['success']}, stop:1 {COLORS['primary']});
                 border-radius: 6px;
             }}
-        """)
+        """
+        )
         progress_layout.addWidget(self.progress_bar, 1)
         preview_layout.addLayout(progress_layout)
 
         # === تفاصيل المهمة المحددة ===
         details_group = QGroupBox("📝 تفاصيل المهمة")
-        details_group.setStyleSheet(f"""
+        details_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLORS['bg_medium']},
@@ -1695,39 +1805,46 @@ class TodoManagerWidget(QWidget):
                 color: white;
                 font-weight: bold;
             }}
-        """)
+        """
+        )
         details_layout = QVBoxLayout()
         details_layout.setSpacing(10)
         details_layout.setContentsMargins(12, 20, 12, 12)
         details_group.setLayout(details_layout)
 
         self.task_title_label = QLabel("اختر مهمة لعرض التفاصيل")
-        self.task_title_label.setStyleSheet(f"""
+        self.task_title_label.setStyleSheet(
+            f"""
             color: {COLORS['text_primary']};
             font-size: 14px;
             font-weight: bold;
             padding: 8px;
             background: {COLORS['bg_light']};
             border-radius: 6px;
-        """)
+        """
+        )
         self.task_title_label.setWordWrap(True)
         details_layout.addWidget(self.task_title_label)
 
         self.task_description_label = QLabel("")
-        self.task_description_label.setStyleSheet(f"""
+        self.task_description_label.setStyleSheet(
+            f"""
             color: {COLORS['text_secondary']};
             font-size: 12px;
             padding: 8px;
             background: {COLORS['bg_medium']};
             border-radius: 6px;
             border-left: 3px solid {COLORS['primary']};
-        """)
+        """
+        )
         self.task_description_label.setWordWrap(True)
         self.task_description_label.setMinimumHeight(60)
         details_layout.addWidget(self.task_description_label)
 
         self.task_info_label = QLabel("")
-        self.task_info_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px; padding: 5px 0;")
+        self.task_info_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; font-size: 11px; padding: 5px 0;"
+        )
         self.task_info_label.setWordWrap(True)
         details_layout.addWidget(self.task_info_label)
 
@@ -1735,7 +1852,8 @@ class TodoManagerWidget(QWidget):
 
         # === أزرار الإجراءات السريعة ===
         quick_actions_group = QGroupBox("⚡ إجراءات سريعة")
-        quick_actions_group.setStyleSheet(f"""
+        quick_actions_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 background: {COLORS['bg_medium']};
                 border: 1px solid {COLORS['border']};
@@ -1752,7 +1870,8 @@ class TodoManagerWidget(QWidget):
                 color: white;
                 font-weight: bold;
             }}
-        """)
+        """
+        )
         quick_actions_layout = QVBoxLayout()
         quick_actions_layout.setSpacing(8)
         quick_actions_layout.setContentsMargins(10, 18, 10, 10)
@@ -1804,18 +1923,21 @@ class TodoManagerWidget(QWidget):
         preview_layout.addWidget(quick_actions_group)
 
         preview_layout.addStretch()
-        main_layout.addWidget(self.preview_groupbox)
+        splitter.addWidget(self.preview_groupbox)
 
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        main_layout.addWidget(splitter, 1)
 
     def _create_stat_card(self, title: str, value: str, color: str) -> QFrame:
         """إنشاء بطاقة إحصائية احترافية مع تأثيرات بصرية"""
-        from PyQt6.QtWidgets import QSizePolicy
 
         card = QFrame()
         card.setFixedHeight(80)
         card.setMinimumWidth(95)
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card.setStyleSheet(f"""
+        card.setStyleSheet(
+            f"""
             QFrame {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLORS['bg_medium']},
@@ -1829,7 +1951,8 @@ class TodoManagerWidget(QWidget):
                     stop:0 {color}22,
                     stop:1 {COLORS['bg_medium']});
             }}
-        """)
+        """
+        )
 
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(2)
@@ -1838,23 +1961,27 @@ class TodoManagerWidget(QWidget):
         # القيمة أولاً (أكبر)
         value_label = QLabel(value)
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet(f"""
+        value_label.setStyleSheet(
+            f"""
             color: {color};
             font-size: 26px;
             font-weight: bold;
             background: transparent;
-        """)
+        """
+        )
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(value_label)
 
         # العنوان تحت القيمة
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"""
+        title_label.setStyleSheet(
+            f"""
             color: {COLORS['text_secondary']};
             font-size: 11px;
             font-weight: 500;
             background: transparent;
-        """)
+        """
+        )
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(title_label)
 
@@ -1869,7 +1996,8 @@ class TodoManagerWidget(QWidget):
     def on_task_selection_changed(self):
         """معالج تغيير اختيار المهمة"""
         # ⚡ تجاهل التحديث إذا كان الكليك يمين
-        from core.context_menu import is_right_click_active
+
+
         if is_right_click_active():
             return
 
@@ -1943,7 +2071,9 @@ class TodoManagerWidget(QWidget):
         self.quick_complete_btn.setEnabled(has_selection)
         self.quick_progress_btn.setEnabled(has_selection)
         self.archive_btn.setEnabled(has_selection)
-        self.restore_btn.setEnabled(has_selection and self.selected_task.is_archived if self.selected_task else False)
+        self.restore_btn.setEnabled(
+            has_selection and self.selected_task.is_archived if self.selected_task else False
+        )
 
         if self.selected_task:
             is_completed = self.selected_task.status == TaskStatus.COMPLETED
@@ -1951,7 +2081,6 @@ class TodoManagerWidget(QWidget):
             self.quick_complete_btn.setEnabled(has_selection and not is_completed)
         else:
             self.complete_button.setEnabled(False)
-
 
     def load_tasks(self):
         """تحميل وعرض المهام في الجدول"""
@@ -2019,7 +2148,11 @@ class TodoManagerWidget(QWidget):
                 self.tasks_table.setItem(row, 4, due_item)
 
                 # المشروع
-                project_name = self._projects_cache.get(task.related_project, task.related_project) if task.related_project else "-"
+                project_name = (
+                    self._projects_cache.get(task.related_project, task.related_project)
+                    if task.related_project
+                    else "-"
+                )
                 self.tasks_table.setItem(row, 5, create_centered_item(project_name))
 
             self.tasks_table.blockSignals(False)
@@ -2031,7 +2164,8 @@ class TodoManagerWidget(QWidget):
 
         except Exception as e:
             safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {e}")
-            import traceback
+
+
             traceback.print_exc()
         finally:
             self._is_loading = False
@@ -2041,9 +2175,20 @@ class TodoManagerWidget(QWidget):
 
     def _sort_tasks(self, tasks: list[Task]) -> list[Task]:
         """ترتيب المهام"""
+
         def sort_key(task):
-            priority_order = {TaskPriority.URGENT: 0, TaskPriority.HIGH: 1, TaskPriority.MEDIUM: 2, TaskPriority.LOW: 3}
-            status_order = {TaskStatus.IN_PROGRESS: 0, TaskStatus.TODO: 1, TaskStatus.COMPLETED: 2, TaskStatus.CANCELLED: 3}
+            priority_order = {
+                TaskPriority.URGENT: 0,
+                TaskPriority.HIGH: 1,
+                TaskPriority.MEDIUM: 2,
+                TaskPriority.LOW: 3,
+            }
+            status_order = {
+                TaskStatus.IN_PROGRESS: 0,
+                TaskStatus.TODO: 1,
+                TaskStatus.COMPLETED: 2,
+                TaskStatus.CANCELLED: 3,
+            }
             overdue_order = 0 if task.is_overdue() else 1
             today_order = 0 if task.is_due_today() else 1
             return (
@@ -2051,8 +2196,9 @@ class TodoManagerWidget(QWidget):
                 today_order,
                 status_order.get(task.status, 4),
                 priority_order.get(task.priority, 4),
-                task.due_date or datetime.max
+                task.due_date or datetime.max,
             )
+
         return sorted(tasks, key=sort_key)
 
     def _create_priority_item(self, task: Task) -> QTableWidgetItem:
@@ -2061,18 +2207,18 @@ class TodoManagerWidget(QWidget):
             TaskPriority.LOW: "#10B981",
             TaskPriority.MEDIUM: "#0A6CF1",
             TaskPriority.HIGH: "#FF6636",
-            TaskPriority.URGENT: "#FF4FD8"
+            TaskPriority.URGENT: "#FF4FD8",
         }
         priority_icons = {
             TaskPriority.LOW: "🟢",
             TaskPriority.MEDIUM: "🟡",
             TaskPriority.HIGH: "🟠",
-            TaskPriority.URGENT: "🔴"
+            TaskPriority.URGENT: "🔴",
         }
 
         item = QTableWidgetItem(f"{priority_icons.get(task.priority, '')} {task.priority.value}")
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setForeground(QColor(priority_colors.get(task.priority, COLORS['text_primary'])))
+        item.setForeground(QColor(priority_colors.get(task.priority, COLORS["text_primary"])))
         return item
 
     def _create_status_item(self, task: Task) -> QTableWidgetItem:
@@ -2081,18 +2227,18 @@ class TodoManagerWidget(QWidget):
             TaskStatus.TODO: COLORS["text_secondary"],
             TaskStatus.IN_PROGRESS: COLORS["warning"],
             TaskStatus.COMPLETED: COLORS["success"],
-            TaskStatus.CANCELLED: COLORS["danger"]
+            TaskStatus.CANCELLED: COLORS["danger"],
         }
         status_icons = {
             TaskStatus.TODO: "⏳",
             TaskStatus.IN_PROGRESS: "🔄",
             TaskStatus.COMPLETED: "✅",
-            TaskStatus.CANCELLED: "❌"
+            TaskStatus.CANCELLED: "❌",
         }
 
         item = QTableWidgetItem(f"{status_icons.get(task.status, '')} {task.status.value}")
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setForeground(QColor(status_colors.get(task.status, COLORS['text_primary'])))
+        item.setForeground(QColor(status_colors.get(task.status, COLORS["text_primary"])))
         return item
 
     def _create_due_date_item(self, task: Task) -> QTableWidgetItem:
@@ -2116,7 +2262,6 @@ class TodoManagerWidget(QWidget):
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         return item
 
-
     def update_statistics(self):
         """تحديث الإحصائيات"""
         stats = self.task_service.get_statistics()
@@ -2137,7 +2282,7 @@ class TodoManagerWidget(QWidget):
                 parent=self,
                 project_service=self.project_service,
                 client_service=self.client_service,
-                default_settings=self.task_service.settings
+                default_settings=self.task_service.settings,
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 task = dialog.get_task()
@@ -2161,7 +2306,7 @@ class TodoManagerWidget(QWidget):
                 parent=self,
                 project_service=self.project_service,
                 client_service=self.client_service,
-                default_settings=self.task_service.settings
+                default_settings=self.task_service.settings,
             )
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 updated_task = dialog.get_task()
@@ -2230,9 +2375,10 @@ class TodoManagerWidget(QWidget):
 
         try:
             reply = QMessageBox.question(
-                self, "تأكيد الحذف",
+                self,
+                "تأكيد الحذف",
                 f"هل أنت متأكد من حذف المهمة:\n{self.selected_task.title}؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
 
             if reply == QMessageBox.StandardButton.Yes:
@@ -2270,14 +2416,14 @@ class TodoManagerWidget(QWidget):
             tasks_to_remind = self.task_service.get_tasks_needing_reminder()
             for task in tasks_to_remind:
                 QMessageBox.information(
-                    self, "⏰ تذكير",
-                    f"المهمة '{task.title}' مستحقة خلال {task.reminder_minutes} دقيقة!"
+                    self,
+                    "⏰ تذكير",
+                    f"المهمة '{task.title}' مستحقة خلال {task.reminder_minutes} دقيقة!",
                 )
                 task.reminder = False
                 self.task_service.update_task(task)
         except Exception as e:
             safe_print(f"ERROR: [TodoManager] فشل فحص التذكيرات: {e}")
-
 
     def _on_item_double_clicked(self, item):
         """معالجة الضغط المزدوج على عنصر"""
@@ -2286,8 +2432,7 @@ class TodoManagerWidget(QWidget):
 
     def _on_table_context_menu(self, pos):
         """عرض قائمة السياق عند الضغط بالزر الأيمن"""
-        from PyQt6.QtGui import QAction
-        from PyQt6.QtWidgets import QMenu
+
 
         item = self.tasks_table.itemAt(pos)
         if not item:
@@ -2309,7 +2454,8 @@ class TodoManagerWidget(QWidget):
             return
 
         menu = QMenu(self)
-        menu.setStyleSheet("""
+        menu.setStyleSheet(
+            """
             QMenu {
                 background-color: #1e293b;
                 color: white;
@@ -2329,7 +2475,8 @@ class TodoManagerWidget(QWidget):
                 background: #334155;
                 margin: 4px 8px;
             }
-        """)
+        """
+        )
 
         # قائمة فرعية لتغيير الحالة
         status_menu = menu.addMenu("🔄 تغيير الحالة")
@@ -2437,9 +2584,10 @@ class TodoManagerWidget(QWidget):
         """حذف مهمة"""
         try:
             reply = QMessageBox.question(
-                self, "تأكيد الحذف",
+                self,
+                "تأكيد الحذف",
                 f"هل أنت متأكد من حذف المهمة:\n{task.title}؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
 
             if reply == QMessageBox.StandardButton.Yes:
@@ -2451,18 +2599,16 @@ class TodoManagerWidget(QWidget):
 
 # للاختبار المستقل
 if __name__ == "__main__":
-    import sys
-
-    from PyQt6.QtWidgets import QApplication
-
     app = QApplication(sys.argv)
-    app.setStyleSheet(f"""
+    app.setStyleSheet(
+        f"""
         QWidget {{
             background-color: {COLORS['bg_dark']};
             color: {COLORS['text_primary']};
             font-family: 'Cairo';
         }}
-    """)
+    """
+    )
 
     window = TodoManagerWidget()
     window.setWindowTitle("نظام إدارة المهام - Sky Wave ERP")
