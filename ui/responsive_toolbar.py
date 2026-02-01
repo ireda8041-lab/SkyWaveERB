@@ -69,7 +69,9 @@ class FlowLayout(QLayout):
 
     def _do_layout(self, rect: QRect, test_only: bool) -> int:
         margins = self.contentsMargins()
-        effective_rect = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        effective_rect = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
 
         x = effective_rect.x()
         y = effective_rect.y()

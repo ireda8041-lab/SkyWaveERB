@@ -43,7 +43,9 @@ class SmartFilterComboBox(QComboBox):
         # ⚡ إعدادات الـ LineEdit الداخلي - محاذاة لليمين للعربية
         if self.lineEdit():
             self.lineEdit().setMinimumWidth(100)
-            self.lineEdit().setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.lineEdit().setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
 
         # إزالة الـ Completer الافتراضي
         self.setCompleter(None)

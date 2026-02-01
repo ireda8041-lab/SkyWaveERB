@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\monitoring.py
-# hypothesis_version: 6.148.3
-
-[1000000.0, '_Listeners', '__address', '__awaited', '__cmd', '__cmd_name', '__conn_id', '__connection_id', '__db', '__duration', '__duration_micros', '__failure', '__new_description', '__op_id', '__options', '__reason', '__reply', '__rqst_id', '__server_address', '__server_conn_id', '__service_id', '__topology_id', 'cmap_listeners', 'command_listeners', 'connectionError', 'error', 'hello', 'idle', 'poolClosed', 'server_listeners', 'stale', 'timeout', 'topology_listeners', '{}({!r}, {!r}, {!r})']

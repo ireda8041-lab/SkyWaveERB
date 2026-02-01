@@ -18,18 +18,23 @@ def safe_print(msg: str) -> None:
     """
     # ⚡ تخطي رسائل INFO و DEBUG في الوضع السريع
     if not VERBOSE_MODE:
-        if msg.startswith('INFO:') or msg.startswith('DEBUG:') or msg.startswith('DEBUG '):
+        if msg.startswith("INFO:") or msg.startswith("DEBUG:") or msg.startswith("DEBUG "):
             return
         # تخطي أي رسالة تحتوي على INFO: أو DEBUG: في أول 30 حرف
         first_part = msg[:30].upper()
-        if 'INFO:' in first_part or 'DEBUG:' in first_part or 'INFO ' in first_part or 'DEBUG ' in first_part:
+        if (
+            "INFO:" in first_part
+            or "DEBUG:" in first_part
+            or "INFO " in first_part
+            or "DEBUG " in first_part
+        ):
             return
 
     try:
         print(msg)
     except UnicodeEncodeError:
         # إزالة الـ emoji والحروف الخاصة، الاحتفاظ بالعربي والإنجليزي
-        clean_msg = re.sub(r'[^\x00-\x7F\u0600-\u06FF\s\.\,\:\;\-\_\(\)\[\]\{\}]+', '', msg)
+        clean_msg = re.sub(r"[^\x00-\x7F\u0600-\u06FF\s\.\,\:\;\-\_\(\)\[\]\{\}]+", "", msg)
         try:
             print(clean_msg)
         except Exception:
@@ -37,4 +42,4 @@ def safe_print(msg: str) -> None:
 
 
 # تصدير الدالة للاستخدام المباشر
-__all__ = ['safe_print', 'VERBOSE_MODE']
+__all__ = ["safe_print", "VERBOSE_MODE"]

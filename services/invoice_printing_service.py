@@ -10,6 +10,7 @@ from typing import Any
 # ⚡ استيراد آمن لـ jinja2
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
+
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
@@ -21,6 +22,7 @@ except ImportError:
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -43,7 +45,7 @@ class InvoicePrintingService:
         self.settings_service = settings_service
 
         # تحديد مسار القوالب ومسار التثبيت
-        if getattr(sys, 'frozen', False):
+        if getattr(sys, "frozen", False):
             # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
             base_path = Path(sys._MEIPASS)
             # مسار التثبيت الفعلي (مجلد الـ EXE)
@@ -64,9 +66,9 @@ class InvoicePrintingService:
         # ⚡ تهيئة Jinja2 مع caching للسرعة
         self.env = Environment(
             loader=FileSystemLoader(str(self.templates_dir)),
-            autoescape=select_autoescape(['html', 'xml']),
+            autoescape=select_autoescape(["html", "xml"]),
             cache_size=400,  # ⚡ تفعيل الـ cache
-            auto_reload=False  # ⚡ تعطيل auto reload للسرعة
+            auto_reload=False,  # ⚡ تعطيل auto reload للسرعة
         )
 
         # ⚡ تحميل القالب مسبقاً (pre-compile)
@@ -91,7 +93,9 @@ class InvoicePrintingService:
             مسار ملف PDF إذا نجح، None إذا فشل
         """
         try:
-            safe_print(f"INFO: [InvoicePrintingService] بدء طباعة الفاتورة: {invoice_data.get('invoice_number', 'N/A')}")
+            safe_print(
+                f"INFO: [InvoicePrintingService] بدء طباعة الفاتورة: {invoice_data.get('invoice_number', 'N/A')}"
+            )
 
             # ⚡ تصحيح البيانات قبل الطباعة
             invoice_data = self._fix_invoice_data(invoice_data)
@@ -100,12 +104,16 @@ class InvoicePrintingService:
             context = self._prepare_context(invoice_data)
 
             # ⚡ Step 2: رندر HTML من القالب (استخدام القالب المحمل مسبقاً)
-            template = self.invoice_template if self.invoice_template else self.env.get_template("final_invoice.html")
+            template = (
+                self.invoice_template
+                if self.invoice_template
+                else self.env.get_template("final_invoice.html")
+            )
             html_content = template.render(**context)
 
             # Step 3: توليد اسم الملف (اسم العميل - اسم المشروع)
-            safe_client_name = self._sanitize_filename(invoice_data.get('client_name', 'client'))
-            safe_project_name = self._sanitize_filename(invoice_data.get('project_name', 'project'))
+            safe_client_name = self._sanitize_filename(invoice_data.get("client_name", "client"))
+            safe_project_name = self._sanitize_filename(invoice_data.get("project_name", "project"))
             filename = f"{safe_client_name} - {safe_project_name}"
 
             # Step 4: توليد PDF
@@ -123,13 +131,14 @@ class InvoicePrintingService:
         except Exception as e:
             safe_print(f"ERROR: [InvoicePrintingService] خطأ في طباعة الفاتورة: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
     def _fix_invoice_data(self, invoice_data: dict[str, Any]) -> dict[str, Any]:
         """⚡ تصحيح البيانات المفقودة أو الخاطئة"""
         # تصحيح الأرقام
-        for key in ['subtotal', 'grand_total', 'total_paid', 'remaining_amount', 'total_amount']:
+        for key in ["subtotal", "grand_total", "total_paid", "remaining_amount", "total_amount"]:
             if key in invoice_data:
                 try:
                     invoice_data[key] = float(invoice_data[key]) if invoice_data[key] else 0.0
@@ -137,40 +146,40 @@ class InvoicePrintingService:
                     invoice_data[key] = 0.0
 
         # تصحيح الدفعات
-        if 'payments' in invoice_data and invoice_data['payments']:
+        if "payments" in invoice_data and invoice_data["payments"]:
             fixed_payments = []
-            for payment in invoice_data['payments']:
+            for payment in invoice_data["payments"]:
                 if isinstance(payment, dict):
                     # تصحيح التاريخ
-                    if 'date' in payment:
-                        date_val = payment['date']
-                        if hasattr(date_val, 'strftime'):
-                            payment['date'] = date_val.strftime('%Y-%m-%d')
+                    if "date" in payment:
+                        date_val = payment["date"]
+                        if hasattr(date_val, "strftime"):
+                            payment["date"] = date_val.strftime("%Y-%m-%d")
                         elif isinstance(date_val, str):
-                            payment['date'] = date_val[:10]
+                            payment["date"] = date_val[:10]
 
                     # تصحيح المبلغ
-                    if 'amount' in payment:
+                    if "amount" in payment:
                         try:
-                            payment['amount'] = float(payment['amount'])
+                            payment["amount"] = float(payment["amount"])
                         except (ValueError, TypeError, AttributeError):
-                            payment['amount'] = 0.0
+                            payment["amount"] = 0.0
 
                     # تصحيح اسم الحساب
-                    if 'account_name' not in payment or not payment['account_name']:
-                        payment['account_name'] = payment.get('account_id', 'غير محدد')
+                    if "account_name" not in payment or not payment["account_name"]:
+                        payment["account_name"] = payment.get("account_id", "غير محدد")
 
                     fixed_payments.append(payment)
 
-            invoice_data['payments'] = fixed_payments
+            invoice_data["payments"] = fixed_payments
         else:
-            invoice_data['payments'] = []
+            invoice_data["payments"] = []
 
         # تصحيح البنود
-        if 'items' in invoice_data and invoice_data['items']:
-            for item in invoice_data['items']:
+        if "items" in invoice_data and invoice_data["items"]:
+            for item in invoice_data["items"]:
                 if isinstance(item, dict):
-                    for key in ['quantity', 'unit_price', 'total', 'discount_rate']:
+                    for key in ["quantity", "unit_price", "total", "discount_rate"]:
                         if key in item:
                             try:
                                 item[key] = float(item[key]) if item[key] else 0.0
@@ -192,8 +201,8 @@ class InvoicePrintingService:
         context = invoice_data.copy()
 
         # تحديد مسارات الموارد (Logo & Font)
-        if getattr(sys, 'frozen', False):
-            base_path = Path(getattr(sys, '_MEIPASS', '.'))
+        if getattr(sys, "frozen", False):
+            base_path = Path(getattr(sys, "_MEIPASS", "."))
         else:
             # استخدام المجلد الحالي بدلاً من parent.parent
             base_path = Path.cwd()
@@ -205,91 +214,111 @@ class InvoicePrintingService:
         if self.settings_service:
             try:
                 settings = self.settings_service.get_settings()
-                context.setdefault('company_name', settings.get('company_name', 'Sky Wave'))
-                context.setdefault('company_tagline', settings.get('company_tagline', 'حلول تسويقية متكاملة'))
-                context.setdefault('company_address', settings.get('company_address', 'القاهرة - مصر'))
-                context.setdefault('company_phone', settings.get('company_phone', '+20 XXX XXX XXXX'))
+                context.setdefault("company_name", settings.get("company_name", "Sky Wave"))
+                context.setdefault(
+                    "company_tagline", settings.get("company_tagline", "حلول تسويقية متكاملة")
+                )
+                context.setdefault(
+                    "company_address", settings.get("company_address", "القاهرة - مصر")
+                )
+                context.setdefault(
+                    "company_phone", settings.get("company_phone", "+20 XXX XXX XXXX")
+                )
+                context.setdefault(
+                    "company_website", settings.get("company_website", "www.skywaveads.com")
+                )
+                context.setdefault("payment_methods", settings.get("payment_methods", []))
                 # لا نستخدم logo_path من الإعدادات، نستخدم default_logo دائماً
             except Exception as e:
                 safe_print(f"WARNING: [InvoicePrintingService] فشل تحميل إعدادات الشركة: {e}")
 
         # قيم افتراضية
-        context.setdefault('company_name', 'Sky Wave')
-        context.setdefault('company_tagline', 'حلول تسويقية متكاملة')
-        context.setdefault('company_address', 'القاهرة - مصر')
-        context.setdefault('company_phone', '+20 XXX XXX XXXX')
+        context.setdefault("company_name", "Sky Wave")
+        context.setdefault("company_tagline", "حلول تسويقية متكاملة")
+        context.setdefault("company_address", "القاهرة - مصر")
+        context.setdefault("company_phone", "+20 XXX XXX XXXX")
         # استخدام default_logo دائماً
         logo_path_for_conversion = default_logo
-        context.setdefault('font_path', default_font)
-        context.setdefault('invoice_number', 'INV-0000')
-        context.setdefault('client_name', '---')
-        context.setdefault('client_phone', '---')
-        context.setdefault('client_address', '---')
-        context.setdefault('project_name', '---')
-        context.setdefault('date', datetime.now().strftime('%Y-%m-%d'))
-        context.setdefault('items', [])
-        context.setdefault('grand_total', '0.00')
-        context.setdefault('total_paid', '0.00')
-        context.setdefault('remaining', '0.00')
+        context.setdefault("font_path", default_font)
+        context.setdefault("invoice_number", "INV-0000")
+        context.setdefault("client_name", "---")
+        context.setdefault("client_phone", "---")
+        context.setdefault("client_address", "---")
+        context.setdefault("project_name", "---")
+        context.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
+        context.setdefault("items", [])
+        context.setdefault("grand_total", "0.00")
+        context.setdefault("total_paid", "0.00")
+        context.setdefault("remaining", "0.00")
+        context.setdefault("project_notes", invoice_data.get("project_notes", ""))
+        context.setdefault("payment_methods", invoice_data.get("payment_methods", []))
 
         # تحويل اللوجو إلى base64 للاستخدام في HTML
         logo_base64 = ""
 
-        safe_print(f"INFO: [InvoicePrintingService] محاولة تحميل اللوجو من: {logo_path_for_conversion}")
+        safe_print(
+            f"INFO: [InvoicePrintingService] محاولة تحميل اللوجو من: {logo_path_for_conversion}"
+        )
 
         if os.path.exists(logo_path_for_conversion):
             try:
                 import base64
-                with open(logo_path_for_conversion, 'rb') as f:
+
+                with open(logo_path_for_conversion, "rb") as f:
                     logo_data = f.read()
                     logo_base64 = f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
-                context['logo_path'] = logo_base64
-                safe_print(f"✅ [InvoicePrintingService] تم تحميل اللوجو بنجاح ({len(logo_data)} بايت)")
+                context["logo_path"] = logo_base64
+                safe_print(
+                    f"✅ [InvoicePrintingService] تم تحميل اللوجو بنجاح ({len(logo_data)} بايت)"
+                )
             except Exception as e:
                 safe_print(f"WARNING: [InvoicePrintingService] فشل تحميل اللوجو: {e}")
-                context['logo_path'] = ""
+                context["logo_path"] = ""
         else:
-            safe_print(f"WARNING: [InvoicePrintingService] ملف اللوجو غير موجود: {logo_path_for_conversion}")
-            context['logo_path'] = ""
+            safe_print(
+                f"WARNING: [InvoicePrintingService] ملف اللوجو غير موجود: {logo_path_for_conversion}"
+            )
+            context["logo_path"] = ""
 
         # تحويل مسار الخط إلى مسار مطلق
-        if os.path.exists(context['font_path']):
-            context['font_path'] = os.path.abspath(context['font_path']).replace('\\', '/')
+        if os.path.exists(context["font_path"]):
+            context["font_path"] = os.path.abspath(context["font_path"]).replace("\\", "/")
 
         # إضافة الحقول المطلوبة للقالب الجديد
-        context.setdefault('invoice_date', context.get('date'))
-        context.setdefault('due_date', context.get('date'))
-        context.setdefault('company_website', 'www.skywaveads.com')
-        context.setdefault('subtotal', context.get('grand_total', 0))
-        context.setdefault('remaining_amount', context.get('remaining', 0))
+        context.setdefault("invoice_date", context.get("date"))
+        context.setdefault("due_date", context.get("date"))
+        context.setdefault("company_website", "www.skywaveads.com")
+        context.setdefault("subtotal", context.get("grand_total", 0))
+        context.setdefault("remaining_amount", context.get("remaining", 0))
 
         # ⚡ تصحيح الدفعات - جلب اسم الحساب
-        if 'payments' in context and context['payments']:
-            for payment in context['payments']:
+        if "payments" in context and context["payments"]:
+            for payment in context["payments"]:
                 if isinstance(payment, dict):
                     # إذا مفيش account_name، نجيبه من account_id
-                    if 'account_name' not in payment or not payment['account_name']:
-                        account_id = payment.get('account_id', '')
+                    if "account_name" not in payment or not payment["account_name"]:
+                        account_id = payment.get("account_id", "")
                         if account_id:
                             try:
                                 # محاولة جلب اسم الحساب من الريبوزيتوري
                                 from core.repository import Repository
+
                                 repo = Repository()
                                 # محاولة جلب الحساب بالكود أولاً
                                 account = repo.get_account_by_code(account_id)
                                 if account:
-                                    payment['account_name'] = account.name
+                                    payment["account_name"] = account.name
                                 else:
                                     # محاولة جلب الحساب بالـ ID
                                     account = repo.get_account_by_id(account_id)
                                     if account:
-                                        payment['account_name'] = account.name
+                                        payment["account_name"] = account.name
                                     else:
-                                        payment['account_name'] = account_id
+                                        payment["account_name"] = account_id
                             except (AttributeError, KeyError, TypeError):
-                                payment['account_name'] = account_id
+                                payment["account_name"] = account_id
                         else:
-                            payment['account_name'] = 'غير محدد'
+                            payment["account_name"] = "غير محدد"
 
         return context
 
@@ -308,19 +337,24 @@ class InvoicePrintingService:
 
         # محاولة 1: استخدام WeasyPrint (الأفضل)
         try:
-            from weasyprint import CSS, HTML
+            import contextlib
+            import io
+
+            with contextlib.redirect_stderr(io.StringIO()):
+                from weasyprint import CSS, HTML
 
             safe_print("INFO: [InvoicePrintingService] استخدام WeasyPrint لتوليد PDF...")
             HTML(string=html_content, base_url=str(self.templates_dir)).write_pdf(
-                pdf_path,
-                stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
+                pdf_path, stylesheets=[CSS(string="@page { size: A4; margin: 0; }")]
             )
 
             safe_print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام WeasyPrint")
             return pdf_path
 
         except ImportError:
-            safe_print("WARNING: [InvoicePrintingService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
+            safe_print(
+                "WARNING: [InvoicePrintingService] WeasyPrint غير متوفر، جاري استخدام PyQt6..."
+            )
         except Exception as e:
             safe_print(f"WARNING: [InvoicePrintingService] فشل WeasyPrint: {e}")
 
@@ -335,7 +369,7 @@ class InvoicePrintingService:
         html_path = str(self.exports_dir / f"{filename}.html")
         try:
             safe_print("INFO: [InvoicePrintingService] حفظ HTML كـ fallback...")
-            with open(html_path, 'w', encoding='utf-8') as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
 
             safe_print(f"⚠️ [InvoicePrintingService] تم حفظ HTML: {html_path}")
@@ -381,7 +415,7 @@ class InvoicePrintingService:
             page_layout = QPageLayout(
                 QPageSize(QPageSize.PageSizeId.A4),
                 QPageLayout.Orientation.Portrait,
-                QMarginsF(0, 0, 0, 0)
+                QMarginsF(0, 0, 0, 0),
             )
             printer.setPageLayout(page_layout)
 
@@ -426,6 +460,7 @@ class InvoicePrintingService:
         except Exception as e:
             safe_print(f"ERROR: [InvoicePrintingService] خطأ في PyQt6: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
@@ -440,13 +475,14 @@ class InvoicePrintingService:
             True إذا نجح، False إذا فشل
         """
         import subprocess
+
         try:
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 os.startfile(file_path)
-            elif sys.platform == 'darwin':  # macOS
-                subprocess.run(['open', file_path], check=False)
+            elif sys.platform == "darwin":  # macOS
+                subprocess.run(["open", file_path], check=False)
             else:  # Linux
-                subprocess.run(['xdg-open', file_path], check=False)
+                subprocess.run(["xdg-open", file_path], check=False)
 
             safe_print(f"✅ [InvoicePrintingService] تم فتح الملف: {file_path}")
             return True
@@ -466,8 +502,8 @@ class InvoicePrintingService:
             اسم آمن للملف
         """
         # إزالة الأحرف الخاصة والمسافات الزائدة
-        safe_name = "".join(c for c in name if c.isalnum() or c in (' ', '_', '-')).strip()
+        safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip()
         # استبدال المسافات بـ underscore
-        safe_name = safe_name.replace(' ', '_')
+        safe_name = safe_name.replace(" ", "_")
         # الحد الأقصى 50 حرف
-        return safe_name[:50] if safe_name else 'invoice'
+        return safe_name[:50] if safe_name else "invoice"

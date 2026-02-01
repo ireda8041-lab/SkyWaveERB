@@ -26,6 +26,7 @@ from ui.smart_combobox import SmartFilterComboBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -66,10 +67,12 @@ class AccountEditorDialog(QDialog):
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         # إزالة الإطار البرتقالي نهائياً من جميع العناصر
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             * {
                 outline: none;
             }
@@ -79,12 +82,14 @@ class AccountEditorDialog(QDialog):
                 border: none;
                 outline: none;
             }
-        """)
+        """
+        )
 
         self.init_ui()
 
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
+
         setup_auto_responsive_dialog(self)
 
     def init_ui(self):
@@ -106,7 +111,8 @@ class AccountEditorDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: transparent;
@@ -121,7 +127,8 @@ class AccountEditorDialog(QDialog):
                 border-radius: 5px;
                 min-height: 30px;
             }}
-        """)
+        """
+        )
 
         # محتوى التمرير
         content_widget = QWidget()
@@ -175,7 +182,9 @@ class AccountEditorDialog(QDialog):
 
         # 5. Currency - Smart Default (EGP)
         self.currency_combo = QComboBox()
-        self.currency_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.currency_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         currencies = [
             (schemas.CurrencyCode.EGP, "جنيه مصري (EGP)"),
             (schemas.CurrencyCode.USD, "دولار أمريكي (USD)"),
@@ -188,17 +197,23 @@ class AccountEditorDialog(QDialog):
         form_layout.addRow("العملة:", self.currency_combo)
 
         # 6. Opening Balance
-        self.balance_spinbox = CustomSpinBox(decimals=2, minimum=-999999999.99, maximum=999999999.99)
+        self.balance_spinbox = CustomSpinBox(
+            decimals=2, minimum=-999999999.99, maximum=999999999.99
+        )
         self.balance_spinbox.setValue(0.0)
         self.balance_spinbox.setSuffix(" ج.م")
-        self.balance_spinbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.balance_spinbox.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         form_layout.addRow("الرصيد الافتتاحي:", self.balance_spinbox)
 
         # 7. Description
         self.description_input = QTextEdit()
         self.description_input.setPlaceholderText("وصف الحساب (اختياري)...")
         self.description_input.setMaximumHeight(60)
-        self.description_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.description_input.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
         form_layout.addRow("الوصف:", self.description_input)
 
         # 8. Active Checkbox - Default checked
@@ -212,7 +227,9 @@ class AccountEditorDialog(QDialog):
 
         # Validation message label
         self.validation_label = QLabelWidget("")
-        self.validation_label.setStyleSheet("color: #ff3d00; font-weight: bold; padding: 5px; border: none; outline: none;")
+        self.validation_label.setStyleSheet(
+            "color: #ff3d00; font-weight: bold; padding: 5px; border: none; outline: none;"
+        )
         self.validation_label.setVisible(False)
         content_layout.addWidget(self.validation_label)
 
@@ -222,12 +239,14 @@ class AccountEditorDialog(QDialog):
 
         # منطقة الأزرار (ثابتة في الأسفل)
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_light']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(15, 12, 15, 12)
         buttons_layout.setSpacing(10)
@@ -331,7 +350,9 @@ class AccountEditorDialog(QDialog):
             display_text = f"{indent}{acc.code} - {acc.name}"
             self.parent_combo.addItem(display_text, userData=str(acc.code))
 
-    def _is_descendant(self, potential_child_code: str, ancestor_code: str, visited: set | None = None) -> bool:
+    def _is_descendant(
+        self, potential_child_code: str, ancestor_code: str, visited: set | None = None
+    ) -> bool:
         """التحقق مما إذا كان الحساب من أحفاد حساب آخر (منع الحلقات الدائرية)"""
         if not potential_child_code or not ancestor_code:
             return False
@@ -362,7 +383,9 @@ class AccountEditorDialog(QDialog):
             return
 
         safe_print(f"INFO: [AccountDialog] Loading account: {self.account_to_edit.name}")
-        safe_print(f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}, parent_id = {self.account_to_edit.parent_id}")
+        safe_print(
+            f"INFO: [AccountDialog] parent_code = {self.account_to_edit.parent_code}, parent_id = {self.account_to_edit.parent_id}"
+        )
 
         # 1. Code
         self.code_input.setText(self.account_to_edit.code or "")
@@ -388,22 +411,31 @@ class AccountEditorDialog(QDialog):
                 item_data = self.parent_combo.itemData(i)
                 if item_data and str(item_data).strip() == parent_code_str:
                     self.parent_combo.setCurrentIndex(i)
-                    safe_print(f"SUCCESS: [AccountDialog] Parent found at index {i}: {parent_code_str}")
+                    safe_print(
+                        f"SUCCESS: [AccountDialog] Parent found at index {i}: {parent_code_str}"
+                    )
                     found = True
                     break
 
             if not found:
                 # إذا لم يتم العثور، نحاول إضافته يدوياً
                 safe_print(f"WARNING: [AccountDialog] Parent {parent_code_str} not found in combo")
-                parent_account = next((acc for acc in self.all_accounts if str(acc.code).strip() == parent_code_str), None)
+                parent_account = next(
+                    (acc for acc in self.all_accounts if str(acc.code).strip() == parent_code_str),
+                    None,
+                )
                 if parent_account:
                     indent = "  └─ " if parent_account.parent_code else ""
                     display_text = f"{indent}{parent_account.code} - {parent_account.name}"
                     self.parent_combo.addItem(display_text, userData=str(parent_account.code))
                     self.parent_combo.setCurrentIndex(self.parent_combo.count() - 1)
-                    safe_print(f"SUCCESS: [AccountDialog] Added and selected parent: {parent_account.code}")
+                    safe_print(
+                        f"SUCCESS: [AccountDialog] Added and selected parent: {parent_account.code}"
+                    )
                 else:
-                    safe_print(f"ERROR: [AccountDialog] Parent account {parent_code_str} not found anywhere!")
+                    safe_print(
+                        f"ERROR: [AccountDialog] Parent account {parent_code_str} not found anywhere!"
+                    )
         else:
             # No parent - set to "No Parent" (index 0)
             self.parent_combo.setCurrentIndex(0)
@@ -445,7 +477,11 @@ class AccountEditorDialog(QDialog):
             "parent_code": parent_code,
             "currency": self.currency_combo.currentData(),
             "description": self.description_input.toPlainText().strip(),
-            "status": schemas.AccountStatus.ACTIVE if self.active_checkbox.isChecked() else schemas.AccountStatus.ARCHIVED,
+            "status": (
+                schemas.AccountStatus.ACTIVE
+                if self.active_checkbox.isChecked()
+                else schemas.AccountStatus.ARCHIVED
+            ),
             "is_group": False,
         }
 
@@ -479,7 +515,9 @@ class AccountEditorDialog(QDialog):
 
         # التحقق من صحة الحساب الأب
         if account_data["parent_code"]:
-            parent_exists = any(acc.code == account_data["parent_code"] for acc in self.all_accounts)
+            parent_exists = any(
+                acc.code == account_data["parent_code"] for acc in self.all_accounts
+            )
             if not parent_exists:
                 return False, f"الحساب الأب '{account_data['parent_code']}' غير موجود"
 
@@ -505,20 +543,18 @@ class AccountEditorDialog(QDialog):
 
                 # إذا لم يكن هناك id صالح، نستخدم الكود للتحديث
                 if not account_id or account_id == "None":
-                    self.accounting_service.update_account_by_code(self.account_to_edit.code, account_data)
+                    self.accounting_service.update_account_by_code(
+                        self.account_to_edit.code, account_data
+                    )
                 else:
                     self.accounting_service.update_account(account_id, account_data)
                 QMessageBox.information(
-                    self,
-                    "تم التعديل",
-                    f"تم حفظ تعديلات الحساب '{account_data['name']}' بنجاح."
+                    self, "تم التعديل", f"تم حفظ تعديلات الحساب '{account_data['name']}' بنجاح."
                 )
             else:
                 self.accounting_service.create_account(account_data)
                 QMessageBox.information(
-                    self,
-                    "تم الإنشاء",
-                    f"تم إضافة الحساب '{account_data['name']}' بنجاح."
+                    self, "تم الإنشاء", f"تم إضافة الحساب '{account_data['name']}' بنجاح."
                 )
 
             self.accept()
@@ -526,10 +562,7 @@ class AccountEditorDialog(QDialog):
         except Exception as e:
             safe_print(f"ERROR: [AccountEditorDialog] Failed to save account: {e}")
             import traceback
+
             traceback.print_exc()
 
-            QMessageBox.critical(
-                self,
-                "خطأ في الحفظ",
-                f"فشل في حفظ الحساب:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "خطأ في الحفظ", f"فشل في حفظ الحساب:\n{str(e)}")

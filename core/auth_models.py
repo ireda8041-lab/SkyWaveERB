@@ -14,6 +14,7 @@ from pydantic import BaseModel
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -23,6 +24,7 @@ except ImportError:
 
 class UserRole(Enum):
     """أدوار المستخدمين"""
+
     ADMIN = "admin"
     ACCOUNTANT = "accountant"
     SALES = "sales"
@@ -30,6 +32,7 @@ class UserRole(Enum):
 
 class User(BaseModel):
     """نموذج المستخدم"""
+
     id: str | None = None
     mongo_id: str | None = None  # تغيير من _mongo_id لتجنب مشاكل Pydantic
     username: str
@@ -57,6 +60,7 @@ class User(BaseModel):
 
 class UserPermissions(BaseModel):
     """نموذج صلاحيات المستخدم المخصصة"""
+
     user_id: str
     tabs: list = []  # التابات المسموحة
     actions: list = []  # الإجراءات المسموحة
@@ -81,18 +85,24 @@ class AuthService:
                 # الحصول على كلمة المرور من الإعدادات الآمنة
                 try:
                     from core.config import Config
+
                     default_password = Config.get_default_admin_password()
                 except ImportError:
                     import os
-                    default_password = os.environ.get('DEFAULT_ADMIN_PASSWORD', 'SkyWave@Admin2024!')
+
+                    default_password = os.environ.get(
+                        "DEFAULT_ADMIN_PASSWORD", "SkyWave@Admin2024!"
+                    )
 
                 # إنشاء مستخدم مدير افتراضي
-                safe_print("INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي...")
+                safe_print(
+                    "INFO: [AuthService] لا يوجد مستخدمين. جاري إنشاء مستخدم مدير افتراضي..."
+                )
                 success = self.create_user(
                     username="admin",
                     password=default_password,
                     role=UserRole.ADMIN,
-                    full_name="مدير النظام"
+                    full_name="مدير النظام",
                 )
                 if success:
                     safe_print("INFO: [AuthService] ✅ تم إنشاء مستخدم مدير افتراضي")
@@ -109,7 +119,7 @@ class AuthService:
     def hash_password(password: str) -> str:
         """تشفير كلمة المرور"""
         salt = secrets.token_hex(16)
-        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100000)
         return f"{salt}:{password_hash.hex()}"
 
     @staticmethod
@@ -117,9 +127,11 @@ class AuthService:
         """التحقق من كلمة المرور"""
         try:
             # التحقق من التشفير الجديد (PBKDF2 مع salt)
-            if ':' in password_hash:
-                salt, stored_hash = password_hash.split(':')
-                password_hash_check = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+            if ":" in password_hash:
+                salt, stored_hash = password_hash.split(":")
+                password_hash_check = hashlib.pbkdf2_hmac(
+                    "sha256", password.encode(), salt.encode(), 100000
+                )
                 return password_hash_check.hex() == stored_hash
             else:
                 # التوافق مع التشفير القديم (SHA256 بسيط)
@@ -135,11 +147,14 @@ class AuthService:
             if user and user.is_active and self.verify_password(password, user.password_hash):
                 # تحديث آخر تسجيل دخول
                 from datetime import datetime
+
                 user.last_login = datetime.now().isoformat()
                 # استخدام update_user_by_username مباشرة لتجنب مشاكل ID
                 self.repo.update_user_by_username(username, {"last_login": user.last_login})
-                role_display = user.role.value if hasattr(user.role, 'value') else str(user.role)
-                safe_print(f"INFO: [AuthService] تم تسجيل دخول المستخدم: {username} ({role_display})")
+                role_display = user.role.value if hasattr(user.role, "value") else str(user.role)
+                safe_print(
+                    f"INFO: [AuthService] تم تسجيل دخول المستخدم: {username} ({role_display})"
+                )
                 result: User | None = user
                 return result
             return None
@@ -147,7 +162,9 @@ class AuthService:
             safe_print(f"ERROR: [AuthService] فشل المصادقة: {e}")
             return None
 
-    def create_user(self, username: str, password: str, role: UserRole, full_name: str | None = None) -> bool:
+    def create_user(
+        self, username: str, password: str, role: UserRole, full_name: str | None = None
+    ) -> bool:
         """إنشاء مستخدم جديد"""
         try:
             # التحقق من عدم وجود المستخدم
@@ -160,7 +177,7 @@ class AuthService:
                 password_hash=self.hash_password(password),
                 role=role,
                 full_name=full_name or username,
-                is_active=True
+                is_active=True,
             )
 
             self.repo.create_user(user)
@@ -177,108 +194,167 @@ class PermissionManager:
     # تعريف الصلاحيات الافتراضية لكل دور
     ROLE_PERMISSIONS = {
         UserRole.ADMIN: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo', 'settings'],
-            'actions': ['create', 'read', 'update', 'delete', 'export', 'print'],
-            'features': ['user_management', 'system_settings', 'financial_reports', 'data_export', 'task_management']
+            "tabs": [
+                "dashboard",
+                "projects",
+                "quotes",
+                "expenses",
+                "payments",
+                "clients",
+                "services",
+                "accounting",
+                "todo",
+                "settings",
+            ],
+            "actions": ["create", "read", "update", "delete", "export", "print"],
+            "features": [
+                "user_management",
+                "system_settings",
+                "financial_reports",
+                "data_export",
+                "task_management",
+            ],
         },
         UserRole.ACCOUNTANT: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo'],
-            'actions': ['create', 'read', 'update', 'delete', 'export', 'print'],
-            'features': ['financial_reports', 'data_export', 'task_management']
+            "tabs": [
+                "dashboard",
+                "projects",
+                "quotes",
+                "expenses",
+                "payments",
+                "clients",
+                "services",
+                "accounting",
+                "todo",
+            ],
+            "actions": ["create", "read", "update", "delete", "export", "print"],
+            "features": ["financial_reports", "data_export", "task_management"],
         },
         UserRole.SALES: {
-            'tabs': ['dashboard', 'projects', 'quotes', 'clients', 'services', 'todo'],
-            'actions': ['create', 'read', 'update', 'print'],
-            'features': ['client_reports', 'task_management']
-        }
+            "tabs": ["dashboard", "projects", "quotes", "clients", "services", "todo"],
+            "actions": ["create", "read", "update", "print"],
+            "features": ["client_reports", "task_management"],
+        },
     }
 
     # جميع الصلاحيات المتاحة
-    ALL_TABS = ['dashboard', 'projects', 'quotes', 'expenses', 'payments', 'clients', 'services', 'accounting', 'todo', 'settings']
-    ALL_ACTIONS = ['create', 'read', 'update', 'delete', 'export', 'print']
-    ALL_FEATURES = ['user_management', 'system_settings', 'financial_reports', 'data_export', 'client_reports', 'task_management']
+    ALL_TABS = [
+        "dashboard",
+        "projects",
+        "quotes",
+        "expenses",
+        "payments",
+        "clients",
+        "services",
+        "accounting",
+        "todo",
+        "settings",
+    ]
+    ALL_ACTIONS = ["create", "read", "update", "delete", "export", "print"]
+    ALL_FEATURES = [
+        "user_management",
+        "system_settings",
+        "financial_reports",
+        "data_export",
+        "client_reports",
+        "task_management",
+    ]
 
     @classmethod
     def can_access_tab(cls, user, tab_name: str) -> bool:
         """التحقق من إمكانية الوصول لتاب معين (مع دعم الصلاحيات المخصصة)"""
         # إذا كان المستخدم مدير، له صلاحية كاملة (فحص شامل)
         user_role_str = str(user.role).lower()
-        if (user.role == UserRole.ADMIN or
-            user_role_str == "admin" or
-            user_role_str == "userrole.admin" or
-            (hasattr(user.role, 'value') and user.role.value == "admin")):
+        if (
+            user.role == UserRole.ADMIN
+            or user_role_str == "admin"
+            or user_role_str == "userrole.admin"
+            or (hasattr(user.role, "value") and user.role.value == "admin")
+        ):
             return True
 
         # التحقق من الصلاحيات المخصصة أولاً
-        if hasattr(user, 'custom_permissions') and user.custom_permissions and 'tabs' in user.custom_permissions:
-            return tab_name in user.custom_permissions['tabs']
+        if (
+            hasattr(user, "custom_permissions")
+            and user.custom_permissions
+            and "tabs" in user.custom_permissions
+        ):
+            return tab_name in user.custom_permissions["tabs"]
 
         # استخدام صلاحيات الدور الافتراضية
         permissions = cls.ROLE_PERMISSIONS.get(user.role, {})
-        return tab_name in permissions.get('tabs', [])
+        return tab_name in permissions.get("tabs", [])
 
     @classmethod
     def can_perform_action(cls, user, action: str) -> bool:
         """التحقق من إمكانية تنفيذ إجراء معين"""
         # إذا كان المستخدم مدير، له صلاحية كاملة (فحص شامل)
         user_role_str = str(user.role).lower()
-        if (user.role == UserRole.ADMIN or
-            user_role_str == "admin" or
-            user_role_str == "userrole.admin" or
-            (hasattr(user.role, 'value') and user.role.value == "admin")):
+        if (
+            user.role == UserRole.ADMIN
+            or user_role_str == "admin"
+            or user_role_str == "userrole.admin"
+            or (hasattr(user.role, "value") and user.role.value == "admin")
+        ):
             return True
 
         # التحقق من الصلاحيات المخصصة أولاً
-        if hasattr(user, 'custom_permissions') and user.custom_permissions and 'actions' in user.custom_permissions:
-            return action in user.custom_permissions['actions']
+        if (
+            hasattr(user, "custom_permissions")
+            and user.custom_permissions
+            and "actions" in user.custom_permissions
+        ):
+            return action in user.custom_permissions["actions"]
 
         # استخدام صلاحيات الدور الافتراضية
         permissions = cls.ROLE_PERMISSIONS.get(user.role, {})
-        return action in permissions.get('actions', [])
+        return action in permissions.get("actions", [])
 
     @classmethod
     def has_feature(cls, user, feature: str) -> bool:
         """التحقق من توفر ميزة معينة"""
         # إذا كان المستخدم مدير، له صلاحية كاملة (فحص شامل)
         user_role_str = str(user.role).lower()
-        if (user.role == UserRole.ADMIN or
-            user_role_str == "admin" or
-            user_role_str == "userrole.admin" or
-            (hasattr(user.role, 'value') and user.role.value == "admin")):
+        if (
+            user.role == UserRole.ADMIN
+            or user_role_str == "admin"
+            or user_role_str == "userrole.admin"
+            or (hasattr(user.role, "value") and user.role.value == "admin")
+        ):
             return True
 
         # التحقق من الصلاحيات المخصصة أولاً
-        if hasattr(user, 'custom_permissions') and user.custom_permissions and 'features' in user.custom_permissions:
-            return feature in user.custom_permissions['features']
+        if (
+            hasattr(user, "custom_permissions")
+            and user.custom_permissions
+            and "features" in user.custom_permissions
+        ):
+            return feature in user.custom_permissions["features"]
 
         # استخدام صلاحيات الدور الافتراضية
         permissions = cls.ROLE_PERMISSIONS.get(user.role, {})
-        return feature in permissions.get('features', [])
+        return feature in permissions.get("features", [])
 
     @classmethod
     def get_user_permissions(cls, user) -> dict:
         """الحصول على جميع صلاحيات المستخدم"""
         # إذا كان المستخدم مدير، له صلاحية كاملة (فحص شامل)
         user_role_str = str(user.role).lower()
-        if (user.role == UserRole.ADMIN or
-            user_role_str == "admin" or
-            user_role_str == "userrole.admin" or
-            (hasattr(user.role, 'value') and user.role.value == "admin")):
-            return {
-                'tabs': cls.ALL_TABS,
-                'actions': cls.ALL_ACTIONS,
-                'features': cls.ALL_FEATURES
-            }
+        if (
+            user.role == UserRole.ADMIN
+            or user_role_str == "admin"
+            or user_role_str == "userrole.admin"
+            or (hasattr(user.role, "value") and user.role.value == "admin")
+        ):
+            return {"tabs": cls.ALL_TABS, "actions": cls.ALL_ACTIONS, "features": cls.ALL_FEATURES}
 
         # إذا كان لديه صلاحيات مخصصة
-        if hasattr(user, 'custom_permissions') and user.custom_permissions:
+        if hasattr(user, "custom_permissions") and user.custom_permissions:
             result: dict[str, Any] = user.custom_permissions
             return result
 
         # استخدام صلاحيات الدور الافتراضية
-        default_perms: dict[str, Any] = cls.ROLE_PERMISSIONS.get(user.role, {
-            'tabs': [],
-            'actions': [],
-            'features': []
-        })
+        default_perms: dict[str, Any] = cls.ROLE_PERMISSIONS.get(
+            user.role, {"tabs": [], "actions": [], "features": []}
+        )
         return default_perms

@@ -28,6 +28,7 @@ from ui.styles import BUTTON_STYLES, create_centered_item, get_cairo_font
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -55,12 +56,14 @@ class ExpenseManagerTab(QWidget):
 
         # 📱 تجاوب: سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.setup_ui()
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
+
         app_signals.expenses_changed.connect(self._on_expenses_changed)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
@@ -68,6 +71,7 @@ class ExpenseManagerTab(QWidget):
 
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
         from ui.styles import apply_rtl_alignment_to_all_fields
+
         apply_rtl_alignment_to_all_fields(self)
 
     def setup_ui(self):
@@ -79,6 +83,7 @@ class ExpenseManagerTab(QWidget):
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
+
         self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ إضافة مصروف")
@@ -112,15 +117,15 @@ class ExpenseManagerTab(QWidget):
         # جدول المصروفات
         self.expenses_table = QTableWidget()
         self.expenses_table.setColumnCount(6)
-        self.expenses_table.setHorizontalHeaderLabels([
-            "#", "التاريخ", "الفئة", "الوصف", "المشروع", "المبلغ"
-        ])
+        self.expenses_table.setHorizontalHeaderLabels(
+            ["#", "التاريخ", "الفئة", "الوصف", "المشروع", "المبلغ"]
+        )
 
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
+
         self.search_bar = UniversalSearchBar(
-            self.expenses_table,
-            placeholder="🔍 بحث (التاريخ، الفئة، الوصف، المشروع، المبلغ)..."
+            self.expenses_table, placeholder="🔍 بحث (التاريخ، الفئة، الوصف، المشروع، المبلغ)..."
         )
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -143,6 +148,7 @@ class ExpenseManagerTab(QWidget):
             v_header.setVisible(False)
         self.expenses_table.itemDoubleClicked.connect(self.open_edit_dialog)
         from ui.styles import TABLE_STYLE_DARK, fix_table_rtl
+
         self.expenses_table.setStyleSheet(TABLE_STYLE_DARK)
         fix_table_rtl(self.expenses_table)
 
@@ -166,13 +172,12 @@ class ExpenseManagerTab(QWidget):
             on_view=self.open_edit_dialog,
             on_edit=self.open_edit_dialog,
             on_delete=self.delete_selected_expense,
-            on_refresh=self.load_expenses_data
+            on_refresh=self.load_expenses_data,
         )
 
     def load_expenses_data(self):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
         safe_print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
-
 
         from core.data_loader import get_data_loader
 
@@ -235,14 +240,14 @@ class ExpenseManagerTab(QWidget):
             load_function=fetch_expenses,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.expense_service, 'invalidate_cache'):
+        if hasattr(self.expense_service, "invalidate_cache"):
             self.expense_service.invalidate_cache()
         self.load_expenses_data()
 
@@ -266,7 +271,7 @@ class ExpenseManagerTab(QWidget):
             accounting_service=self.accounting_service,
             project_service=self.project_service,
             expense_to_edit=None,
-            parent=self
+            parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_expenses_data()
@@ -283,7 +288,7 @@ class ExpenseManagerTab(QWidget):
             accounting_service=self.accounting_service,
             project_service=self.project_service,
             expense_to_edit=selected_expense,
-            parent=self
+            parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_expenses_data()

@@ -62,6 +62,8 @@ chrome_profiles/
 
 # ملفات الإعدادات الحساسة (احتفظ بها محلياً فقط)
 # skywave_settings.json  # يحتوي على إعدادات الشركة - قد تحتاج مشاركته
+local_settings.json
+check_mongo_users.py
 sync_config.local.json
 
 # نظام التشغيل
@@ -84,6 +86,10 @@ installer_output/
 *.tmp
 *.bak
 *.swp
+SkyWaveERP_Setup_temp.iss
+
+# Trae IDE
+.trae/
 
 # مجلد مكرر
 SkyWaveERB/

@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QMessageBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -30,21 +31,17 @@ class ErrorHandler:
         "ConnectionError": "فشل الاتصال بالإنترنت. يرجى التحقق من الاتصال والمحاولة مرة أخرى.",
         "ServerSelectionTimeoutError": "تعذر الاتصال بقاعدة البيانات. يرجى التحقق من الاتصال بالإنترنت.",
         "NetworkTimeout": "انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى.",
-
         # أخطاء البيانات
         "ValidationError": "البيانات المدخلة غير صحيحة. يرجى مراجعة المدخلات والمحاولة مرة أخرى.",
         "DuplicateKeyError": "هذا السجل موجود بالفعل. يرجى استخدام قيم مختلفة.",
         "E11000": "هذا السجل موجود بالفعل في قاعدة البيانات.",
         "IntegrityError": "تعارض في البيانات. يرجى التحقق من صحة المدخلات.",
-
         # أخطاء الصلاحيات
         "PermissionError": "ليس لديك صلاحية لتنفيذ هذا الإجراء.",
         "AuthenticationError": "فشل التحقق من الهوية. يرجى تسجيل الدخول مرة أخرى.",
-
         # أخطاء الملفات
         "FileNotFoundError": "الملف المطلوب غير موجود.",
         "IOError": "خطأ في قراءة أو كتابة الملف.",
-
         # أخطاء عامة
         "ValueError": "قيمة غير صالحة. يرجى التحقق من المدخلات.",
         "TypeError": "نوع بيانات غير صحيح.",
@@ -66,7 +63,7 @@ class ErrorHandler:
         context: str,
         user_message: str | None = None,
         show_dialog: bool = True,
-        log_level: str = "ERROR"
+        log_level: str = "ERROR",
     ) -> None:
         """
         معالجة الأخطاء بشكل موحد.
@@ -99,7 +96,7 @@ class ErrorHandler:
             "context": context,
             "exception_type": type(exception).__name__,
             "exception_message": str(exception),
-            "traceback": traceback.format_exc()
+            "traceback": traceback.format_exc(),
         }
 
         log_message = (
@@ -136,11 +133,7 @@ class ErrorHandler:
         safe_print(f"⚠️ CRITICAL ERROR: {type(exception).__name__} in {context}")
 
     @staticmethod
-    def _show_user_dialog(
-        exception: Exception,
-        user_message: str | None,
-        context: str
-    ) -> None:
+    def _show_user_dialog(exception: Exception, user_message: str | None, context: str) -> None:
         """عرض نافذة منبثقة للمستخدم"""
         try:
             # الحصول على الرسالة المناسبة
@@ -187,11 +180,7 @@ class ErrorHandler:
         )
 
     @staticmethod
-    def handle_warning(
-        message: str,
-        context: str,
-        show_dialog: bool = True
-    ) -> None:
+    def handle_warning(message: str, context: str, show_dialog: bool = True) -> None:
         """
         معالجة التحذيرات (Warnings).
 
@@ -212,11 +201,7 @@ class ErrorHandler:
             msg_box.exec()
 
     @staticmethod
-    def handle_info(
-        message: str,
-        context: str,
-        show_dialog: bool = False
-    ) -> None:
+    def handle_info(message: str, context: str, show_dialog: bool = False) -> None:
         """
         معالجة الرسائل المعلوماتية (Info).
 
@@ -247,18 +232,17 @@ def handle_errors(context: str, show_dialog: bool = True):
     def create_project(self, data):
         # الكود هنا
     """
+
     def decorator(func):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                ErrorHandler.handle_exception(
-                    exception=e,
-                    context=context,
-                    show_dialog=show_dialog
-                )
+                ErrorHandler.handle_exception(exception=e, context=context, show_dialog=show_dialog)
                 return None
+
         return wrapper
+
     return decorator
 
 
@@ -266,8 +250,7 @@ def handle_errors(context: str, show_dialog: bool = True):
 if __name__ == "__main__":
     # إعداد Logger للاختبار
     logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
 
     safe_print("--- اختبار ErrorHandler ---\n")

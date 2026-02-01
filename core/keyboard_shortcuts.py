@@ -53,126 +53,101 @@ class KeyboardShortcutManager(QObject):
         # تعريف الاختصارات
         self.shortcut_definitions = {
             # اختصارات الإنشاء
-            'new_project': {
-                'key': 'Ctrl+N',
-                'description': 'مشروع جديد',
-                'signal': self.new_project
+            "new_project": {
+                "key": "Ctrl+N",
+                "description": "مشروع جديد",
+                "signal": self.new_project,
             },
-            'new_client': {
-                'key': 'Ctrl+Shift+N',
-                'description': 'عميل جديد',
-                'signal': self.new_client
+            "new_client": {
+                "key": "Ctrl+Shift+N",
+                "description": "عميل جديد",
+                "signal": self.new_client,
             },
-            'new_expense': {
-                'key': 'Ctrl+E',
-                'description': 'مصروف جديد',
-                'signal': self.new_expense
+            "new_expense": {
+                "key": "Ctrl+E",
+                "description": "مصروف جديد",
+                "signal": self.new_expense,
             },
-
             # اختصارات التنقل والبحث
-            'search': {
-                'key': 'Ctrl+F',
-                'description': 'تفعيل البحث',
-                'signal': self.search_activated
+            "search": {
+                "key": "Ctrl+F",
+                "description": "تفعيل البحث",
+                "signal": self.search_activated,
             },
-            'refresh': {
-                'key': 'F5',
-                'description': 'تحديث البيانات',
-                'signal': self.refresh_data
-            },
-
+            "refresh": {"key": "F5", "description": "تحديث البيانات", "signal": self.refresh_data},
             # اختصارات الحفظ والإغلاق
-            'save': {
-                'key': 'Ctrl+S',
-                'description': 'حفظ',
-                'signal': self.save_data
-            },
-            'close': {
-                'key': 'Esc',
-                'description': 'إغلاق النافذة',
-                'signal': self.close_dialog
-            },
-
+            "save": {"key": "Ctrl+S", "description": "حفظ", "signal": self.save_data},
+            "close": {"key": "Esc", "description": "إغلاق النافذة", "signal": self.close_dialog},
             # اختصارات المساعدة
-            'help': {
-                'key': 'F1',
-                'description': 'عرض المساعدة',
-                'signal': self.show_help
-            },
-
+            "help": {"key": "F1", "description": "عرض المساعدة", "signal": self.show_help},
             # اختصارات التابات
-            'tab_dashboard': {
-                'key': 'Ctrl+1',
-                'description': 'الانتقال إلى الداشبورد',
-                'action': lambda: self._switch_tab(0)
+            "tab_dashboard": {
+                "key": "Ctrl+1",
+                "description": "الانتقال إلى الداشبورد",
+                "action": lambda: self._switch_tab(0),
             },
-            'tab_projects': {
-                'key': 'Ctrl+2',
-                'description': 'الانتقال إلى المشاريع',
-                'action': lambda: self._switch_tab(1)
+            "tab_projects": {
+                "key": "Ctrl+2",
+                "description": "الانتقال إلى المشاريع",
+                "action": lambda: self._switch_tab(1),
             },
-            'tab_expenses': {
-                'key': 'Ctrl+3',
-                'description': 'الانتقال إلى المصروفات',
-                'action': lambda: self._switch_tab(2)
+            "tab_expenses": {
+                "key": "Ctrl+3",
+                "description": "الانتقال إلى المصروفات",
+                "action": lambda: self._switch_tab(2),
             },
-            'tab_clients': {
-                'key': 'Ctrl+4',
-                'description': 'الانتقال إلى العملاء',
-                'action': lambda: self._switch_tab(3)
+            "tab_clients": {
+                "key": "Ctrl+4",
+                "description": "الانتقال إلى العملاء",
+                "action": lambda: self._switch_tab(3),
             },
-            'tab_services': {
-                'key': 'Ctrl+5',
-                'description': 'الانتقال إلى الخدمات',
-                'action': lambda: self._switch_tab(4)
+            "tab_services": {
+                "key": "Ctrl+5",
+                "description": "الانتقال إلى الخدمات",
+                "action": lambda: self._switch_tab(4),
             },
-            'tab_accounting': {
-                'key': 'Ctrl+6',
-                'description': 'الانتقال إلى المحاسبة',
-                'action': lambda: self._switch_tab(5)
+            "tab_accounting": {
+                "key": "Ctrl+6",
+                "description": "الانتقال إلى المحاسبة",
+                "action": lambda: self._switch_tab(5),
             },
-            'tab_settings': {
-                'key': 'Ctrl+7',
-                'description': 'الانتقال إلى الإعدادات',
-                'action': lambda: self._switch_tab(6)
+            "tab_settings": {
+                "key": "Ctrl+7",
+                "description": "الانتقال إلى الإعدادات",
+                "action": lambda: self._switch_tab(6),
             },
-
             # اختصارات إضافية
-            'new_payment': {
-                'key': 'Ctrl+P',
-                'description': 'دفعة جديدة',
-                'signal': self.new_payment
+            "new_payment": {
+                "key": "Ctrl+P",
+                "description": "دفعة جديدة",
+                "signal": self.new_payment,
             },
-            'full_sync': {
-                'key': 'Ctrl+Shift+S',
-                'description': 'مزامنة كاملة',
-                'signal': self.full_sync
+            "full_sync": {
+                "key": "Ctrl+Shift+S",
+                "description": "مزامنة كاملة",
+                "signal": self.full_sync,
             },
-            'delete_selected': {
-                'key': 'Delete',
-                'description': 'حذف العنصر المحدد',
-                'signal': self.delete_selected
+            "delete_selected": {
+                "key": "Delete",
+                "description": "حذف العنصر المحدد",
+                "signal": self.delete_selected,
             },
-            'select_all': {
-                'key': 'Ctrl+A',
-                'description': 'تحديد الكل',
-                'signal': self.select_all
+            "select_all": {"key": "Ctrl+A", "description": "تحديد الكل", "signal": self.select_all},
+            "copy_selected": {
+                "key": "Ctrl+C",
+                "description": "نسخ المحدد",
+                "signal": self.copy_selected,
             },
-            'copy_selected': {
-                'key': 'Ctrl+C',
-                'description': 'نسخ المحدد',
-                'signal': self.copy_selected
+            "export_excel": {
+                "key": "Ctrl+Shift+E",
+                "description": "تصدير Excel",
+                "signal": self.export_excel,
             },
-            'export_excel': {
-                'key': 'Ctrl+Shift+E',
-                'description': 'تصدير Excel',
-                'signal': self.export_excel
+            "print_current": {
+                "key": "Ctrl+Shift+P",
+                "description": "طباعة",
+                "signal": self.print_current,
             },
-            'print_current': {
-                'key': 'Ctrl+Shift+P',
-                'description': 'طباعة',
-                'signal': self.print_current
-            }
         }
 
         logger.info("تم تهيئة KeyboardShortcutManager")
@@ -193,20 +168,17 @@ class KeyboardShortcutManager(QObject):
             definition: تعريف الاختصار
         """
         try:
-            shortcut = QShortcut(
-                QKeySequence(definition['key']),
-                self.main_window
-            )
+            shortcut = QShortcut(QKeySequence(definition["key"]), self.main_window)
 
             # ⚡ تفعيل الاختصار دائماً
             shortcut.setEnabled(True)
             shortcut.setAutoRepeat(False)  # منع التكرار التلقائي
 
             # ربط الاختصار بالإجراء أو الإشارة
-            if 'signal' in definition:
-                shortcut.activated.connect(definition['signal'].emit)
-            elif 'action' in definition:
-                shortcut.activated.connect(definition['action'])
+            if "signal" in definition:
+                shortcut.activated.connect(definition["signal"].emit)
+            elif "action" in definition:
+                shortcut.activated.connect(definition["action"])
 
             self.shortcuts[name] = shortcut
             logger.debug(f"تم إنشاء اختصار: {name} ({definition['key']})")
@@ -222,7 +194,7 @@ class KeyboardShortcutManager(QObject):
             index: رقم التاب
         """
         try:
-            if hasattr(self.main_window, 'tabs'):
+            if hasattr(self.main_window, "tabs"):
                 if index < self.main_window.tabs.count():
                     self.main_window.tabs.setCurrentIndex(index)
                     logger.debug(f"تم التبديل إلى التاب {index}")
@@ -294,51 +266,69 @@ class KeyboardShortcutManager(QObject):
             قاموس بالاختصارات مصنفة
         """
         categories: dict[str, list[dict[str, str]]] = {
-            'إنشاء': [],
-            'تنقل وبحث': [],
-            'تحرير': [],
-            'حفظ وإغلاق': [],
-            'مساعدة': [],
-            'التابات': []
+            "إنشاء": [],
+            "تنقل وبحث": [],
+            "تحرير": [],
+            "حفظ وإغلاق": [],
+            "مساعدة": [],
+            "التابات": [],
         }
 
         for name, definition in self.shortcut_definitions.items():
-            if name.startswith('new_'):
-                categories['إنشاء'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
-            elif name in ['search', 'refresh', 'full_sync']:
-                categories['تنقل وبحث'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
-            elif name in ['delete_selected', 'select_all', 'copy_selected', 'export_excel', 'print_current']:
-                categories['تحرير'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
-            elif name in ['save', 'close']:
-                categories['حفظ وإغلاق'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
-            elif name == 'help':
-                categories['مساعدة'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
-            elif name.startswith('tab_'):
-                categories['التابات'].append({
-                    'name': name,
-                    'key': definition['key'],
-                    'description': definition['description']
-                })
+            if name.startswith("new_"):
+                categories["إنشاء"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
+            elif name in ["search", "refresh", "full_sync"]:
+                categories["تنقل وبحث"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
+            elif name in [
+                "delete_selected",
+                "select_all",
+                "copy_selected",
+                "export_excel",
+                "print_current",
+            ]:
+                categories["تحرير"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
+            elif name in ["save", "close"]:
+                categories["حفظ وإغلاق"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
+            elif name == "help":
+                categories["مساعدة"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
+            elif name.startswith("tab_"):
+                categories["التابات"].append(
+                    {
+                        "name": name,
+                        "key": definition["key"],
+                        "description": definition["description"],
+                    }
+                )
 
         return categories
 

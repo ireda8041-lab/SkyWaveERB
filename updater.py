@@ -3,6 +3,8 @@
 Sky Wave ERP - Professional Updater v2.0
 """
 
+import hashlib
+import io
 import json
 import os
 import shutil
@@ -11,17 +13,18 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime
 
 # Fix for PyInstaller windowed mode - redirect stdin/stdout/stderr to devnull
 # This prevents "RuntimeError: lost sys.stdin" when running without console
 if sys.stdin is None:
-    sys.stdin = open(os.devnull)
+    sys.stdin = io.StringIO("")
 if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w")
+    sys.stdout = io.StringIO()
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
+    sys.stderr = io.StringIO()
 
 try:
     from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
@@ -44,6 +47,60 @@ except ImportError:
     HAS_GUI = False
 
 APP_NAME = "Sky Wave ERP"
+ALLOWED_UPDATE_HOSTS = {
+    "github.com",
+    "objects.githubusercontent.com",
+    "raw.githubusercontent.com",
+}
+MAX_UPDATE_SIZE_BYTES = 500 * 1024 * 1024
+
+
+def _spawn_detached(args: list[str]) -> int:
+    if not args:
+        raise ValueError("args must not be empty")
+    return os.spawnv(os.P_NOWAIT, args[0], args)
+
+
+def _validate_update_url(url: str) -> str:
+    if not isinstance(url, str) or not url.strip():
+        raise ValueError("Empty update URL")
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme.lower() != "https":
+        raise ValueError("Update URL must use https")
+    if not parsed.hostname:
+        raise ValueError("Update URL must include a hostname")
+    host = parsed.hostname.lower()
+    if host not in ALLOWED_UPDATE_HOSTS:
+        raise ValueError(f"Update host is not allowed: {host}")
+    return url.strip()
+
+
+def _sha256_file(path: str, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _normalize_sha256(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    cleaned = value.strip().lower()
+    if cleaned.startswith("sha256:"):
+        cleaned = cleaned[len("sha256:") :].strip()
+    if len(cleaned) != 64:
+        return None
+    try:
+        int(cleaned, 16)
+    except ValueError:
+        return None
+    return cleaned
 
 
 # تحميل خط Cairo
@@ -124,12 +181,22 @@ class UpdateManager:
             return f"{speed:.0f} B/s"
         return ""
 
-    def download_file(self, url, dest_path):
+    def download_file(self, url, dest_path, *, expected_sha256: str | None = None):
         try:
             self.emit_status("Downloading...")
+            url = _validate_update_url(url)
             request = urllib.request.Request(url, headers={"User-Agent": "SkyWaveERP-Updater/2.0"})
-            with urllib.request.urlopen(request, timeout=60) as response:
+
+            class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
+                def redirect_request(self, req, fp, code, msg, headers, newurl):
+                    _validate_update_url(newurl)
+                    return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+            opener = urllib.request.build_opener(_ValidatingRedirectHandler())
+            with opener.open(request, timeout=60) as response:
                 total_size = int(response.headers.get("content-length", 0))
+                if total_size and total_size > MAX_UPDATE_SIZE_BYTES:
+                    raise ValueError("Update file is too large")
                 downloaded = 0
                 block_size = 8192
                 with open(dest_path, "wb") as f:
@@ -141,6 +208,8 @@ class UpdateManager:
                             break
                         f.write(buffer)
                         downloaded += len(buffer)
+                        if downloaded > MAX_UPDATE_SIZE_BYTES:
+                            raise ValueError("Update file exceeded maximum allowed size")
                         if total_size > 0:
                             progress = int((downloaded / total_size) * 100)
                             self.emit_progress(progress)
@@ -150,6 +219,11 @@ class UpdateManager:
                             dm = downloaded / (1024 * 1024)
                             tm = total_size / (1024 * 1024)
                             self.emit_detail(f"Downloaded {dm:.1f} MB / {tm:.1f} MB")
+            normalized_expected = _normalize_sha256(expected_sha256)
+            if normalized_expected:
+                actual = _sha256_file(dest_path)
+                if actual.lower() != normalized_expected:
+                    raise ValueError("SHA-256 verification failed")
             return True
         except Exception as e:
             self.emit_detail(f"Error: {str(e)}")
@@ -189,7 +263,7 @@ class UpdateManager:
                     ["tasklist", "/FI", "IMAGENAME eq SkyWaveERP.exe"],
                     capture_output=True,
                     text=True,
-                    shell=True,
+                    shell=False,
                 )
                 if "skywaveerp" not in result.stdout.lower():
                     return True
@@ -210,7 +284,7 @@ class UpdateManager:
             args = [setup_path]
             if silent:
                 args.append("/SILENT")
-            subprocess.Popen(args, shell=False)
+            _spawn_detached(args)
             return True
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
@@ -239,34 +313,30 @@ class UpdateManager:
             self.emit_status("Installing... Please wait")
 
             # Run and wait for completion
-            process = subprocess.Popen(args, shell=False)
+            with subprocess.Popen(args, shell=False) as process:
 
-            # Monitor the process
-            start_time = time.time()
-            while process.poll() is None:
-                if self.cancelled:
-                    process.terminate()
-                    return False
+                start_time = time.time()
+                while process.poll() is None:
+                    if self.cancelled:
+                        process.terminate()
+                        return False
 
-                elapsed = int(time.time() - start_time)
-                self.emit_detail(f"Installing... ({elapsed}s)")
-                time.sleep(1)
+                    elapsed = int(time.time() - start_time)
+                    self.emit_detail(f"Installing... ({elapsed}s)")
+                    time.sleep(1)
 
-                # Timeout after 10 minutes (large installer)
-                if elapsed > 600:
-                    self.emit_detail("Installation timeout!")
-                    process.terminate()
-                    return False
+                    if elapsed > 600:
+                        self.emit_detail("Installation timeout!")
+                        process.terminate()
+                        return False
 
-            # Check exit code
-            exit_code = process.returncode
-            if exit_code == 0:
-                self.emit_detail("Installation completed successfully!")
-                return True
-            else:
+                exit_code = process.returncode
+                if exit_code == 0:
+                    self.emit_detail("Installation completed successfully!")
+                    return True
+
                 self.emit_detail(f"Installer exited with code: {exit_code}")
-                # Even with non-zero exit, installation might have succeeded
-                return exit_code in [0, 1]  # 1 = restart required
+                return exit_code in [0, 1]
 
         except Exception as e:
             self.emit_detail(f"Installer error: {str(e)}")
@@ -282,6 +352,9 @@ if HAS_GUI:
             self.app_folder = app_folder or os.getcwd()
             self.download_url = download_url
             self.version_info = version_info or {}
+            self.expected_sha256 = _normalize_sha256(
+                self.version_info.get("sha256")
+            ) or _normalize_sha256(self.version_info.get("expected_sha256"))
             self.signals = UpdateSignals()
             self.update_manager = UpdateManager(self.signals)
             self._init_ui()
@@ -302,14 +375,16 @@ if HAS_GUI:
 
             main_frame = QFrame()
             main_frame.setObjectName("mainFrame")
-            main_frame.setStyleSheet("""
+            main_frame.setStyleSheet(
+                """
                 QFrame#mainFrame {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                         stop:0 #001A3A, stop:1 #0A2A55);
                     border: none;
                     border-radius: 30px;
                 }
-            """)
+            """
+            )
 
             frame_layout = QVBoxLayout(main_frame)
             frame_layout.setContentsMargins(35, 25, 35, 25)
@@ -329,10 +404,12 @@ if HAS_GUI:
 
             close_btn = QPushButton("✕")
             close_btn.setFixedSize(32, 32)
-            close_btn.setStyleSheet("""
+            close_btn.setStyleSheet(
+                """
                 QPushButton { background: transparent; border: none; color: #64748B; font-size: 16px; border-radius: 16px; }
                 QPushButton:hover { background: rgba(239, 68, 68, 0.2); color: #EF4444; }
-            """)
+            """
+            )
             close_btn.clicked.connect(self._on_cancel)
             title_layout.addWidget(close_btn)
             frame_layout.addWidget(title_bar)
@@ -359,7 +436,8 @@ if HAS_GUI:
             self.progress_bar.setValue(0)
             self.progress_bar.setTextVisible(True)
             self.progress_bar.setFixedHeight(24)
-            self.progress_bar.setStyleSheet("""
+            self.progress_bar.setStyleSheet(
+                """
                 QProgressBar {
                     border: none;
                     border-radius: 12px;
@@ -374,7 +452,8 @@ if HAS_GUI:
                         stop:0 #0A6CF1, stop:1 #10B981);
                     border-radius: 12px;
                 }
-            """)
+            """
+            )
             frame_layout.addWidget(self.progress_bar)
 
             # Speed
@@ -408,10 +487,12 @@ if HAS_GUI:
             self.cancel_btn.setFixedSize(130, 40)
             self.cancel_btn.setFont(get_cairo_font(11, bold=True))
             self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.cancel_btn.setStyleSheet("""
+            self.cancel_btn.setStyleSheet(
+                """
                 QPushButton { background: rgba(239, 68, 68, 0.15); border: none; border-radius: 20px; color: #EF4444; }
                 QPushButton:hover { background: #EF4444; color: white; }
-            """)
+            """
+            )
             self.cancel_btn.clicked.connect(self._on_cancel)
 
             btn_layout = QHBoxLayout()
@@ -459,10 +540,12 @@ if HAS_GUI:
                     "color: #10B981; background: transparent; border: none;"
                 )
                 self.cancel_btn.setText("Close")
-                self.cancel_btn.setStyleSheet("""
+                self.cancel_btn.setStyleSheet(
+                    """
                     QPushButton { background: rgba(16, 185, 129, 0.2); border: none; border-radius: 20px; color: #10B981; font-weight: bold; }
                     QPushButton:hover { background: #10B981; color: white; }
-                """)
+                """
+                )
                 # Don't auto-close - let _restart_app handle it
             else:
                 self.status_label.setText("✗ " + message)
@@ -498,7 +581,9 @@ if HAS_GUI:
                 if self.download_url and not self.setup_path:
                     temp_dir = tempfile.gettempdir()
                     self.setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
-                    if not self.update_manager.download_file(self.download_url, self.setup_path):
+                    if not self.update_manager.download_file(
+                        self.download_url, self.setup_path, expected_sha256=self.expected_sha256
+                    ):
                         if self.update_manager.cancelled:
                             return
                         self.signals.finished.emit(False, "Download failed")
@@ -527,17 +612,13 @@ if HAS_GUI:
                     "/CLOSEAPPLICATIONS",
                     "/FORCECLOSEAPPLICATIONS",
                 ]
-                
+
                 # Start installer as detached process
-                subprocess.Popen(
-                    args, 
-                    shell=False,
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                )
-                
+                _spawn_detached(args)
+
                 self.signals.progress.emit(100)
                 self.signals.detail.emit("Installer started! Closing updater...")
-                
+
                 # ⚡ Exit updater immediately so installer can proceed
                 time.sleep(1)
                 os._exit(0)
@@ -553,28 +634,32 @@ if HAS_GUI:
                     os.path.join(self.app_folder, "SkyWaveERP.exe"),
                     os.path.join(self.app_folder, "..", "SkyWaveERP.exe"),
                     r"D:\Sky Wave ERP\SkyWaveERP.exe",
-                    os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs', 'Sky Wave ERP', 'SkyWaveERP.exe'),
-                    os.path.join(os.environ.get('PROGRAMFILES', ''), 'Sky Wave ERP', 'SkyWaveERP.exe'),
+                    os.path.join(
+                        os.environ.get("LOCALAPPDATA", ""),
+                        "Programs",
+                        "Sky Wave ERP",
+                        "SkyWaveERP.exe",
+                    ),
+                    os.path.join(
+                        os.environ.get("PROGRAMFILES", ""), "Sky Wave ERP", "SkyWaveERP.exe"
+                    ),
                 ]
-                
+
                 app_exe = None
                 for path in possible_paths:
                     if os.path.exists(path):
                         app_exe = path
                         break
-                
+
                 if app_exe:
                     self.signals.detail.emit(f"Starting app from: {app_exe}")
                     # Use START_NEW_SESSION to detach the process completely
-                    subprocess.Popen(
-                        [app_exe], 
-                        shell=False, 
-                        cwd=os.path.dirname(app_exe),
-                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                    )
+                    _spawn_detached([app_exe])
                     self.signals.detail.emit("App started successfully!")
                 else:
-                    self.signals.detail.emit("Could not find SkyWaveERP.exe - please start manually")
+                    self.signals.detail.emit(
+                        "Could not find SkyWaveERP.exe - please start manually"
+                    )
             except Exception as e:
                 self.signals.detail.emit(f"Could not restart app: {e}")
             finally:
@@ -602,7 +687,18 @@ def run_console_updater(setup_path=None, app_folder=None, download_url=None):
         print("\nDownloading update...")
         temp_dir = tempfile.gettempdir()
         setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
-        if not manager.download_file(download_url, setup_path):
+        version_info = {}
+        try:
+            vf = os.path.join(app_folder or os.getcwd(), "version.json")
+            if os.path.exists(vf):
+                with open(vf, encoding="utf-8") as f:
+                    version_info = json.load(f)
+        except Exception:
+            version_info = {}
+        expected_sha256 = _normalize_sha256(version_info.get("sha256")) or _normalize_sha256(
+            version_info.get("expected_sha256")
+        )
+        if not manager.download_file(download_url, setup_path, expected_sha256=expected_sha256):
             print("Download failed!")
             time.sleep(3)
             return

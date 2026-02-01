@@ -22,7 +22,7 @@ class TestPasswordSecurity(unittest.TestCase):
         hashed = AuthService.hash_password(password)
 
         # التأكد من أن الهاش يحتوي على salt
-        self.assertIn(':', hashed)
+        self.assertIn(":", hashed)
 
         # التأكد من أن الهاش مختلف عن كلمة المرور
         self.assertNotEqual(password, hashed)
@@ -65,38 +65,38 @@ class TestFileSecurityPatterns(unittest.TestCase):
 
     def test_env_in_gitignore(self):
         """التأكد من أن .env في .gitignore"""
-        gitignore_path = os.path.join(self.project_root, '.gitignore')
+        gitignore_path = os.path.join(self.project_root, ".gitignore")
 
-        with open(gitignore_path, encoding='utf-8') as f:
+        with open(gitignore_path, encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn('.env', content)
+        self.assertIn(".env", content)
 
     def test_db_files_in_gitignore(self):
         """التأكد من أن ملفات قاعدة البيانات في .gitignore"""
-        gitignore_path = os.path.join(self.project_root, '.gitignore')
+        gitignore_path = os.path.join(self.project_root, ".gitignore")
 
-        with open(gitignore_path, encoding='utf-8') as f:
+        with open(gitignore_path, encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn('*.db', content)
+        self.assertIn("*.db", content)
 
     def test_env_example_exists(self):
         """التأكد من وجود ملف .env.example"""
-        env_example_path = os.path.join(self.project_root, '.env.example')
+        env_example_path = os.path.join(self.project_root, ".env.example")
         self.assertTrue(os.path.exists(env_example_path))
 
     def test_env_example_has_no_real_credentials(self):
         """التأكد من أن .env.example لا يحتوي على بيانات حقيقية"""
-        env_example_path = os.path.join(self.project_root, '.env.example')
+        env_example_path = os.path.join(self.project_root, ".env.example")
 
-        with open(env_example_path, encoding='utf-8') as f:
+        with open(env_example_path, encoding="utf-8") as f:
             content = f.read()
 
         # التأكد من عدم وجود بيانات حقيقية
-        self.assertNotIn('SkywavePassword', content)
-        self.assertNotIn('147.79.66.116', content)
-        self.assertNotIn('AIzaSy', content)
+        self.assertNotIn("SkywavePassword", content)
+        self.assertNotIn("147.79.66.116", content)
+        self.assertNotIn("AIzaSy", content)
 
 
 class TestUserRoles(unittest.TestCase):
@@ -106,18 +106,18 @@ class TestUserRoles(unittest.TestCase):
         """التأكد من تعريف أدوار المستخدمين"""
         from core.auth_models import UserRole
 
-        self.assertTrue(hasattr(UserRole, 'ADMIN'))
-        self.assertTrue(hasattr(UserRole, 'ACCOUNTANT'))
-        self.assertTrue(hasattr(UserRole, 'SALES'))
+        self.assertTrue(hasattr(UserRole, "ADMIN"))
+        self.assertTrue(hasattr(UserRole, "ACCOUNTANT"))
+        self.assertTrue(hasattr(UserRole, "SALES"))
 
     def test_permission_manager_exists(self):
         """التأكد من وجود مدير الصلاحيات"""
         from core.auth_models import PermissionManager
 
-        self.assertTrue(hasattr(PermissionManager, 'can_access_tab'))
-        self.assertTrue(hasattr(PermissionManager, 'can_perform_action'))
-        self.assertTrue(hasattr(PermissionManager, 'has_feature'))
+        self.assertTrue(hasattr(PermissionManager, "can_access_tab"))
+        self.assertTrue(hasattr(PermissionManager, "can_perform_action"))
+        self.assertTrue(hasattr(PermissionManager, "has_feature"))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

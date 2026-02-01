@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\response.py
-# hypothesis_version: 6.148.3
-
-['_address', '_conn', '_data', '_docs', '_duration', '_from_command', '_more_to_come', '_request_id']

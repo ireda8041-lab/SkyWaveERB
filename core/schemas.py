@@ -11,12 +11,15 @@ class ClientStatus(str, Enum):
     ACTIVE = "نشط"
     ARCHIVED = "مؤرشف"
 
+
 class ServiceStatus(str, Enum):
     ACTIVE = "نشط"
     ARCHIVED = "مؤرشف"
 
+
 class AccountType(str, Enum):
-    """ أنواع الحسابات الرئيسية في شجرة الحسابات """
+    """أنواع الحسابات الرئيسية في شجرة الحسابات"""
+
     ASSET = "أصول"
     CASH = "أصول نقدية"
     LIABILITY = "خصوم"
@@ -26,34 +29,43 @@ class AccountType(str, Enum):
 
 
 class AccountStatus(str, Enum):
-    """ حالات الحساب داخل شجرة الحسابات """
+    """حالات الحساب داخل شجرة الحسابات"""
+
     ACTIVE = "نشط"
     ARCHIVED = "مؤرشف"
 
+
 class CurrencyCode(str, Enum):
-    """ العملات المدعومة - يمكن إضافة المزيد """
+    """العملات المدعومة - يمكن إضافة المزيد"""
+
     EGP = "EGP"
     USD = "USD"
     SAR = "SAR"
     AED = "AED"
 
+
 class InvoiceStatus(str, Enum):
-    """ حالات الفاتورة """
+    """حالات الفاتورة"""
+
     DRAFT = "مسودة"
     SENT = "مرسلة"
     PAID = "مدفوعة"
     PARTIAL = "مدفوعة جزئياً"
     VOID = "ملغاة"
 
+
 class ProjectStatus(str, Enum):
-    """ حالات المشروع """
+    """حالات المشروع"""
+
     PLANNING = "تخطيط"
     ACTIVE = "نشط"
     COMPLETED = "مكتمل"
     ON_HOLD = "معلق"
     ARCHIVED = "مؤرشف"
 
+
 # --- هياكل البيانات الأساسية (Schemas) ---
+
 
 class BaseSchema(BaseModel):
     """
@@ -61,13 +73,14 @@ class BaseSchema(BaseModel):
     - هنستخدمه عشان نضمن إن كل حاجة ليها تاريخ إنشاء وتعديل
     - الـ 'Field(default_factory=datetime.now)' بتخلي التاريخ يتسجل أوتوماتيك
     """
+
     id: int | None = None
     created_at: datetime = Field(default_factory=datetime.now)
     last_modified: datetime = Field(default_factory=datetime.now)
 
     # الحقول الخاصة بالمزامنة (دي مهمة جداً)
     mongo_id: str | None = Field(default=None, alias="_mongo_id")
-    sync_status: str = Field(default="new_offline") # (new_offline, synced, modified_offline)
+    sync_status: str = Field(default="new_offline")  # (new_offline, synced, modified_offline)
 
     model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
 
@@ -85,15 +98,16 @@ class Account(BaseSchema):
     نموذج شجرة الحسابات (من collection 'accounts')
     ده اللي هيشغل المحاسبة الأوتوماتيك
     """
+
     name: str
     code: str  # كود الحساب (مثلاً: 1010) - يجب أن يكون فريداً
-    type: AccountType # نوع الحساب (أصول، إيرادات...)
-    parent_code: str | None = None # كود الحساب الأب (للشجرة الهرمية)
-    parent_id: str | None = None # عشان نعمل شجرة (حساب أب) - للتوافق مع الكود القديم
-    is_group: bool = False # هل هذا حساب مجموعة (له أطفال) أم حساب نهائي
-    balance: float = 0.0 # الرصيد المحسوب (من قيود اليومية)
-    debit_total: float = 0.0 # إجمالي المدين
-    credit_total: float = 0.0 # إجمالي الدائن
+    type: AccountType  # نوع الحساب (أصول، إيرادات...)
+    parent_code: str | None = None  # كود الحساب الأب (للشجرة الهرمية)
+    parent_id: str | None = None  # عشان نعمل شجرة (حساب أب) - للتوافق مع الكود القديم
+    is_group: bool = False  # هل هذا حساب مجموعة (له أطفال) أم حساب نهائي
+    balance: float = 0.0  # الرصيد المحسوب (من قيود اليومية)
+    debit_total: float = 0.0  # إجمالي المدين
+    credit_total: float = 0.0  # إجمالي الدائن
     currency: CurrencyCode | None = CurrencyCode.EGP  # العملة
     description: str | None = None  # وصف الحساب
     status: AccountStatus = AccountStatus.ACTIVE
@@ -126,15 +140,17 @@ class Account(BaseSchema):
             # الخصوم والإيرادات وحقوق الملكية: الرصيد = الدائن - المدين
             self.balance = self.credit_total - self.debit_total
 
+
 class Client(BaseSchema):
-    """ نموذج العميل (من collection 'clients') """
+    """نموذج العميل (من collection 'clients')"""
+
     name: str
     company_name: str | None = None
     email: str | None = None
     phone: str | None = None
     address: str | None = None
-    country: str | None = None # (مهم لشركة Sky Wave عشان شغلهم في EGY/KSA/UAE)
-    vat_number: str | None = None # الرقم الضريبي
+    country: str | None = None  # (مهم لشركة Sky Wave عشان شغلهم في EGY/KSA/UAE)
+    vat_number: str | None = None  # الرقم الضريبي
     status: ClientStatus = ClientStatus.ACTIVE
     client_type: str | None = "فرد"
     work_field: str | None = None
@@ -143,25 +159,31 @@ class Client(BaseSchema):
     client_notes: str | None = None
     is_vip: bool = False  # ⚡ عميل مميز VIP
 
+
 class Currency(BaseSchema):
-    """ نموذج العملات (من collection 'currencies') """
+    """نموذج العملات (من collection 'currencies')"""
+
     code: CurrencyCode  # EGP, USD... - يجب أن يكون فريداً
-    name: str # (جنيه مصري، دولار أمريكي)
-    exchange_rate: float = 1.0 # سعر الصرف مقابل العملة الأساسية (مثلاً EGP)
+    name: str  # (جنيه مصري، دولار أمريكي)
+    exchange_rate: float = 1.0  # سعر الصرف مقابل العملة الأساسية (مثلاً EGP)
+
 
 class Service(BaseSchema):
     """
     نموذج الخدمات والباقات (من collection 'services')
     دي الخدمات اللي في ملف الشركة (SEO, Ads, Starter Package...)
     """
+
     name: str
     description: str | None = None
     default_price: float
-    category: str | None = "General" # (مثلاً: SEO, Web Dev, Packages)
+    category: str | None = "General"  # (مثلاً: SEO, Web Dev, Packages)
     status: ServiceStatus = ServiceStatus.ACTIVE
+
 
 class ProjectItem(BaseModel):
     """نموذج بند المشروع مع دعم تحليل الربحية"""
+
     service_id: str
     description: str
     quantity: float
@@ -176,6 +198,7 @@ class ProjectItem(BaseModel):
 # ==================== نظام الدفعات المرحلية (Milestones) ====================
 class MilestoneStatus(str, Enum):
     """حالات الدفعة المرحلية"""
+
     PENDING = "قيد الانتظار"
     PAID = "مدفوعة"
     OVERDUE = "متأخرة"
@@ -186,6 +209,7 @@ class ProjectMilestone(BaseModel):
     نموذج الدفعة المرحلية (Milestone)
     يستخدم لتقسيم مدفوعات المشروع على مراحل
     """
+
     id: str | None = None
     name: str  # مثلاً: دفعة التعاقد، دفعة التسليم
     percentage: float = 0.0  # نسبة مئوية من إجمالي المشروع
@@ -200,6 +224,7 @@ class ProjectMilestone(BaseModel):
 # ==================== نظام العقود (Retainer) ====================
 class RenewalCycle(str, Enum):
     """دورة التجديد للعقود"""
+
     MONTHLY = "شهري"
     QUARTERLY = "ربع سنوي"
     YEARLY = "سنوي"
@@ -207,6 +232,7 @@ class RenewalCycle(str, Enum):
 
 class ContractType(str, Enum):
     """نوع العقد"""
+
     ONE_TIME = "مرة واحدة"
     RETAINER = "اشتراك/عقد"
 
@@ -216,6 +242,7 @@ class Project(BaseSchema):
     🏢 نموذج المشروع Enterprise Level
     يدعم: التكويد الذكي، تحليل الربحية، مراكز التكلفة، العقود المتكررة
     """
+
     name: str  # يجب أن يكون فريداً
     client_id: str
     status: ProjectStatus = ProjectStatus.ACTIVE
@@ -263,7 +290,7 @@ class Project(BaseSchema):
     project_manager_id: str | None = None  # مدير المشروع
 
     # ⚡ Pydantic v2 Validator لتحويل None إلى قائمة فارغة
-    @field_validator('milestones', 'items', mode='before')
+    @field_validator("milestones", "items", mode="before")
     @classmethod
     def convert_none_to_list(cls, v):
         """تحويل None إلى قائمة فارغة"""
@@ -271,37 +298,46 @@ class Project(BaseSchema):
             return []
         return v
 
+
 class Expense(BaseSchema):
-    """ نموذج المصروفات (من collection 'expenses') """
+    """نموذج المصروفات (من collection 'expenses')"""
+
     date: datetime
-    category: str # (إيجار، مرتبات، إعلانات مدفوعة، اشتراكات برامج)
+    category: str  # (إيجار، مرتبات، إعلانات مدفوعة، اشتراكات برامج)
     amount: float
     description: str | None = None
-    account_id: str # ربط بحساب المصروف في شجرة الحسابات
-    payment_account_id: str | None = None # الحساب اللي اتدفع منه (خزينة، بنك، فودافون كاش، إلخ)
+    account_id: str  # ربط بحساب المصروف في شجرة الحسابات
+    payment_account_id: str | None = None  # الحساب اللي اتدفع منه (خزينة، بنك، فودافون كاش، إلخ)
     project_id: str | None = None
 
+
 class User(BaseSchema):
-    """ نموذج المستخدمين (من collection 'users') """
+    """نموذج المستخدمين (من collection 'users')"""
+
     username: str  # يجب أن يكون فريداً
-    hashed_password: str # مش هنخزن الباسورد أبداً كنص عادي
+    hashed_password: str  # مش هنخزن الباسورد أبداً كنص عادي
     full_name: str
-    role: str # (مثلاً: admin, user)
+    role: str  # (مثلاً: admin, user)
+
 
 # --- الهياكل المعقدة (الفواتير والقيود) ---
 
+
 class InvoiceItem(BaseModel):
-    """ نموذج البند الواحد جوه الفاتورة """
+    """نموذج البند الواحد جوه الفاتورة"""
+
     service_id: str
-    description: str # (هييجي أوتوماتيك من الخدمة بس نقدر نعدله)
+    description: str  # (هييجي أوتوماتيك من الخدمة بس نقدر نعدله)
     quantity: float
     unit_price: float
     discount_rate: float = 0.0  # نسبة الخصم على البند (%)
     discount_amount: float = 0.0  # مبلغ الخصم على البند
-    total: float # الإجمالي بعد الخصم
+    total: float  # الإجمالي بعد الخصم
+
 
 class Invoice(BaseSchema):
-    """ نموذج الفاتورة (من collection 'invoices') """
+    """نموذج الفاتورة (من collection 'invoices')"""
+
     invoice_number: str  # رقم الفاتورة - يجب أن يكون فريداً
     client_id: str
     project_id: str | None = None
@@ -310,10 +346,10 @@ class Invoice(BaseSchema):
     items: list[InvoiceItem]
     subtotal: float
 
-    discount_rate: float = 0.0 # نسبة الخصم
-    discount_amount: float = 0.0 # مبلغ الخصم
+    discount_rate: float = 0.0  # نسبة الخصم
+    discount_amount: float = 0.0  # مبلغ الخصم
 
-    tax_rate: float = 0.0 # نسبة الضريبة
+    tax_rate: float = 0.0  # نسبة الضريبة
     tax_amount: float = 0.0
     total_amount: float
     amount_paid: float = 0.0
@@ -321,16 +357,18 @@ class Invoice(BaseSchema):
     currency: CurrencyCode = CurrencyCode.EGP
     notes: str | None = None
 
+
 class JournalEntryLine(BaseModel):
     """
     نموذج السطر الواحد في قيد اليومية (مدين أو دائن)
     ده اللي هيعمله الروبوت المحاسبي لوحده
     """
-    account_id: str # ID الحساب من 'accounts'
-    account_code: str | None = None # كود الحساب (للبحث السريع)
-    account_name: str | None = None # اسم الحساب (للعرض)
+
+    account_id: str  # ID الحساب من 'accounts'
+    account_code: str | None = None  # كود الحساب (للبحث السريع)
+    account_name: str | None = None  # اسم الحساب (للعرض)
     debit: float = 0.0  # مدين
-    credit: float = 0.0 # دائن
+    credit: float = 0.0  # دائن
     description: str | None = None
 
     def validate_entry(self) -> bool:
@@ -343,18 +381,20 @@ class JournalEntryLine(BaseModel):
             return False
         return True
 
+
 class JournalEntry(BaseSchema):
-    """ نموذج قيد اليومية (من collection 'journal_entries') """
+    """نموذج قيد اليومية (من collection 'journal_entries')"""
+
     date: datetime
-    description: str # (مثلاً: "إثبات فاتورة رقم 123 للعميل س")
+    description: str  # (مثلاً: "إثبات فاتورة رقم 123 للعميل س")
     lines: list[JournalEntryLine]
-    reference_type: str | None = None # نوع المرجع (invoice, expense, payment)
-    reference_id: str | None = None # معرف المرجع
-    related_document_id: str | None = None # (ID الفاتورة أو المصروف اللي عمل القيد) - للتوافق
-    entry_number: str | None = None # رقم القيد
-    is_balanced: bool = True # هل القيد متوازن
-    total_debit: float = 0.0 # إجمالي المدين
-    total_credit: float = 0.0 # إجمالي الدائن
+    reference_type: str | None = None  # نوع المرجع (invoice, expense, payment)
+    reference_id: str | None = None  # معرف المرجع
+    related_document_id: str | None = None  # (ID الفاتورة أو المصروف اللي عمل القيد) - للتوافق
+    entry_number: str | None = None  # رقم القيد
+    is_balanced: bool = True  # هل القيد متوازن
+    total_debit: float = 0.0  # إجمالي المدين
+    total_credit: float = 0.0  # إجمالي الدائن
 
     def calculate_totals(self):
         """حساب إجماليات القيد"""
@@ -380,32 +420,40 @@ class JournalEntry(BaseSchema):
 
         return True, "القيد صحيح"
 
+
 class Payment(BaseSchema):
     """
     نموذج الدفعة (التحصيل).
     ده بيمثل أي فلوس استلمناها من العميل.
     """
-    project_id: str   # المشروع اللي الدفعة دي تابعة ليه
-    client_id: str    # العميل اللي دفع
-    date: datetime    # تاريخ التحصيل
-    amount: float     # المبلغ اللي اندفع
-    account_id: str   # كود الحساب اللي استلم الفلوس (مثلاً: 1110 البنك)
-    method: str | None = "Bank Transfer" # (طريقة الدفع: تحويل، كاش، ...)
+
+    project_id: str  # المشروع اللي الدفعة دي تابعة ليه
+    client_id: str  # العميل اللي دفع
+    date: datetime  # تاريخ التحصيل
+    amount: float  # المبلغ اللي اندفع
+    account_id: str  # كود الحساب اللي استلم الفلوس (مثلاً: 1110 البنك)
+    method: str | None = "Bank Transfer"  # (طريقة الدفع: تحويل، كاش، ...)
+
 
 class SyncOperation(str, Enum):
-    """ أنواع عمليات المزامنة """
+    """أنواع عمليات المزامنة"""
+
     CREATE = "create"
     UPDATE = "update"
     DELETE = "delete"
 
+
 class SyncPriority(str, Enum):
-    """ أولويات المزامنة """
+    """أولويات المزامنة"""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
+
 class SyncStatus(str, Enum):
-    """ حالات المزامنة """
+    """حالات المزامنة"""
+
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
@@ -417,8 +465,9 @@ class SyncQueueItem(BaseSchema):
     نموذج عنصر في قائمة انتظار المزامنة
     يستخدم لتتبع العمليات التي تحتاج للمزامنة مع MongoDB
     """
+
     entity_type: str  # نوع الكيان (clients, projects, expenses, etc.)
-    entity_id: str    # معرف الكيان المحلي
+    entity_id: str  # معرف الكيان المحلي
     operation: SyncOperation  # نوع العملية (create, update, delete)
     priority: SyncPriority = SyncPriority.MEDIUM  # أولوية المزامنة
     status: SyncStatus = SyncStatus.PENDING  # حالة المزامنة
@@ -428,10 +477,13 @@ class SyncQueueItem(BaseSchema):
     error_message: str | None = None  # رسالة الخطأ في حالة الفشل
     last_attempt: datetime | None = None  # وقت آخر محاولة
 
+
 # تم تحميل schemas.py بنجاح
 
+
 class NotificationType(str, Enum):
-    """ أنواع الإشعارات """
+    """أنواع الإشعارات"""
+
     INFO = "معلومة"
     WARNING = "تحذير"
     ERROR = "خطأ"
@@ -440,18 +492,22 @@ class NotificationType(str, Enum):
     PAYMENT_RECEIVED = "دفعة_مستلمة"
     SYNC_FAILED = "فشل_المزامنة"
 
+
 class NotificationPriority(str, Enum):
-    """ أولويات الإشعارات """
+    """أولويات الإشعارات"""
+
     LOW = "منخفضة"
     MEDIUM = "متوسطة"
     HIGH = "عالية"
     URGENT = "عاجلة"
+
 
 class Notification(BaseSchema):
     """
     نموذج الإشعار
     يستخدم لإشعار المستخدم بالأحداث المهمة
     """
+
     title: str  # عنوان الإشعار
     message: str  # نص الإشعار
     type: NotificationType  # نوع الإشعار
@@ -463,11 +519,12 @@ class Notification(BaseSchema):
     expires_at: datetime | None = None  # تاريخ انتهاء الصلاحية (للإشعارات المؤقتة)
 
 
-
 # ==================== نظام المهام (Tasks) ====================
+
 
 class TaskPriority(str, Enum):
     """أولوية المهمة"""
+
     LOW = "منخفضة"
     MEDIUM = "متوسطة"
     HIGH = "عالية"
@@ -476,6 +533,7 @@ class TaskPriority(str, Enum):
 
 class TaskStatus(str, Enum):
     """حالة المهمة"""
+
     TODO = "قيد الانتظار"
     IN_PROGRESS = "قيد التنفيذ"
     COMPLETED = "مكتملة"
@@ -484,6 +542,7 @@ class TaskStatus(str, Enum):
 
 class TaskCategory(str, Enum):
     """فئة المهمة"""
+
     GENERAL = "عامة"
     PROJECT = "مشروع"
     CLIENT = "عميل"
@@ -495,12 +554,14 @@ class TaskCategory(str, Enum):
 
 # ==================== نماذج لوحة التحكم المحسّنة (Enhanced Dashboard) ====================
 
+
 class KPIData(BaseModel):
     """
     نموذج بيانات مؤشر الأداء الرئيسي (KPI)
     يستخدم لعرض KPIs مع مؤشرات الاتجاه في لوحة التحكم
     Requirements: 1.4, 1.5, 1.6, 1.7
     """
+
     name: str  # اسم المؤشر (مثل "إجمالي الإيرادات")
     current_value: float  # القيمة الحالية
     previous_value: float | None = None  # القيمة السابقة للمقارنة
@@ -537,6 +598,7 @@ class CashFlowEntry(BaseModel):
     يستخدم لتمثيل التدفقات النقدية الداخلة والخارجة في فترة زمنية
     Requirements: 2.5
     """
+
     date: datetime  # تاريخ الإدخال
     inflow: float = 0.0  # التدفق الداخل (الدفعات المحصلة)
     outflow: float = 0.0  # التدفق الخارج (المصروفات)
@@ -556,9 +618,12 @@ class DashboardSettings(BaseModel):
     يستخدم لحفظ تفضيلات المستخدم للوحة التحكم
     Requirements: 4.4
     """
+
     auto_refresh_enabled: bool = True  # هل التحديث التلقائي مفعل
     auto_refresh_interval: int = 30  # فترة التحديث بالثواني
-    selected_period: str = "this_month"  # الفترة المحددة (today, this_week, this_month, this_year, custom)
+    selected_period: str = (
+        "this_month"  # الفترة المحددة (today, this_week, this_month, this_year, custom)
+    )
     custom_start_date: datetime | None = None  # تاريخ البداية للفترة المخصصة
     custom_end_date: datetime | None = None  # تاريخ النهاية للفترة المخصصة
 
@@ -568,6 +633,7 @@ class Task(BaseSchema):
     نموذج المهمة (من collection 'tasks')
     يستخدم لإدارة المهام والتذكيرات
     """
+
     title: str  # عنوان المهمة
     description: str | None = None  # وصف المهمة
     priority: TaskPriority = TaskPriority.MEDIUM  # الأولوية
@@ -586,8 +652,10 @@ class Task(BaseSchema):
 
 # ==================== نظام الموارد البشرية (HR System) ====================
 
+
 class EmployeeStatus(str, Enum):
     """حالات الموظف"""
+
     ACTIVE = "نشط"
     INACTIVE = "غير نشط"
     ON_LEAVE = "إجازة"
@@ -598,6 +666,7 @@ class EmployeeStatus(str, Enum):
 
 class LeaveType(str, Enum):
     """أنواع الإجازات"""
+
     ANNUAL = "سنوية"
     SICK = "مرضية"
     EMERGENCY = "طارئة"
@@ -611,6 +680,7 @@ class LeaveType(str, Enum):
 
 class LeaveStatus(str, Enum):
     """حالات طلب الإجازة"""
+
     PENDING = "معلق"
     APPROVED = "موافق عليه"
     REJECTED = "مرفوض"
@@ -619,6 +689,7 @@ class LeaveStatus(str, Enum):
 
 class LoanStatus(str, Enum):
     """حالات السلفة"""
+
     ACTIVE = "نشط"
     PAID = "مسدد"
     CANCELLED = "ملغي"
@@ -626,6 +697,7 @@ class LoanStatus(str, Enum):
 
 class AttendanceStatus(str, Enum):
     """حالات الحضور"""
+
     PRESENT = "حاضر"
     ABSENT = "غائب"
     LATE = "متأخر"
@@ -636,6 +708,7 @@ class AttendanceStatus(str, Enum):
 
 class SalaryStatus(str, Enum):
     """حالات الراتب"""
+
     PENDING = "معلق"
     CALCULATED = "محسوب"
     APPROVED = "معتمد"
@@ -644,6 +717,7 @@ class SalaryStatus(str, Enum):
 
 class Employee(BaseSchema):
     """نموذج الموظف"""
+
     employee_id: str  # رقم الموظف (فريد)
     name: str  # الاسم الكامل
     national_id: str | None = None  # الرقم القومي
@@ -665,6 +739,7 @@ class Employee(BaseSchema):
 
 class EmployeeLeave(BaseSchema):
     """نموذج طلب إجازة"""
+
     employee_id: int  # معرف الموظف
     leave_type: LeaveType = LeaveType.ANNUAL
     start_date: datetime
@@ -679,6 +754,7 @@ class EmployeeLeave(BaseSchema):
 
 class EmployeeLoan(BaseSchema):
     """نموذج سلفة موظف"""
+
     employee_id: int  # معرف الموظف
     loan_type: str = "سلفة"  # نوع السلفة
     amount: float  # مبلغ السلفة
@@ -694,6 +770,7 @@ class EmployeeLoan(BaseSchema):
 
 class EmployeeAttendance(BaseSchema):
     """نموذج حضور موظف"""
+
     employee_id: int  # معرف الموظف
     date: datetime
     check_in_time: str | None = None  # وقت الحضور (HH:MM)
@@ -706,6 +783,7 @@ class EmployeeAttendance(BaseSchema):
 
 class EmployeeSalary(BaseSchema):
     """نموذج راتب شهري"""
+
     employee_id: int  # معرف الموظف
     month: str  # الشهر (YYYY-MM)
     basic_salary: float = 0.0  # الراتب الأساسي
@@ -726,11 +804,12 @@ class EmployeeSalary(BaseSchema):
     notes: str | None = None
 
 
-
 # ==================== نظام عروض الأسعار (Quotations System) ====================
+
 
 class QuotationStatus(str, Enum):
     """حالات عرض السعر"""
+
     DRAFT = "مسودة"
     SENT = "مرسل"
     VIEWED = "تم الاطلاع"
@@ -742,6 +821,7 @@ class QuotationStatus(str, Enum):
 
 class QuotationItem(BaseModel):
     """نموذج بند في عرض السعر"""
+
     service_id: str | None = None
     description: str
     quantity: float = 1.0
@@ -757,22 +837,23 @@ class Quotation(BaseSchema):
     📋 نموذج عرض السعر (Quotation/Proposal)
     يستخدم لإنشاء عروض أسعار احترافية للعملاء
     """
+
     quotation_number: str  # رقم العرض (فريد)
     client_id: str  # معرف العميل
     client_name: str | None = None  # اسم العميل (للعرض)
-    
+
     # التواريخ
     issue_date: datetime  # تاريخ الإصدار
     valid_until: datetime  # صالح حتى
-    
+
     # العنوان والوصف
     title: str  # عنوان العرض
     description: str | None = None  # وصف تفصيلي
     scope_of_work: str | None = None  # نطاق العمل
-    
+
     # البنود
     items: list[QuotationItem] = Field(default_factory=list)
-    
+
     # الحسابات
     subtotal: float = 0.0
     discount_rate: float = 0.0
@@ -780,36 +861,35 @@ class Quotation(BaseSchema):
     tax_rate: float = 0.0
     tax_amount: float = 0.0
     total_amount: float = 0.0
-    
+
     # العملة
     currency: CurrencyCode = CurrencyCode.EGP
-    
+
     # الحالة
     status: QuotationStatus = QuotationStatus.DRAFT
-    
+
     # الشروط والأحكام
     terms_and_conditions: str | None = None
     payment_terms: str | None = None  # شروط الدفع
     delivery_time: str | None = None  # مدة التسليم
     warranty: str | None = None  # الضمان
-    
+
     # ملاحظات
     notes: str | None = None
     internal_notes: str | None = None  # ملاحظات داخلية (لا تظهر للعميل)
-    
+
     # التحويل لمشروع
     converted_to_project_id: str | None = None
     conversion_date: datetime | None = None
-    
+
     # المتابعة
     sent_date: datetime | None = None
     viewed_date: datetime | None = None
     response_date: datetime | None = None
-    
-    @field_validator('items', mode='before')
+
+    @field_validator("items", mode="before")
     @classmethod
     def convert_none_to_list(cls, v):
         if v is None:
             return []
         return v
-

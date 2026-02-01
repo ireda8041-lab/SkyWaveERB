@@ -31,6 +31,7 @@ from ui.smart_combobox import SmartFilterComboBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -50,7 +51,7 @@ class ExpenseEditorDialog(QDialog):
         expense_to_edit: schemas.Expense | None = None,
         parent=None,
         pre_selected_project_id: str | None = None,
-        pre_selected_project_name: str | None = None
+        pre_selected_project_name: str | None = None,
     ):
         super().__init__(parent)
 
@@ -76,20 +77,21 @@ class ExpenseEditorDialog(QDialog):
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         # جلب البيانات
         self.load_data()
         self.init_ui()
-        
+
         # تحديد المشروع المسبق إذا تم تمريره
-        if self.pre_selected_project_id and hasattr(self, 'project_combo'):
+        if self.pre_selected_project_id and hasattr(self, "project_combo"):
             self._select_pre_selected_project()
 
     def load_data(self):
         """جلب الحسابات والمشاريع والفئات من قاعدة البيانات"""
         all_accounts = self.accounting_service.repo.get_all_accounts()
-        self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith('11')]
+        self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith("11")]
         self.projects_list = self.project_service.get_all_projects()
 
         # جلب فئات المصروفات من المصروفات السابقة
@@ -104,7 +106,7 @@ class ExpenseEditorDialog(QDialog):
             "مستلزمات مكتبية",
             "اتصالات وإنترنت",
             "تسويق وإعلان",
-            "مصروفات متنوعة"
+            "مصروفات متنوعة",
         ]
         # دمج الفئات الافتراضية مع الفئات الموجودة
         all_categories = set(self.expense_categories) | set(default_categories)
@@ -134,7 +136,8 @@ class ExpenseEditorDialog(QDialog):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -149,7 +152,8 @@ class ExpenseEditorDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         # المحتوى الداخلي
         content_widget = QWidget()
@@ -317,12 +321,14 @@ class ExpenseEditorDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -349,7 +355,7 @@ class ExpenseEditorDialog(QDialog):
         # تحميل البيانات إذا كان تعديل
         if self.is_editing:
             self.load_expense_data()
-        
+
         # تحديد المشروع المسبق إذا تم تمريره
         if self.pre_selected_project_id:
             self._select_pre_selected_project()
@@ -360,14 +366,18 @@ class ExpenseEditorDialog(QDialog):
             for i in range(self.project_combo.count()):
                 project = self.project_combo.itemData(i)
                 if project:
-                    project_id = getattr(project, "_mongo_id", None) or str(getattr(project, "id", ""))
+                    project_id = getattr(project, "_mongo_id", None) or str(
+                        getattr(project, "id", "")
+                    )
                     project_name = getattr(project, "name", "")
-                    
-                    if (project_id == self.pre_selected_project_id or 
-                        project_name == self.pre_selected_project_name):
+
+                    if (
+                        project_id == self.pre_selected_project_id
+                        or project_name == self.pre_selected_project_name
+                    ):
                         self.project_combo.setCurrentIndex(i)
                         break
-        except Exception as e:
+        except Exception:
             pass  # تجاهل الأخطاء في التحديد المسبق
 
     def _validate_amount(self):
@@ -386,7 +396,7 @@ class ExpenseEditorDialog(QDialog):
         if exp.project_id:
             for i in range(self.project_combo.count()):
                 project = self.project_combo.itemData(i)
-                if project and hasattr(project, 'name') and project.name == exp.project_id:
+                if project and hasattr(project, "name") and project.name == exp.project_id:
                     self.project_combo.setCurrentIndex(i)
                     break
 
@@ -404,7 +414,7 @@ class ExpenseEditorDialog(QDialog):
                 self.category_combo.setCurrentIndex(self.category_combo.count() - 1)
 
         # ⚡ تحميل الحساب - البحث في account_id أو payment_account_id
-        account_code = getattr(exp, 'account_id', None) or getattr(exp, 'payment_account_id', None)
+        account_code = getattr(exp, "account_id", None) or getattr(exp, "payment_account_id", None)
         if account_code:
             for i in range(self.account_combo.count()):
                 acc_code = self.account_combo.itemData(i)
@@ -452,14 +462,15 @@ class ExpenseEditorDialog(QDialog):
                 expense_data._mongo_id = self.expense_to_edit._mongo_id
                 expense_data.id = self.expense_to_edit.id
                 expense_id = self.expense_to_edit.id or self.expense_to_edit._mongo_id
-                
+
                 result = self.expense_service.update_expense(expense_id, expense_data)
                 if result:
                     # ⚡ إرسال إشارات التحديث
                     from core.signals import app_signals
+
                     app_signals.emit_data_changed("expenses")
                     app_signals.emit_data_changed("accounting")
-                    
+
                     QMessageBox.information(self, "تم", "تم حفظ التعديلات بنجاح.")
                     self.accept()
                 else:
@@ -470,5 +481,3 @@ class ExpenseEditorDialog(QDialog):
                 self.accept()
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل الحفظ: {e}")
-
-

@@ -1,6 +1,5 @@
 """الملف: ui/service_manager.py"""
 
-
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -24,11 +23,13 @@ from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
+
 
 logger = get_logger(__name__)
 
@@ -57,14 +58,17 @@ class ServiceManagerTab(QWidget):
 
         # جعل التاب متجاوب مع حجم الشاشة
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
-        app_signals.services_changed.connect(self._on_services_changed)
+
+        app_signals.safe_connect(app_signals.services_changed, self._on_services_changed)
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
+
         self.toolbar = ResponsiveToolbar()
 
         self.add_button = QPushButton("➕ إضافة خدمة جديدة")
@@ -112,9 +116,9 @@ class ServiceManagerTab(QWidget):
 
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
+
         self.search_bar = UniversalSearchBar(
-            self.services_table,
-            placeholder="🔍 بحث (الاسم، الفئة، السعر، الحالة)..."
+            self.services_table, placeholder="🔍 بحث (الاسم، الفئة، السعر، الحالة)..."
         )
         table_layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -122,6 +126,7 @@ class ServiceManagerTab(QWidget):
         self.services_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.services_table)
         self.services_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.services_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -154,6 +159,7 @@ class ServiceManagerTab(QWidget):
 
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
         from ui.styles import apply_rtl_alignment_to_all_fields
+
         apply_rtl_alignment_to_all_fields(self)
 
     def _setup_context_menu(self):
@@ -164,7 +170,7 @@ class ServiceManagerTab(QWidget):
             table=self.services_table,
             on_view=self.open_editor_for_selected,
             on_edit=self.open_editor_for_selected,
-            on_refresh=self.load_services_data
+            on_refresh=self.load_services_data,
         )
 
     def update_buttons_state(self, has_selection: bool):
@@ -174,6 +180,7 @@ class ServiceManagerTab(QWidget):
     def on_service_selection_changed(self):
         # ⚡ تجاهل التحديث إذا كان الكليك يمين
         from core.context_menu import is_right_click_active
+
         if is_right_click_active():
             return
 
@@ -191,7 +198,6 @@ class ServiceManagerTab(QWidget):
         """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
 
-
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
@@ -207,7 +213,7 @@ class ServiceManagerTab(QWidget):
                 else:
                     return self.service_service.get_all_services()
             except Exception as e:
-                logger.error(f"[ServiceManager] فشل جلب الخدمات: {e}")
+                logger.error("[ServiceManager] فشل جلب الخدمات: %s", e)
                 return []
 
         # دالة تحديث الواجهة
@@ -224,7 +230,9 @@ class ServiceManagerTab(QWidget):
                     description = service.description or ""
                     description = description.strip()
                     if description:
-                        display_desc = description[:50] + "..." if len(description) > 50 else description
+                        display_desc = (
+                            description[:50] + "..." if len(description) > 50 else description
+                        )
                         desc_item = create_centered_item(display_desc)
                         desc_item.setToolTip(description)  # عرض الوصف الكامل عند التمرير
                     else:
@@ -232,11 +240,19 @@ class ServiceManagerTab(QWidget):
                         desc_item.setForeground(QColor("#666666"))
                     self.services_table.setItem(index, 1, desc_item)
 
-                    self.services_table.setItem(index, 2, create_centered_item(service.category or ""))
-                    self.services_table.setItem(index, 3, create_centered_item(f"{service.default_price:,.2f}"))
+                    self.services_table.setItem(
+                        index, 2, create_centered_item(service.category or "")
+                    )
+                    self.services_table.setItem(
+                        index, 3, create_centered_item(f"{service.default_price:,.2f}")
+                    )
 
                     # الحالة مع لون الخلفية
-                    bg_color = QColor("#ef4444") if service.status == schemas.ServiceStatus.ARCHIVED else None
+                    bg_color = (
+                        QColor("#ef4444")
+                        if service.status == schemas.ServiceStatus.ARCHIVED
+                        else None
+                    )
                     status_item = create_centered_item(service.status.value, bg_color)
                     if service.status == schemas.ServiceStatus.ARCHIVED:
                         status_item.setForeground(QColor("white"))
@@ -244,17 +260,17 @@ class ServiceManagerTab(QWidget):
 
                     self.services_table.setRowHeight(index, 40)
 
-                logger.info(f"[ServiceManager] ✅ تم تحميل {len(self.services_list)} خدمة")
+                logger.info("[ServiceManager] ✅ تم تحميل %s خدمة", len(self.services_list))
                 self.update_buttons_state(False)
 
             except Exception as e:
-                logger.error(f"[ServiceManager] فشل تحديث الجدول: {e}", exc_info=True)
+                logger.error("[ServiceManager] فشل تحديث الجدول: %s", e, exc_info=True)
             finally:
                 self.services_table.blockSignals(False)
                 self.services_table.setUpdatesEnabled(True)
 
         def on_error(error_msg):
-            logger.error(f"[ServiceManager] فشل تحميل الخدمات: {error_msg}")
+            logger.error("[ServiceManager] فشل تحميل الخدمات: %s", error_msg)
             self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
 
@@ -265,14 +281,14 @@ class ServiceManagerTab(QWidget):
             load_function=fetch_services,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.service_service, 'invalidate_cache'):
+        if hasattr(self.service_service, "invalidate_cache"):
             self.service_service.invalidate_cache()
         self.load_services_data()
 
@@ -314,8 +330,8 @@ class ServiceManagerTab(QWidget):
             service_id = self.selected_service._mongo_id or str(self.selected_service.id)
             self.service_service.delete_service(service_id)
             QMessageBox.information(self, "تم", "تمت الأرشفة بنجاح")
-            logger.info(f"[ServiceManager] تم أرشفة الخدمة: {self.selected_service.name}")
+            logger.info("[ServiceManager] تم أرشفة الخدمة: %s", self.selected_service.name)
             self.load_services_data()
         except Exception as e:
-            logger.error(f"[ServiceManager] فشل أرشفة الخدمة: {e}", exc_info=True)
+            logger.error("[ServiceManager] فشل أرشفة الخدمة: %s", e, exc_info=True)
             QMessageBox.critical(self, "خطأ", f"فشل الأرشفة: {e}")

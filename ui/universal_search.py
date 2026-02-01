@@ -1,6 +1,7 @@
 """
 Universal Search Widget - Reusable search bar for all tables
 """
+
 from PyQt6.QtWidgets import QLineEdit, QTableWidget
 
 
@@ -16,7 +17,8 @@ class UniversalSearchBar(QLineEdit):
         self.setClearButtonEnabled(True)
 
         # Apply styling
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QLineEdit {
                 padding: 8px 12px;
                 font-size: 14px;
@@ -32,7 +34,8 @@ class UniversalSearchBar(QLineEdit):
             QLineEdit::placeholder {
                 color: #6B7280;
             }
-        """)
+        """
+        )
 
         # Connect search signal
         self.textChanged.connect(self.filter_table)

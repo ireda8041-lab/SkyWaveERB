@@ -30,9 +30,9 @@ class TestKPIDataProperties:
         """
         kpi = KPIData(name="test", current_value=current, previous_value=previous)
         expected = ((current - previous) / previous) * 100
-        assert abs(kpi.change_percentage - expected) < 0.0001, (
-            f"Expected {expected}, got {kpi.change_percentage}"
-        )
+        assert (
+            abs(kpi.change_percentage - expected) < 0.0001
+        ), f"Expected {expected}, got {kpi.change_percentage}"
 
     @settings(max_examples=100)
     @given(
@@ -53,17 +53,17 @@ class TestKPIDataProperties:
         kpi = KPIData(name="test", current_value=current, previous_value=previous)
 
         if current > previous:
-            assert kpi.trend_direction == "up", (
-                f"Expected 'up' for current={current} > previous={previous}, got '{kpi.trend_direction}'"
-            )
+            assert (
+                kpi.trend_direction == "up"
+            ), f"Expected 'up' for current={current} > previous={previous}, got '{kpi.trend_direction}'"
         elif current < previous:
-            assert kpi.trend_direction == "down", (
-                f"Expected 'down' for current={current} < previous={previous}, got '{kpi.trend_direction}'"
-            )
+            assert (
+                kpi.trend_direction == "down"
+            ), f"Expected 'down' for current={current} < previous={previous}, got '{kpi.trend_direction}'"
         else:
-            assert kpi.trend_direction == "neutral", (
-                f"Expected 'neutral' for current={current} == previous={previous}, got '{kpi.trend_direction}'"
-            )
+            assert (
+                kpi.trend_direction == "neutral"
+            ), f"Expected 'neutral' for current={current} == previous={previous}, got '{kpi.trend_direction}'"
 
     @settings(max_examples=100)
     @given(current=st.floats(min_value=-1e9, max_value=1e9, allow_nan=False, allow_infinity=False))
@@ -76,9 +76,9 @@ class TestKPIDataProperties:
         When previous value is None, trend direction SHALL be "neutral"
         """
         kpi = KPIData(name="test", current_value=current, previous_value=None)
-        assert kpi.trend_direction == "neutral", (
-            f"Expected 'neutral' when previous_value is None, got '{kpi.trend_direction}'"
-        )
+        assert (
+            kpi.trend_direction == "neutral"
+        ), f"Expected 'neutral' when previous_value is None, got '{kpi.trend_direction}'"
 
 
 class TestCashFlowEntryProperties:
@@ -102,9 +102,9 @@ class TestCashFlowEntryProperties:
 
         entry = CashFlowEntry(date=datetime.now(), inflow=inflow, outflow=outflow)
         expected = inflow - outflow
-        assert abs(entry.net_flow - expected) < 0.0001, (
-            f"Expected net_flow={expected}, got {entry.net_flow}"
-        )
+        assert (
+            abs(entry.net_flow - expected) < 0.0001
+        ), f"Expected net_flow={expected}, got {entry.net_flow}"
 
 
 class TestCashFlowAggregationProperties:
@@ -155,9 +155,9 @@ class TestCashFlowAggregationProperties:
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
 
-        assert abs(total_aggregated - total_input) < 0.01, (
-            f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
-        )
+        assert (
+            abs(total_aggregated - total_input) < 0.01
+        ), f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
 
         # Verify: each period contains correct sum
         for date_val, _ in data:
@@ -208,9 +208,9 @@ class TestCashFlowAggregationProperties:
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
 
-        assert abs(total_aggregated - total_input) < 0.01, (
-            f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
-        )
+        assert (
+            abs(total_aggregated - total_input) < 0.01
+        ), f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
@@ -257,9 +257,9 @@ class TestCashFlowAggregationProperties:
         total_aggregated = sum(aggregated.values())
         total_input = sum(amounts)
 
-        assert abs(total_aggregated - total_input) < 0.01, (
-            f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
-        )
+        assert (
+            abs(total_aggregated - total_input) < 0.01
+        ), f"Total aggregated ({total_aggregated}) should equal total input ({total_input})"
 
 
 class TestDateRangeFilteringProperties:
@@ -305,18 +305,18 @@ class TestDateRangeFilteringProperties:
         # Verify: all filtered records are within the date range
         for record in filtered:
             assert isinstance(record["date"], datetime)
-            assert start_date <= record["date"] <= end_date, (
-                f"Record date {record['date']} should be within range [{start_date}, {end_date}]"
-            )
+            assert (
+                start_date <= record["date"] <= end_date
+            ), f"Record date {record['date']} should be within range [{start_date}, {end_date}]"
 
         # Verify: no records outside the range are included
         for record in records:
             if record not in filtered:
                 # Record should be outside the range
                 if isinstance(record["date"], datetime):
-                    assert not (start_date <= record["date"] <= end_date), (
-                        f"Record date {record['date']} is within range but was not included in filtered results"
-                    )
+                    assert not (
+                        start_date <= record["date"] <= end_date
+                    ), f"Record date {record['date']} is within range but was not included in filtered results"
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
@@ -362,9 +362,9 @@ class TestDateRangeFilteringProperties:
         )
 
         # Verify: filtered count matches expected count
-        assert len(filtered) == expected_count, (
-            f"Expected {expected_count} records in range, got {len(filtered)}"
-        )
+        assert (
+            len(filtered) == expected_count
+        ), f"Expected {expected_count} records in range, got {len(filtered)}"
 
     @settings(max_examples=100, suppress_health_check=[HealthCheck.too_slow])
     @given(
@@ -431,12 +431,12 @@ class TestKPIDataConsistencyProperties:
         kpi = KPIData(name="test_kpi", current_value=current, previous_value=previous)
 
         # Verify the values are stored correctly
-        assert kpi.current_value == current, (
-            f"Current value mismatch: expected {current}, got {kpi.current_value}"
-        )
-        assert kpi.previous_value == previous, (
-            f"Previous value mismatch: expected {previous}, got {kpi.previous_value}"
-        )
+        assert (
+            kpi.current_value == current
+        ), f"Current value mismatch: expected {current}, got {kpi.current_value}"
+        assert (
+            kpi.previous_value == previous
+        ), f"Previous value mismatch: expected {previous}, got {kpi.previous_value}"
         assert kpi.name == "test_kpi", f"Name mismatch: expected 'test_kpi', got {kpi.name}"
 
     @settings(max_examples=100)
@@ -501,15 +501,15 @@ class TestSettingsPersistenceProperties:
         )
 
         # Verify all values are preserved
-        assert restored.auto_refresh_enabled == original.auto_refresh_enabled, (
-            f"auto_refresh_enabled mismatch: {restored.auto_refresh_enabled} != {original.auto_refresh_enabled}"
-        )
-        assert restored.auto_refresh_interval == original.auto_refresh_interval, (
-            f"auto_refresh_interval mismatch: {restored.auto_refresh_interval} != {original.auto_refresh_interval}"
-        )
-        assert restored.selected_period == original.selected_period, (
-            f"selected_period mismatch: {restored.selected_period} != {original.selected_period}"
-        )
+        assert (
+            restored.auto_refresh_enabled == original.auto_refresh_enabled
+        ), f"auto_refresh_enabled mismatch: {restored.auto_refresh_enabled} != {original.auto_refresh_enabled}"
+        assert (
+            restored.auto_refresh_interval == original.auto_refresh_interval
+        ), f"auto_refresh_interval mismatch: {restored.auto_refresh_interval} != {original.auto_refresh_interval}"
+        assert (
+            restored.selected_period == original.selected_period
+        ), f"selected_period mismatch: {restored.selected_period} != {original.selected_period}"
 
     @settings(max_examples=100)
     @given(

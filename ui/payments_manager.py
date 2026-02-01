@@ -37,6 +37,7 @@ from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item, get
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -47,11 +48,11 @@ except ImportError:
 def to_decimal(value) -> Decimal:
     """تحويل آمن للقيم المالية إلى Decimal"""
     if value is None:
-        return Decimal('0.00')
+        return Decimal("0.00")
     try:
-        return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
-        return Decimal('0.00')
+        return Decimal("0.00")
 
 
 class NewPaymentDialog(QDialog):
@@ -59,6 +60,7 @@ class NewPaymentDialog(QDialog):
     ⚡ نافذة إضافة دفعة جديدة من التاب الرئيسية
     تدعم: اختيار المشروع، التحقق من المبلغ، التكامل المحاسبي
     """
+
     payment_created = pyqtSignal(object)  # إشارة عند إنشاء دفعة جديدة
 
     def __init__(
@@ -80,23 +82,28 @@ class NewPaymentDialog(QDialog):
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             * { outline: none; }
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus { border: none; outline: none; }
-        """)
+        """
+        )
 
         self._setup_ui()
         self._load_data()
 
         # تطبيق الأسهم
         from ui.styles import apply_arrows_to_all_widgets
+
         apply_arrows_to_all_widgets(self)
 
     def _setup_ui(self):
@@ -156,13 +163,15 @@ class NewPaymentDialog(QDialog):
 
         # معلومات المشروع المالية (تظهر عند اختيار مشروع)
         self.project_info_frame = QFrame()
-        self.project_info_frame.setStyleSheet(f"""
+        self.project_info_frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: rgba(30, 41, 59, 0.6);
                 border-radius: 6px;
                 border: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         info_layout = QHBoxLayout(self.project_info_frame)
         info_layout.setContentsMargins(6, 6, 6, 6)
         info_layout.setSpacing(6)
@@ -244,7 +253,8 @@ class NewPaymentDialog(QDialog):
         buttons_layout.addStretch()
 
         self.save_btn = QPushButton("💾 تسجيل الدفعة")
-        self.save_btn.setStyleSheet("""
+        self.save_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #10b981; color: white;
                 padding: 8px 16px; font-weight: bold; border-radius: 6px;
@@ -252,21 +262,24 @@ class NewPaymentDialog(QDialog):
             }
             QPushButton:hover { background-color: #059669; }
             QPushButton:disabled { background-color: #4b5563; color: #9ca3af; }
-        """)
+        """
+        )
         self.save_btn.setFixedHeight(28)
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save_payment)
         buttons_layout.addWidget(self.save_btn)
 
         self.cancel_btn = QPushButton("إلغاء")
-        self.cancel_btn.setStyleSheet("""
+        self.cancel_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #475569; color: white;
                 padding: 8px 16px; border-radius: 6px;
                 font-size: 11px; min-width: 80px;
             }
             QPushButton:hover { background-color: #64748b; }
-        """)
+        """
+        )
         self.cancel_btn.setFixedHeight(28)
         self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)
@@ -276,22 +289,28 @@ class NewPaymentDialog(QDialog):
     def _create_info_label(self, title: str, value: str, color: str) -> QFrame:
         """إنشاء label معلومات مالية"""
         frame = QFrame()
-        frame.setStyleSheet(f"""
+        frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {color};
                 border-radius: 5px;
                 border: none;
             }}
-        """)
+        """
+        )
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(8, 5, 8, 5)
         layout.setSpacing(1)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: rgba(255,255,255,0.8); font-size: 9px; background: transparent;")
+        title_lbl.setStyleSheet(
+            "color: rgba(255,255,255,0.8); font-size: 9px; background: transparent;"
+        )
         title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         value_lbl = QLabel(value)
-        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 12px; background: transparent;")
+        value_lbl.setStyleSheet(
+            "color: white; font-weight: bold; font-size: 12px; background: transparent;"
+        )
         value_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         value_lbl.setObjectName("value_label")
 
@@ -335,7 +354,8 @@ class NewPaymentDialog(QDialog):
         try:
             all_accounts = self.accounting_service.repo.get_all_accounts()
             return [
-                acc for acc in all_accounts
+                acc
+                for acc in all_accounts
                 if acc.type in [schemas.AccountType.CASH, schemas.AccountType.ASSET]
                 and acc.code.startswith("11")
             ]
@@ -389,7 +409,7 @@ class NewPaymentDialog(QDialog):
         method = self._get_payment_method_from_account(account)
         self.method_label.setText(method)
 
-    def _get_payment_method_from_account(self, account: schemas.Account) -> str:
+    def _get_payment_method_from_account(self, account: schemas.Account | None) -> str:
         """⚡ تحديد طريقة الدفع من الحساب - يدعم نظام 4 و 6 أرقام"""
         if not account:
             return "Other"
@@ -474,7 +494,7 @@ class NewPaymentDialog(QDialog):
                     "تأكيد",
                     f"المبلغ المدخل ({amount:,.2f}) أكبر من المتبقي ({remaining:,.2f}).\n\nهل تريد المتابعة؟",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No
+                    QMessageBox.StandardButton.No,
                 )
                 if reply == QMessageBox.StandardButton.No:
                     self.save_btn.setEnabled(True)
@@ -489,7 +509,7 @@ class NewPaymentDialog(QDialog):
                 project=self.selected_project,
                 amount=amount,
                 date=self.date_input.dateTime().toPyDateTime(),
-                account_id=account.code
+                account_id=account.code,
             )
 
             if payment:
@@ -516,6 +536,7 @@ class PaymentEditorDialog(QDialog):
 
     def __init__(
         self,
+        *,
         payment: schemas.Payment,
         accounts: list[schemas.Account],
         accounting_service: AccountingService,
@@ -536,17 +557,21 @@ class PaymentEditorDialog(QDialog):
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             * { outline: none; }
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
             QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
             QPushButton:focus { border: none; outline: none; }
-        """)
+        """
+        )
 
         layout = QVBoxLayout()
         form = QFormLayout()
@@ -603,13 +628,15 @@ class PaymentEditorDialog(QDialog):
         # أزرار
         buttons_layout = QHBoxLayout()
         self.save_btn = QPushButton("💾 حفظ التعديلات")
-        self.save_btn.setStyleSheet("""
+        self.save_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #0A6CF1; color: white;
                 padding: 10px; font-weight: bold; border-radius: 6px;
             }
             QPushButton:hover { background-color: #0A6CF1; }
-        """)
+        """
+        )
         self.save_btn.clicked.connect(self.save_changes)
 
         self.cancel_btn = QPushButton("إلغاء")
@@ -624,6 +651,7 @@ class PaymentEditorDialog(QDialog):
 
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
+
         apply_arrows_to_all_widgets(self)
 
     def _update_payment_method_from_account(self):
@@ -636,11 +664,21 @@ class PaymentEditorDialog(QDialog):
         code = selected_account.code
 
         # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-        if "vodafone" in account_name or "فودافون" in account_name or "v/f" in account_name or "vf" in account_name:
+        if (
+            "vodafone" in account_name
+            or "فودافون" in account_name
+            or "v/f" in account_name
+            or "vf" in account_name
+        ):
             self.method_combo.setCurrentText("Vodafone Cash")
         elif "instapay" in account_name or "انستاباي" in account_name:
             self.method_combo.setCurrentText("InstaPay")
-        elif "كاش" in account_name or "cash" in account_name or "خزينة" in account_name or "صندوق" in account_name:
+        elif (
+            "كاش" in account_name
+            or "cash" in account_name
+            or "خزينة" in account_name
+            or "صندوق" in account_name
+        ):
             self.method_combo.setCurrentText("Cash")
         elif "بنك" in account_name or "bank" in account_name:
             self.method_combo.setCurrentText("Bank Transfer")
@@ -667,10 +705,8 @@ class PaymentEditorDialog(QDialog):
             return
 
         try:
-            # حفظ الحساب القديم لإعادة حساب رصيده
-            old_account_id = self.original_account_id
             new_account_id = selected_account.code
-            
+
             # تحديث بيانات الدفعة
             self.payment.amount = float(new_amount)
             self.payment.account_id = new_account_id
@@ -688,12 +724,13 @@ class PaymentEditorDialog(QDialog):
                 # ⚡ إعادة حساب أرصدة الحسابات المتأثرة فوراً
                 if self.accounting_service:
                     self.accounting_service._recalculate_cash_balances()
-                
+
                 # ⚡ إرسال إشارات التحديث
                 from core.signals import app_signals
+
                 app_signals.emit_data_changed("payments")
                 app_signals.emit_data_changed("accounting")
-                
+
                 QMessageBox.information(self, "تم", "تم تعديل الدفعة بنجاح")
                 self.accept()
             else:
@@ -709,6 +746,7 @@ class PaymentsManagerTab(QWidget):
 
     def __init__(
         self,
+        *,
         project_service: ProjectService,
         accounting_service: AccountingService,
         client_service: ClientService,
@@ -727,6 +765,7 @@ class PaymentsManagerTab(QWidget):
 
         # 📱 تجاوب: سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.setup_ui()
@@ -734,6 +773,7 @@ class PaymentsManagerTab(QWidget):
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
+
         app_signals.payments_changed.connect(self._on_payments_changed)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
@@ -746,6 +786,7 @@ class PaymentsManagerTab(QWidget):
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
+
         self.toolbar = ResponsiveToolbar()
 
         # ⚡ زر إضافة دفعة جديدة
@@ -780,15 +821,16 @@ class PaymentsManagerTab(QWidget):
         # جدول الدفعات
         self.payments_table = QTableWidget()
         self.payments_table.setColumnCount(7)
-        self.payments_table.setHorizontalHeaderLabels([
-            "#", "التاريخ", "النوع", "العميل/المشروع", "المبلغ", "طريقة الدفع", "الحساب"
-        ])
+        self.payments_table.setHorizontalHeaderLabels(
+            ["#", "التاريخ", "النوع", "العميل/المشروع", "المبلغ", "طريقة الدفع", "الحساب"]
+        )
 
         # === UNIVERSAL SEARCH BAR ===
         from ui.universal_search import UniversalSearchBar
+
         self.search_bar = UniversalSearchBar(
             self.payments_table,
-            placeholder="🔍 بحث (التاريخ، النوع، العميل، المشروع، المبلغ، الحساب)..."
+            placeholder="🔍 بحث (التاريخ، النوع، العميل، المشروع، المبلغ، الحساب)...",
         )
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -799,7 +841,9 @@ class PaymentsManagerTab(QWidget):
             h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # #
             h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # التاريخ
             h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # النوع
-            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # العميل/المشروع - يتمدد
+            h_header.setSectionResizeMode(
+                3, QHeaderView.ResizeMode.Stretch
+            )  # العميل/المشروع - يتمدد
             h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ
             h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # طريقة الدفع
             h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # الحساب - يتمدد
@@ -820,6 +864,7 @@ class PaymentsManagerTab(QWidget):
         self.payments_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.payments_table)
         layout.addWidget(self.payments_table)
 
@@ -838,7 +883,7 @@ class PaymentsManagerTab(QWidget):
             on_view=self.open_edit_dialog,
             on_edit=self.open_edit_dialog,
             on_delete=self.delete_selected_payment,
-            on_refresh=self.load_payments_data
+            on_refresh=self.load_payments_data,
         )
 
     def load_payments_data(self):
@@ -880,24 +925,30 @@ class PaymentsManagerTab(QWidget):
                 safe_print(f"DEBUG: [PaymentsManager] تم تحميل {len(clients)} عميل في الـ cache")
 
                 return {
-                    'payments': payments,
-                    'accounts_cache': accounts_cache,
-                    'projects_cache': projects_cache,
-                    'clients_cache': clients_cache
+                    "payments": payments,
+                    "accounts_cache": accounts_cache,
+                    "projects_cache": projects_cache,
+                    "clients_cache": clients_cache,
                 }
             except Exception as e:
                 safe_print(f"ERROR: [PaymentsManager] فشل جلب الدفعات: {e}")
                 import traceback
+
                 traceback.print_exc()
-                return {'payments': [], 'accounts_cache': {}, 'projects_cache': {}, 'clients_cache': {}}
+                return {
+                    "payments": [],
+                    "accounts_cache": {},
+                    "projects_cache": {},
+                    "clients_cache": {},
+                }
 
         # دالة تحديث الواجهة
         def on_data_loaded(data):
             try:
-                self.payments_list = data['payments']
-                accounts_cache = data['accounts_cache']
-                projects_cache = data['projects_cache']
-                data['clients_cache']
+                self.payments_list = data["payments"]
+                accounts_cache = data["accounts_cache"]
+                projects_cache = data["projects_cache"]
+                data["clients_cache"]
 
                 total_sum = 0.0
 
@@ -927,8 +978,8 @@ class PaymentsManagerTab(QWidget):
                             if project.client_id and project.client_id.strip():
                                 # البحث عن العميل في الـ cache بطرق متعددة
                                 client_id = project.client_id.strip()
-                                if client_id in data['clients_cache']:
-                                    client = data['clients_cache'][client_id]
+                                if client_id in data["clients_cache"]:
+                                    client = data["clients_cache"][client_id]
                                     client_name = client.name
                                 else:
                                     # استخدام client_id كما هو إذا لم نجد العميل
@@ -936,33 +987,44 @@ class PaymentsManagerTab(QWidget):
                         else:
                             # المشروع غير موجود في الـ cache - ابحث بالاسم الجزئي
                             for proj_name, proj in projects_cache.items():
-                                if payment.project_id in proj_name or proj_name in payment.project_id:
+                                if (
+                                    payment.project_id in proj_name
+                                    or proj_name in payment.project_id
+                                ):
                                     project_name = proj.name
                                     if proj.client_id and proj.client_id.strip():
                                         client_id = proj.client_id.strip()
-                                        if client_id in data['clients_cache']:
-                                            client = data['clients_cache'][client_id]
+                                        if client_id in data["clients_cache"]:
+                                            client = data["clients_cache"][client_id]
                                             client_name = client.name
                                         else:
                                             client_name = client_id
                                     break
 
                     # 2. ثانياً: استخدام client_id من الدفعة مباشرة كـ fallback
-                    if client_name == "عميل غير محدد" and payment.client_id and payment.client_id.strip():
+                    if (
+                        client_name == "عميل غير محدد"
+                        and payment.client_id
+                        and payment.client_id.strip()
+                    ):
                         client_id = payment.client_id.strip()
-                        if client_id in data['clients_cache']:
-                            client = data['clients_cache'][client_id]
+                        if client_id in data["clients_cache"]:
+                            client = data["clients_cache"][client_id]
                             client_name = client.name
                         else:
                             client_name = client_id
 
-                    self.payments_table.setItem(i, 3, create_centered_item(f"{client_name} - {project_name}"))
+                    self.payments_table.setItem(
+                        i, 3, create_centered_item(f"{client_name} - {project_name}")
+                    )
 
                     amount_item = create_centered_item(f"{payment.amount:,.2f}")
                     amount_item.setForeground(QColor("#0A6CF1"))
                     self.payments_table.setItem(i, 4, amount_item)
 
-                    payment_method = self._get_payment_method_from_account(payment.account_id, accounts_cache)
+                    payment_method = self._get_payment_method_from_account(
+                        payment.account_id, accounts_cache
+                    )
                     self.payments_table.setItem(i, 5, create_centered_item(payment_method))
 
                     account_display = "---"
@@ -983,6 +1045,7 @@ class PaymentsManagerTab(QWidget):
             except Exception as e:
                 safe_print(f"ERROR: [PaymentsManager] فشل تحديث الجدول: {e}")
                 import traceback
+
                 traceback.print_exc()
             finally:
                 self.payments_table.blockSignals(False)
@@ -1000,14 +1063,14 @@ class PaymentsManagerTab(QWidget):
             load_function=fetch_payments,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [PaymentsManager] ⚡ استلام إشارة تحديث الدفعات - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.project_service, 'invalidate_cache'):
+        if hasattr(self.project_service, "invalidate_cache"):
             self.project_service.invalidate_cache()
         self.load_payments_data()
 
@@ -1055,7 +1118,7 @@ class PaymentsManagerTab(QWidget):
             accounts=accounts,
             accounting_service=self.accounting_service,
             project_service=self.project_service,
-            parent=self
+            parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.load_payments_data()
@@ -1065,7 +1128,8 @@ class PaymentsManagerTab(QWidget):
         try:
             all_accounts = self.accounting_service.repo.get_all_accounts()
             cash_accounts = [
-                acc for acc in all_accounts
+                acc
+                for acc in all_accounts
                 if acc.type in [schemas.AccountType.CASH, schemas.AccountType.ASSET]
                 and acc.code.startswith("11")  # حسابات النقدية تبدأ بـ 11
             ]
@@ -1084,11 +1148,21 @@ class PaymentsManagerTab(QWidget):
         code = account_code
 
         # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-        if "vodafone" in account_name or "فودافون" in account_name or "v/f" in account_name or "vf" in account_name:
+        if (
+            "vodafone" in account_name
+            or "فودافون" in account_name
+            or "v/f" in account_name
+            or "vf" in account_name
+        ):
             return "Vodafone Cash"
         elif "instapay" in account_name or "انستاباي" in account_name:
             return "InstaPay"
-        elif "كاش" in account_name or "cash" in account_name or "خزينة" in account_name or "صندوق" in account_name:
+        elif (
+            "كاش" in account_name
+            or "cash" in account_name
+            or "خزينة" in account_name
+            or "صندوق" in account_name
+        ):
             return "Cash"
         elif "بنك" in account_name or "bank" in account_name:
             return "Bank Transfer"
@@ -1113,7 +1187,7 @@ class PaymentsManagerTab(QWidget):
             project_service=self.project_service,
             accounting_service=self.accounting_service,
             client_service=self.client_service,
-            parent=self
+            parent=self,
         )
         dialog.payment_created.connect(self._on_payment_created)
         dialog.exec()
@@ -1159,7 +1233,9 @@ class PaymentsManagerTab(QWidget):
             return
 
         amount = to_decimal(selected_payment.amount)
-        date_str = selected_payment.date.strftime('%Y-%m-%d') if selected_payment.date else 'غير محدد'
+        date_str = (
+            selected_payment.date.strftime("%Y-%m-%d") if selected_payment.date else "غير محدد"
+        )
 
         reply = QMessageBox.question(
             self,
@@ -1184,9 +1260,7 @@ class PaymentsManagerTab(QWidget):
 
             if result:
                 QMessageBox.information(
-                    self,
-                    "تم الحذف",
-                    "تم حذف الدفعة وعكس القيد المحاسبي وتحديث حالة المشروع بنجاح."
+                    self, "تم الحذف", "تم حذف الدفعة وعكس القيد المحاسبي وتحديث حالة المشروع بنجاح."
                 )
                 self.load_payments_data()
             else:

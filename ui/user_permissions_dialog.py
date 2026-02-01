@@ -24,6 +24,7 @@ from ui.styles import BUTTON_STYLES, COLORS, get_cairo_font
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -49,10 +50,12 @@ class UserPermissionsDialog(QDialog):
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self.init_ui()
@@ -60,6 +63,7 @@ class UserPermissionsDialog(QDialog):
 
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
+
         setup_auto_responsive_dialog(self)
 
     def init_ui(self):
@@ -73,7 +77,8 @@ class UserPermissionsDialog(QDialog):
         # منطقة التمرير
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"""
+        scroll.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: transparent;
@@ -88,7 +93,8 @@ class UserPermissionsDialog(QDialog):
                 border-radius: 5px;
                 min-height: 30px;
             }}
-        """)
+        """
+        )
 
         # محتوى التمرير
         scroll_widget = QWidget()
@@ -102,7 +108,9 @@ class UserPermissionsDialog(QDialog):
         user_info.setStyleSheet(f"color: {COLORS['primary']}; padding: 10px;")
         scroll_layout.addWidget(user_info)
 
-        role_display = self.user.role.value if hasattr(self.user.role, 'value') else str(self.user.role)
+        role_display = (
+            self.user.role.value if hasattr(self.user.role, "value") else str(self.user.role)
+        )
         role_info = QLabel(f"🎭 الدور: {role_display}")
         role_info.setStyleSheet(f"color: {COLORS['text_secondary']}; padding: 5px 10px;")
         scroll_layout.addWidget(role_info)
@@ -128,12 +136,14 @@ class UserPermissionsDialog(QDialog):
 
         # منطقة الأزرار (ثابتة في الأسفل)
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_light']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(15, 12, 15, 12)
         buttons_layout.setSpacing(10)
@@ -167,15 +177,15 @@ class UserPermissionsDialog(QDialog):
 
         self.tab_checkboxes = {}
         tab_names = {
-            'dashboard': '🏠 الصفحة الرئيسية',
-            'projects': '🚀 المشاريع',
-            'expenses': '💳 المصروفات',
-            'payments': '💰 الدفعات',
-            'clients': '👤 العملاء',
-            'services': '🛠️ الخدمات والباقات',
-            'accounting': '📊 المحاسبة',
-            'todo': '📋 المهام',
-            'settings': '🔧 الإعدادات'
+            "dashboard": "🏠 الصفحة الرئيسية",
+            "projects": "🚀 المشاريع",
+            "expenses": "💳 المصروفات",
+            "payments": "💰 الدفعات",
+            "clients": "👤 العملاء",
+            "services": "🛠️ الخدمات والباقات",
+            "accounting": "📊 المحاسبة",
+            "todo": "📋 المهام",
+            "settings": "🔧 الإعدادات",
         }
 
         for tab_key, tab_display in tab_names.items():
@@ -194,12 +204,12 @@ class UserPermissionsDialog(QDialog):
 
         self.action_checkboxes = {}
         action_names = {
-            'create': '➕ إنشاء',
-            'read': '👁️ عرض',
-            'update': '✏️ تعديل',
-            'delete': '🗑️ حذف',
-            'export': '📤 تصدير',
-            'print': '🖨️ طباعة'
+            "create": "➕ إنشاء",
+            "read": "👁️ عرض",
+            "update": "✏️ تعديل",
+            "delete": "🗑️ حذف",
+            "export": "📤 تصدير",
+            "print": "🖨️ طباعة",
         }
 
         for action_key, action_display in action_names.items():
@@ -218,12 +228,12 @@ class UserPermissionsDialog(QDialog):
 
         self.feature_checkboxes = {}
         feature_names = {
-            'user_management': '👥 إدارة المستخدمين',
-            'system_settings': '⚙️ إعدادات النظام',
-            'financial_reports': '📊 التقارير المالية',
-            'data_export': '💾 تصدير البيانات',
-            'client_reports': '👤 تقارير العملاء',
-            'task_management': '📋 إدارة المهام'
+            "user_management": "👥 إدارة المستخدمين",
+            "system_settings": "⚙️ إعدادات النظام",
+            "financial_reports": "📊 التقارير المالية",
+            "data_export": "💾 تصدير البيانات",
+            "client_reports": "👤 تقارير العملاء",
+            "task_management": "📋 إدارة المهام",
         }
 
         for feature_key, feature_display in feature_names.items():
@@ -239,10 +249,12 @@ class UserPermissionsDialog(QDialog):
         """تحميل الصلاحيات الحالية للمستخدم"""
         # إذا كان المستخدم مدير، حدد كل شيء
         user_role_str = str(self.user.role).lower()
-        if (self.user.role == UserRole.ADMIN or
-            user_role_str == "admin" or
-            user_role_str == "userrole.admin" or
-            (hasattr(self.user.role, 'value') and self.user.role.value == "admin")):
+        if (
+            self.user.role == UserRole.ADMIN
+            or user_role_str == "admin"
+            or user_role_str == "userrole.admin"
+            or (hasattr(self.user.role, "value") and self.user.role.value == "admin")
+        ):
             # المدير له صلاحية كاملة
             for checkbox in self.tab_checkboxes.values():
                 checkbox.setChecked(True)
@@ -257,27 +269,27 @@ class UserPermissionsDialog(QDialog):
 
         # تحديد التابات
         for tab_key, checkbox in self.tab_checkboxes.items():
-            checkbox.setChecked(tab_key in current_permissions.get('tabs', []))
+            checkbox.setChecked(tab_key in current_permissions.get("tabs", []))
 
         # تحديد الإجراءات
         for action_key, checkbox in self.action_checkboxes.items():
-            checkbox.setChecked(action_key in current_permissions.get('actions', []))
+            checkbox.setChecked(action_key in current_permissions.get("actions", []))
 
         # تحديد الميزات
         for feature_key, checkbox in self.feature_checkboxes.items():
-            checkbox.setChecked(feature_key in current_permissions.get('features', []))
+            checkbox.setChecked(feature_key in current_permissions.get("features", []))
 
     def reset_to_default(self):
         """إعادة تعيين الصلاحيات للافتراضي حسب الدور"""
         reply = QMessageBox.question(
-            self, "تأكيد",
+            self,
+            "تأكيد",
             "هل تريد إعادة تعيين الصلاحيات للقيم الافتراضية حسب الدور؟",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             # تحويل الدور إلى UserRole enum إذا كان string
-            from core.auth_models import UserRole
             user_role = self.user.role
             if isinstance(user_role, str):
                 try:
@@ -291,49 +303,58 @@ class UserPermissionsDialog(QDialog):
 
             # إعادة تعيين التابات
             for tab_key, checkbox in self.tab_checkboxes.items():
-                checkbox.setChecked(tab_key in default_permissions.get('tabs', []))
+                checkbox.setChecked(tab_key in default_permissions.get("tabs", []))
 
             # إعادة تعيين الإجراءات
             for action_key, checkbox in self.action_checkboxes.items():
-                checkbox.setChecked(action_key in default_permissions.get('actions', []))
+                checkbox.setChecked(action_key in default_permissions.get("actions", []))
 
             # إعادة تعيين الميزات
             for feature_key, checkbox in self.feature_checkboxes.items():
-                checkbox.setChecked(feature_key in default_permissions.get('features', []))
+                checkbox.setChecked(feature_key in default_permissions.get("features", []))
 
     def save_permissions(self):
         """حفظ الصلاحيات المخصصة"""
         try:
             # جمع الصلاحيات المحددة
-            selected_tabs = [key for key, checkbox in self.tab_checkboxes.items() if checkbox.isChecked()]
-            selected_actions = [key for key, checkbox in self.action_checkboxes.items() if checkbox.isChecked()]
-            selected_features = [key for key, checkbox in self.feature_checkboxes.items() if checkbox.isChecked()]
+            selected_tabs = [
+                key for key, checkbox in self.tab_checkboxes.items() if checkbox.isChecked()
+            ]
+            selected_actions = [
+                key for key, checkbox in self.action_checkboxes.items() if checkbox.isChecked()
+            ]
+            selected_features = [
+                key for key, checkbox in self.feature_checkboxes.items() if checkbox.isChecked()
+            ]
 
             # إنشاء كائن الصلاحيات المخصصة
             custom_permissions = {
-                'tabs': selected_tabs,
-                'actions': selected_actions,
-                'features': selected_features
+                "tabs": selected_tabs,
+                "actions": selected_actions,
+                "features": selected_features,
             }
 
             # حفظ في قاعدة البيانات باستخدام username (أكثر أماناً)
-            safe_print(f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}")
-            
+            safe_print(
+                f"INFO: [UserPermissionsDialog] جاري حفظ صلاحيات المستخدم: {self.user.username}"
+            )
+
             try:
-                success = self.repository.update_user_by_username(self.user.username, {
-                    'custom_permissions': custom_permissions
-                })
+                success = self.repository.update_user_by_username(
+                    self.user.username, {"custom_permissions": custom_permissions}
+                )
             except Exception as update_error:
                 safe_print(f"ERROR: [UserPermissionsDialog] فشل تحديث الصلاحيات: {update_error}")
                 success = False
 
             if success:
                 QMessageBox.information(
-                    self, "نجاح",
+                    self,
+                    "نجاح",
                     f"تم حفظ صلاحيات المستخدم {self.user.username} بنجاح!\n\n"
                     f"التابات: {len(selected_tabs)}\n"
                     f"الإجراءات: {len(selected_actions)}\n"
-                    f"الميزات: {len(selected_features)}"
+                    f"الميزات: {len(selected_features)}",
                 )
                 self.accept()
             else:

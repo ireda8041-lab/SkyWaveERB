@@ -67,7 +67,7 @@ class Config:
     @staticmethod
     def get_mongo_uri() -> str:
         """الحصول على رابط MongoDB من متغيرات البيئة"""
-        uri = os.environ.get("MONGO_URI")
+        uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI")
         if not uri:
             safe_print("WARNING: [Config] MONGO_URI غير محدد - استخدام القيمة الافتراضية")
             # قيمة افتراضية للتطوير المحلي فقط
@@ -77,7 +77,7 @@ class Config:
     @staticmethod
     def get_db_name() -> str:
         """الحصول على اسم قاعدة البيانات"""
-        return os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
+        return os.environ.get("MONGO_DB_NAME", os.environ.get("MONGODB_DB_NAME", "skywave_erp_db"))
 
     @staticmethod
     def get_local_db_path() -> str:
@@ -100,9 +100,12 @@ class Config:
             # توليد كلمة مرور عشوائية آمنة إذا لم تكن محددة
             import secrets
             import string
+
             chars = string.ascii_letters + string.digits + "!@#$%^&*"
-            password = ''.join(secrets.choice(chars) for _ in range(16))
-            safe_print("WARNING: [Config] ⚠️ تم توليد كلمة مرور عشوائية - يرجى تعيين DEFAULT_ADMIN_PASSWORD في .env!")
+            password = "".join(secrets.choice(chars) for _ in range(16))
+            safe_print(
+                "WARNING: [Config] ⚠️ تم توليد كلمة مرور عشوائية - يرجى تعيين DEFAULT_ADMIN_PASSWORD في .env!"
+            )
         return password
 
     @staticmethod

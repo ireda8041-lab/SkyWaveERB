@@ -1,4 +1,3 @@
-
 from unittest.mock import patch
 
 import pytest
@@ -43,7 +42,7 @@ class TestClientService:
         mock_repo.update_client.return_value = sample_client_data.model_copy(update=update_data)
 
         # Action (mocking app_signals to avoid emission errors during test)
-        with patch('services.client_service.app_signals'):
+        with patch("services.client_service.app_signals"):
             result = service.update_client(client_id, update_data)
 
         # Assert
@@ -57,7 +56,7 @@ class TestClientService:
         mock_repo.delete_client_permanently.return_value = True
 
         # Action
-        with patch('services.client_service.app_signals'):
+        with patch("services.client_service.app_signals"):
             result = service.delete_client(client_id)
 
         # Assert

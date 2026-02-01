@@ -10,7 +10,7 @@ from typing import Any, Generic, TypeVar
 from core.error_handler import ErrorHandler
 from core.logger import get_logger
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class BaseService(ABC, Generic[T]):
@@ -25,12 +25,7 @@ class BaseService(ABC, Generic[T]):
     - نشر الأحداث
     """
 
-    def __init__(
-        self,
-        repository,
-        event_bus=None,
-        cache_enabled: bool = True
-    ):
+    def __init__(self, repository, event_bus=None, cache_enabled: bool = True):
         self.repo = repository
         self.event_bus = event_bus
         self.cache_enabled = cache_enabled
@@ -39,7 +34,7 @@ class BaseService(ABC, Generic[T]):
         self.error_handler = ErrorHandler()
         self.cache = None  # Cache disabled for now
 
-        self.logger.info(f"تم تهيئة {self.__class__.__name__}")
+        self.logger.info("تم تهيئة %s", self.__class__.__name__)
 
     @property
     @abstractmethod
@@ -73,7 +68,7 @@ class BaseService(ABC, Generic[T]):
         if self.event_bus:
             self.event_bus.publish(full_event_name, data)
 
-        self.logger.debug(f"تم نشر حدث: {full_event_name}")
+        self.logger.debug("تم نشر حدث: %s", full_event_name)
 
     def _validate(self, data: dict[str, Any], validator=None):
         """التحقق من البيانات - placeholder"""
@@ -84,24 +79,18 @@ class BaseService(ABC, Generic[T]):
         pass
 
     def _handle_error(
-        self,
-        exception: Exception,
-        context: str,
-        user_message: str | None = None
+        self, exception: Exception, context: str, user_message: str | None = None
     ) -> None:
         """معالجة الخطأ"""
         self.error_handler.handle_exception(
             exception=exception,
             context=f"{self.__class__.__name__}.{context}",
             user_message=user_message,
-            show_dialog=False
+            show_dialog=False,
         )
 
     def _log_operation(
-        self,
-        operation: str,
-        entity_id: str | None = None,
-        details: dict[str, Any] | None = None
+        self, operation: str, entity_id: str | None = None, details: dict[str, Any] | None = None
     ) -> None:
         """تسجيل عملية"""
         message = f"{operation}"
@@ -125,7 +114,7 @@ class CRUDService(BaseService[T]):
     """
 
     @property
-    def validator_class(self):
+    def validator_class(self) -> type[Any] | None:
         """فئة المحقق - placeholder"""
         return None
 
@@ -145,7 +134,7 @@ class CRUDService(BaseService[T]):
             if self.cache:
                 cached_result = self.cache.get(cache_key)
                 if cached_result is not None:
-                    self.logger.debug(f"تم جلب {self.entity_name} من الكاش")
+                    self.logger.debug("تم جلب %s من الكاش", self.entity_name)
                     return cached_result
 
             result = self._fetch_all(**filters)
@@ -211,8 +200,9 @@ class CRUDService(BaseService[T]):
         """
         try:
             # التحقق من البيانات
-            if self.validator_class:
-                validator = self.validator_class()
+            validator_cls = self.validator_class
+            if validator_cls is not None:
+                validator = validator_cls()
                 self._validate_or_raise(data, validator)
 
             # الإنشاء
@@ -256,8 +246,9 @@ class CRUDService(BaseService[T]):
                 raise ValueError(f"{self.entity_name} غير موجود")
 
             # التحقق من البيانات
-            if self.validator_class:
-                validator = self.validator_class()
+            validator_cls = self.validator_class
+            if validator_cls is not None:
+                validator = validator_cls()
                 self._validate_or_raise(data, validator)
 
             # التحديث
@@ -341,7 +332,7 @@ class QueryService(BaseService[T]):
         sort_by: str | None = None,
         sort_order: str = "desc",
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
     ) -> dict[str, Any]:
         """
         استعلام متقدم
@@ -365,12 +356,7 @@ class QueryService(BaseService[T]):
         try:
             # بناء مفتاح الكاش
             cache_key = self._get_cache_key(
-                "query",
-                str(filters),
-                sort_by or "",
-                sort_order,
-                page,
-                page_size
+                "query", str(filters), sort_by or "", sort_order, page, page_size
             )
 
             if self.cache:
@@ -384,7 +370,7 @@ class QueryService(BaseService[T]):
                 sort_by=sort_by,
                 sort_order=sort_order,
                 page=page,
-                page_size=page_size
+                page_size=page_size,
             )
 
             if self.cache:
@@ -394,13 +380,7 @@ class QueryService(BaseService[T]):
 
         except Exception as e:
             self._handle_error(e, "query")
-            return {
-                'items': [],
-                'total': 0,
-                'page': page,
-                'page_size': page_size,
-                'total_pages': 0
-            }
+            return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
 
     @abstractmethod
     def _execute_query(
@@ -409,7 +389,7 @@ class QueryService(BaseService[T]):
         sort_by: str | None,
         sort_order: str,
         page: int,
-        page_size: int
+        page_size: int,
     ) -> dict[str, Any]:
         """تنفيذ الاستعلام"""
         pass
@@ -452,12 +432,7 @@ class QueryService(BaseService[T]):
         except Exception:
             return False
 
-    def search(
-        self,
-        query: str,
-        fields: list[str] | None = None,
-        limit: int = 20
-    ) -> list[T]:
+    def search(self, query: str, fields: list[str] | None = None, limit: int = 20) -> list[T]:
         """
         البحث في الكيانات
 
@@ -476,11 +451,6 @@ class QueryService(BaseService[T]):
             return []
 
     @abstractmethod
-    def _search(
-        self,
-        query: str,
-        fields: list[str] | None,
-        limit: int
-    ) -> list[T]:
+    def _search(self, query: str, fields: list[str] | None, limit: int) -> list[T]:
         """البحث في المخزن"""
         pass

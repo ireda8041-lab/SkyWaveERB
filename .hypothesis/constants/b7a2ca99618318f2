@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\core\base_service.py
+# hypothesis_version: 6.150.0
+
+[120, 300, 600, 'CREATED', 'DELETED', 'T', 'UPDATED', 'all', 'count', 'create', 'data', 'delete', 'desc', 'get_all', 'get_by_id', 'id', 'items', 'page', 'page_size', 'query', 'search', 'total', 'total_pages', 'update', 'تم تهيئة %s', 'تم جلب %s من الكاش', 'تم نشر حدث: %s']

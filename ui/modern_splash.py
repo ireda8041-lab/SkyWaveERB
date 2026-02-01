@@ -53,9 +53,9 @@ class ModernSplash(QSplashScreen):
 
         super().__init__(
             pixmap,
-            Qt.WindowType.SplashScreen |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.SplashScreen
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.FramelessWindowHint,
         )
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
@@ -82,13 +82,15 @@ class ModernSplash(QSplashScreen):
         self.logo_pixmap = QPixmap(logo_path)
         if not self.logo_pixmap.isNull():
             self.logo_pixmap = self.logo_pixmap.scaled(
-                180, 180,
+                180,
+                180,
                 Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
+                Qt.TransformationMode.SmoothTransformation,
             )
 
         # توسيط الشاشة
         from PyQt6.QtWidgets import QApplication
+
         screen = QApplication.primaryScreen().geometry()
         x = (screen.width() - 600) // 2
         y = (screen.height() - 400) // 2
@@ -117,11 +119,7 @@ class ModernSplash(QSplashScreen):
         # العنوان في الأعلى
         painter.setFont(self.title_font)
         painter.setPen(QColor("#ffffff"))
-        painter.drawText(
-            QRectF(0, 25, 600, 50),
-            Qt.AlignmentFlag.AlignHCenter,
-            "Sky Wave ERP"
-        )
+        painter.drawText(QRectF(0, 25, 600, 50), Qt.AlignmentFlag.AlignHCenter, "Sky Wave ERP")
 
         # اللوجو في المنتصف تماماً
         if not self.logo_pixmap.isNull():
@@ -175,7 +173,9 @@ class ModernSplash(QSplashScreen):
 
             offset = i * 2
             path = QPainterPath()
-            path.addRoundedRect(QRectF(3 + offset, 3 + offset, 594 - offset * 2, 394 - offset * 2), 38, 38)
+            path.addRoundedRect(
+                QRectF(3 + offset, 3 + offset, 594 - offset * 2, 394 - offset * 2), 38, 38
+            )
             painter.setOpacity(1.0 - i * 0.3)
             painter.drawPath(path)
 

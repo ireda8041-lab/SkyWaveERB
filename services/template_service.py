@@ -1,29 +1,97 @@
+# pylint: disable=too-many-lines,too-many-nested-blocks,too-many-positional-arguments
 # الملف: services/template_service.py
 """
 خدمة قوالب الفواتير - إدارة وإنتاج قوالب HTML للفواتير
 """
 
+import base64
 import os
+import re
+import subprocess
 import sys
+import traceback
 from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+from PyQt6.QtCore import QEventLoop, QTimer, QUrl
+from PyQt6.QtWidgets import QApplication
+
+from core import schemas
+from core.base_service import BaseService
+
+# ⚡ استيراد مكتبات PDF الاختيارية
+WEASYPRINT_AVAILABLE: bool | None = None
+WEASYPRINT_IMPORT_ERROR: str | None = None
+CSS = None
+HTML = None
+
+
+def _try_get_weasyprint():
+    global CSS, HTML, WEASYPRINT_AVAILABLE, WEASYPRINT_IMPORT_ERROR
+
+    if WEASYPRINT_AVAILABLE is True:
+        return CSS, HTML
+    if WEASYPRINT_AVAILABLE is False:
+        return None
+
+    try:
+        probe = subprocess.run(
+            [sys.executable, "-c", "import weasyprint"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        combined = (probe.stdout or "") + (probe.stderr or "")
+        if probe.returncode != 0 or "could not import some external libraries" in combined.lower():
+            WEASYPRINT_AVAILABLE = False
+            WEASYPRINT_IMPORT_ERROR = (combined.strip() or f"returncode={probe.returncode}")[:500]
+            return None
+
+        from weasyprint import CSS as _CSS
+        from weasyprint import HTML as _HTML
+
+        CSS = _CSS
+        HTML = _HTML
+        WEASYPRINT_AVAILABLE = True
+        return CSS, HTML
+    except Exception as e:
+        WEASYPRINT_AVAILABLE = False
+        WEASYPRINT_IMPORT_ERROR = str(e)
+        return None
+
+
+PDFKIT_AVAILABLE = False
+try:
+    import pdfkit
+
+    PDFKIT_AVAILABLE = True
+except Exception:
+    pass
+
+QWEBENGINE_AVAILABLE = False
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView
+
+    QWEBENGINE_AVAILABLE = True
+except Exception:
+    pass
 
 # ⚡ استيراد آمن لـ jinja2
 try:
     from jinja2 import Environment, FileSystemLoader
+
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
     Environment = None
     FileSystemLoader = None
 
-from core import schemas
-from core.base_service import BaseService
-
 # استيراد دالة الطباعة الآمنة
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -33,7 +101,7 @@ except ImportError:
 
 def get_base_path():
     """الحصول على المسار الأساسي للتطبيق - يعمل مع PyInstaller و Python العادي"""
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # التطبيق يعمل كـ EXE (PyInstaller)
         return os.path.dirname(sys.executable)
     else:
@@ -57,9 +125,15 @@ class TemplateService(BaseService):
 
         # جرب المسارات المختلفة
         possible_paths = [
-            os.path.join(base_path, "_internal", "assets", "templates", "invoices"),  # PyInstaller onedir
-            os.path.join(base_path, "assets", "templates", "invoices"),  # PyInstaller onefile أو dev
-            os.path.join(os.path.dirname(sys.executable), "_internal", "assets", "templates", "invoices"),
+            os.path.join(
+                base_path, "_internal", "assets", "templates", "invoices"
+            ),  # PyInstaller onedir
+            os.path.join(
+                base_path, "assets", "templates", "invoices"
+            ),  # PyInstaller onefile أو dev
+            os.path.join(
+                os.path.dirname(sys.executable), "_internal", "assets", "templates", "invoices"
+            ),
             os.path.join("assets", "templates", "invoices"),  # مسار نسبي
         ]
 
@@ -74,21 +148,56 @@ class TemplateService(BaseService):
             # إنشاء المجلد الافتراضي
             self.templates_dir = os.path.join("assets", "templates", "invoices")
             os.makedirs(self.templates_dir, exist_ok=True)
-            safe_print(f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}")
+            safe_print(
+                f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}"
+            )
 
-        # إعداد Jinja2
-        self.jinja_env = Environment(
-            loader=FileSystemLoader(self.templates_dir),
-            autoescape=True
-        )
+        if not JINJA2_AVAILABLE or Environment is None or FileSystemLoader is None:
+            raise RuntimeError("Jinja2 is required for template rendering")
+
+        self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir), autoescape=True)
 
         # إضافة فلاتر مخصصة
-        self.jinja_env.filters['format_currency'] = self._format_currency
+        self.jinja_env.filters["format_currency"] = self._format_currency
 
         safe_print(f"INFO: [TemplateService] Templates directory: {self.templates_dir}")
 
         # إنشاء جدول القوالب
         self._create_templates_table()
+
+    @staticmethod
+    def _sanitize_template_filename(name: str) -> str:
+        if not isinstance(name, str):
+            raise ValueError("Template name must be a string")
+        normalized = re.sub(r"\s+", "_", name.strip().lower())
+        if not normalized:
+            raise ValueError("Template name must not be empty")
+        if any(sep in normalized for sep in ["/", "\\", ":", "\x00"]):
+            raise ValueError("Invalid characters in template name")
+        if ".." in normalized:
+            raise ValueError("Invalid template name")
+        normalized = normalized.strip("._")
+        normalized = re.sub(r"[^0-9a-z_\u0600-\u06FF-]+", "", normalized)
+        normalized = normalized[:120] if len(normalized) > 120 else normalized
+        if not normalized:
+            raise ValueError("Invalid template name")
+        return f"{normalized}.html"
+
+    def _safe_template_path(self, filename: str) -> str:
+        if not isinstance(filename, str) or not filename.strip():
+            raise ValueError("Invalid template filename")
+        if any(sep in filename for sep in ["/", "\\", ":", "\x00"]):
+            raise ValueError("Invalid template filename")
+        if ".." in filename:
+            raise ValueError("Invalid template filename")
+        if not filename.lower().endswith(".html"):
+            raise ValueError("Template filename must end with .html")
+
+        root = os.path.realpath(self.templates_dir)
+        full = os.path.realpath(os.path.join(root, filename))
+        if full == root or not full.startswith(root + os.sep):
+            raise ValueError("Template path is outside templates directory")
+        return full
 
     def _create_templates_table(self):
         """إنشاء جدول قوالب الفواتير"""
@@ -123,7 +232,7 @@ class TemplateService(BaseService):
         """تنسيق الأرقام بفواصل الآلاف"""
         try:
             if isinstance(value, str):
-                value = float(value.replace(',', ''))
+                value = float(value.replace(",", ""))
             return f"{value:,.2f}"
         except (ValueError, AttributeError, TypeError):
             return str(value)
@@ -141,12 +250,18 @@ class TemplateService(BaseService):
             if count == 0:
                 # التحقق من وجود القالب في المجلد
                 template_file = "final_invoice.html"
-                template_path = os.path.join(self.templates_dir, template_file)
+                try:
+                    template_path = self._safe_template_path(template_file)
+                except ValueError:
+                    template_path = ""
 
-                if not os.path.exists(template_path):
+                if not template_path or not os.path.exists(template_path):
                     # جرب القوالب الأخرى
                     for alt_template in ["final_invoice.html", "skywave_ads_invoice_template.html"]:
-                        alt_path = os.path.join(self.templates_dir, alt_template)
+                        try:
+                            alt_path = self._safe_template_path(alt_template)
+                        except ValueError:
+                            continue
                         if os.path.exists(alt_path):
                             template_file = alt_template
                             break
@@ -155,12 +270,15 @@ class TemplateService(BaseService):
                 INSERT INTO invoice_templates (name, description, template_file, is_default)
                 VALUES (?, ?, ?, ?)
                 """
-                cursor.execute(insert_sql, (
-                    "Sky Wave Professional",
-                    "القالب الاحترافي لفواتير Sky Wave",
-                    template_file,
-                    1
-                ))
+                cursor.execute(
+                    insert_sql,
+                    (
+                        "Sky Wave Professional",
+                        "القالب الاحترافي لفواتير Sky Wave",
+                        template_file,
+                        1,
+                    ),
+                )
                 self.repo.sqlite_conn.commit()
                 safe_print(f"INFO: تم إضافة القالب الافتراضي: {template_file}")
 
@@ -186,14 +304,16 @@ class TemplateService(BaseService):
 
             templates = []
             for row in rows:
-                templates.append({
-                    'id': row[0],
-                    'name': row[1],
-                    'description': row[2],
-                    'template_file': row[3],
-                    'is_default': bool(row[4]),
-                    'created_at': row[5]
-                })
+                templates.append(
+                    {
+                        "id": row[0],
+                        "name": row[1],
+                        "description": row[2],
+                        "template_file": row[3],
+                        "is_default": bool(row[4]),
+                        "created_at": row[5],
+                    }
+                )
 
             return templates
 
@@ -220,12 +340,12 @@ class TemplateService(BaseService):
 
             if row:
                 return {
-                    'id': row[0],
-                    'name': row[1],
-                    'description': row[2],
-                    'template_file': row[3],
-                    'is_default': bool(row[4]),
-                    'created_at': row[5]
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "template_file": row[3],
+                    "is_default": bool(row[4]),
+                    "created_at": row[5],
                 }
 
             return None
@@ -255,28 +375,40 @@ class TemplateService(BaseService):
             if row:
                 template_file = row[3]
                 # التحقق من وجود الملف فعلياً
-                template_path = os.path.join(self.templates_dir, template_file)
-                if not os.path.exists(template_path):
-                    safe_print(f"WARNING: [TemplateService] Template file not found: {template_file}")
+                try:
+                    template_path = self._safe_template_path(template_file)
+                except ValueError:
+                    template_path = ""
+                if not template_path or not os.path.exists(template_path):
+                    safe_print(
+                        f"WARNING: [TemplateService] Template file not found: {template_file}"
+                    )
                     # البحث عن قالب بديل
                     for alt_template in ["skywave_ads_invoice_template.html"]:
-                        alt_path = os.path.join(self.templates_dir, alt_template)
+                        try:
+                            alt_path = self._safe_template_path(alt_template)
+                        except ValueError:
+                            continue
                         if os.path.exists(alt_path):
-                            safe_print(f"INFO: [TemplateService] Using alternative template: {alt_template}")
+                            safe_print(
+                                f"INFO: [TemplateService] Using alternative template: {alt_template}"
+                            )
                             template_file = alt_template
                             # تحديث قاعدة البيانات
-                            update_sql = "UPDATE invoice_templates SET template_file = ? WHERE id = ?"
+                            update_sql = (
+                                "UPDATE invoice_templates SET template_file = ? WHERE id = ?"
+                            )
                             cursor.execute(update_sql, (template_file, row[0]))
                             self.repo.sqlite_conn.commit()
                             break
 
                 return {
-                    'id': row[0],
-                    'name': row[1],
-                    'description': row[2],
-                    'template_file': template_file,
-                    'is_default': bool(row[4]),
-                    'created_at': row[5]
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "template_file": template_file,
+                    "is_default": bool(row[4]),
+                    "created_at": row[5],
                 }
 
             # إذا لم يوجد قالب افتراضي، إرجاع الأول
@@ -295,7 +427,7 @@ class TemplateService(BaseService):
         project: schemas.Project,
         client_info: dict[str, str],
         template_id: int | None = None,
-        payments: list[dict[str, Any]] | None = None
+        payments: list[dict[str, Any]] | None = None,
     ) -> str:
         """إنتاج HTML للفاتورة باستخدام القالب"""
         try:
@@ -306,10 +438,10 @@ class TemplateService(BaseService):
                 template_info = self.get_default_template()
 
             if not template_info:
-                raise Exception("لم يتم العثور على قالب مناسب")
+                raise ValueError("لم يتم العثور على قالب مناسب")
 
             # تحميل القالب
-            template_file = template_info['template_file']
+            template_file = template_info["template_file"]
             safe_print(f"INFO: [TemplateService] Loading template: {template_file}")
             template = self.jinja_env.get_template(template_file)
             safe_print(f"INFO: [TemplateService] Template loaded successfully: {template_file}")
@@ -318,53 +450,65 @@ class TemplateService(BaseService):
             template_data = self._prepare_template_data(project, client_info, payments)
 
             # إنتاج HTML
-            safe_print(f"INFO: [TemplateService] Rendering template with data keys: {list(template_data.keys())}")
+            safe_print(
+                f"INFO: [TemplateService] Rendering template with data keys: {list(template_data.keys())}"
+            )
             html_content = template.render(**template_data)
-            safe_print(f"INFO: [TemplateService] Template rendered successfully, HTML size: {len(html_content)} chars")
+            safe_print(
+                f"INFO: [TemplateService] Template rendered successfully, HTML size: {len(html_content)} chars"
+            )
 
-            # التحقق من وجود العلامة المميزة
             if "SKYWAVE_CUSTOM_TEMPLATE_2025" in html_content:
                 safe_print("✅ [TemplateService] Custom template is being used correctly!")
-            else:
-                safe_print("❌ [TemplateService] WARNING: Custom template marker not found!")
 
             return str(html_content)
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في إنتاج HTML للفاتورة: {e}")
-            import traceback
+
             traceback.print_exc()
             return f"<html><body><h1>خطأ في إنتاج الفاتورة: {e}</h1></body></html>"
 
-    def _prepare_template_data(self, project: schemas.Project, client_info: dict[str, str], payments: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    def _prepare_template_data(
+        self,
+        project: schemas.Project,
+        client_info: dict[str, str],
+        payments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """تحضير بيانات القالب"""
         try:
             # التأكد من أن project هو كائن صحيح وليس dict
             if isinstance(project, dict):
-                safe_print("WARNING: [TemplateService] project is a dict, converting to object-like access")
+                safe_print(
+                    "WARNING: [TemplateService] project is a dict, converting to object-like access"
+                )
+
                 # تحويل dict إلى object للوصول للخصائص
                 class DictToObj:
                     def __init__(self, d):
                         for key, value in d.items():
                             setattr(self, key, value)
+
                 project = DictToObj(project)
 
             # التحقق من وجود الخصائص الأساسية وإضافتها إذا لزم الأمر
-            if not hasattr(project, 'name'):
-                safe_print("WARNING: [TemplateService] Project object missing 'name' attribute, adding default")
+            if not hasattr(project, "name"):
+                safe_print(
+                    "WARNING: [TemplateService] Project object missing 'name' attribute, adding default"
+                )
                 # إضافة قيمة افتراضية بدلاً من رفع خطأ
-                project.name = 'مشروع'
+                project.name = "مشروع"
 
             # التحقق من الخصائص الأخرى المطلوبة
-            if not hasattr(project, 'id'):
+            if not hasattr(project, "id"):
                 project.id = None
-            if not hasattr(project, 'items'):
+            if not hasattr(project, "items"):
                 project.items = []
-            if not hasattr(project, 'total_amount'):
+            if not hasattr(project, "total_amount"):
                 project.total_amount = 0
-            if not hasattr(project, 'discount_rate'):
+            if not hasattr(project, "discount_rate"):
                 project.discount_rate = 0
-            if not hasattr(project, 'tax_rate'):
+            if not hasattr(project, "tax_rate"):
                 project.tax_rate = 0
 
             # ⚡ حساب الإجماليات بشكل صحيح:
@@ -375,16 +519,16 @@ class TemplateService(BaseService):
             gross_total = 0.0
             items_total_after_discount = 0.0
 
-            if hasattr(project, 'items') and project.items and len(project.items) > 0:
+            if hasattr(project, "items") and project.items and len(project.items) > 0:
                 for item in project.items:
                     if isinstance(item, dict):
-                        qty = float(item.get('quantity', 1))
-                        price = float(item.get('unit_price', 0))
-                        item_total = float(item.get('total', 0))
+                        qty = float(item.get("quantity", 1))
+                        price = float(item.get("unit_price", 0))
+                        item_total = float(item.get("total", 0))
                     else:
-                        qty = float(getattr(item, 'quantity', 1))
-                        price = float(getattr(item, 'unit_price', 0))
-                        item_total = float(getattr(item, 'total', 0))
+                        qty = float(getattr(item, "quantity", 1))
+                        price = float(getattr(item, "unit_price", 0))
+                        item_total = float(getattr(item, "total", 0))
 
                     gross_total += qty * price  # قبل الخصم
                     items_total_after_discount += item_total  # بعد خصم البند
@@ -393,12 +537,12 @@ class TemplateService(BaseService):
             items_discount = gross_total - items_total_after_discount
 
             # خصم إضافي على مستوى المشروع
-            project_discount_rate = float(getattr(project, 'discount_rate', 0) or 0)
+            project_discount_rate = float(getattr(project, "discount_rate", 0) or 0)
             project_discount = items_total_after_discount * (project_discount_rate / 100)
 
             # الإجمالي النهائي (بعد كل الخصومات)
             taxable = items_total_after_discount - project_discount
-            tax_rate = float(getattr(project, 'tax_rate', 0) or 0)
+            tax_rate = float(getattr(project, "tax_rate", 0) or 0)
             tax_amount = taxable * (tax_rate / 100)
 
             # ⚡ استخدم الحسابات الجديدة دايماً (مش من المشروع)
@@ -409,13 +553,15 @@ class TemplateService(BaseService):
 
             # إذا لم يكن هناك gross_total، استخدم subtotal من المشروع
             if gross_total == 0:
-                gross_total = float(getattr(project, 'subtotal', 0) or 0)
+                gross_total = float(getattr(project, "subtotal", 0) or 0)
                 if gross_total == 0:
                     gross_total = grand_total + discount_amount
 
             safe_print("INFO: [TemplateService] ====== حسابات الفاتورة ======")
             safe_print(f"INFO: [TemplateService] مجموع البنود (قبل خصم البند): {gross_total}")
-            safe_print(f"INFO: [TemplateService] مجموع البنود (بعد خصم البند): {items_total_after_discount}")
+            safe_print(
+                f"INFO: [TemplateService] مجموع البنود (بعد خصم البند): {items_total_after_discount}"
+            )
             safe_print(f"INFO: [TemplateService] خصم البنود: {items_discount}")
             safe_print(f"INFO: [TemplateService] نسبة خصم المشروع: {project_discount_rate}%")
             safe_print(f"INFO: [TemplateService] مبلغ خصم المشروع: {project_discount}")
@@ -425,59 +571,73 @@ class TemplateService(BaseService):
 
             # إذا لا يزال صفر، استخدم مجموع الدفعات
             if grand_total == 0 and payments:
-                total_paid_temp = sum(float(p.get('amount', 0)) for p in payments)
+                total_paid_temp = sum(float(p.get("amount", 0)) for p in payments)
                 if total_paid_temp > 0:
                     grand_total = total_paid_temp
-                    safe_print(f"WARNING: [TemplateService] المشروع بدون إجمالي، تم استخدام مجموع الدفعات: {grand_total}")
+                    safe_print(
+                        f"WARNING: [TemplateService] المشروع بدون إجمالي، تم استخدام مجموع الدفعات: {grand_total}"
+                    )
 
             # تحضير بنود الخدمات
             items = []
-            if hasattr(project, 'items') and project.items and len(project.items) > 0:
+            if hasattr(project, "items") and project.items and len(project.items) > 0:
                 for item in project.items:
                     # التعامل مع item سواء كان object أو dict
                     if isinstance(item, dict):
-                        items.append({
-                            'name': item.get('description', 'خدمة'),
-                            'qty': f"{item.get('quantity', 1):.1f}",
-                            'price': f"{item.get('unit_price', 0):,.0f}",
-                            'discount': f"{item.get('discount_rate', 0):.1f}",
-                            'total': f"{item.get('total', 0):,.0f}"
-                        })
+                        items.append(
+                            {
+                                "name": item.get("description", "خدمة"),
+                                "qty": f"{item.get('quantity', 1):.1f}",
+                                "price": f"{item.get('unit_price', 0):,.0f}",
+                                "discount": f"{item.get('discount_rate', 0):.1f}",
+                                "total": f"{item.get('total', 0):,.0f}",
+                            }
+                        )
                     else:
-                        items.append({
-                            'name': getattr(item, 'description', 'خدمة'),
-                            'qty': f"{getattr(item, 'quantity', 1):.1f}",
-                            'price': f"{getattr(item, 'unit_price', 0):,.0f}",
-                            'discount': f"{getattr(item, 'discount_rate', 0):.1f}",
-                            'total': f"{getattr(item, 'total', 0):,.0f}"
-                        })
+                        items.append(
+                            {
+                                "name": getattr(item, "description", "خدمة"),
+                                "qty": f"{getattr(item, 'quantity', 1):.1f}",
+                                "price": f"{getattr(item, 'unit_price', 0):,.0f}",
+                                "discount": f"{getattr(item, 'discount_rate', 0):.1f}",
+                                "total": f"{getattr(item, 'total', 0):,.0f}",
+                            }
+                        )
             else:
                 # إذا لم تكن هناك بنود، أنشئ بند واحد للمشروع
-                project_name = getattr(project, 'name', None) or project.get('name', 'مشروع') if isinstance(project, dict) else 'مشروع'
-                items.append({
-                    'name': project_name,
-                    'qty': "1.0",
-                    'price': f"{grand_total:,.0f}",
-                    'discount': "0.0",
-                    'total': f"{grand_total:,.0f}"
-                })
+                project_name = (
+                    getattr(project, "name", None) or project.get("name", "مشروع")
+                    if isinstance(project, dict)
+                    else "مشروع"
+                )
+                items.append(
+                    {
+                        "name": project_name,
+                        "qty": "1.0",
+                        "price": f"{grand_total:,.0f}",
+                        "discount": "0.0",
+                        "total": f"{grand_total:,.0f}",
+                    }
+                )
 
             # ⚡ إنتاج رقم الفاتورة الثابت (يُحفظ في قاعدة البيانات)
             try:
                 # أولاً: تحقق من وجود رقم فاتورة محفوظ مسبقاً
-                existing_invoice_number = getattr(project, 'invoice_number', None)
+                existing_invoice_number = getattr(project, "invoice_number", None)
                 if isinstance(project, dict):
-                    existing_invoice_number = project.get('invoice_number')
+                    existing_invoice_number = project.get("invoice_number")
 
                 if existing_invoice_number:
                     # استخدم الرقم المحفوظ
                     invoice_id = existing_invoice_number
-                    safe_print(f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}")
+                    safe_print(
+                        f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}"
+                    )
                 else:
                     # ولّد رقم جديد وحاول حفظه
-                    local_id = getattr(project, 'id', None)
+                    local_id = getattr(project, "id", None)
                     if isinstance(project, dict):
-                        local_id = project.get('id')
+                        local_id = project.get("id")
 
                     if local_id and local_id > 0:
                         # الصيغة: 97161 + local_id (يبدأ من SW-97162)
@@ -490,27 +650,33 @@ class TemplateService(BaseService):
                                 try:
                                     cursor.execute(
                                         "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                                        (invoice_id, local_id)
+                                        (invoice_id, local_id),
                                     )
                                     self.repo.sqlite_conn.commit()
-                                    safe_print(f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}")
+                                    safe_print(
+                                        f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}"
+                                    )
                                 finally:
                                     cursor.close()
                         except Exception as save_error:
-                            safe_print(f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}")
+                            safe_print(
+                                f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}"
+                            )
                     else:
                         # لا يوجد ID - استخدم رقم افتراضي
                         invoice_id = "SW-97162"
-                        safe_print(f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}")
+                        safe_print(
+                            f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}"
+                        )
             except (AttributeError, KeyError, TypeError) as e:
                 # في حالة الخطأ، استخدم رقم افتراضي
                 invoice_id = "SW-97162"
                 safe_print(f"ERROR: [TemplateService] خطأ في توليد رقم الفاتورة: {e}")
 
             # تاريخ الفاتورة = تاريخ بداية المشروع
-            project_start_date = getattr(project, 'start_date', None)
+            project_start_date = getattr(project, "start_date", None)
             if project_start_date:
-                if hasattr(project_start_date, 'strftime'):
+                if hasattr(project_start_date, "strftime"):
                     today = project_start_date.strftime("%Y-%m-%d")
                 elif isinstance(project_start_date, str):
                     today = project_start_date[:10]
@@ -523,25 +689,27 @@ class TemplateService(BaseService):
             payments_list = []
             total_paid = 0.0
 
-            safe_print(f"INFO: [TemplateService] معالجة الدفعات - عدد الدفعات: {len(payments) if payments else 0}")
+            safe_print(
+                f"INFO: [TemplateService] معالجة الدفعات - عدد الدفعات: {len(payments) if payments else 0}"
+            )
 
             if payments:
                 for payment in payments:
                     # معالجة التاريخ - يمكن أن يكون object أو dict
                     if isinstance(payment, dict):
-                        payment_date = payment.get('date', '')
-                        amount_value = payment.get('amount', 0)
-                        method_value = payment.get('method', 'نقدي')
+                        payment_date = payment.get("date", "")
+                        amount_value = payment.get("amount", 0)
+                        method_value = payment.get("method", "نقدي")
                     else:
-                        payment_date = getattr(payment, 'date', '')
-                        amount_value = getattr(payment, 'amount', 0)
-                        method_value = getattr(payment, 'method', None) or 'نقدي'
+                        payment_date = getattr(payment, "date", "")
+                        amount_value = getattr(payment, "amount", 0)
+                        method_value = getattr(payment, "method", None) or "نقدي"
 
                     # تحويل التاريخ لنص
-                    if hasattr(payment_date, 'strftime'):
-                        date_str = payment_date.strftime('%Y-%m-%d')
+                    if hasattr(payment_date, "strftime"):
+                        date_str = payment_date.strftime("%Y-%m-%d")
                     else:
-                        date_str = str(payment_date)[:10] if payment_date else ''
+                        date_str = str(payment_date)[:10] if payment_date else ""
 
                     # تحويل المبلغ لرقم بأمان
                     try:
@@ -554,13 +722,15 @@ class TemplateService(BaseService):
                     # جلب اسم الحساب إذا كان متوفراً
                     account_name = method_value
                     if isinstance(payment, dict):
-                        account_name = payment.get('account_name', '') or payment.get('method', 'نقدي')
+                        account_name = payment.get("account_name", "") or payment.get(
+                            "method", "نقدي"
+                        )
 
                     payment_entry = {
-                        'date': date_str,
-                        'amount': amount,  # ⚡ رقم مش string عشان القالب يقدر يعمل format
-                        'method': method_value,
-                        'account_name': account_name
+                        "date": date_str,
+                        "amount": amount,  # ⚡ رقم مش string عشان القالب يقدر يعمل format
+                        "method": method_value,
+                        "account_name": account_name,
                     }
                     payments_list.append(payment_entry)
                     safe_print(f"  - دفعة: {payment_entry}")
@@ -573,7 +743,6 @@ class TemplateService(BaseService):
             safe_print(f"  - المتبقي: {remaining}")
 
             # إضافة معلومات الشركة من الإعدادات
-            import base64
 
             # تحميل اللوجو تلقائياً من site logo.png - مع دعم PyInstaller
             logo_base64 = ""
@@ -594,41 +763,58 @@ class TemplateService(BaseService):
 
             if site_logo_path:
                 try:
-                    with open(site_logo_path, 'rb') as f:
+                    with open(site_logo_path, "rb") as f:
                         logo_data = f.read()
-                        logo_base64 = f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
-                    safe_print(f"INFO: [TemplateService] تم تحميل اللوجو تلقائياً من: {site_logo_path}")
+                        logo_base64 = (
+                            f"data:image/png;base64,{base64.b64encode(logo_data).decode()}"
+                        )
+                    safe_print(
+                        f"INFO: [TemplateService] تم تحميل اللوجو تلقائياً من: {site_logo_path}"
+                    )
                 except Exception as e:
                     safe_print(f"WARNING: [TemplateService] فشل تحميل اللوجو: {e}")
 
             company_data = {}
             if self.settings_service:
                 company_data = {
-                    'company_name': self.settings_service.get_setting("company_name") or "SkyWave ERP",
-                    'company_tagline': self.settings_service.get_setting("company_tagline") or "نظام إدارة المشاريع الذكي",
-                    'company_phone': self.settings_service.get_setting("company_phone") or "01000000000",
-                    'company_email': self.settings_service.get_setting("company_email") or "info@skywave.com",
-                    'company_website': self.settings_service.get_setting("company_website") or "www.skywaveads.com",
-                    'company_address': self.settings_service.get_setting("company_address") or "القاهرة، مصر",
-                    'logo_path': logo_base64 if logo_base64 else "logo.png",
+                    "company_name": self.settings_service.get_setting("company_name")
+                    or "SkyWave ERP",
+                    "company_tagline": self.settings_service.get_setting("company_tagline")
+                    or "نظام إدارة المشاريع الذكي",
+                    "company_phone": self.settings_service.get_setting("company_phone")
+                    or "01000000000",
+                    "company_email": self.settings_service.get_setting("company_email")
+                    or "info@skywave.com",
+                    "company_website": self.settings_service.get_setting("company_website")
+                    or "www.skywaveads.com",
+                    "company_address": self.settings_service.get_setting("company_address")
+                    or "القاهرة، مصر",
+                    "logo_path": logo_base64 if logo_base64 else "logo.png",
                 }
             else:
                 company_data = {
-                    'company_name': "SkyWave ERP",
-                    'company_tagline': "نظام إدارة المشاريع الذكي",
-                    'company_phone': "01000000000",
-                    'company_email': "info@skywave.com",
-                    'company_website': "www.skywaveads.com",
-                    'company_address': "القاهرة، مصر",
-                    'logo_path': logo_base64 if logo_base64 else "logo.png",
+                    "company_name": "SkyWave ERP",
+                    "company_tagline": "نظام إدارة المشاريع الذكي",
+                    "company_phone": "01000000000",
+                    "company_email": "info@skywave.com",
+                    "company_website": "www.skywaveads.com",
+                    "company_address": "القاهرة، مصر",
+                    "logo_path": logo_base64 if logo_base64 else "logo.png",
                 }
 
             # إضافة معلومات المشروع
-            project_name = getattr(project, 'name', None) or (project.get('name', 'مشروع') if isinstance(project, dict) else 'مشروع')
+            project_name = getattr(project, "name", None) or (
+                project.get("name", "مشروع") if isinstance(project, dict) else "مشروع"
+            )
             project_data = {
-                'project_name': project_name,
-                'project_status': getattr(project, 'status', None) or (project.get('status', 'نشط') if isinstance(project, dict) else 'نشط'),
-                'project_duration': f"{getattr(project, 'duration_days', 0)} يوم" if getattr(project, 'duration_days', None) else "غير محدد",
+                "project_name": project_name,
+                "project_status": getattr(project, "status", None)
+                or (project.get("status", "نشط") if isinstance(project, dict) else "نشط"),
+                "project_duration": (
+                    f"{getattr(project, 'duration_days', 0)} يوم"
+                    if getattr(project, "duration_days", None)
+                    else "غير محدد"
+                ),
             }
 
             # ⚡ تحميل العلامة المائية - مع دعم PyInstaller
@@ -647,71 +833,80 @@ class TemplateService(BaseService):
 
             if watermark_path:
                 try:
-                    with open(watermark_path, 'rb') as f:
+                    with open(watermark_path, "rb") as f:
                         watermark_data = f.read()
-                        watermark_base64 = f"data:image/png;base64,{base64.b64encode(watermark_data).decode()}"
-                    safe_print(f"INFO: [TemplateService] تم تحميل العلامة المائية من: {watermark_path}")
+                        watermark_base64 = (
+                            f"data:image/png;base64,{base64.b64encode(watermark_data).decode()}"
+                        )
+                    safe_print(
+                        f"INFO: [TemplateService] تم تحميل العلامة المائية من: {watermark_path}"
+                    )
                 except Exception as e:
                     safe_print(f"WARNING: [TemplateService] فشل تحميل العلامة المائية: {e}")
 
             # ⚡ جلب ملاحظات المشروع
-            project_notes = getattr(project, 'project_notes', None) or (project.get('project_notes', '') if isinstance(project, dict) else '')
+            project_notes = getattr(project, "project_notes", None) or (
+                project.get("project_notes", "") if isinstance(project, dict) else ""
+            )
             safe_print(f"INFO: [TemplateService] ملاحظات المشروع: '{project_notes}'")
             safe_print(f"INFO: [TemplateService] discount_amount_raw: {discount_amount}")
+
+            payment_methods = []
+            try:
+                if self.settings_service:
+                    payment_methods = self.settings_service.get_setting("payment_methods") or []
+            except Exception:
+                payment_methods = []
 
             # ⚡ نسبة الخصم (تم حسابها مسبقاً في project_discount_rate)
             discount_rate = project_discount_rate
 
             return {
                 # معلومات الفاتورة
-                'invoice_id': invoice_id,
-                'invoice_number': invoice_id,  # إضافة للتوافق مع القالب
-                'invoice_date': today,
-                'date': today,
-                'due_date': project.end_date.strftime("%Y-%m-%d") if hasattr(project, 'end_date') and project.end_date else "غير محدد",
-
+                "invoice_id": invoice_id,
+                "invoice_number": invoice_id,  # إضافة للتوافق مع القالب
+                "invoice_date": today,
+                "date": today,
+                "due_date": (
+                    project.end_date.strftime("%Y-%m-%d")
+                    if hasattr(project, "end_date") and project.end_date
+                    else "غير محدد"
+                ),
                 # معلومات العميل
-                'client_name': client_info.get('name', '') or 'غير محدد',
-                'client_phone': client_info.get('phone', '') or '',
-                'client_email': client_info.get('email', '') or '',
-                'client_address': client_info.get('address', '') or '',
-
+                "client_name": client_info.get("name", "") or "غير محدد",
+                "client_phone": client_info.get("phone", "") or "",
+                "client_email": client_info.get("email", "") or "",
+                "client_address": client_info.get("address", "") or "",
                 # البنود
-                'items': items,
-
+                "items": items,
                 # الحسابات
                 # ⚡ subtotal = الإجمالي الكلي (قبل الخصم) = gross_total
                 # ⚡ grand_total = الإجمالي الفرعي (بعد الخصم)
-                'subtotal': f"{gross_total:,.2f}",
-                'discount_rate': f"{discount_rate:.0f}",
-                'discount_amount': f"{discount_amount:,.2f}" if discount_amount > 0 else "0",
-                'discount_amount_raw': discount_amount,  # للمقارنة في القالب
-                'tax_amount': f"{tax_amount:,.2f}" if tax_amount > 0 else "0",
-                'grand_total': f"{grand_total:,.2f}",
-                'total_amount': f"{grand_total:,.2f}",  # للتوافق
-
+                "subtotal": f"{gross_total:,.2f}",
+                "discount_rate": f"{discount_rate:.0f}",
+                "discount_amount": f"{discount_amount:,.2f}" if discount_amount > 0 else "0",
+                "discount_amount_raw": discount_amount,  # للمقارنة في القالب
+                "tax_amount": f"{tax_amount:,.2f}" if tax_amount > 0 else "0",
+                "grand_total": f"{grand_total:,.2f}",
+                "total_amount": f"{grand_total:,.2f}",  # للتوافق
                 # الدفعات
-                'payments': payments_list,
-                'total_paid': f"{total_paid:,.0f}",
-                'amount_paid': f"{total_paid:,.0f}",  # للتوافق
-                'remaining_amount': f"{remaining:,.0f}",
-
+                "payments": payments_list,
+                "total_paid": f"{total_paid:,.0f}",
+                "amount_paid": f"{total_paid:,.0f}",  # للتوافق
+                "remaining_amount": f"{remaining:,.0f}",
                 # معلومات الشركة
                 **company_data,
-
                 # معلومات المشروع
                 **project_data,
-
                 # ⚡ ملاحظات المشروع
-                'project_notes': project_notes,
-
+                "project_notes": project_notes,
+                "payment_methods": payment_methods,
                 # ⚡ العلامة المائية
-                'watermark_path': watermark_base64,
-
+                "watermark_path": watermark_base64,
                 # متغيرات للتحقق
-                'debug_grand_total': grand_total,
-                'debug_total_paid': total_paid,
-                'debug_remaining': remaining
+                "debug_grand_total": grand_total,
+                "debug_total_paid": total_paid,
+                "debug_remaining": remaining,
             }
 
         except Exception as e:
@@ -724,15 +919,13 @@ class TemplateService(BaseService):
         client_info: dict[str, str],
         template_id: int | None = None,
         payments: list[dict[str, Any]] | None = None,
-        use_pdf: bool = True  # ⚡ PDF افتراضي
+        use_pdf: bool = True,  # ⚡ PDF افتراضي
     ) -> bool:
         """معاينة القالب - توليد PDF سريع وفتحه"""
         try:
-            import sys
-            from pathlib import Path
 
             # تحديد مجلد الصادرات
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 install_path = Path(sys.executable).parent
             else:
                 install_path = Path.cwd()
@@ -741,13 +934,17 @@ class TemplateService(BaseService):
             exports_dir.mkdir(parents=True, exist_ok=True)
 
             # توليد اسم الملف
-            company_name = client_info.get('company_name', '')
-            client_name = client_info.get('name', '')
-            project_name = getattr(project, 'name', 'project') if not isinstance(project, dict) else project.get('name', 'project')
+            company_name = client_info.get("company_name", "")
+            client_name = client_info.get("name", "")
+            project_name = (
+                getattr(project, "name", "project")
+                if not isinstance(project, dict)
+                else project.get("name", "project")
+            )
 
             display_name = company_name if company_name else client_name
-            display_name = self._sanitize_filename(display_name) if display_name else 'client'
-            project_name_safe = self._sanitize_filename(project_name) if project_name else 'project'
+            display_name = self._sanitize_filename(display_name) if display_name else "client"
+            project_name_safe = self._sanitize_filename(project_name) if project_name else "project"
 
             filename = f"{display_name} - {project_name_safe}"
 
@@ -775,14 +972,14 @@ class TemplateService(BaseService):
                     # Fallback: فتح HTML
                     safe_print("WARNING: [TemplateService] فشل PDF، جاري فتح HTML...")
                     html_path = os.path.join(str(exports_dir), f"{filename}.html")
-                    with open(html_path, 'w', encoding='utf-8') as f:
+                    with open(html_path, "w", encoding="utf-8") as f:
                         f.write(html_content)
                     self._open_file(html_path)
                     return True
             else:
                 # فتح HTML مباشرة
                 html_path = os.path.join(str(exports_dir), f"{filename}.html")
-                with open(html_path, 'w', encoding='utf-8') as f:
+                with open(html_path, "w", encoding="utf-8") as f:
                     f.write(html_content)
                 self._open_file(html_path)
                 safe_print(f"✅ [TemplateService] تم فتح HTML: {html_path}")
@@ -790,7 +987,7 @@ class TemplateService(BaseService):
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في معاينة القالب: {e}")
-            import traceback
+
             traceback.print_exc()
             return False
 
@@ -799,76 +996,84 @@ class TemplateService(BaseService):
         pdf_path = os.path.join(exports_dir, f"{filename}.pdf")
 
         # ⚡ محاولة 1: WeasyPrint (الأسرع)
-        try:
-            from weasyprint import CSS, HTML
-            safe_print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
-            HTML(string=html_content, base_url=self.templates_dir).write_pdf(
-                pdf_path,
-                stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
-            )
-            if os.path.exists(pdf_path):
-                safe_print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
-                return pdf_path
-        except ImportError:
-            safe_print("INFO: [TemplateService] WeasyPrint غير متوفر")
-        except Exception as e:
-            safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+        wp = _try_get_weasyprint()
+        if wp:
+            _CSS, _HTML = wp
+            try:
+                safe_print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
+                _HTML(string=html_content, base_url=self.templates_dir).write_pdf(
+                    pdf_path, stylesheets=[_CSS(string="@page { size: A4; margin: 0; }")]
+                )
+                if os.path.exists(pdf_path):
+                    safe_print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
+                    return pdf_path
+            except Exception as e:
+                safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+        else:
+            if WEASYPRINT_IMPORT_ERROR:
+                safe_print(
+                    f"INFO: [TemplateService] WeasyPrint غير متوفر: {WEASYPRINT_IMPORT_ERROR}"
+                )
 
         # ⚡ محاولة 2: pdfkit (wkhtmltopdf)
-        try:
-            import pdfkit
-            safe_print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
-            options = {
-                'page-size': 'A4',
-                'margin-top': '0mm',
-                'margin-right': '0mm',
-                'margin-bottom': '0mm',
-                'margin-left': '0mm',
-                'encoding': 'UTF-8',
-                'no-outline': None,
-                'quiet': ''
-            }
-            pdfkit.from_string(html_content, pdf_path, options=options)
-            if os.path.exists(pdf_path):
-                safe_print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
-                return pdf_path
-        except ImportError:
+        if PDFKIT_AVAILABLE:
+            try:
+                safe_print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
+                options = {
+                    "page-size": "A4",
+                    "margin-top": "0mm",
+                    "margin-right": "0mm",
+                    "margin-bottom": "0mm",
+                    "margin-left": "0mm",
+                    "encoding": "UTF-8",
+                    "no-outline": None,
+                    "quiet": "",
+                }
+                pdfkit.from_string(html_content, pdf_path, options=options)
+                if os.path.exists(pdf_path):
+                    safe_print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
+                    return pdf_path
+            except Exception as e:
+                safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
+        else:
             safe_print("INFO: [TemplateService] pdfkit غير متوفر")
-        except Exception as e:
-            safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
 
         # ⚡ محاولة 3: PyQt6 WebEngine (أبطأ لكن موجود)
-        try:
-            return self._generate_pdf_with_qt(html_content, pdf_path)
-        except Exception as e:
-            safe_print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+        if QWEBENGINE_AVAILABLE:
+            try:
+                return self._generate_pdf_with_qt(html_content, pdf_path)
+            except Exception as e:
+                safe_print(f"WARNING: [TemplateService] فشل PyQt6: {e}")
+        else:
+            safe_print("INFO: [TemplateService] PyQt6 WebEngine غير متوفر")
 
         return None
 
     def _sanitize_filename(self, name: str) -> str:
         """تنظيف اسم الملف من الأحرف غير المسموحة"""
-        safe_name = "".join(c for c in str(name) if c.isalnum() or c in (' ', '_', '-')).strip()
-        safe_name = safe_name.replace(' ', '_')
-        return safe_name[:50] if safe_name else 'invoice'
+        safe_name = "".join(c for c in str(name) if c.isalnum() or c in (" ", "_", "-")).strip()
+        safe_name = safe_name.replace(" ", "_")
+        return safe_name[:50] if safe_name else "invoice"
 
     def _generate_pdf(self, html_content: str, exports_dir: str, filename: str) -> str | None:
         """توليد PDF من HTML"""
         pdf_path = os.path.join(exports_dir, f"{filename}.pdf")
 
         # محاولة 1: استخدام WeasyPrint
-        try:
-            from weasyprint import CSS, HTML
-            safe_print("INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
-            HTML(string=html_content, base_url=self.templates_dir).write_pdf(
-                pdf_path,
-                stylesheets=[CSS(string='@page { size: A4; margin: 0; }')]
-            )
-            safe_print("✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
-            return pdf_path
-        except ImportError:
+        wp = _try_get_weasyprint()
+        if wp:
+            _CSS, _HTML = wp
+            try:
+                safe_print("INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
+                _HTML(string=html_content, base_url=self.templates_dir).write_pdf(
+                    pdf_path, stylesheets=[_CSS(string="@page { size: A4; margin: 0; }")]
+                )
+                safe_print("✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
+                return pdf_path
+            except Exception as e:
+                safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
+        else:
             safe_print("WARNING: [TemplateService] WeasyPrint غير متوفر، جاري استخدام PyQt6...")
-        except Exception as e:
-            safe_print(f"WARNING: [TemplateService] فشل WeasyPrint: {e}")
 
         # محاولة 2: استخدام PyQt6
         try:
@@ -881,7 +1086,7 @@ class TemplateService(BaseService):
         html_path = os.path.join(exports_dir, f"{filename}.html")
         try:
             safe_print("INFO: [TemplateService] حفظ HTML كـ fallback...")
-            with open(html_path, 'w', encoding='utf-8') as f:
+            with open(html_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
             safe_print(f"⚠️ [TemplateService] تم حفظ HTML: {html_path}")
             return html_path
@@ -892,9 +1097,6 @@ class TemplateService(BaseService):
     def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> str | None:
         """توليد PDF باستخدام PyQt6 - محسّن للسرعة"""
         try:
-            from PyQt6.QtCore import QEventLoop, QTimer, QUrl
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
-            from PyQt6.QtWidgets import QApplication
 
             app = QApplication.instance()
             if not app:
@@ -942,15 +1144,14 @@ class TemplateService(BaseService):
 
     def _open_file(self, file_path: str) -> bool:
         """فتح الملف في البرنامج الافتراضي"""
-        import subprocess
+
         try:
-            import sys
-            if sys.platform == 'win32':
+            if sys.platform == "win32":
                 os.startfile(file_path)
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', file_path], check=False)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", file_path], check=False)
             else:
-                subprocess.run(['xdg-open', file_path], check=False)
+                subprocess.run(["xdg-open", file_path], check=False)
             return True
         except Exception as e:
             safe_print(f"WARNING: [TemplateService] فشل فتح الملف: {e}")
@@ -962,7 +1163,7 @@ class TemplateService(BaseService):
         client_info: dict[str, str],
         output_path: str,
         template_id: int | None = None,
-        payments: list[dict[str, Any]] | None = None
+        payments: list[dict[str, Any]] | None = None,
     ) -> bool:
         """حفظ فاتورة HTML في ملف"""
         try:
@@ -970,7 +1171,7 @@ class TemplateService(BaseService):
             html_content = self.generate_invoice_html(project, client_info, template_id, payments)
 
             # حفظ في الملف
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
 
             safe_print(f"INFO: تم حفظ فاتورة HTML: {output_path}")
@@ -985,10 +1186,10 @@ class TemplateService(BaseService):
         cursor = None
         try:
             # حفظ ملف القالب
-            template_filename = f"{name.replace(' ', '_').lower()}.html"
-            template_path = os.path.join(self.templates_dir, template_filename)
+            template_filename = self._sanitize_template_filename(name)
+            template_path = self._safe_template_path(template_filename)
 
-            with open(template_path, 'w', encoding='utf-8') as f:
+            with open(template_path, "w", encoding="utf-8") as f:
                 f.write(template_content)
 
             # إضافة إلى قاعدة البيانات
@@ -1011,7 +1212,9 @@ class TemplateService(BaseService):
             if cursor:
                 cursor.close()
 
-    def update_template(self, template_id: int, name: str, description: str, template_content: str) -> bool:
+    def update_template(
+        self, template_id: int, name: str, description: str, template_content: str
+    ) -> bool:
         """تحديث قالب موجود"""
         cursor = None
         try:
@@ -1022,17 +1225,17 @@ class TemplateService(BaseService):
                 return False
 
             # تحديث ملف القالب
-            old_filename = template['template_file']
-            new_filename = f"{name.replace(' ', '_').lower()}.html"
+            old_filename = template["template_file"]
+            new_filename = self._sanitize_template_filename(name)
 
             # حفظ المحتوى الجديد
-            template_path = os.path.join(self.templates_dir, new_filename)
-            with open(template_path, 'w', encoding='utf-8') as f:
+            template_path = self._safe_template_path(new_filename)
+            with open(template_path, "w", encoding="utf-8") as f:
                 f.write(template_content)
 
             # حذف الملف القديم إذا كان الاسم مختلف
             if old_filename != new_filename:
-                old_path = os.path.join(self.templates_dir, old_filename)
+                old_path = self._safe_template_path(old_filename)
                 if os.path.exists(old_path):
                     os.remove(old_path)
 
@@ -1093,12 +1296,12 @@ class TemplateService(BaseService):
 
             # منع حذف القالب الافتراضي إذا كان الوحيد
             templates = self.get_all_templates()
-            if template_info['is_default'] and len(templates) == 1:
+            if template_info["is_default"] and len(templates) == 1:
                 safe_print("ERROR: لا يمكن حذف القالب الافتراضي الوحيد")
                 return False
 
             # حذف ملف القالب
-            template_path = os.path.join(self.templates_dir, template_info['template_file'])
+            template_path = self._safe_template_path(template_info["template_file"])
             if os.path.exists(template_path):
                 os.remove(template_path)
 
@@ -1109,10 +1312,10 @@ class TemplateService(BaseService):
             self.repo.sqlite_conn.commit()
 
             # إذا كان القالب المحذوف افتراضياً، تعيين آخر كافتراضي
-            if template_info['is_default']:
+            if template_info["is_default"]:
                 remaining_templates = self.get_all_templates()
                 if remaining_templates:
-                    self.set_default_template(remaining_templates[0]['id'])
+                    self.set_default_template(remaining_templates[0]["id"])
 
             safe_print(f"INFO: تم حذف القالب: {template_info['name']}")
             return True

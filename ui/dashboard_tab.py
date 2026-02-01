@@ -6,10 +6,14 @@
 
 import json
 import os
+import shutil
+import sys
 from datetime import datetime, timedelta
 
 from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QButtonGroup,
     QDateEdit,
     QFrame,
@@ -32,6 +36,7 @@ from ui.styles import TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
+
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     FigureCanvas = None
@@ -42,6 +47,7 @@ except ImportError:
 try:
     import arabic_reshaper
     from bidi.algorithm import get_display
+
     ARABIC_RESHAPER_AVAILABLE = True
 except ImportError:
     arabic_reshaper = None
@@ -55,6 +61,7 @@ from services.accounting_service import AccountingService
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -88,7 +95,8 @@ class StatCard(QFrame):
         self.setMinimumWidth(180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: #1e293b;
                 border-radius: 15px;
@@ -113,7 +121,8 @@ class StatCard(QFrame):
             QLabel#Icon {{
                 font-size: 28px;
             }}
-        """)
+        """
+        )
 
         layout = QHBoxLayout()
         layout.setContentsMargins(18, 12, 18, 12)
@@ -154,13 +163,7 @@ class EnhancedKPICard(QFrame):
     Requirements: 1.1, 1.4, 1.5, 1.6, 1.7
     """
 
-    def __init__(
-        self,
-        title: str,
-        icon: str,
-        color_hex: str,
-        parent: QWidget = None
-    ):
+    def __init__(self, title: str, icon: str, color_hex: str, parent: QWidget = None):
         """
         Args:
             title: عنوان المؤشر (مثل "إجمالي الإيرادات")
@@ -186,7 +189,8 @@ class EnhancedKPICard(QFrame):
 
     def _apply_styles(self):
         """تطبيق الأنماط على البطاقة"""
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: #1e293b;
                 border-radius: 15px;
@@ -229,7 +233,8 @@ class EnhancedKPICard(QFrame):
                 font-weight: bold;
                 font-family: 'Cairo';
             }}
-        """)
+        """
+        )
 
     def _init_ui(self):
         """تهيئة واجهة المستخدم"""
@@ -323,9 +328,7 @@ class EnhancedKPICard(QFrame):
             KPIData object مع القيم الحالية
         """
         return KPIData(
-            name=self.title,
-            current_value=self._current_value,
-            previous_value=self._previous_value
+            name=self.title, current_value=self._current_value, previous_value=self._previous_value
         )
 
     @property
@@ -359,7 +362,7 @@ class FinancialChart(_ChartBase):
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
-        self.fig.patch.set_facecolor('#1e293b')
+        self.fig.patch.set_facecolor("#1e293b")
 
     def plot_data(self, sales: float, expenses: float, profit: float):
         """رسم البيانات مع دعم العربية"""
@@ -369,24 +372,24 @@ class FinancialChart(_ChartBase):
         self.axes.clear()
 
         # البيانات مع إصلاح النص العربي
-        categories = [fix_text('المبيعات'), fix_text('المصروفات'), fix_text('صافي الربح')]
+        categories = [fix_text("المبيعات"), fix_text("المصروفات"), fix_text("صافي الربح")]
         values = [sales, expenses, profit]
-        colors = ['#3b82f6', '#ef4444', '#10b981']  # أزرق، أحمر، أخضر
+        colors = ["#3b82f6", "#ef4444", "#10b981"]  # أزرق، أحمر، أخضر
 
         # الرسم
         bars = self.axes.bar(categories, values, color=colors, width=0.5)
 
         # تنسيق المحاور والألوان (Dark Mode)
-        self.axes.set_facecolor('#1e293b')
-        self.axes.tick_params(axis='x', colors='white', labelsize=11)
-        self.axes.tick_params(axis='y', colors='white', labelsize=10)
-        self.axes.spines['bottom'].set_color('#475569')
-        self.axes.spines['left'].set_color('#475569')
-        self.axes.spines['top'].set_visible(False)
-        self.axes.spines['right'].set_visible(False)
+        self.axes.set_facecolor("#1e293b")
+        self.axes.tick_params(axis="x", colors="white", labelsize=11)
+        self.axes.tick_params(axis="y", colors="white", labelsize=10)
+        self.axes.spines["bottom"].set_color("#475569")
+        self.axes.spines["left"].set_color("#475569")
+        self.axes.spines["top"].set_visible(False)
+        self.axes.spines["right"].set_visible(False)
 
         # خطوط الشبكة
-        self.axes.grid(axis='y', linestyle='--', alpha=0.2, color='#475569')
+        self.axes.grid(axis="y", linestyle="--", alpha=0.2, color="#475569")
         self.axes.set_axisbelow(True)
 
         # زيادة سقف الرسم
@@ -397,10 +400,14 @@ class FinancialChart(_ChartBase):
         for bar in bars:
             height = bar.get_height()
             self.axes.text(
-                bar.get_x() + bar.get_width() / 2., height,
-                f'{height:,.0f}',
-                ha='center', va='bottom',
-                color='white', fontweight='bold', fontsize=10
+                bar.get_x() + bar.get_width() / 2.0,
+                height,
+                f"{height:,.0f}",
+                ha="center",
+                va="bottom",
+                color="white",
+                fontweight="bold",
+                fontsize=10,
             )
 
         self.fig.tight_layout(pad=1.5)
@@ -425,18 +432,18 @@ class CashFlowChart(_ChartBase):
         self.axes = self.fig.add_subplot(111)
         super().__init__(self.fig)
         self.setParent(parent)
-        self.fig.patch.set_facecolor('#1e293b')
+        self.fig.patch.set_facecolor("#1e293b")
 
         # ألوان المخطط
-        self.inflow_color = '#10b981'   # أخضر للدفعات الداخلة
-        self.outflow_color = '#ef4444'  # أحمر للمصروفات
-        self.net_color = '#3b82f6'      # أزرق لصافي التدفق
+        self.inflow_color = "#10b981"  # أخضر للدفعات الداخلة
+        self.outflow_color = "#ef4444"  # أحمر للمصروفات
+        self.net_color = "#3b82f6"  # أزرق لصافي التدفق
 
     def plot_cash_flow(
         self,
         inflows: list[tuple[str, float]],
         outflows: list[tuple[str, float]],
-        period: str = "monthly"
+        period: str = "monthly",
     ) -> None:
         """
         رسم مخطط التدفق النقدي
@@ -464,38 +471,60 @@ class CashFlowChart(_ChartBase):
         # تحضير البيانات للرسم
         inflow_values = [aggregated_inflows.get(p, 0.0) for p in all_periods]
         outflow_values = [aggregated_outflows.get(p, 0.0) for p in all_periods]
-        net_values = [aggregated_inflows.get(p, 0.0) - aggregated_outflows.get(p, 0.0) for p in all_periods]
+        net_values = [
+            aggregated_inflows.get(p, 0.0) - aggregated_outflows.get(p, 0.0) for p in all_periods
+        ]
 
         # إصلاح النصوص العربية للتسميات
         x_labels = [fix_text(self._format_period_label(p, period)) for p in all_periods]
         x_positions = range(len(all_periods))
 
         # رسم الخطوط
-        self.axes.plot(x_positions, inflow_values,
-                      color=self.inflow_color, marker='o', linewidth=2,
-                      label=fix_text('الدفعات الداخلة'), markersize=6)
-        self.axes.plot(x_positions, outflow_values,
-                      color=self.outflow_color, marker='s', linewidth=2,
-                      label=fix_text('المصروفات'), markersize=6)
-        self.axes.plot(x_positions, net_values,
-                      color=self.net_color, marker='^', linewidth=2, linestyle='--',
-                      label=fix_text('صافي التدفق'), markersize=6)
+        self.axes.plot(
+            x_positions,
+            inflow_values,
+            color=self.inflow_color,
+            marker="o",
+            linewidth=2,
+            label=fix_text("الدفعات الداخلة"),
+            markersize=6,
+        )
+        self.axes.plot(
+            x_positions,
+            outflow_values,
+            color=self.outflow_color,
+            marker="s",
+            linewidth=2,
+            label=fix_text("المصروفات"),
+            markersize=6,
+        )
+        self.axes.plot(
+            x_positions,
+            net_values,
+            color=self.net_color,
+            marker="^",
+            linewidth=2,
+            linestyle="--",
+            label=fix_text("صافي التدفق"),
+            markersize=6,
+        )
 
         # تنسيق المحاور
         self._style_axes(x_positions, x_labels)
 
         # إضافة الأسطورة
-        self.axes.legend(loc='upper left', facecolor='#1e293b', edgecolor='#475569',
-                        labelcolor='white', fontsize=9)
+        self.axes.legend(
+            loc="upper left",
+            facecolor="#1e293b",
+            edgecolor="#475569",
+            labelcolor="white",
+            fontsize=9,
+        )
 
         self.fig.tight_layout(pad=1.5)
         self.draw()
 
-    def _aggregate_by_period(
-        self,
-        data: list[tuple[str, float]],
-        period: str
-    ) -> dict[str, float]:
+    def _aggregate_by_period(self, data: list[tuple[str, float]], period: str) -> dict[str, float]:
         """
         تجميع البيانات حسب الفترة الزمنية
 
@@ -522,23 +551,35 @@ class CashFlowChart(_ChartBase):
         if period_type == "daily":
             # YYYY-MM-DD -> DD/MM
             try:
-                parts = period_key.split('-')
+                parts = period_key.split("-")
                 return f"{parts[2]}/{parts[1]}"
             except (IndexError, ValueError):
                 return period_key
         elif period_type == "weekly":
             # YYYY-WXX -> أسبوع XX
             try:
-                week_num = period_key.split('-W')[1]
+                week_num = period_key.split("-W")[1]
                 return f"أسبوع {week_num}"
             except (IndexError, ValueError):
                 return period_key
         else:  # monthly
             # YYYY-MM -> MM/YYYY
             try:
-                parts = period_key.split('-')
-                months_ar = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-                            'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر']
+                parts = period_key.split("-")
+                months_ar = [
+                    "يناير",
+                    "فبراير",
+                    "مارس",
+                    "أبريل",
+                    "مايو",
+                    "يونيو",
+                    "يوليو",
+                    "أغسطس",
+                    "سبتمبر",
+                    "أكتوبر",
+                    "نوفمبر",
+                    "ديسمبر",
+                ]
                 month_idx = int(parts[1]) - 1
                 if 0 <= month_idx < 12:
                     return months_ar[month_idx]
@@ -548,31 +589,38 @@ class CashFlowChart(_ChartBase):
 
     def _style_axes(self, x_positions, x_labels):
         """تنسيق المحاور والألوان"""
-        self.axes.set_facecolor('#1e293b')
-        self.axes.tick_params(axis='x', colors='white', labelsize=9, rotation=45)
-        self.axes.tick_params(axis='y', colors='white', labelsize=10)
-        self.axes.spines['bottom'].set_color('#475569')
-        self.axes.spines['left'].set_color('#475569')
-        self.axes.spines['top'].set_visible(False)
-        self.axes.spines['right'].set_visible(False)
+        self.axes.set_facecolor("#1e293b")
+        self.axes.tick_params(axis="x", colors="white", labelsize=9, rotation=45)
+        self.axes.tick_params(axis="y", colors="white", labelsize=10)
+        self.axes.spines["bottom"].set_color("#475569")
+        self.axes.spines["left"].set_color("#475569")
+        self.axes.spines["top"].set_visible(False)
+        self.axes.spines["right"].set_visible(False)
 
         # تسميات المحور X
         self.axes.set_xticks(list(x_positions))
-        self.axes.set_xticklabels(x_labels, ha='right')
+        self.axes.set_xticklabels(x_labels, ha="right")
 
         # خطوط الشبكة
-        self.axes.grid(axis='y', linestyle='--', alpha=0.2, color='#475569')
+        self.axes.grid(axis="y", linestyle="--", alpha=0.2, color="#475569")
         self.axes.set_axisbelow(True)
 
         # خط الصفر
-        self.axes.axhline(y=0, color='#475569', linestyle='-', linewidth=0.5)
+        self.axes.axhline(y=0, color="#475569", linestyle="-", linewidth=0.5)
 
     def _draw_empty_chart(self):
         """رسم مخطط فارغ عند عدم وجود بيانات"""
-        self.axes.set_facecolor('#1e293b')
-        self.axes.text(0.5, 0.5, fix_text('لا توجد بيانات'),
-                      ha='center', va='center', color='#94a3b8',
-                      fontsize=14, transform=self.axes.transAxes)
+        self.axes.set_facecolor("#1e293b")
+        self.axes.text(
+            0.5,
+            0.5,
+            fix_text("لا توجد بيانات"),
+            ha="center",
+            va="center",
+            color="#94a3b8",
+            fontsize=14,
+            transform=self.axes.transAxes,
+        )
         self.axes.set_xticks([])
         self.axes.set_yticks([])
         for spine in self.axes.spines.values():
@@ -597,7 +645,7 @@ class PeriodSelector(QFrame):
         "this_week": "هذا الأسبوع",
         "this_month": "هذا الشهر",
         "this_year": "هذا العام",
-        "custom": "فترة مخصصة"
+        "custom": "فترة مخصصة",
     }
 
     SETTINGS_FILE = "skywave_settings.json"
@@ -607,9 +655,36 @@ class PeriodSelector(QFrame):
         self._current_period = "this_month"
         self._custom_start = None
         self._custom_end = None
+        data_dir = os.environ.get("SKYWAVEERP_DATA_DIR") or os.path.join(
+            os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+            "SkyWaveERP",
+        )
+        os.makedirs(data_dir, exist_ok=True)
+        self.SETTINGS_FILE = os.path.join(data_dir, "skywave_settings.json")
+        if not os.path.exists(self.SETTINGS_FILE):
+            legacy_paths = [os.path.join(os.getcwd(), "skywave_settings.json")]
+            if getattr(sys, "frozen", False):
+                legacy_paths.append(
+                    os.path.join(os.path.dirname(sys.executable), "skywave_settings.json")
+                )
+            else:
+                project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                legacy_paths.append(os.path.join(project_root, "skywave_settings.json"))
+            for legacy in legacy_paths:
+                if (
+                    legacy
+                    and os.path.exists(legacy)
+                    and os.path.abspath(legacy) != os.path.abspath(self.SETTINGS_FILE)
+                ):
+                    try:
+                        shutil.copy2(legacy, self.SETTINGS_FILE)
+                        break
+                    except Exception:
+                        pass
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QFrame {
                 background-color: #1e293b;
                 border-radius: 10px;
@@ -650,7 +725,8 @@ class PeriodSelector(QFrame):
                 background: transparent;
                 border: none;
             }
-        """)
+        """
+        )
 
         self._init_ui()
         self.load_selection()
@@ -776,32 +852,51 @@ class PeriodSelector(QFrame):
             if self._custom_start and self._custom_end:
                 start = datetime.combine(self._custom_start, datetime.min.time())
                 end = datetime.combine(self._custom_end, datetime.max.time())
+                if start > end:
+                    start, end = end, start
                 return start, end
-            # fallback to this month
-            return self.get_date_range()
+            start = today.replace(day=1)
+            if today.month == 12:
+                end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(seconds=1)
+            else:
+                end = today.replace(month=today.month + 1, day=1) - timedelta(seconds=1)
+            return start, end
 
         # Default: this month
-        return self.get_date_range()
+        start = today.replace(day=1)
+        if today.month == 12:
+            end = today.replace(year=today.year + 1, month=1, day=1) - timedelta(seconds=1)
+        else:
+            end = today.replace(month=today.month + 1, day=1) - timedelta(seconds=1)
+        return start, end
 
     def save_selection(self) -> None:
         """حفظ الاختيار في ملف الإعدادات"""
         try:
             settings = {}
             if os.path.exists(self.SETTINGS_FILE):
-                with open(self.SETTINGS_FILE, encoding='utf-8') as f:
+                with open(self.SETTINGS_FILE, encoding="utf-8") as f:
                     settings = json.load(f)
 
             # تحديث إعدادات لوحة التحكم
-            dashboard_settings = settings.get('dashboard', {})
-            dashboard_settings['selected_period'] = self._current_period
+            dashboard_settings = settings.get("dashboard", {})
+            dashboard_settings["selected_period"] = self._current_period
 
             if self._current_period == "custom" and self._custom_start and self._custom_end:
-                dashboard_settings['custom_start_date'] = self._custom_start.isoformat() if hasattr(self._custom_start, 'isoformat') else str(self._custom_start)
-                dashboard_settings['custom_end_date'] = self._custom_end.isoformat() if hasattr(self._custom_end, 'isoformat') else str(self._custom_end)
+                dashboard_settings["custom_start_date"] = (
+                    self._custom_start.isoformat()
+                    if hasattr(self._custom_start, "isoformat")
+                    else str(self._custom_start)
+                )
+                dashboard_settings["custom_end_date"] = (
+                    self._custom_end.isoformat()
+                    if hasattr(self._custom_end, "isoformat")
+                    else str(self._custom_end)
+                )
 
-            settings['dashboard'] = dashboard_settings
+            settings["dashboard"] = dashboard_settings
 
-            with open(self.SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
 
         except Exception as e:
@@ -813,11 +908,11 @@ class PeriodSelector(QFrame):
             if not os.path.exists(self.SETTINGS_FILE):
                 return
 
-            with open(self.SETTINGS_FILE, encoding='utf-8') as f:
+            with open(self.SETTINGS_FILE, encoding="utf-8") as f:
                 settings = json.load(f)
 
-            dashboard_settings = settings.get('dashboard', {})
-            saved_period = dashboard_settings.get('selected_period', 'this_month')
+            dashboard_settings = settings.get("dashboard", {})
+            saved_period = dashboard_settings.get("selected_period", "this_month")
 
             if saved_period in self.PERIODS:
                 self._current_period = saved_period
@@ -830,24 +925,38 @@ class PeriodSelector(QFrame):
                 if saved_period == "custom":
                     self._toggle_custom_dates(True)
 
-                    custom_start = dashboard_settings.get('custom_start_date')
-                    custom_end = dashboard_settings.get('custom_end_date')
+                    custom_start = dashboard_settings.get("custom_start_date")
+                    custom_end = dashboard_settings.get("custom_end_date")
 
                     if custom_start:
                         try:
                             from datetime import date
+
                             if isinstance(custom_start, str):
                                 self._custom_start = date.fromisoformat(custom_start)
-                            self.date_from.setDate(QDate(self._custom_start.year, self._custom_start.month, self._custom_start.day))
+                            self.date_from.setDate(
+                                QDate(
+                                    self._custom_start.year,
+                                    self._custom_start.month,
+                                    self._custom_start.day,
+                                )
+                            )
                         except (ValueError, AttributeError):
                             pass
 
                     if custom_end:
                         try:
                             from datetime import date
+
                             if isinstance(custom_end, str):
                                 self._custom_end = date.fromisoformat(custom_end)
-                            self.date_to.setDate(QDate(self._custom_end.year, self._custom_end.month, self._custom_end.day))
+                            self.date_to.setDate(
+                                QDate(
+                                    self._custom_end.year,
+                                    self._custom_end.month,
+                                    self._custom_end.day,
+                                )
+                            )
                         except (ValueError, AttributeError):
                             pass
 
@@ -865,7 +974,7 @@ class PeriodSelector(QFrame):
         return DashboardSettings(
             selected_period=self._current_period,
             custom_start_date=start_date if self._current_period == "custom" else None,
-            custom_end_date=end_date if self._current_period == "custom" else None
+            custom_end_date=end_date if self._current_period == "custom" else None,
         )
 
     def set_period(self, period_key: str) -> None:
@@ -939,7 +1048,8 @@ class DashboardTab(QWidget):
         header.setStyleSheet("color: white;")
 
         self.refresh_btn = QPushButton("🔄 تحديث")
-        self.refresh_btn.setStyleSheet("""
+        self.refresh_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #3b82f6;
                 color: white;
@@ -950,11 +1060,22 @@ class DashboardTab(QWidget):
                 font-family: 'Cairo';
             }
             QPushButton:hover { background-color: #2563eb; }
-        """)
+        """
+        )
         self.refresh_btn.clicked.connect(self.refresh_data)
+
+        self.last_update_lbl = QLabel("آخر تحديث: —")
+        self.last_update_lbl.setStyleSheet(
+            """
+            color: #94a3b8;
+            font-size: 11px;
+            font-family: 'Cairo';
+        """
+        )
 
         header_layout.addWidget(header)
         header_layout.addStretch()
+        header_layout.addWidget(self.last_update_lbl)
         header_layout.addWidget(self.refresh_btn)
         main_layout.addLayout(header_layout)
 
@@ -968,8 +1089,15 @@ class DashboardTab(QWidget):
         self.card_collected = StatCard("النقدية المحصلة", "0.00 EGP", "💰", "#10b981")
         self.card_receivables = StatCard("مستحقات آجلة", "0.00 EGP", "📝", "#f59e0b")
         self.card_expenses = StatCard("المصروفات", "0.00 EGP", "💸", "#ef4444")
+        self.card_net_profit = StatCard("صافي الربح", "0.00 EGP", "📈", "#22c55e")
 
-        self.stat_cards = [self.card_sales, self.card_collected, self.card_receivables, self.card_expenses]
+        self.stat_cards = [
+            self.card_sales,
+            self.card_collected,
+            self.card_receivables,
+            self.card_expenses,
+            self.card_net_profit,
+        ]
 
         # ترتيب أولي (سيتم تحديثه في resizeEvent)
         for i, card in enumerate(self.stat_cards):
@@ -980,35 +1108,41 @@ class DashboardTab(QWidget):
         # === 3. القسم السفلي - Splitter للتحكم التلقائي ===
         self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.bottom_splitter.setChildrenCollapsible(False)
-        self.bottom_splitter.setStyleSheet("""
+        self.bottom_splitter.setStyleSheet(
+            """
             QSplitter::handle {
                 background-color: #334155;
                 width: 3px;
                 margin: 0 5px;
             }
-        """)
+        """
+        )
 
         # أ) الرسم البياني
         self.chart_container = QFrame()
-        self.chart_container.setStyleSheet("""
+        self.chart_container.setStyleSheet(
+            """
             QFrame {
                 background-color: #1e293b;
                 border-radius: 15px;
                 border: 1px solid #334155;
             }
-        """)
+        """
+        )
         chart_layout = QVBoxLayout(self.chart_container)
         chart_layout.setContentsMargins(15, 15, 15, 15)
 
         lbl_chart = QLabel("📈 الملخص المالي")
-        lbl_chart.setStyleSheet("""
+        lbl_chart.setStyleSheet(
+            """
             color: white;
             font-weight: bold;
             font-size: 14px;
             border: none;
             background: transparent;
             font-family: 'Cairo';
-        """)
+        """
+        )
         chart_layout.addWidget(lbl_chart)
 
         self.chart = FinancialChart(self)
@@ -1017,26 +1151,34 @@ class DashboardTab(QWidget):
 
         # ب) جدول آخر العمليات
         self.table_container = QFrame()
-        self.table_container.setStyleSheet("""
+        self.table_container.setStyleSheet(
+            """
             QFrame {
                 background-color: #1e293b;
                 border-radius: 15px;
                 border: 1px solid #334155;
             }
-        """)
+        """
+        )
         table_layout = QVBoxLayout(self.table_container)
         table_layout.setContentsMargins(15, 15, 15, 15)
 
         lbl_table = QLabel("📝 آخر العمليات المسجلة")
-        lbl_table.setStyleSheet("""
+        lbl_table.setStyleSheet(
+            """
             color: white;
             font-weight: bold;
             font-size: 14px;
             border: none;
             background: transparent;
             font-family: 'Cairo';
-        """)
+        """
+        )
         table_layout.addWidget(lbl_table)
+
+        self.recent_hint_lbl = QLabel("")
+        self.recent_hint_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-family: 'Cairo';")
+        table_layout.addWidget(self.recent_hint_lbl)
 
         self.recent_table = QTableWidget()
         self.recent_table.setColumnCount(3)
@@ -1046,7 +1188,13 @@ class DashboardTab(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.recent_table.verticalHeader().setVisible(False)
+        self.recent_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.recent_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.recent_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.recent_table.setAlternatingRowColors(True)
+        self.recent_table.setSortingEnabled(True)
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.recent_table)
         self.recent_table.setStyleSheet(TABLE_STYLE_DARK)
         self.recent_table.verticalHeader().setDefaultSectionSize(32)
@@ -1116,6 +1264,8 @@ class DashboardTab(QWidget):
         self._is_refreshing = True
         self._last_refresh_time = current_time
         safe_print("INFO: [Dashboard] جاري تحديث أرقام الداشبورد...")
+        self.refresh_btn.setEnabled(False)
+        self.refresh_btn.setText("⏳ جاري التحديث...")
 
         from core.data_loader import get_data_loader
 
@@ -1123,16 +1273,16 @@ class DashboardTab(QWidget):
             try:
                 # استخدام الدالة الموحدة الجديدة
                 stats = self.accounting_service.get_dashboard_stats()
-                recent = self.accounting_service.get_recent_journal_entries(8)
-                return {'stats': stats, 'recent': recent}
+                recent = self.accounting_service.get_recent_activity(8)
+                return {"stats": stats, "recent": recent}
             except Exception as e:
                 safe_print(f"ERROR: [Dashboard] فشل جلب البيانات: {e}")
                 return {}
 
         def on_data_loaded(data):
             try:
-                stats = data.get('stats', {})
-                recent = data.get('recent', [])
+                stats = data.get("stats", {})
+                recent = data.get("recent", [])
 
                 # استخراج القيم من المصدر الموحد
                 sales = stats.get("total_sales", 0)
@@ -1146,38 +1296,63 @@ class DashboardTab(QWidget):
                 self.card_collected.set_value(collected)
                 self.card_receivables.set_value(receivables)
                 self.card_expenses.set_value(expenses)
+                self.card_net_profit.set_value(net_profit)
 
                 # تحديث الرسم البياني (نفس البيانات بالضبط)
                 self.chart.plot_data(sales, expenses, net_profit)
 
                 # تحديث جدول آخر العمليات
-                self.recent_table.setRowCount(len(recent))
-                for i, entry in enumerate(recent):
-                    if isinstance(entry, dict):
-                        date_val = entry.get('date', '')
-                        desc_val = entry.get('description', '')
-                        amount_val = entry.get('amount', 0)
-                    else:
-                        # tuple format
-                        date_val = str(entry[0]) if len(entry) > 0 else ''
-                        desc_val = str(entry[1]) if len(entry) > 1 else ''
-                        amount_val = entry[2] if len(entry) > 2 else 0
+                self.recent_table.setSortingEnabled(False)
+                if not recent:
+                    self.recent_hint_lbl.setText("لا توجد عمليات لعرضها حالياً.")
+                    self.recent_table.setRowCount(0)
+                else:
+                    self.recent_hint_lbl.setText("")
+                    self.recent_table.setRowCount(len(recent))
+                    for i, entry in enumerate(recent):
+                        if isinstance(entry, dict):
+                            date_val = entry.get("date", "")
+                            desc_val = entry.get("description", "")
+                            amount_val = entry.get("amount", 0)
+                        else:
+                            date_val = str(entry[0]) if len(entry) > 0 else ""
+                            desc_val = str(entry[1]) if len(entry) > 1 else ""
+                            amount_val = entry[2] if len(entry) > 2 else 0
 
-                    self.recent_table.setItem(i, 0, create_centered_item(date_val))
-                    self.recent_table.setItem(i, 1, create_centered_item(desc_val))
-                    self.recent_table.setItem(i, 2, create_centered_item(f"{amount_val:,.2f}"))
+                        amount_float = float(amount_val or 0)
+                        amount_item = create_centered_item(f"{amount_float:,.2f}")
+                        amount_item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+                        )
+                        amount_item.setForeground(
+                            QBrush(QColor("#22c55e" if amount_float >= 0 else "#ef4444"))
+                        )
+
+                        self.recent_table.setItem(i, 0, create_centered_item(date_val))
+                        self.recent_table.setItem(i, 1, create_centered_item(desc_val))
+                        self.recent_table.setItem(i, 2, amount_item)
+                self.recent_table.setSortingEnabled(True)
+
+                self.last_update_lbl.setText(
+                    f"آخر تحديث: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
 
                 safe_print("INFO: [Dashboard] ✅ تم تحديث الداشبورد بنجاح")
             except Exception as e:
                 safe_print(f"ERROR: [Dashboard] فشل تحديث الواجهة: {e}")
                 import traceback
+
                 traceback.print_exc()
             finally:
                 self._is_refreshing = False
+                self.refresh_btn.setEnabled(True)
+                self.refresh_btn.setText("🔄 تحديث")
 
         def on_error(error_msg):
             safe_print(f"ERROR: [Dashboard] {error_msg}")
             self._is_refreshing = False
+            self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setText("🔄 تحديث")
 
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -1185,5 +1360,5 @@ class DashboardTab(QWidget):
             load_function=fetch_data,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )

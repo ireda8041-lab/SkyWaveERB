@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=too-many-lines,too-many-public-methods,too-many-positional-arguments
 """
 نظام إدارة المهام الاحترافي - Sky Wave ERP
 Professional TODO Management System
@@ -428,7 +429,6 @@ class TaskService:
         except Exception as e:
             safe_print(f"ERROR: [TaskService] فشل إضافة المهمة: {e}")
 
-
             traceback.print_exc()
             return task
 
@@ -464,7 +464,6 @@ class TaskService:
     def _emit_change_signal(self):
         """إرسال إشارة تغيير البيانات"""
         try:
-
 
             app_signals.emit_data_changed("tasks")
         except Exception:
@@ -561,7 +560,6 @@ class TaskService:
 
     def generate_id(self) -> str:
         """توليد ID فريد"""
-
 
         return str(uuid.uuid4())[:8]
 
@@ -662,7 +660,6 @@ class TaskSettingsDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         try:
-
 
             setup_custom_title_bar(self)
         except (ImportError, AttributeError):
@@ -992,7 +989,6 @@ class TaskEditorDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         try:
-
 
             setup_custom_title_bar(self)
         except (ImportError, AttributeError):
@@ -1440,7 +1436,6 @@ class TaskEditorDialog(QDialog):
                 completed_at = None
         else:
 
-
             task_id = str(uuid.uuid4())[:8]
             created_at = datetime.now()
             status = TaskStatus.TODO
@@ -1506,7 +1501,6 @@ class TodoManagerWidget(QWidget):
 
         # ⚡ ربط آمن للإشارات (يفصل أولاً ثم يربط لمنع التكرارات)
         try:
-
 
             app_signals.safe_connect(app_signals.tasks_changed, self._on_tasks_changed)
         except Exception as e:
@@ -1575,7 +1569,6 @@ class TodoManagerWidget(QWidget):
         left_panel = QVBoxLayout()
 
         # === شريط الأزرار المتجاوب ===
-
 
         self.toolbar = ResponsiveToolbar()
 
@@ -1662,7 +1655,6 @@ class TodoManagerWidget(QWidget):
 
         # شريط البحث
 
-
         self.tasks_table = QTableWidget()
         self.tasks_table.setColumnCount(6)
         self.tasks_table.setHorizontalHeaderLabels(
@@ -1675,7 +1667,6 @@ class TodoManagerWidget(QWidget):
         # إعدادات الجدول
         self.tasks_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
-
 
         fix_table_rtl(self.tasks_table)
         self.tasks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -1997,7 +1988,6 @@ class TodoManagerWidget(QWidget):
         """معالج تغيير اختيار المهمة"""
         # ⚡ تجاهل التحديث إذا كان الكليك يمين
 
-
         if is_right_click_active():
             return
 
@@ -2164,7 +2154,6 @@ class TodoManagerWidget(QWidget):
 
         except Exception as e:
             safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {e}")
-
 
             traceback.print_exc()
         finally:
@@ -2432,7 +2421,6 @@ class TodoManagerWidget(QWidget):
 
     def _on_table_context_menu(self, pos):
         """عرض قائمة السياق عند الضغط بالزر الأيمن"""
-
 
         item = self.tasks_table.itemAt(pos)
         if not item:

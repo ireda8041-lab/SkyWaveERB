@@ -39,7 +39,6 @@ try:
     from bidi.algorithm import get_display  # noqa: F401
     from reportlab.lib import colors  # noqa: F401
     from reportlab.lib.pagesizes import A4  # noqa: F401
-
     from reportlab.lib.utils import ImageReader  # noqa: F401
     from reportlab.pdfgen import canvas  # noqa: F401
 
@@ -487,9 +486,9 @@ class ProjectPrintingService:
             if platform.system() == "Windows":
                 os.startfile(file_path)
             elif platform.system() == "Darwin":  # macOS
-                subprocess.run(["open", file_path])
+                subprocess.run(["open", file_path], check=False)
             else:  # Linux
-                subprocess.run(["xdg-open", file_path])
+                subprocess.run(["xdg-open", file_path], check=False)
 
             safe_print(f"INFO: [ProjectPrintingService] Opened PDF: {file_path}")
         except Exception as e:
@@ -503,7 +502,6 @@ class ProjectPrinter:
         self.width, self.height = A4
 
         # تسجيل خط Cairo العربي
-        import os
         import sys
 
         # تحديد مسار خط Cairo

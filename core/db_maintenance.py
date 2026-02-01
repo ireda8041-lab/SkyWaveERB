@@ -12,6 +12,7 @@ from datetime import datetime
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -26,6 +27,7 @@ class DatabaseMaintenance:
         # ⚡ استخدام المسار الصحيح من Config
         if db_path is None:
             from core.config import Config
+
             db_path = Config.get_local_db_path()
 
         self.db_path = db_path
@@ -36,9 +38,8 @@ class DatabaseMaintenance:
     def should_run_monthly_maintenance() -> bool:
         """⚡ التحقق من ضرورة تشغيل الصيانة الشهرية"""
         try:
-            import os
             import json
-            from datetime import datetime
+            import os
 
             # ملف تتبع آخر صيانة (في المجلد الرئيسي)
             current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -49,13 +50,15 @@ class DatabaseMaintenance:
 
             # إذا الملف مش موجود، نشغل الصيانة
             if not os.path.exists(maintenance_file):
-                safe_print("INFO: [DBMaintenance] لم يتم العثور على ملف الصيانة - سيتم تشغيل الصيانة")
+                safe_print(
+                    "INFO: [DBMaintenance] لم يتم العثور على ملف الصيانة - سيتم تشغيل الصيانة"
+                )
                 return True
 
             # قراءة تاريخ آخر صيانة
-            with open(maintenance_file, 'r', encoding='utf-8') as f:
+            with open(maintenance_file, encoding="utf-8") as f:
                 data = json.load(f)
-                last_run_str = data.get('last_run', '2000-01-01')
+                last_run_str = data.get("last_run", "2000-01-01")
                 last_run = datetime.fromisoformat(last_run_str)
 
             # التحقق: مر شهر أو أكثر؟
@@ -66,17 +69,20 @@ class DatabaseMaintenance:
 
             # تشغيل الصيانة كل 30 يوم
             should_run = days_since_last >= 30
-            
+
             if should_run:
                 safe_print("INFO: [DBMaintenance] ✅ حان موعد الصيانة الشهرية")
             else:
-                safe_print(f"INFO: [DBMaintenance] ⏭️ لا حاجة للصيانة (باقي {30 - days_since_last} يوم)")
-            
+                safe_print(
+                    f"INFO: [DBMaintenance] ⏭️ لا حاجة للصيانة (باقي {30 - days_since_last} يوم)"
+                )
+
             return should_run
 
         except Exception as e:
             safe_print(f"WARNING: [DBMaintenance] فشل التحقق من موعد الصيانة: {e}")
             import traceback
+
             traceback.print_exc()
             return False
 
@@ -84,21 +90,17 @@ class DatabaseMaintenance:
     def mark_maintenance_done():
         """⚡ تسجيل تاريخ آخر صيانة"""
         try:
-            import os
             import json
-            from datetime import datetime
+            import os
 
             # ملف تتبع آخر صيانة (في المجلد الرئيسي)
             current_dir = os.path.dirname(os.path.abspath(__file__))
             root_dir = os.path.dirname(current_dir)  # الرجوع للمجلد الرئيسي
             maintenance_file = os.path.join(root_dir, "last_maintenance.json")
 
-            data = {
-                'last_run': datetime.now().isoformat(),
-                'version': '1.3.12'
-            }
+            data = {"last_run": datetime.now().isoformat(), "version": "1.3.12"}
 
-            with open(maintenance_file, 'w', encoding='utf-8') as f:
+            with open(maintenance_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
             safe_print(f"INFO: [DBMaintenance] ✅ تم تسجيل تاريخ الصيانة في: {maintenance_file}")
@@ -128,7 +130,7 @@ class DatabaseMaintenance:
     def run_all_maintenance(self, auto_mode: bool = False):
         """
         تشغيل كل عمليات الصيانة - محسّن للسرعة
-        
+
         Args:
             auto_mode: True إذا كانت الصيانة تلقائية (شهرية)
         """
@@ -136,15 +138,15 @@ class DatabaseMaintenance:
             return False
 
         start_time = time.time()
-        
+
         if auto_mode:
-            safe_print("\n" + "="*60)
+            safe_print("\n" + "=" * 60)
             safe_print("🔧 [DBMaintenance] صيانة شهرية تلقائية...")
-            safe_print("="*60)
+            safe_print("=" * 60)
         else:
-            safe_print("\n" + "="*60)
+            safe_print("\n" + "=" * 60)
             safe_print("🔧 [DBMaintenance] بدء صيانة قاعدة البيانات...")
-            safe_print("="*60)
+            safe_print("=" * 60)
 
         try:
             # ⚡ تشغيل كل العمليات في transaction واحد للسرعة
@@ -172,9 +174,9 @@ class DatabaseMaintenance:
             self.cursor.execute("ANALYZE")
 
             elapsed = time.time() - start_time
-            safe_print("="*60)
+            safe_print("=" * 60)
             safe_print(f"✅ [DBMaintenance] اكتملت الصيانة في {elapsed:.2f} ثانية")
-            safe_print("="*60 + "\n")
+            safe_print("=" * 60 + "\n")
 
             # ⚡ تسجيل تاريخ الصيانة إذا كانت تلقائية
             if auto_mode:
@@ -202,20 +204,24 @@ class DatabaseMaintenance:
 
         for idx_name, table, column in constraints:
             try:
-                self.cursor.execute(f"""
+                self.cursor.execute(
+                    f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS {idx_name}
                     ON {table}({column})
-                """)
+                """
+                )
             except Exception:
                 pass  # Index already exists
 
         # Unique indexes for MongoDB IDs
-        for table in ['projects', 'clients', 'services', 'payments']:
+        for table in ["projects", "clients", "services", "payments"]:
             try:
-                self.cursor.execute(f"""
+                self.cursor.execute(
+                    f"""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_{table}_mongo_id
                     ON {table}(_mongo_id) WHERE _mongo_id IS NOT NULL AND _mongo_id != ''
-                """)
+                """
+                )
             except Exception:
                 pass
 
@@ -232,10 +238,12 @@ class DatabaseMaintenance:
 
         for idx_name, table, column in performance_indexes:
             try:
-                self.cursor.execute(f"""
+                self.cursor.execute(
+                    f"""
                     CREATE INDEX IF NOT EXISTS {idx_name}
                     ON {table}({column})
-                """)
+                """
+                )
             except Exception:
                 pass
 
@@ -250,16 +258,16 @@ class DatabaseMaintenance:
 
         # تعريف الجداول والحقول الفريدة
         tables_config = {
-            'projects': 'name',
-            'clients': 'name',
-            'services': 'name',
-            'accounts': 'code',
-            'invoices': 'invoice_number',
-            'currencies': 'code',
-            'users': 'username',
-            'expenses': 'id',  # للمصروفات نستخدم _mongo_id
-            'notifications': 'id',
-            'tasks': 'id',
+            "projects": "name",
+            "clients": "name",
+            "services": "name",
+            "accounts": "code",
+            "invoices": "invoice_number",
+            "currencies": "code",
+            "users": "username",
+            "expenses": "id",  # للمصروفات نستخدم _mongo_id
+            "notifications": "id",
+            "tasks": "id",
         }
 
         for table, unique_field in tables_config.items():
@@ -273,14 +281,16 @@ class DatabaseMaintenance:
 
         # حذف الدفعات المكررة (بناءً على project_id + date + amount)
         try:
-            self.cursor.execute("""
+            self.cursor.execute(
+                """
                 DELETE FROM payments
                 WHERE id NOT IN (
                     SELECT MIN(CASE WHEN _mongo_id IS NOT NULL THEN id ELSE id + 1000000 END)
                     FROM payments
                     GROUP BY project_id, date, amount
                 )
-            """)
+            """
+            )
             deleted = self.cursor.rowcount
             total_deleted += deleted
             if deleted > 0:
@@ -301,13 +311,15 @@ class DatabaseMaintenance:
         يحتفظ بالسجل الذي له _mongo_id، وإلا الأقدم
         """
         # البحث عن التكرارات
-        self.cursor.execute(f"""
+        self.cursor.execute(
+            f"""
             SELECT {unique_field}, COUNT(*) as cnt
             FROM {table_name}
             WHERE {unique_field} IS NOT NULL AND {unique_field} != ''
             GROUP BY {unique_field}
             HAVING cnt > 1
-        """)
+        """
+        )
         duplicates = self.cursor.fetchall()
 
         if not duplicates:
@@ -319,13 +331,16 @@ class DatabaseMaintenance:
 
             # الحصول على كل السجلات المكررة مرتبة
             # الأولوية: 1. له _mongo_id  2. الأقدم (أقل id)
-            self.cursor.execute(f"""
+            self.cursor.execute(
+                f"""
                 SELECT id, _mongo_id FROM {table_name}
                 WHERE {unique_field} = ?
                 ORDER BY
                     CASE WHEN _mongo_id IS NOT NULL AND _mongo_id != '' THEN 0 ELSE 1 END,
                     id ASC
-            """, (unique_value,))
+            """,
+                (unique_value,),
+            )
             records = self.cursor.fetchall()
 
             # الاحتفاظ بالأول وحذف الباقي
@@ -341,10 +356,12 @@ class DatabaseMaintenance:
         safe_print("📋 [3/5] إصلاح أرقام الفواتير...")
 
         try:
-            self.cursor.execute("""
+            self.cursor.execute(
+                """
                 SELECT id, name FROM projects
                 WHERE invoice_number IS NULL OR invoice_number = ''
-            """)
+            """
+            )
             projects_without_invoice = self.cursor.fetchall()
 
             if not projects_without_invoice:
@@ -357,7 +374,7 @@ class DatabaseMaintenance:
                     # تحقق من وجود رقم محفوظ
                     self.cursor.execute(
                         "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
-                        (project_name,)
+                        (project_name,),
                     )
                     existing = self.cursor.fetchone()
 
@@ -373,13 +390,13 @@ class DatabaseMaintenance:
                         # احفظ الرقم الجديد
                         self.cursor.execute(
                             "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
-                            (project_name, invoice_number, datetime.now().isoformat())
+                            (project_name, invoice_number, datetime.now().isoformat()),
                         )
 
                     # حدّث المشروع
                     self.cursor.execute(
                         "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                        (invoice_number, project_id)
+                        (invoice_number, project_id),
                     )
                     fixed_count += 1
 
@@ -398,22 +415,26 @@ class DatabaseMaintenance:
 
         try:
             # تحديث المشاريع المتزامنة
-            self.cursor.execute("""
+            self.cursor.execute(
+                """
                 UPDATE projects
                 SET sync_status = 'synced'
                 WHERE _mongo_id IS NOT NULL
                 AND _mongo_id != ''
                 AND sync_status != 'synced'
-            """)
+            """
+            )
             updated = self.cursor.rowcount
 
             # تحديث المشاريع المحلية
-            self.cursor.execute("""
+            self.cursor.execute(
+                """
                 UPDATE projects
                 SET sync_status = 'new_offline'
                 WHERE (_mongo_id IS NULL OR _mongo_id = '')
                 AND sync_status != 'new_offline'
-            """)
+            """
+            )
             updated += self.cursor.rowcount
 
             self.db.commit()
@@ -445,11 +466,10 @@ class DatabaseMaintenance:
             self.cursor.execute("SELECT id, items FROM projects WHERE items IS NOT NULL")
             for row in self.cursor.fetchall():
                 project_id, items = row
-                if items and not items.startswith('['):
+                if items and not items.startswith("["):
                     # items فاسدة، نصلحها
                     self.cursor.execute(
-                        "UPDATE projects SET items = '[]' WHERE id = ?",
-                        (project_id,)
+                        "UPDATE projects SET items = '[]' WHERE id = ?", (project_id,)
                     )
                     cleaned += 1
 
@@ -460,16 +480,25 @@ class DatabaseMaintenance:
                 if lines_json:
                     try:
                         import json
-                        lines = json.loads(lines_json) if isinstance(lines_json, str) else lines_json
+
+                        lines = (
+                            json.loads(lines_json) if isinstance(lines_json, str) else lines_json
+                        )
                         needs_fix = False
                         for line in lines:
-                            if isinstance(line, dict) and ("account_id" not in line or not line.get("account_id")):
-                                line["account_id"] = line.get("account_code", "") or line.get("account_name", "") or "unknown"
+                            if isinstance(line, dict) and (
+                                "account_id" not in line or not line.get("account_id")
+                            ):
+                                line["account_id"] = (
+                                    line.get("account_code", "")
+                                    or line.get("account_name", "")
+                                    or "unknown"
+                                )
                                 needs_fix = True
                         if needs_fix:
                             self.cursor.execute(
                                 "UPDATE journal_entries SET lines = ? WHERE id = ?",
-                                (json.dumps(lines, ensure_ascii=False), entry_id)
+                                (json.dumps(lines, ensure_ascii=False), entry_id),
                             )
                             cleaned += 1
                     except Exception:
@@ -499,12 +528,12 @@ def run_monthly_maintenance_if_needed():
             safe_print("INFO: [DBMaintenance] 🔧 بدء الصيانة الشهرية التلقائية...")
             maintenance = DatabaseMaintenance()
             success = maintenance.run_all_maintenance(auto_mode=True)
-            
+
             if success:
                 safe_print("SUCCESS: [DBMaintenance] ✅ اكتملت الصيانة الشهرية بنجاح")
             else:
                 safe_print("WARNING: [DBMaintenance] ⚠️ فشلت الصيانة الشهرية")
-            
+
             return success
         else:
             safe_print("INFO: [DBMaintenance] ⏭️ لا حاجة للصيانة الآن (آخر صيانة كانت حديثة)")

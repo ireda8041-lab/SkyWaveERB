@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\asynchronous\database.py
-# hypothesis_version: 6.148.3
-
-['$cmd', '$external', 'AsyncMongoClient', '_', '_id', 'background', 'clusteredIndex', 'comment', 'corrupt', 'cursor', 'drop', 'encryptedFields', 'encrypted_fields', 'exception', 'filter', 'firstBatch', 'full', 'listCollections', 'name', 'nameOnly', 'ns not found', 'raw', 'result', 'scandata', 'valid', 'validate']

@@ -1,0 +1,4 @@
+# file: D:\blogs\appas\SkyWaveERB\updater.py
+# hypothesis_version: 6.150.0
+
+[0.5, 100, 130, 400, 500, 520, 600, 1000, 1024, 8192, '%H:%M:%S', '%Y%m%d_%H%M%S', '..', '/CLOSEAPPLICATIONS', '/FI', '/NOCANCEL', '/NORESTART', '/SILENT', '/VERYSILENT', '=', '?', 'Cairo', 'Cancel', 'Close', 'Creating backup...', 'Download failed', 'Download failed!', 'Downloading...', 'Empty update URL', 'Fusion', 'LOCALAPPDATA', 'PROGRAMFILES', 'Preparing...', 'Programs', 'Setup file not found', 'Sky Wave ERP', 'SkyWaveERP.exe', 'SkyWaveERP_Backup', 'User-Agent', '__main__', 'assets', 'content-length', 'custom_fields.json', 'expected_sha256', 'font', 'frozen', 'github.com', 'http', 'https', 'mainFrame', 'rb', 'sha256', 'sha256:', 'skywave_local.db', 'skywaveerp', 'sync_config.json', 'tasklist', 'url', 'utf-8', 'version', 'version.json', 'wb', '✓ ', '✕', '✗ ']

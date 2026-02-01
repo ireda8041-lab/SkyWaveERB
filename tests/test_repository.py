@@ -1,5 +1,3 @@
-
-
 class TestRepository:
     """
     Since Repository connects to DBs, we will test its logic lightly or verify its structure.

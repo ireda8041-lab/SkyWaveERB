@@ -10,6 +10,7 @@ from logging.handlers import RotatingFileHandler
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -25,7 +26,9 @@ class LoggerSetup:
 
     # إعدادات افتراضية
     # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات)
-    LOG_DIR = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP', 'logs')
+    LOG_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SkyWaveERP", "logs"
+    )
     LOG_FILE = "skywave_erp.log"
     MAX_LOG_SIZE = 10 * 1024 * 1024  # 10 MB
     BACKUP_COUNT = 5  # عدد الملفات الاحتياطية
@@ -36,7 +39,7 @@ class LoggerSetup:
     def setup_logger(
         log_level: int = logging.INFO,  # ⚡ تغيير من DEBUG إلى INFO للسرعة
         log_to_console: bool = True,
-        log_to_file: bool = True
+        log_to_file: bool = True,
     ) -> logging.Logger:
         """
         إعداد نظام التسجيل.
@@ -62,8 +65,8 @@ class LoggerSetup:
 
         # تنسيق الرسائل
         formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
 
         # 1. File Handler (التسجيل في ملف)
@@ -77,7 +80,7 @@ class LoggerSetup:
                 log_file_path,
                 maxBytes=LoggerSetup.MAX_LOG_SIZE,
                 backupCount=LoggerSetup.BACKUP_COUNT,
-                encoding='utf-8'
+                encoding="utf-8",
             )
             file_handler.setLevel(logging.INFO)  # ⚡ تغيير من DEBUG إلى INFO للسرعة
             file_handler.setFormatter(formatter)
@@ -101,9 +104,9 @@ class LoggerSetup:
                 pass  # تجاهل خطأ الترميز في الكونسول
 
         # تسجيل رسالة البداية
-        logger.info("="*80)
+        logger.info("=" * 80)
         logger.info(f"Sky Wave ERP - بدء التشغيل في {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info("="*80)
+        logger.info("=" * 80)
 
         LoggerSetup._logger_initialized = True
         return logger
@@ -136,9 +139,12 @@ class LoggerSetup:
         def my_function(arg1, arg2):
             # الكود هنا
         """
+
         def wrapper(*args, **kwargs):
             logger = LoggerSetup.get_logger(func.__module__)
-            logger.debug(f"استدعاء دالة: {func.__name__} مع المعاملات: args={args}, kwargs={kwargs}")
+            logger.debug(
+                f"استدعاء دالة: {func.__name__} مع المعاملات: args={args}, kwargs={kwargs}"
+            )
 
             try:
                 result = func(*args, **kwargs)
@@ -156,23 +162,16 @@ class LoggerSetup:
         إنشاء ملف log منفصل لكل جلسة.
         مفيد للتتبع المفصل.
         """
-        session_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-        session_log_file = os.path.join(
-            LoggerSetup.LOG_DIR,
-            f"session_{session_time}.log"
-        )
+        session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_log_file = os.path.join(LoggerSetup.LOG_DIR, f"session_{session_time}.log")
 
         logger = logging.getLogger("SkyWaveERP")
 
-        session_handler = logging.FileHandler(
-            session_log_file,
-            encoding='utf-8'
-        )
+        session_handler = logging.FileHandler(session_log_file, encoding="utf-8")
         session_handler.setLevel(logging.DEBUG)
 
         formatter = logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
+            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         session_handler.setFormatter(formatter)
 
@@ -198,7 +197,7 @@ class LoggerSetup:
         deleted_count = 0
 
         for filename in os.listdir(LoggerSetup.LOG_DIR):
-            if not filename.endswith('.log'):
+            if not filename.endswith(".log"):
                 continue
 
             file_path = os.path.join(LoggerSetup.LOG_DIR, filename)
@@ -220,6 +219,7 @@ class LoggerSetup:
 
 
 # --- دوال مساعدة سريعة ---
+
 
 def debug(message: str, context: str | None = None):
     """تسجيل رسالة DEBUG"""

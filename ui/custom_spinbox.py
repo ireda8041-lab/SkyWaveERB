@@ -10,6 +10,7 @@ class CustomSpinBox(QWidget):
     SpinBox مخصص مع أزرار + و - عمودية
     الأزرار على اليمين والقيمة على اليسار (للعربية)
     """
+
     valueChanged = pyqtSignal(float)
 
     def __init__(self, parent=None, decimals=2, minimum=0.0, maximum=999999999.99):

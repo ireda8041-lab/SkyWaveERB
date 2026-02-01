@@ -1,4 +1,4 @@
-
+import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -14,20 +14,20 @@ def mock_repo():
     repo = MagicMock(spec=Repository)
     return repo
 
+
 @pytest.fixture
 def mock_event_bus():
     """Mock EventBus for testing services"""
     bus = MagicMock(spec=EventBus)
     return bus
 
+
 @pytest.fixture
 def sample_client_data():
     return schemas.Client(
-        name="Test Client",
-        email="test@example.com",
-        phone="01000000000",
-        country="Egypt"
+        name="Test Client", email="test@example.com", phone="01000000000", country="Egypt"
     )
+
 
 @pytest.fixture
 def sample_invoice_data():
@@ -42,11 +42,22 @@ def sample_invoice_data():
                 description="Test Service",
                 quantity=1,
                 unit_price=1000,
-                total=1000
+                total=1000,
             )
         ],
         subtotal=1000,
         total_amount=1000,
         status=schemas.InvoiceStatus.SENT,
-        currency=schemas.CurrencyCode.EGP
+        currency=schemas.CurrencyCode.EGP,
     )
+
+
+@pytest.fixture(scope="session")
+def qt_app():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app

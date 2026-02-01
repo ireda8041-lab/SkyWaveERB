@@ -289,7 +289,8 @@ class LoginWindow(QDialog):
             self.authenticated_user = user
             self.error_label.setVisible(False)
             self.login_btn.setText("✓ تم بنجاح")
-            self.login_btn.setStyleSheet("""
+            self.login_btn.setStyleSheet(
+                """
                 background: #2ecc71;
                 color: white;
                 border: none;
@@ -297,7 +298,8 @@ class LoginWindow(QDialog):
                 padding: 16px;
                 font-size: 16px;
                 font-weight: bold;
-            """)
+            """
+            )
             QTimer.singleShot(800, self.accept)
         else:
             self.show_error("اسم المستخدم أو كلمة المرور غير صحيحة")

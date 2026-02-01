@@ -33,18 +33,22 @@ from ui.smart_combobox import SmartFilterComboBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
 
+
 # استيراد دوال الإشعارات
 try:
     from ui.notification_system import notify_error, notify_success
 except ImportError:
+
     def notify_success(msg, title=""):
         safe_print(f"INFO: {title} - {msg}")
+
     def notify_error(msg, title=""):
         safe_print(f"ERROR: {title} - {msg}")
 
@@ -52,7 +56,12 @@ except ImportError:
 class ClientEditorDialog(QDialog):
     """نافذة إضافة/تعديل عميل - تصميم متجاوب"""
 
-    def __init__(self, client_service: ClientService, client_to_edit: schemas.Client | None = None, parent=None):
+    def __init__(
+        self,
+        client_service: ClientService,
+        client_to_edit: schemas.Client | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
 
         self.client_service = client_service
@@ -68,23 +77,25 @@ class ClientEditorDialog(QDialog):
         # 📱 الديالوج على قد المحتوى بالضبط - بدون scroll
         self.setMinimumWidth(520)
         self.setMinimumHeight(680)  # ⚡ زيادة قليلة لإظهار كل المحتوى
-        
+
         # ⚡ فتح الديالوج بحجم ثابت مناسب للمحتوى
         self.resize(520, 680)  # حجم ثابت مناسب
-        
+
         # وضع الديالوج في منتصف الشاشة
         from PyQt6.QtWidgets import QApplication
+
         screen = QApplication.primaryScreen()
         if screen:
             screen_geo = screen.availableGeometry()
             x = (screen_geo.width() - 520) // 2
             y = (screen_geo.height() - 680) // 2
             self.move(x, y)
-        
+
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self.init_ui()
@@ -100,7 +111,8 @@ class ClientEditorDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -115,7 +127,8 @@ class ClientEditorDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -281,7 +294,8 @@ class ClientEditorDialog(QDialog):
 
         # SmartFilterComboBox مع فلترة ذكية
         self.work_field_input = SmartFilterComboBox()
-        self.work_field_input.setStyleSheet(f"""
+        self.work_field_input.setStyleSheet(
+            f"""
             QComboBox {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
@@ -313,7 +327,8 @@ class ClientEditorDialog(QDialog):
                 selection-color: white;
                 padding: 4px;
             }}
-        """)
+        """
+        )
 
         # تحميل مجالات العمل (الافتراضية + المخصصة)
         self.work_field_input.addItem("")  # خيار فارغ
@@ -353,7 +368,8 @@ class ClientEditorDialog(QDialog):
 
         # زرار اختيار الصورة
         select_logo_btn = QPushButton("اختيار...")
-        select_logo_btn.setStyleSheet(f"""
+        select_logo_btn.setStyleSheet(
+            f"""
             QPushButton {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
@@ -365,12 +381,14 @@ class ClientEditorDialog(QDialog):
             QPushButton:hover {{
                 border-color: {COLORS['primary']};
             }}
-        """)
+        """
+        )
         select_logo_btn.clicked.connect(self.select_logo_file)
 
         # زرار حذف الصورة
         self.delete_logo_btn = QPushButton("🗑️ حذف")
-        self.delete_logo_btn.setStyleSheet("""
+        self.delete_logo_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #dc2626;
                 color: white;
@@ -382,7 +400,8 @@ class ClientEditorDialog(QDialog):
             QPushButton:hover {
                 background-color: #b91c1c;
             }
-        """)
+        """
+        )
         self.delete_logo_btn.clicked.connect(self.delete_logo)
 
         logo_layout.addWidget(self.logo_path_label, 1)
@@ -410,7 +429,8 @@ class ClientEditorDialog(QDialog):
         # ⚡ عميل VIP مميز
         self.vip_checkbox = QCheckBox("⭐ عميل مميز VIP")
         self.vip_checkbox.setChecked(False)
-        self.vip_checkbox.setStyleSheet("""
+        self.vip_checkbox.setStyleSheet(
+            """
             QCheckBox {
                 color: #fbbf24;
                 font-size: 12px;
@@ -425,7 +445,8 @@ class ClientEditorDialog(QDialog):
                 border: 2px solid #f59e0b;
                 border-radius: 4px;
             }
-        """)
+        """
+        )
         layout.addWidget(self.vip_checkbox)
 
         layout.addStretch()
@@ -435,12 +456,14 @@ class ClientEditorDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -466,7 +489,9 @@ class ClientEditorDialog(QDialog):
             self.save_button.setText("💾 حفظ")
 
     def select_logo_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "اختر صورة", "", "Image Files (*.png *.jpg *.jpeg)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "اختر صورة", "", "Image Files (*.png *.jpg *.jpeg)"
+        )
         if file_path:
             normalized = file_path.replace("/", "\\")
             self.logo_path_label.setText(normalized)
@@ -479,7 +504,9 @@ class ClientEditorDialog(QDialog):
 
         # إعادة تعيين الـ label
         self.logo_path_label.setText("لم يتم اختيار صورة")
-        self.logo_path_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 10px; font-style: italic;")
+        self.logo_path_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; font-size: 10px; font-style: italic;"
+        )
 
         # ⚡ تعيين flag للحذف الصريح
         self._logo_deleted = True
@@ -509,12 +536,14 @@ class ClientEditorDialog(QDialog):
         else:
             self.work_field_input.setCurrentText(work_field)
 
-        has_logo_data = hasattr(self.client_to_edit, 'logo_data') and self.client_to_edit.logo_data
+        has_logo_data = hasattr(self.client_to_edit, "logo_data") and self.client_to_edit.logo_data
         logo_path = self.client_to_edit.logo_path or ""
 
         if has_logo_data:
             self.logo_path_label.setText("✅ صورة محفوظة في قاعدة البيانات")
-            self.logo_path_label.setStyleSheet("font-style: normal; color: #10B981; font-weight: bold;")
+            self.logo_path_label.setStyleSheet(
+                "font-style: normal; color: #10B981; font-weight: bold;"
+            )
         elif logo_path:
             self.logo_path_label.setText(logo_path)
             self.logo_path_label.setStyleSheet("font-style: normal; color: #111827;")
@@ -526,7 +555,7 @@ class ClientEditorDialog(QDialog):
         self.status_checkbox.setChecked(self.client_to_edit.status == schemas.ClientStatus.ACTIVE)
 
         # ⚡ تحميل حالة VIP
-        is_vip = getattr(self.client_to_edit, 'is_vip', False)
+        is_vip = getattr(self.client_to_edit, "is_vip", False)
         self.vip_checkbox.setChecked(bool(is_vip))
 
     def _convert_image_to_base64(self, image_path: str) -> str:
@@ -553,9 +582,10 @@ class ClientEditorDialog(QDialog):
             max_size = 400  # حجم أصغر للأداء الأفضل
             if pixmap.width() > max_size or pixmap.height() > max_size:
                 pixmap = pixmap.scaled(
-                    max_size, max_size,
+                    max_size,
+                    max_size,
                     Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
+                    Qt.TransformationMode.SmoothTransformation,
                 )
                 safe_print(f"INFO: 📷 تم تصغير الصورة إلى {pixmap.width()}x{pixmap.height()}")
 
@@ -595,18 +625,23 @@ class ClientEditorDialog(QDialog):
             if size_kb > 500:
                 safe_print(f"WARNING: 📷 الصورة كبيرة ({size_kb:.1f} KB) - قد تؤثر على الأداء")
 
-            base64_str = base64.b64encode(img_data).decode('utf-8')
+            base64_str = base64.b64encode(img_data).decode("utf-8")
             return f"data:image/{format_used.lower()};base64,{base64_str}"
 
         except Exception as e:
             safe_print(f"ERROR: فشل تحويل الصورة إلى base64: {e}")
             import traceback
+
             traceback.print_exc()
             return ""
 
     def get_form_data(self) -> dict[str, Any]:
         """يجمع البيانات من الحقول"""
-        status = schemas.ClientStatus.ACTIVE if self.status_checkbox.isChecked() else schemas.ClientStatus.ARCHIVED
+        status = (
+            schemas.ClientStatus.ACTIVE
+            if self.status_checkbox.isChecked()
+            else schemas.ClientStatus.ARCHIVED
+        )
         logo_text = self.logo_path_label.text()
 
         logo_value = ""
@@ -662,7 +697,9 @@ class ClientEditorDialog(QDialog):
 
         # ⚡ تسجيل بيانات الصورة
         safe_print(f"DEBUG: [save_client] logo_path = {client_data.get('logo_path', '')}")
-        safe_print(f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}")
+        safe_print(
+            f"DEBUG: [save_client] logo_data length = {len(client_data.get('logo_data', ''))}"
+        )
 
         if not client_data["name"]:
             QMessageBox.warning(self, "خطأ", "اسم العميل مطلوب")
@@ -676,45 +713,44 @@ class ClientEditorDialog(QDialog):
 
             if self.is_editing:
                 client_id = self.client_to_edit._mongo_id or str(self.client_to_edit.id)
-                safe_print(f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
+                safe_print(
+                    f"DEBUG: [save_client] تعديل العميل {client_id} مع logo_data ({len(client_data.get('logo_data', ''))} حرف)"
+                )
                 self.client_service.update_client(client_id, client_data)
 
                 # 🔔 إشعار محسّن للتحديث
-                if client_data.get('logo_data') and client_data['logo_data'] != "__DELETE__":
+                if client_data.get("logo_data") and client_data["logo_data"] != "__DELETE__":
                     notify_success(
-                        f"تم تحديث العميل '{client_data['name']}' مع اللوجو 🖼️",
-                        "✅ تحديث عميل"
+                        f"تم تحديث العميل '{client_data['name']}' مع اللوجو 🖼️", "✅ تحديث عميل"
                     )
-                elif client_data.get('logo_data') == "__DELETE__":
+                elif client_data.get("logo_data") == "__DELETE__":
                     notify_success(
-                        f"تم تحديث العميل '{client_data['name']}' وحذف اللوجو 🗑️",
-                        "✅ تحديث عميل"
+                        f"تم تحديث العميل '{client_data['name']}' وحذف اللوجو 🗑️", "✅ تحديث عميل"
                     )
                 else:
-                    notify_success(
-                        f"تم تحديث العميل '{client_data['name']}'",
-                        "✅ تحديث عميل"
-                    )
+                    notify_success(f"تم تحديث العميل '{client_data['name']}'", "✅ تحديث عميل")
 
-                QMessageBox.information(self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح.")
+                QMessageBox.information(
+                    self, "تم", f"تم حفظ تعديلات العميل '{client_data['name']}' بنجاح."
+                )
             else:
-                safe_print(f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)")
+                safe_print(
+                    f"DEBUG: [save_client] إضافة عميل جديد مع logo_data ({len(client_data.get('logo_data', ''))} حرف)"
+                )
                 new_client_schema = schemas.Client(**client_data)
                 self.client_service.create_client(new_client_schema)
 
                 # 🔔 إشعار محسّن للإضافة
-                if client_data.get('logo_data') and client_data['logo_data']:
+                if client_data.get("logo_data") and client_data["logo_data"]:
                     notify_success(
-                        f"تم إضافة العميل '{client_data['name']}' مع اللوجو 🖼️",
-                        "✅ عميل جديد"
+                        f"تم إضافة العميل '{client_data['name']}' مع اللوجو 🖼️", "✅ عميل جديد"
                     )
                 else:
-                    notify_success(
-                        f"تم إضافة العميل '{client_data['name']}'",
-                        "✅ عميل جديد"
-                    )
+                    notify_success(f"تم إضافة العميل '{client_data['name']}'", "✅ عميل جديد")
 
-                QMessageBox.information(self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح.")
+                QMessageBox.information(
+                    self, "تم", f"تم إضافة العميل '{client_data['name']}' بنجاح."
+                )
 
             self.accept()
 

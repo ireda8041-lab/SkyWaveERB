@@ -27,6 +27,7 @@ from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, create_centered_i
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -50,6 +51,7 @@ class LedgerWindow(QDialog):
 
         # 📱 تجاوب: حجم متجاوب مع الشاشة
         from PyQt6.QtWidgets import QApplication, QSizePolicy
+
         self.setMinimumWidth(800)
         self.setMinimumHeight(500)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -68,6 +70,7 @@ class LedgerWindow(QDialog):
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self.init_ui()
@@ -81,7 +84,8 @@ class LedgerWindow(QDialog):
 
         # === 1. معلومات الحساب ===
         info_group = QGroupBox("معلومات الحساب")
-        info_group.setStyleSheet(f"""
+        info_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 font-weight: bold;
                 color: {COLORS['text_primary']};
@@ -99,13 +103,16 @@ class LedgerWindow(QDialog):
                 color: white;
                 border-radius: 4px;
             }}
-        """)
+        """
+        )
 
         info_layout = QHBoxLayout()
 
         # الكود
         code_label = QLabel(f"الكود: {self.account.code}")
-        code_label.setStyleSheet(f"font-size: 14px; color: {COLORS['text_primary']}; font-weight: bold;")
+        code_label.setStyleSheet(
+            f"font-size: 14px; color: {COLORS['text_primary']}; font-weight: bold;"
+        )
         info_layout.addWidget(code_label)
 
         # النوع
@@ -116,7 +123,9 @@ class LedgerWindow(QDialog):
 
         # الرصيد
         balance_label = QLabel(f"الرصيد الحالي: {self.account.balance:,.2f} جنيه")
-        balance_label.setStyleSheet(f"font-size: 16px; color: {COLORS['success']}; font-weight: bold;")
+        balance_label.setStyleSheet(
+            f"font-size: 16px; color: {COLORS['success']}; font-weight: bold;"
+        )
         info_layout.addWidget(balance_label)
 
         info_layout.addStretch()
@@ -125,7 +134,8 @@ class LedgerWindow(QDialog):
 
         # === 2. فلتر التاريخ ===
         filter_group = QGroupBox("فلتر الفترة")
-        filter_group.setStyleSheet(f"""
+        filter_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 border: 1px solid {COLORS['border']};
                 border-radius: 6px;
@@ -138,7 +148,8 @@ class LedgerWindow(QDialog):
                 left: 10px;
                 padding: 2px 8px;
             }}
-        """)
+        """
+        )
 
         filter_layout = QHBoxLayout()
 
@@ -147,7 +158,8 @@ class LedgerWindow(QDialog):
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
         self.start_date.setDate(QDate.currentDate().addMonths(-1))
-        self.start_date.setStyleSheet(f"""
+        self.start_date.setStyleSheet(
+            f"""
             QDateEdit {{
                 background-color: {COLORS['bg_light']};
                 color: {COLORS['text_primary']};
@@ -155,7 +167,8 @@ class LedgerWindow(QDialog):
                 border-radius: 4px;
                 padding: 5px;
             }}
-        """)
+        """
+        )
         filter_layout.addWidget(self.start_date)
 
         # إلى تاريخ
@@ -163,7 +176,8 @@ class LedgerWindow(QDialog):
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
         self.end_date.setDate(QDate.currentDate())
-        self.end_date.setStyleSheet(f"""
+        self.end_date.setStyleSheet(
+            f"""
             QDateEdit {{
                 background-color: {COLORS['bg_light']};
                 color: {COLORS['text_primary']};
@@ -171,7 +185,8 @@ class LedgerWindow(QDialog):
                 border-radius: 4px;
                 padding: 5px;
             }}
-        """)
+        """
+        )
         filter_layout.addWidget(self.end_date)
 
         # زر التطبيق
@@ -192,7 +207,8 @@ class LedgerWindow(QDialog):
 
         # === 3. جدول الحركات ===
         movements_group = QGroupBox("الحركات المحاسبية")
-        movements_group.setStyleSheet(f"""
+        movements_group.setStyleSheet(
+            f"""
             QGroupBox {{
                 border: 1px solid {COLORS['border']};
                 border-radius: 6px;
@@ -206,20 +222,22 @@ class LedgerWindow(QDialog):
                 padding: 2px 8px;
                 font-weight: bold;
             }}
-        """)
+        """
+        )
 
         movements_layout = QVBoxLayout()
 
         self.movements_table = QTableWidget()
         self.movements_table.setColumnCount(6)
-        self.movements_table.setHorizontalHeaderLabels([
-            "التاريخ", "الوصف", "المرجع", "مدين", "دائن", "الرصيد"
-        ])
+        self.movements_table.setHorizontalHeaderLabels(
+            ["التاريخ", "الوصف", "المرجع", "مدين", "دائن", "الرصيد"]
+        )
 
         # ستايل الجدول
         self.movements_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
         from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.movements_table)
 
         # إعدادات الجدول
@@ -252,16 +270,28 @@ class LedgerWindow(QDialog):
         summary_layout = QHBoxLayout()
 
         self.total_debit_label = QLabel("إجمالي المدين: 0.00 جنيه")
-        self.total_debit_label.setStyleSheet(f"font-size: 14px; color: {COLORS['success']}; font-weight: bold;")
+        self.total_debit_label.setStyleSheet(
+            f"font-size: 14px; color: {COLORS['success']}; font-weight: bold;"
+        )
         summary_layout.addWidget(self.total_debit_label)
 
         self.total_credit_label = QLabel("إجمالي الدائن: 0.00 جنيه")
-        self.total_credit_label.setStyleSheet(f"font-size: 14px; color: {COLORS['danger']}; font-weight: bold;")
+        self.total_credit_label.setStyleSheet(
+            f"font-size: 14px; color: {COLORS['danger']}; font-weight: bold;"
+        )
         summary_layout.addWidget(self.total_credit_label)
 
         self.net_movement_label = QLabel("صافي الحركة: 0.00 جنيه")
-        self.net_movement_label.setStyleSheet(f"font-size: 14px; color: {COLORS['info']}; font-weight: bold;")
+        self.net_movement_label.setStyleSheet(
+            f"font-size: 14px; color: {COLORS['info']}; font-weight: bold;"
+        )
         summary_layout.addWidget(self.net_movement_label)
+
+        self.opening_balance_label = QLabel("الرصيد الافتتاحي: 0.00 جنيه")
+        self.opening_balance_label.setStyleSheet(
+            f"font-size: 14px; color: {COLORS['text_secondary']}; font-weight: bold;"
+        )
+        summary_layout.addWidget(self.opening_balance_label)
 
         summary_layout.addStretch()
         layout.addLayout(summary_layout)
@@ -293,151 +323,139 @@ class LedgerWindow(QDialog):
     def load_ledger_data(self):
         """⚡ تحميل بيانات كشف الحساب في الخلفية لمنع التجميد"""
         safe_print(f"INFO: [LedgerWindow] جاري تحميل كشف حساب: {self.account.name}")
-        
+
         # عرض رسالة تحميل
         self.movements_table.setRowCount(0)
         self.total_debit_label.setText("إجمالي المدين: ⏳ جاري التحميل...")
         self.total_credit_label.setText("إجمالي الدائن: ⏳ جاري التحميل...")
         self.net_movement_label.setText("صافي الحركة: ⏳ جاري التحميل...")
-        
+        self.opening_balance_label.setText("الرصيد الافتتاحي: ⏳ جاري التحميل...")
+
         from core.data_loader import get_data_loader
-        
+
         # حفظ الفترة المحددة
         start_date = self.start_date.date().toPyDate()
         end_date = self.end_date.date().toPyDate()
         account_code = self.account.code
-        account_type = self.account.type.value if self.account.type else self.account.type
-        
+
         def fetch_ledger_data():
             """جلب بيانات كشف الحساب في thread منفصل"""
             try:
                 # تحويل إلى datetime
                 start_datetime = datetime.combine(start_date, datetime.min.time())
                 end_datetime = datetime.combine(end_date, datetime.max.time())
+                report = self.accounting_service.get_account_ledger_report(
+                    account_code, start_datetime, end_datetime
+                )
 
-                # جلب جميع القيود المحاسبية
-                all_entries = self.accounting_service.repo.get_all_journal_entries()
+                return {
+                    "movements": report.get("movements", []),
+                    "opening_balance": report.get("opening_balance", 0.0),
+                    "total_debit": report.get("total_debit", 0.0),
+                    "total_credit": report.get("total_credit", 0.0),
+                    "net_movement": report.get("net_movement", 0.0),
+                    "error": None,
+                }
 
-                # فلترة القيود حسب الحساب والفترة
-                movements = []
-                running_balance = 0.0
-
-                for entry in all_entries:
-                    entry_date = entry.date
-
-                    # التحقق من الفترة
-                    if entry_date < start_datetime or entry_date > end_datetime:
-                        continue
-
-                    # البحث عن بنود تخص هذا الحساب
-                    for line in entry.lines:
-                        acc_code = line.account_code or line.account_id
-
-                        if acc_code == account_code:
-                            debit = line.debit
-                            credit = line.credit
-
-                            # حساب الرصيد الجاري
-                            asset_types = ['ASSET', 'CASH', 'EXPENSE', 'أصول', 'أصول نقدية', 'مصروفات']
-
-                            if account_type in asset_types:
-                                running_balance += debit - credit
-                            else:
-                                running_balance += credit - debit
-
-                            movements.append({
-                                'date': entry_date,
-                                'description': line.description or entry.description,
-                                'reference': entry.related_document_id or '',
-                                'debit': debit,
-                                'credit': credit,
-                                'balance': running_balance
-                            })
-
-                # ترتيب الحركات حسب التاريخ
-                movements.sort(key=lambda x: x['date'])
-                
-                return {'movements': movements, 'error': None}
-                
             except Exception as e:
                 safe_print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
                 import traceback
+
                 traceback.print_exc()
-                return {'movements': [], 'error': str(e)}
-        
+                return {"movements": [], "opening_balance": 0.0, "error": str(e)}
+
         def on_data_loaded(data):
             """تحديث الواجهة بالبيانات"""
             try:
-                if data.get('error'):
+                if data.get("error"):
                     QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{data['error']}")
                     return
-                
-                movements = data['movements']
-                
+
+                movements = data["movements"]
+                opening_balance = float(data.get("opening_balance", 0.0) or 0.0)
+
                 # عرض الحركات في الجدول
                 self.movements_table.setRowCount(0)
 
-                total_debit = 0.0
-                total_credit = 0.0
+                total_debit = float(data.get("total_debit", 0.0) or 0.0)
+                total_credit = float(data.get("total_credit", 0.0) or 0.0)
+                net_movement = float(data.get("net_movement", 0.0) or 0.0)
 
                 for i, movement in enumerate(movements):
                     self.movements_table.insertRow(i)
 
                     # التاريخ
-                    date_str = movement['date'].strftime("%Y-%m-%d") if hasattr(movement['date'], 'strftime') else str(movement['date'])[:10]
+                    date_val = movement.get("date") if isinstance(movement, dict) else None
+                    date_str = (
+                        date_val.strftime("%Y-%m-%d")
+                        if hasattr(date_val, "strftime")
+                        else str(date_val or "")[:10]
+                    )
                     self.movements_table.setItem(i, 0, create_centered_item(date_str))
 
                     # الوصف
-                    self.movements_table.setItem(i, 1, create_centered_item(movement['description']))
+                    desc_text = (
+                        str(movement.get("description") or "") if isinstance(movement, dict) else ""
+                    )
+                    self.movements_table.setItem(i, 1, create_centered_item(desc_text))
 
                     # المرجع
-                    ref_text = movement['reference'][:20] if len(movement['reference']) > 20 else movement['reference']
+                    ref_raw = (
+                        str(movement.get("reference") or "") if isinstance(movement, dict) else ""
+                    )
+                    ref_text = ref_raw[:20] if len(ref_raw) > 20 else ref_raw
                     self.movements_table.setItem(i, 2, create_centered_item(ref_text))
 
                     # مدين
-                    debit_text = f"{movement['debit']:,.2f}" if movement['debit'] > 0 else "-"
+                    debit_val = (
+                        float(movement.get("debit") or 0) if isinstance(movement, dict) else 0.0
+                    )
+                    debit_text = f"{debit_val:,.2f}" if debit_val > 0 else "-"
                     debit_item = create_centered_item(debit_text)
-                    if movement['debit'] > 0:
-                        debit_item.setForeground(QColor(COLORS['success']))
+                    if debit_val > 0:
+                        debit_item.setForeground(QColor(COLORS["success"]))
                     self.movements_table.setItem(i, 3, debit_item)
 
                     # دائن
-                    credit_text = f"{movement['credit']:,.2f}" if movement['credit'] > 0 else "-"
+                    credit_val = (
+                        float(movement.get("credit") or 0) if isinstance(movement, dict) else 0.0
+                    )
+                    credit_text = f"{credit_val:,.2f}" if credit_val > 0 else "-"
                     credit_item = create_centered_item(credit_text)
-                    if movement['credit'] > 0:
-                        credit_item.setForeground(QColor(COLORS['danger']))
+                    if credit_val > 0:
+                        credit_item.setForeground(QColor(COLORS["danger"]))
                     self.movements_table.setItem(i, 4, credit_item)
 
                     # الرصيد
-                    balance_item = create_centered_item(f"{movement['balance']:,.2f}")
+                    balance_val = (
+                        float(movement.get("balance") or 0) if isinstance(movement, dict) else 0.0
+                    )
+                    balance_item = create_centered_item(f"{balance_val:,.2f}")
                     balance_item.setFont(get_cairo_font(10, bold=True))
-                    if movement['balance'] > 0:
-                        balance_item.setForeground(QColor(COLORS['success']))
-                    elif movement['balance'] < 0:
-                        balance_item.setForeground(QColor(COLORS['danger']))
+                    if balance_val > 0:
+                        balance_item.setForeground(QColor(COLORS["success"]))
+                    elif balance_val < 0:
+                        balance_item.setForeground(QColor(COLORS["danger"]))
                     self.movements_table.setItem(i, 5, balance_item)
-
-                    total_debit += movement['debit']
-                    total_credit += movement['credit']
 
                 # تحديث الملخص
                 self.total_debit_label.setText(f"إجمالي المدين: {total_debit:,.2f} جنيه")
                 self.total_credit_label.setText(f"إجمالي الدائن: {total_credit:,.2f} جنيه")
-
-                net_movement = total_debit - total_credit
                 self.net_movement_label.setText(f"صافي الحركة: {net_movement:,.2f} جنيه")
+                self.opening_balance_label.setText(f"الرصيد الافتتاحي: {opening_balance:,.2f} جنيه")
 
                 safe_print(f"INFO: [LedgerWindow] تم تحميل {len(movements)} حركة")
-                
+
             except Exception as e:
                 safe_print(f"ERROR: [LedgerWindow] فشل تحديث الواجهة: {e}")
                 import traceback
+
                 traceback.print_exc()
-        
+
         def on_error(error_msg):
             safe_print(f"ERROR: [LedgerWindow] {error_msg}")
             QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{error_msg}")
-        
+
         # ⚡ تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -445,7 +463,7 @@ class LedgerWindow(QDialog):
             load_function=fetch_ledger_data,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def reset_filter(self):
@@ -455,7 +473,7 @@ class LedgerWindow(QDialog):
         self.load_ledger_data()
 
     def export_to_excel(self):
-        """تصدير كشف الحساب إلى Excel"""
+        """تصدير كشف الحساب إلى CSV"""
         try:
             import csv
             from datetime import datetime
@@ -463,12 +481,11 @@ class LedgerWindow(QDialog):
             from PyQt6.QtWidgets import QFileDialog
 
             # اختيار مكان الحفظ
-            default_filename = f"كشف_حساب_{self.account.code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            default_filename = (
+                f"كشف_حساب_{self.account.code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            )
             file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "حفظ كشف الحساب",
-                default_filename,
-                "CSV Files (*.csv);;All Files (*)"
+                self, "حفظ كشف الحساب", default_filename, "CSV Files (*.csv);;All Files (*)"
             )
 
             if not file_path:
@@ -479,15 +496,20 @@ class LedgerWindow(QDialog):
             cols = self.movements_table.columnCount()
 
             # كتابة البيانات
-            with open(file_path, 'w', newline='', encoding='utf-8-sig') as file:
+            with open(file_path, "w", newline="", encoding="utf-8-sig") as file:
                 writer = csv.writer(file)
 
                 # كتابة معلومات الحساب
-                writer.writerow(['كشف حساب'])
-                writer.writerow(['الحساب:', self.account.name])
-                writer.writerow(['الكود:', self.account.code])
-                writer.writerow(['الرصيد الحالي:', f"{self.account.balance:,.2f} جنيه"])
-                writer.writerow(['الفترة:', f"من {self.start_date.date().toString('yyyy-MM-dd')} إلى {self.end_date.date().toString('yyyy-MM-dd')}"])
+                writer.writerow(["كشف حساب"])
+                writer.writerow(["الحساب:", self.account.name])
+                writer.writerow(["الكود:", self.account.code])
+                writer.writerow(["الرصيد الحالي:", f"{self.account.balance:,.2f} جنيه"])
+                writer.writerow(
+                    [
+                        "الفترة:",
+                        f"من {self.start_date.date().toString('yyyy-MM-dd')} إلى {self.end_date.date().toString('yyyy-MM-dd')}",
+                    ]
+                )
                 writer.writerow([])  # سطر فارغ
 
                 # كتابة رؤوس الأعمدة
@@ -501,31 +523,26 @@ class LedgerWindow(QDialog):
                     row_data = []
                     for col in range(cols):
                         item = self.movements_table.item(row, col)
-                        row_data.append(item.text() if item else '')
+                        row_data.append(item.text() if item else "")
                     writer.writerow(row_data)
 
                 # كتابة الملخص
                 writer.writerow([])  # سطر فارغ
-                writer.writerow(['الملخص'])
+                writer.writerow(["الملخص"])
                 writer.writerow([self.total_debit_label.text()])
                 writer.writerow([self.total_credit_label.text()])
                 writer.writerow([self.net_movement_label.text()])
 
             QMessageBox.information(
-                self,
-                "✅ تم التصدير",
-                f"تم تصدير كشف الحساب بنجاح!\n\n📄 {file_path}"
+                self, "✅ تم التصدير", f"تم تصدير كشف الحساب بنجاح!\n\n📄 {file_path}"
             )
 
         except Exception as e:
             safe_print(f"ERROR: [LedgerWindow] فشل التصدير: {e}")
             import traceback
+
             traceback.print_exc()
-            QMessageBox.critical(
-                self,
-                "خطأ",
-                f"فشل تصدير كشف الحساب:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "خطأ", f"فشل تصدير كشف الحساب:\n{str(e)}")
 
     def print_ledger(self):
         """طباعة كشف الحساب"""
@@ -562,7 +579,9 @@ class LedgerWindow(QDialog):
 
                 # العنوان
                 painter.setFont(title_font)
-                painter.drawText(QRect(margin, y, page_width, 50), Qt.AlignmentFlag.AlignCenter, "كشف حساب")
+                painter.drawText(
+                    QRect(margin, y, page_width, 50), Qt.AlignmentFlag.AlignCenter, "كشف حساب"
+                )
                 y += 60
 
                 # معلومات الحساب
@@ -573,7 +592,11 @@ class LedgerWindow(QDialog):
                 y += 30
                 painter.drawText(margin, y, f"الرصيد الحالي: {self.account.balance:,.2f} جنيه")
                 y += 30
-                painter.drawText(margin, y, f"الفترة: من {self.start_date.date().toString('yyyy-MM-dd')} إلى {self.end_date.date().toString('yyyy-MM-dd')}")
+                painter.drawText(
+                    margin,
+                    y,
+                    f"الفترة: من {self.start_date.date().toString('yyyy-MM-dd')} إلى {self.end_date.date().toString('yyyy-MM-dd')}",
+                )
                 y += 50
 
                 # خط فاصل
@@ -606,8 +629,10 @@ class LedgerWindow(QDialog):
                     x = margin
                     for col in range(6):
                         item = self.movements_table.item(row, col)
-                        text = item.text() if item else ''
-                        painter.drawText(QRect(x, y, col_widths[col] - 10, 30), Qt.AlignmentFlag.AlignLeft, text)
+                        text = item.text() if item else ""
+                        painter.drawText(
+                            QRect(x, y, col_widths[col] - 10, 30), Qt.AlignmentFlag.AlignLeft, text
+                        )
                         x += col_widths[col]
                     y += 25
 
@@ -627,9 +652,7 @@ class LedgerWindow(QDialog):
                 painter.end()
 
                 QMessageBox.information(
-                    self,
-                    "✅ تمت الطباعة",
-                    "تم إرسال كشف الحساب إلى الطابعة بنجاح!"
+                    self, "✅ تمت الطباعة", "تم إرسال كشف الحساب إلى الطابعة بنجاح!"
                 )
 
             except Exception as e:
@@ -639,9 +662,6 @@ class LedgerWindow(QDialog):
         except Exception as e:
             safe_print(f"ERROR: [LedgerWindow] فشل الطباعة: {e}")
             import traceback
+
             traceback.print_exc()
-            QMessageBox.critical(
-                self,
-                "خطأ",
-                f"فشل طباعة كشف الحساب:\n{str(e)}"
-            )
+            QMessageBox.critical(self, "خطأ", f"فشل طباعة كشف الحساب:\n{str(e)}")

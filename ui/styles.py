@@ -1226,7 +1226,8 @@ def create_scrollable_form(parent=None):
     scroll_area.setWidgetResizable(True)
     scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    scroll_area.setStyleSheet(f"""
+    scroll_area.setStyleSheet(
+        f"""
         QScrollArea {{
             border: none;
             background-color: transparent;
@@ -1248,7 +1249,8 @@ def create_scrollable_form(parent=None):
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0px;
         }}
-    """)
+    """
+    )
 
     # إنشاء الـ widget الداخلي
     content_widget = QWidget()
@@ -1295,12 +1297,14 @@ def create_responsive_dialog_layout(dialog, has_scroll: bool = True):
 
     # منطقة الأزرار (ثابتة في الأسفل)
     buttons_container = QWidget()
-    buttons_container.setStyleSheet(f"""
+    buttons_container.setStyleSheet(
+        f"""
         QWidget {{
             background-color: {COLORS["bg_light"]};
             border-top: 1px solid {COLORS["border"]};
         }}
-    """)
+    """
+    )
     buttons_layout = QHBoxLayout(buttons_container)
     buttons_layout.setContentsMargins(15, 12, 15, 12)
     buttons_layout.setSpacing(10)

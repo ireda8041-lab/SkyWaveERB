@@ -15,11 +15,13 @@ from typing import Any
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
+
 
 # ⚡ إعدادات الأداء - محسّنة للسرعة القصوى
 DEFAULT_CACHE_SIZE = 5000  # ⚡ زيادة حجم الـ cache
@@ -78,10 +80,7 @@ class LRUCache:
             return
 
         self._last_cleanup = now
-        expired_keys = [
-            k for k, t in self._timestamps.items()
-            if now - t > self.ttl
-        ]
+        expired_keys = [k for k, t in self._timestamps.items() if now - t > self.ttl]
         for key in expired_keys:
             self._cache.pop(key, None)
             self._timestamps.pop(key, None)
@@ -120,7 +119,7 @@ class LRUCache:
             "maxsize": self.maxsize,
             "hits": self._hits,
             "misses": self._misses,
-            "hit_rate": f"{hit_rate:.1f}%"
+            "hit_rate": f"{hit_rate:.1f}%",
         }
 
 
@@ -138,6 +137,7 @@ def cached(cache_key: str | None = None, ttl: int = 60):
     def get_all_clients():
         return db.query(...)
     """
+
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -220,8 +220,8 @@ class BatchProcessor:
         results = []
         with self._lock:
             while self._queue:
-                batch = self._queue[:self.batch_size]
-                self._queue = self._queue[self.batch_size:]
+                batch = self._queue[: self.batch_size]
+                self._queue = self._queue[self.batch_size :]
 
                 # معالجة الدفعة
                 batch_results = processor_func(batch)
@@ -234,14 +234,10 @@ def run_in_background(func: Callable) -> Callable:
     """
     ⚡ Decorator لتشغيل الدالة في الخلفية
     """
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        thread = threading.Thread(
-            target=func,
-            args=args,
-            kwargs=kwargs,
-            daemon=True
-        )
+        thread = threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True)
         thread.start()
         return thread
 
@@ -252,6 +248,7 @@ def debounce(wait_seconds: float = 0.3):
     """
     ⚡ Decorator لتأخير تنفيذ الدالة (مفيد للبحث)
     """
+
     def decorator(func: Callable) -> Callable:
         timer = [None]
 
@@ -277,6 +274,7 @@ def throttle(min_interval: float = 1.0):
     """
     ⚡ Decorator لتحديد الحد الأقصى لتكرار الدالة
     """
+
     def decorator(func: Callable) -> Callable:
         last_call = [0.0]
 
@@ -296,10 +294,7 @@ def throttle(min_interval: float = 1.0):
 # ⚡ إحصائيات الأداء
 def get_cache_stats() -> dict[str, Any]:
     """جلب إحصائيات الـ cache"""
-    return {
-        "data_cache": _data_cache.get_stats(),
-        "query_cache": _query_cache.get_stats()
-    }
+    return {"data_cache": _data_cache.get_stats(), "query_cache": _query_cache.get_stats()}
 
 
 def print_cache_stats():

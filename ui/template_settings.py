@@ -29,17 +29,19 @@ class TemplateSettings(QWidget):
 
         # 📱 تصميم متجاوب
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.settings_service = settings_service
 
         # إنشاء خدمة القوالب
         # نحتاج repository من settings_service
-        if hasattr(settings_service, 'repo'):
+        if hasattr(settings_service, "repo"):
             repository = settings_service.repo
         else:
             # إنشاء repository مؤقت
             from core.repository import Repository
+
             repository = Repository()
 
         self.template_service = TemplateService(repository, settings_service)
@@ -55,7 +57,8 @@ class TemplateSettings(QWidget):
         title_label = QLabel("🎨 إدارة قوالب الفواتير")
         title_label.setFont(get_cairo_font(16, bold=True))
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title_label.setStyleSheet("""
+        title_label.setStyleSheet(
+            """
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #667eea, stop:1 #764ba2);
@@ -64,7 +67,8 @@ class TemplateSettings(QWidget):
                 border-radius: 8px;
                 margin-bottom: 10px;
             }
-        """)
+        """
+        )
         layout.addWidget(title_label)
 
         # معلومات سريعة
@@ -147,14 +151,13 @@ class TemplateSettings(QWidget):
             self.default_template_combo.clear()
             for template in templates:
                 self.default_template_combo.addItem(
-                    f"{'⭐ ' if template['is_default'] else ''}{template['name']}",
-                    template['id']
+                    f"{'⭐ ' if template['is_default'] else ''}{template['name']}", template["id"]
                 )
 
             # تحديد القالب الافتراضي في الـ ComboBox
             if default_template:
                 for i in range(self.default_template_combo.count()):
-                    if self.default_template_combo.itemData(i) == default_template['id']:
+                    if self.default_template_combo.itemData(i) == default_template["id"]:
                         self.default_template_combo.setCurrentIndex(i)
                         break
 
@@ -187,46 +190,62 @@ class TemplateSettings(QWidget):
             # إنشاء بيانات تجريبية للمعاينة
 
             # بيانات مشروع تجريبية
-            sample_project = type('Project', (), {
-                'id': 1001,
-                'items': [
-                    type('Item', (), {
-                        'description': 'تصميم موقع إلكتروني احترافي',
-                        'quantity': 1.0,
-                        'unit_price': 8000.0,
-                        'discount_rate': 10.0,
-                        'total': 7200.0
-                    })(),
-                    type('Item', (), {
-                        'description': 'إدارة وسائل التواصل الاجتماعي (3 أشهر)',
-                        'quantity': 3.0,
-                        'unit_price': 1500.0,
-                        'discount_rate': 5.0,
-                        'total': 4275.0
-                    })(),
-                    type('Item', (), {
-                        'description': 'تحسين محركات البحث SEO',
-                        'quantity': 1.0,
-                        'unit_price': 3000.0,
-                        'discount_rate': 0.0,
-                        'total': 3000.0
-                    })()
-                ],
-                'discount_rate': 5.0,
-                'tax_rate': 14.0
-            })()
+            sample_project = type(
+                "Project",
+                (),
+                {
+                    "id": 1001,
+                    "items": [
+                        type(
+                            "Item",
+                            (),
+                            {
+                                "description": "تصميم موقع إلكتروني احترافي",
+                                "quantity": 1.0,
+                                "unit_price": 8000.0,
+                                "discount_rate": 10.0,
+                                "total": 7200.0,
+                            },
+                        )(),
+                        type(
+                            "Item",
+                            (),
+                            {
+                                "description": "إدارة وسائل التواصل الاجتماعي (3 أشهر)",
+                                "quantity": 3.0,
+                                "unit_price": 1500.0,
+                                "discount_rate": 5.0,
+                                "total": 4275.0,
+                            },
+                        )(),
+                        type(
+                            "Item",
+                            (),
+                            {
+                                "description": "تحسين محركات البحث SEO",
+                                "quantity": 1.0,
+                                "unit_price": 3000.0,
+                                "discount_rate": 0.0,
+                                "total": 3000.0,
+                            },
+                        )(),
+                    ],
+                    "discount_rate": 5.0,
+                    "tax_rate": 14.0,
+                },
+            )()
 
             # بيانات عميل تجريبية
             sample_client = {
-                'name': 'شركة النجاح للتجارة والاستيراد',
-                'phone': '+20 10 123 4567',
-                'email': 'info@success-company.com',
-                'address': 'شارع التحرير، وسط البلد، القاهرة، مصر'
+                "name": "شركة النجاح للتجارة والاستيراد",
+                "phone": "+20 10 123 4567",
+                "email": "info@success-company.com",
+                "address": "شارع التحرير، وسط البلد، القاهرة، مصر",
             }
 
             # معاينة القالب
             success = self.template_service.preview_template(
-                sample_project, sample_client, default_template['id']
+                sample_project, sample_client, default_template["id"]
             )
 
             if not success:

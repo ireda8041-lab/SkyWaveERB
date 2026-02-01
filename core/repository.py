@@ -1,3 +1,4 @@
+# pylint: disable=R0801,duplicate-code,too-many-lines,too-many-nested-blocks,too-many-public-methods
 # الملف: core/repository.py
 """
 ⚡ المخزن الذكي - Sky Wave ERP
@@ -6,12 +7,26 @@
 
 import json
 import os
+import re
+import shutil
 import sqlite3
 import sys
 import threading
 import time
+import traceback
+import urllib.request
+import uuid
 from datetime import datetime
 from typing import Any
+
+from PyQt6.QtCore import QTimer
+
+try:
+    from bson import ObjectId
+except ImportError:
+    ObjectId = None
+
+from core.auth_models import User, UserRole
 
 # ⚡ استيراد آمن لـ pymongo
 try:
@@ -28,7 +43,6 @@ from . import schemas
 try:
     from core.safe_print import safe_print
 except ImportError:
-    import re
 
     def safe_print(msg: str):
         """طباعة آمنة تتعامل مع مشاكل الترميز في Windows"""
@@ -77,18 +91,15 @@ if CONFIG_LOADED:
     LOCAL_DB_FILE = Config.get_local_db_path()
 else:
     # قيم احتياطية للتوافق
-    import os as _os
-
-    MONGO_URI = _os.environ.get("MONGO_URI", "mongodb://localhost:27017/skywave_erp_db")
-    DB_NAME = _os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
-    _PROJECT_DIR = _os.path.dirname(_os.path.dirname(__file__))
-    LOCAL_DB_FILE = _os.path.join(_PROJECT_DIR, "skywave_local.db")
+    MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/skywave_erp_db")
+    DB_NAME = os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
+    _PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
+    LOCAL_DB_FILE = os.path.join(_PROJECT_DIR, "skywave_local.db")
 
 
 # ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
 def _copy_initial_db():
     """نسخ قاعدة البيانات الأولية من مجلد البرنامج إذا لم تكن موجودة"""
-    import shutil
 
     if os.path.exists(LOCAL_DB_FILE):
         return  # قاعدة البيانات موجودة بالفعل
@@ -133,54 +144,54 @@ _copy_initial_db()
 class CursorContextManager:
     """
     ⚡ Context Manager للـ cursor لضمان إغلاقه تلقائياً
-    
+
     الاستخدام:
         with repo.get_cursor() as cursor:
             cursor.execute("SELECT * FROM table")
             rows = cursor.fetchall()
         # الـ cursor يُغلق تلقائياً هنا
     """
-    
+
     def __init__(self, cursor):
         self._cursor = cursor
-    
+
     def __enter__(self):
         return self._cursor
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
             self._cursor.close()
         except Exception:
             pass
         return False  # لا نبتلع الاستثناءات
-    
+
     # تمرير كل الدوال للـ cursor الأصلي
     def execute(self, *args, **kwargs):
         return self._cursor.execute(*args, **kwargs)
-    
+
     def executemany(self, *args, **kwargs):
         return self._cursor.executemany(*args, **kwargs)
-    
+
     def fetchone(self):
         return self._cursor.fetchone()
-    
+
     def fetchall(self):
         return self._cursor.fetchall()
-    
+
     def fetchmany(self, size=None):
         return self._cursor.fetchmany(size)
-    
+
     def close(self):
         return self._cursor.close()
-    
+
     @property
     def description(self):
         return self._cursor.description
-    
+
     @property
     def rowcount(self):
         return self._cursor.rowcount
-    
+
     @property
     def lastrowid(self):
         return self._cursor.lastrowid
@@ -234,7 +245,7 @@ class Repository:
         """
         ⚡ الحصول على cursor منفصل لتجنب مشكلة Recursive cursor
         يجب إغلاق الـ cursor بعد الاستخدام: cursor.close()
-        
+
         يمكن استخدامه كـ context manager:
             with self.get_cursor() as cursor:
                 cursor.execute(...)
@@ -251,12 +262,23 @@ class Repository:
     def close(self):
         """⚡ إغلاق اتصالات قاعدة البيانات"""
         try:
-            if self.sqlite_cursor is not None:
-                self.sqlite_cursor.close()
-            if self.sqlite_conn is not None:
-                self.sqlite_conn.close()
-            if self.mongo_client is not None:
-                self.mongo_client.close()
+            try:
+                if self.sqlite_cursor is not None:
+                    self.sqlite_cursor.close()
+            except Exception:
+                pass
+
+            try:
+                if self.sqlite_conn is not None:
+                    self.sqlite_conn.close()
+            except Exception:
+                pass
+
+            try:
+                if self.mongo_client is not None:
+                    self.mongo_client.close()
+            except Exception:
+                pass
             safe_print("INFO: [Repository] تم إغلاق اتصالات قاعدة البيانات")
         except Exception as e:
             safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
@@ -301,11 +323,11 @@ class Repository:
         def connect_mongo():
             max_retries = 3
             retry_delay = 2  # ثانيتين بين كل محاولة
-            
+
             for attempt in range(max_retries):
                 try:
                     safe_print(f"INFO: محاولة الاتصال بـ MongoDB ({attempt + 1}/{max_retries})...")
-                    
+
                     self.mongo_client = pymongo.MongoClient(
                         MONGO_URI,
                         serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال
@@ -318,14 +340,14 @@ class Repository:
                         maxIdleTimeMS=60000,
                         waitQueueTimeoutMS=5000,
                     )
-                    
+
                     # اختبار الاتصال
                     self.mongo_client.server_info()
                     self.mongo_db = self.mongo_client[DB_NAME]
                     self.online = True
                     safe_print("INFO: ✅ متصل بـ MongoDB بنجاح!")
                     break  # نجح الاتصال
-                    
+
                 except Exception as e:
                     safe_print(f"WARNING: فشلت محاولة {attempt + 1}: {e}")
                     if attempt < max_retries - 1:
@@ -334,11 +356,10 @@ class Repository:
                     else:
                         safe_print("WARNING: فشل الاتصال بـ MongoDB - العمل بالبيانات المحلية")
                         self.online = False
-            
+
             self._mongo_connecting = False
 
         # تشغيل الاتصال في thread منفصل
-        import threading
         thread = threading.Thread(target=connect_mongo, daemon=True)
         thread.start()
 
@@ -347,7 +368,8 @@ class Repository:
         safe_print("INFO: جاري فحص الجداول المحلية (SQLite)...")
 
         # جدول الحسابات (accounts)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -361,7 +383,8 @@ class Repository:
             balance REAL DEFAULT 0.0,
             currency TEXT DEFAULT 'EGP',
             description TEXT
-        )""")
+        )"""
+        )
 
         # Migration: إضافة الأعمدة الناقصة للجداول القديمة
         try:
@@ -380,7 +403,8 @@ class Repository:
             pass  # العمود موجود بالفعل
 
         # جدول المصروفات (expenses)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -394,7 +418,8 @@ class Repository:
             account_id TEXT NOT NULL,
             payment_account_id TEXT,
             project_id TEXT
-        )""")
+        )"""
+        )
 
         # Migration: إضافة عمود payment_account_id للجداول القديمة
         try:
@@ -445,7 +470,8 @@ class Repository:
         self.sqlite_conn.commit()
 
         # ⚡ جدول الدفعات المرحلية (project_milestones)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS project_milestones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id TEXT NOT NULL,
@@ -460,28 +486,33 @@ class Repository:
             created_at TEXT NOT NULL,
             FOREIGN KEY (project_id) REFERENCES projects(name)
         )
-        """)
+        """
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول الدفعات المرحلية جاهز")
 
         # ⚡ جدول أرقام الفواتير الثابتة (مرتبط باسم المشروع وليس الـ ID)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS invoice_numbers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_name TEXT NOT NULL UNIQUE,
             invoice_number TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL
         )
-        """)
+        """
+        )
         self.sqlite_conn.commit()
 
         # ⚡ Migration: توليد أرقام فواتير للمشاريع القديمة اللي مش عندها invoice_number
         try:
             # جلب المشاريع اللي مش عندها رقم فاتورة
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT p.id, p.name FROM projects p
                 WHERE p.invoice_number IS NULL OR p.invoice_number = ''
-            """)
+            """
+            )
             projects_without_invoice = self.sqlite_cursor.fetchall()
 
             if projects_without_invoice:
@@ -530,12 +561,12 @@ class Repository:
                 )
         except Exception as e:
             safe_print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
-            import traceback
 
             traceback.print_exc()
 
         # جدول العملاء (clients)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS clients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -556,7 +587,8 @@ class Repository:
             logo_data TEXT,
             client_notes TEXT,
             is_vip INTEGER DEFAULT 0
-        )""")
+        )"""
+        )
 
         # إضافة عمود logo_data إذا لم يكن موجوداً (للتوافق مع قواعد البيانات القديمة)
         try:
@@ -575,7 +607,8 @@ class Repository:
             pass  # العمود موجود بالفعل
 
         # جدول الخدمات (services)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS services (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -587,11 +620,13 @@ class Repository:
             default_price REAL NOT NULL,
             category TEXT,
             status TEXT NOT NULL DEFAULT 'نشط'
-        )""")
+        )"""
+        )
 
         # جدول الفواتير (invoices)
         # (البنود 'items' هتتخزن كـ JSON text)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS invoices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -614,10 +649,12 @@ class Repository:
             currency TEXT NOT NULL,
             notes TEXT,
             project_id TEXT
-        )""")
+        )"""
+        )
 
         # جدول المشاريع (projects) (معدل بالكامل)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -656,11 +693,13 @@ class Repository:
             estimated_profit REAL DEFAULT 0.0,
             profit_margin REAL DEFAULT 0.0,
             project_manager_id TEXT
-        )""")
+        )"""
+        )
 
         # جدول قيود اليومية (journal_entries)
         # (البنود 'lines' هتتخزن كـ JSON text)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS journal_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -671,10 +710,12 @@ class Repository:
             description TEXT NOT NULL,
             lines TEXT NOT NULL, -- (JSON List of JournalEntryLine)
             related_document_id TEXT
-        )""")
+        )"""
+        )
 
         # جدول الدفعات (payments)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -687,10 +728,12 @@ class Repository:
             amount REAL NOT NULL,
             account_id TEXT NOT NULL,
             method TEXT
-        )""")
+        )"""
+        )
 
         # جدول العملات (currencies)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS currencies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -703,10 +746,12 @@ class Repository:
             rate REAL NOT NULL DEFAULT 1.0,
             is_base INTEGER DEFAULT 0,
             active INTEGER DEFAULT 1
-        )""")
+        )"""
+        )
 
         # جدول الإشعارات (notifications)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -722,10 +767,12 @@ class Repository:
             related_entity_id TEXT,
             action_url TEXT,
             expires_at TEXT
-        )""")
+        )"""
+        )
 
         # جدول المستخدمين (users)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -740,7 +787,8 @@ class Repository:
             is_active INTEGER DEFAULT 1,
             last_login TEXT,
             custom_permissions TEXT
-        )""")
+        )"""
+        )
 
         # Migration: إضافة عمود custom_permissions للجداول القديمة
         try:
@@ -749,7 +797,8 @@ class Repository:
             pass  # العمود موجود بالفعل
 
         # جدول الموظفين (employees) - نظام الموارد البشرية
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -769,12 +818,14 @@ class Repository:
             national_id TEXT,
             bank_account TEXT,
             notes TEXT
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول الموظفين جاهز")
 
         # جدول سلف الموظفين (employee_loans)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS employee_loans (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -793,12 +844,14 @@ class Repository:
             approved_by TEXT,
             notes TEXT,
             FOREIGN KEY (employee_id) REFERENCES employees(id)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول سلف الموظفين جاهز")
 
         # جدول مرتبات الموظفين (employee_salaries)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS employee_salaries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -825,12 +878,14 @@ class Repository:
             notes TEXT,
             FOREIGN KEY (employee_id) REFERENCES employees(id),
             UNIQUE(employee_id, month)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول مرتبات الموظفين جاهز")
 
         # جدول حضور الموظفين (employee_attendance)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS employee_attendance (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -847,12 +902,14 @@ class Repository:
             notes TEXT,
             FOREIGN KEY (employee_id) REFERENCES employees(id),
             UNIQUE(employee_id, date)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول حضور الموظفين جاهز")
 
         # جدول إجازات الموظفين (employee_leaves)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS employee_leaves (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -870,12 +927,14 @@ class Repository:
             approval_date TEXT,
             notes TEXT,
             FOREIGN KEY (employee_id) REFERENCES employees(id)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول إجازات الموظفين جاهز")
 
         # جدول أقساط السلف (loan_payments)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS loan_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -890,12 +949,14 @@ class Repository:
             notes TEXT,
             FOREIGN KEY (loan_id) REFERENCES employee_loans(id),
             FOREIGN KEY (employee_id) REFERENCES employees(id)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول أقساط السلف جاهز")
 
         # جدول عروض الأسعار (quotations) - نظام العروض
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS quotations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -931,12 +992,14 @@ class Repository:
             viewed_date TEXT,
             response_date TEXT,
             FOREIGN KEY (client_id) REFERENCES clients(id)
-        )""")
+        )"""
+        )
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ جدول عروض الأسعار جاهز")
 
         # جدول المهام (tasks) - نظام TODO
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -960,7 +1023,8 @@ class Repository:
             is_archived INTEGER DEFAULT 0,
             FOREIGN KEY (related_project_id) REFERENCES projects(name),
             FOREIGN KEY (related_client_id) REFERENCES clients(id)
-        )""")
+        )"""
+        )
 
         # إضافة حقل is_archived إذا لم يكن موجوداً (للتوافق مع قواعد البيانات القديمة)
         try:
@@ -969,7 +1033,8 @@ class Repository:
             pass  # الحقل موجود بالفعل
 
         # جدول قائمة انتظار المزامنة (sync_queue)
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE TABLE IF NOT EXISTS sync_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             _mongo_id TEXT,
@@ -987,7 +1052,8 @@ class Repository:
             data TEXT,
             error_message TEXT,
             last_attempt TEXT
-        )""")
+        )"""
+        )
 
         # إضافة عمود action إذا لم يكن موجوداً (للتوافق مع الإصدارات القديمة)
         try:
@@ -999,20 +1065,26 @@ class Repository:
             pass
 
         # إنشاء indexes لتحسين أداء sync_queue
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE INDEX IF NOT EXISTS idx_sync_queue_status
         ON sync_queue(status)
-        """)
+        """
+        )
 
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE INDEX IF NOT EXISTS idx_sync_queue_priority
         ON sync_queue(priority, status)
-        """)
+        """
+        )
 
-        self.sqlite_cursor.execute("""
+        self.sqlite_cursor.execute(
+            """
         CREATE INDEX IF NOT EXISTS idx_sync_queue_entity
         ON sync_queue(entity_type, entity_id)
-        """)
+        """
+        )
 
         self.sqlite_conn.commit()
         safe_print("INFO: الجداول المحلية جاهزة.")
@@ -1068,6 +1140,12 @@ class Repository:
             self.sqlite_cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_expenses_project ON expenses(project_id)"
             )
+            self.sqlite_cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_expenses_account ON expenses(account_id)"
+            )
+            self.sqlite_cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_expenses_payment_account ON expenses(payment_account_id)"
+            )
 
             # Indexes لـ invoices
             self.sqlite_cursor.execute(
@@ -1083,6 +1161,9 @@ class Repository:
             )
             self.sqlite_cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date)"
+            )
+            self.sqlite_cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_payments_account ON payments(account_id)"
             )
 
             # ⚡ Unique indexes لمنع التكرار
@@ -1208,20 +1289,20 @@ class Repository:
         existing_client = self.get_client_by_name(client_data.name)
         if existing_client:
             safe_print(f"WARNING: العميل '{client_data.name}' موجود بالفعل!")
-            raise Exception(f"العميل '{client_data.name}' موجود بالفعل في النظام")
+            raise ValueError(f"العميل '{client_data.name}' موجود بالفعل في النظام")
 
         # ✅ فحص التكرار بالاسم (case insensitive)
         similar_client = self._get_similar_client(client_data.name)
         if similar_client:
             safe_print(f"WARNING: يوجد عميل مشابه '{similar_client.name}'!")
-            raise Exception(f"يوجد عميل مشابه بالاسم '{similar_client.name}'")
+            raise ValueError(f"يوجد عميل مشابه بالاسم '{similar_client.name}'")
 
         # ✅ فحص التكرار بالهاتف أيضاً
         if client_data.phone:
             existing_by_phone = self._get_client_by_phone(client_data.phone)
             if existing_by_phone:
                 safe_print(f"WARNING: العميل برقم الهاتف '{client_data.phone}' موجود بالفعل!")
-                raise Exception(f"يوجد عميل آخر بنفس رقم الهاتف '{client_data.phone}'")
+                raise ValueError(f"يوجد عميل آخر بنفس رقم الهاتف '{client_data.phone}'")
 
         now = datetime.now()
         client_data.created_at = now
@@ -1345,12 +1426,12 @@ class Repository:
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
             safe_print(f"DEBUG: [Repo] تم تحديث is_vip = {is_vip_value} للعميل {client_id}")
-            
+
             # ⚡ إبطال الـ cache بعد التحديث
-            if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+            if CACHE_ENABLED and hasattr(self, "_clients_cache"):
                 self._clients_cache.invalidate()
                 safe_print("INFO: ⚡ تم إبطال cache العملاء بعد التحديث")
-                
+
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث العميل (SQLite): {e}")
             return None
@@ -1416,7 +1497,7 @@ class Repository:
         ⚡ جلب كل العملاء النشطين (SQLite أولاً للسرعة) - مع Cache ذكي
         """
         # ⚡ استخدام الـ cache إذا كان متاحاً
-        if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+        if CACHE_ENABLED and hasattr(self, "_clients_cache"):
             cached_result = self._clients_cache.get("all_clients")
             if cached_result is not None:
                 safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} عميل من الـ Cache")
@@ -1436,7 +1517,7 @@ class Repository:
                     cursor.close()
 
             # ⚡ حفظ في الـ cache
-            if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+            if CACHE_ENABLED and hasattr(self, "_clients_cache"):
                 self._clients_cache.set("all_clients", clients_list)
 
             # ⚡ تسجيل عدد العملاء اللي عندهم صور
@@ -1462,11 +1543,11 @@ class Repository:
                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
                     except Exception:
                         continue
-                
+
                 # ⚡ حفظ في الـ cache
-                if CACHE_ENABLED and hasattr(self, '_clients_cache'):
+                if CACHE_ENABLED and hasattr(self, "_clients_cache"):
                     self._clients_cache.set("all_clients", clients_list)
-                
+
                 safe_print(f"INFO: تم جلب {len(clients_list)} عميل نشط من الأونلاين.")
                 return clients_list
             except Exception as e:
@@ -1530,7 +1611,6 @@ class Repository:
     def _to_objectid(self, item_id: str):
         """محاولة تحويل النص إلى ObjectId صالح لتجنب أخطاء InvalidId."""
         try:
-            from bson import ObjectId
 
             if isinstance(item_id, str) and len(item_id) == 24:
                 return ObjectId(item_id)
@@ -2000,9 +2080,6 @@ class Repository:
                     else:
                         safe_print(f"WARNING: فشل مزامنة الحساب '{account_data.name}': {e}")
 
-            import threading
-
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(100, sync_to_mongo)
 
         return account_data
@@ -2027,8 +2104,12 @@ class Repository:
 
         # الجلب من SQLite في حالة الأوفلاين أو عدم وجوده أونلاين
         try:
-            self.sqlite_cursor.execute("SELECT * FROM accounts WHERE code = ?", (code,))
-            row = self.sqlite_cursor.fetchone()
+            cursor = self.get_cursor()
+            try:
+                cursor.execute("SELECT * FROM accounts WHERE code = ?", (code,))
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
             if row:
                 account = schemas.Account(**dict(row))
                 safe_print(f"INFO: تم جلب الحساب (Code: {code}) من المحلي.")
@@ -2083,10 +2164,15 @@ class Repository:
 
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM accounts WHERE id = ? OR _mongo_id = ?", (account_id_num, account_id)
-            )
-            row = self.sqlite_cursor.fetchone()
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    "SELECT * FROM accounts WHERE id = ? OR _mongo_id = ?",
+                    (account_id_num, account_id),
+                )
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
             if row:
                 return schemas.Account(**dict(row))
         except Exception as e:
@@ -2099,8 +2185,6 @@ class Repository:
     def create_user(self, user) -> str:
         """إنشاء مستخدم جديد"""
         try:
-            from datetime import datetime
-
             now_dt = datetime.now()
             now_iso = now_dt.isoformat()
 
@@ -2168,14 +2252,15 @@ class Repository:
     def get_user_by_username(self, username: str):
         """جلب مستخدم بالاسم"""
         try:
-            from core.auth_models import User, UserRole
 
             # البحث في MongoDB أولاً
             if self.online:
                 try:
                     user_data = self.mongo_db.users.find_one({"username": username})
                     if user_data:
-                        user_data["mongo_id"] = str(user_data["_id"])  # استخدام mongo_id بدلاً من _mongo_id
+                        user_data["mongo_id"] = str(
+                            user_data["_id"]
+                        )  # استخدام mongo_id بدلاً من _mongo_id
                         del user_data["_id"]  # حذف _id لتجنب التعارض
                         user_data["role"] = UserRole(user_data["role"])
                         # تحويل datetime إلى string
@@ -2203,8 +2288,6 @@ class Repository:
                 # تحويل custom_permissions من JSON string إلى dict
                 if user_data.get("custom_permissions"):
                     try:
-                        import json
-
                         user_data["custom_permissions"] = json.loads(
                             user_data["custom_permissions"]
                         )
@@ -2221,9 +2304,6 @@ class Repository:
     def update_user_by_username(self, username: str, update_data: dict) -> bool:
         """تحديث بيانات مستخدم باستخدام اسم المستخدم (أكثر أماناً)"""
         try:
-            import json
-            from datetime import datetime
-
             now_dt = datetime.now()
             now_iso = now_dt.isoformat()
 
@@ -2242,7 +2322,6 @@ class Repository:
                     sqlite_data[key] = json.dumps(value, ensure_ascii=False)
 
             # التحقق من صحة أسماء الأعمدة للحماية من SQL Injection
-            import re
 
             valid_columns = {
                 k for k in sqlite_data.keys() if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", k)
@@ -2289,7 +2368,6 @@ class Repository:
             return rows_affected > 0
         except Exception as e:
             safe_print(f"ERROR: [Repository] فشل تحديث المستخدم: {e}")
-            import traceback
 
             traceback.print_exc()
             return False
@@ -2301,7 +2379,7 @@ class Repository:
             if not user_id:
                 safe_print("WARNING: [Repository] تم تمرير user_id فارغ - تجاهل التحديث")
                 return False
-                
+
             safe_print(f"INFO: [Repository] جاري تحديث المستخدم بـ ID: {user_id}")
             safe_print(f"INFO: [Repository] البيانات المراد تحديثها: {update_data}")
 
@@ -2330,7 +2408,9 @@ class Repository:
                         safe_print(f"WARNING: [Repository] فشل البحث في MongoDB: {e}")
 
             if not username:
-                safe_print(f"WARNING: [Repository] المستخدم غير موجود بـ ID: {user_id} - تجاهل التحديث")
+                safe_print(
+                    f"WARNING: [Repository] المستخدم غير موجود بـ ID: {user_id} - تجاهل التحديث"
+                )
                 return False
 
             # استخدام الدالة الجديدة للتحديث باستخدام username
@@ -2343,7 +2423,6 @@ class Repository:
     def get_all_users(self):
         """جلب جميع المستخدمين من MongoDB أو SQLite - محسّن للأداء"""
         try:
-            from core.auth_models import User, UserRole
 
             users = []
 
@@ -2423,7 +2502,6 @@ class Repository:
                     custom_perms = None
                     if row_dict.get("custom_permissions"):
                         try:
-                            import json
                             custom_perms = json.loads(row_dict["custom_permissions"])
                         except (json.JSONDecodeError, TypeError):
                             custom_perms = None
@@ -2450,7 +2528,6 @@ class Repository:
             return users
         except Exception as e:
             safe_print(f"ERROR: [Repository] فشل جلب المستخدمين: {e}")
-            import traceback
 
             traceback.print_exc()
             return []
@@ -2464,15 +2541,15 @@ class Repository:
             return result
 
         try:
-            from datetime import datetime
-
             # === 1. رفع المستخدمين المحليين الجدد/المعدلين إلى السحابة ===
             safe_print("INFO: [Repository] 📤 جاري رفع المستخدمين المحليين إلى السحابة...")
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT * FROM users
                 WHERE sync_status IN ('new_offline', 'modified_offline', 'pending')
                    OR _mongo_id IS NULL
-            """)
+            """
+            )
             local_pending = self.sqlite_cursor.fetchall()
 
             for row in local_pending:
@@ -2690,9 +2767,6 @@ class Repository:
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل مزامنة الحساب مع السيرفر: {e}")
 
-            import threading
-
-            from PyQt6.QtCore import QTimer
             QTimer.singleShot(100, sync_to_mongo)
 
         return account_data
@@ -2771,7 +2845,6 @@ class Repository:
 
                 def delete_from_mongo():
                     try:
-                        from bson import ObjectId
 
                         try:
                             self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
@@ -2781,9 +2854,6 @@ class Repository:
                     except Exception as e:
                         safe_print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
 
-                import threading
-
-                from PyQt6.QtCore import QTimer
                 QTimer.singleShot(100, delete_from_mongo)
 
             return True
@@ -3026,6 +3096,103 @@ class Repository:
 
         return []
 
+    def get_journal_entries_before(self, before_iso: str) -> list[schemas.JournalEntry]:
+        """⚡ جلب قيود اليومية قبل تاريخ محدد (SQLite أولاً للسرعة)"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    "SELECT * FROM journal_entries WHERE date < ? ORDER BY date ASC", (before_iso,)
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+            entries_list: list[schemas.JournalEntry] = []
+            for row in rows:
+                row_dict = dict(row)
+                lines_value = row_dict.get("lines")
+                if isinstance(lines_value, str):
+                    try:
+                        row_dict["lines"] = json.loads(lines_value)
+                    except json.JSONDecodeError:
+                        row_dict["lines"] = []
+
+                fixed_lines = []
+                for line in row_dict.get("lines", []):
+                    if isinstance(line, dict):
+                        if "account_id" not in line or not line.get("account_id"):
+                            line["account_id"] = (
+                                line.get("account_code", "")
+                                or line.get("account_name", "")
+                                or "unknown"
+                            )
+                        fixed_lines.append(line)
+                row_dict["lines"] = fixed_lines
+
+                try:
+                    entries_list.append(schemas.JournalEntry(**row_dict))
+                except Exception as entry_error:
+                    safe_print(f"WARNING: تخطي قيد فاسد: {entry_error}")
+                    continue
+
+            return entries_list
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب قيود اليومية قبل تاريخ (SQLite): {e}")
+            return []
+
+    def get_journal_entries_between(
+        self, start_iso: str, end_iso: str
+    ) -> list[schemas.JournalEntry]:
+        """⚡ جلب قيود اليومية في فترة زمنية (SQLite أولاً للسرعة)"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT * FROM journal_entries
+                    WHERE date >= ? AND date <= ?
+                    ORDER BY date ASC
+                """,
+                    (start_iso, end_iso),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+            entries_list: list[schemas.JournalEntry] = []
+            for row in rows:
+                row_dict = dict(row)
+                lines_value = row_dict.get("lines")
+                if isinstance(lines_value, str):
+                    try:
+                        row_dict["lines"] = json.loads(lines_value)
+                    except json.JSONDecodeError:
+                        row_dict["lines"] = []
+
+                fixed_lines = []
+                for line in row_dict.get("lines", []):
+                    if isinstance(line, dict):
+                        if "account_id" not in line or not line.get("account_id"):
+                            line["account_id"] = (
+                                line.get("account_code", "")
+                                or line.get("account_name", "")
+                                or "unknown"
+                            )
+                        fixed_lines.append(line)
+                row_dict["lines"] = fixed_lines
+
+                try:
+                    entries_list.append(schemas.JournalEntry(**row_dict))
+                except Exception as entry_error:
+                    safe_print(f"WARNING: تخطي قيد فاسد: {entry_error}")
+                    continue
+
+            return entries_list
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب قيود اليومية في فترة (SQLite): {e}")
+            return []
+
     def get_journal_entry_by_doc_id(self, doc_id: str) -> schemas.JournalEntry | None:
         """(جديدة) جلب قيد يومية عن طريق ID الفاتورة/المصروف المرتبط به"""
         if self.online:
@@ -3084,7 +3251,7 @@ class Repository:
                 safe_print(
                     f"WARNING: دفعة مكررة! (المشروع: {payment_data.project_id}, التاريخ: {payment_data.date}, المبلغ: {payment_data.amount})"
                 )
-                raise Exception(
+                raise ValueError(
                     f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})"
                 )
 
@@ -3169,7 +3336,7 @@ class Repository:
         ⚡ يدعم البحث المرن للتعامل مع الاختلافات البسيطة في الأسماء
         """
         safe_print(f"DEBUG: [Repo] جلب دفعات للمشروع: [{project_name}]")
-        
+
         query_filter = {"project_id": project_name}
         if self.online:
             try:
@@ -3189,33 +3356,35 @@ class Repository:
         try:
             with self._lock:
                 temp_cursor = self.sqlite_conn.cursor()
-                
+
                 # ⚡ محاولة 1: البحث الدقيق
                 temp_cursor.execute("SELECT * FROM payments WHERE project_id = ?", (project_name,))
                 rows = temp_cursor.fetchall()
-                
+
                 # ⚡ محاولة 2: إذا لم يتم العثور على نتائج، جرب البحث المرن
                 if len(rows) == 0:
-                    safe_print(f"DEBUG: [Repo] لم يتم العثور على دفعات بالبحث الدقيق، جاري البحث المرن...")
-                    
+                    safe_print(
+                        "DEBUG: [Repo] لم يتم العثور على دفعات بالبحث الدقيق، جاري البحث المرن..."
+                    )
+
                     # تنظيف اسم المشروع (إزالة المسافات الزائدة والرموز الخاصة)
-                    clean_name = project_name.strip().replace('  ', ' ')
-                    
+                    clean_name = project_name.strip().replace("  ", " ")
+
                     # البحث باستخدام LIKE
                     temp_cursor.execute(
                         "SELECT * FROM payments WHERE TRIM(project_id) = ? OR project_id LIKE ?",
-                        (clean_name, f"%{clean_name}%")
+                        (clean_name, f"%{clean_name}%"),
                     )
                     rows = temp_cursor.fetchall()
-                    
+
                     if len(rows) > 0:
                         safe_print(f"DEBUG: [Repo] ✅ تم العثور على {len(rows)} دفعة بالبحث المرن")
-                
+
                 temp_cursor.close()
-            
+
             payments = [schemas.Payment(**dict(row)) for row in rows]
             safe_print(f"DEBUG: [Repo] تم جلب {len(payments)} دفعة من SQLite")
-            
+
             # 🔍 Debug: إذا لم يتم العثور على دفعات
             if len(payments) == 0:
                 safe_print(f"WARNING: [Repo] لم يتم العثور على دفعات للمشروع [{project_name}]")
@@ -3224,14 +3393,14 @@ class Repository:
                 temp_cursor2.execute("SELECT DISTINCT project_id FROM payments LIMIT 5")
                 all_project_names = [row[0] for row in temp_cursor2.fetchall()]
                 temp_cursor2.close()
-                safe_print(f"DEBUG: [Repo] أمثلة من المشاريع اللي عندها دفعات:")
+                safe_print("DEBUG: [Repo] أمثلة من المشاريع اللي عندها دفعات:")
                 for pname in all_project_names:
                     safe_print(f"  - [{pname}]")
-            
+
             return payments
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (SQLite): {e}")
-            import traceback
+
             traceback.print_exc()
             return []
 
@@ -3239,8 +3408,12 @@ class Repository:
         """⚡ جلب كل الدفعات (SQLite أولاً للسرعة)"""
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            self.sqlite_cursor.execute("SELECT * FROM payments ORDER BY date DESC")
-            rows = self.sqlite_cursor.fetchall()
+            cursor = self.get_cursor()
+            try:
+                cursor.execute("SELECT * FROM payments ORDER BY date DESC")
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
             payments = [schemas.Payment(**dict(row)) for row in rows]
             safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
             return payments
@@ -3264,6 +3437,47 @@ class Repository:
 
         return []
 
+    def get_payments_by_account(
+        self, account_code: str, start_iso: str, end_iso: str
+    ) -> list[schemas.Payment]:
+        """⚡ جلب دفعات حساب معين في فترة زمنية (SQLite أولاً للسرعة)"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT * FROM payments
+                    WHERE account_id = ? AND date >= ? AND date <= ?
+                    ORDER BY date ASC
+                """,
+                    (account_code, start_iso, end_iso),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+            return [schemas.Payment(**dict(row)) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب دفعات الحساب (SQLite): {e}")
+            return []
+
+    def sum_payments_before(self, account_code: str, before_iso: str) -> float:
+        """⚡ إجمالي الدفعات قبل تاريخ محدد"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE account_id = ? AND date < ?",
+                    (account_code, before_iso),
+                )
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+            return float(row[0] if row else 0.0)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حساب إجمالي الدفعات: {e}")
+            return 0.0
+
     def update_payment(self, payment_id, payment_data: schemas.Payment) -> bool:
         """تعديل دفعة موجودة"""
         now_dt = datetime.now()
@@ -3271,7 +3485,9 @@ class Repository:
 
         try:
             # ⚡ تحديد نوع الـ ID والبحث المناسب
-            if isinstance(payment_id, int) or (isinstance(payment_id, str) and payment_id.isdigit()):
+            if isinstance(payment_id, int) or (
+                isinstance(payment_id, str) and payment_id.isdigit()
+            ):
                 where_clause = "WHERE id = ?"
                 where_params = (int(payment_id),)
             else:
@@ -3279,8 +3495,8 @@ class Repository:
                 where_params = (str(payment_id),)
 
             # ⚡ جلب الحقول بأمان
-            client_id = getattr(payment_data, 'client_id', '') or ''
-            project_id = getattr(payment_data, 'project_id', '') or ''
+            client_id = getattr(payment_data, "client_id", "") or ""
+            project_id = getattr(payment_data, "project_id", "") or ""
 
             sql = f"""
                 UPDATE payments SET
@@ -3294,12 +3510,12 @@ class Repository:
                 payment_data.date.isoformat(),
                 payment_data.amount,
                 payment_data.account_id,
-                payment_data.method or '',
+                payment_data.method or "",
                 client_id,
                 project_id,
                 "modified",
             ) + where_params
-            
+
             self.sqlite_cursor.execute(sql, params)
             rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
@@ -3309,21 +3525,20 @@ class Repository:
 
             if self.online:
                 try:
-                    from bson import ObjectId
 
                     payment_dict = {
                         "last_modified": now_dt,
                         "date": payment_data.date,
                         "amount": payment_data.amount,
                         "account_id": payment_data.account_id,
-                        "method": payment_data.method or '',
+                        "method": payment_data.method or "",
                         "client_id": client_id,
                         "project_id": project_id,
                         "sync_status": "synced",
                     }
 
                     result = None
-                    mongo_id = getattr(payment_data, '_mongo_id', None)
+                    mongo_id = getattr(payment_data, "_mongo_id", None)
                     if mongo_id:
                         result = self.mongo_db.payments.update_one(
                             {"_id": ObjectId(mongo_id)}, {"$set": payment_dict}
@@ -3335,7 +3550,7 @@ class Repository:
                             ("synced",) + where_params,
                         )
                         self.sqlite_conn.commit()
-                except Exception as e:
+                except Exception:
                     pass  # Ignore sync errors
 
             # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
@@ -3345,7 +3560,7 @@ class Repository:
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تعديل الدفعة: {e}")
-            import traceback
+
             traceback.print_exc()
             return False
 
@@ -3385,7 +3600,6 @@ class Repository:
             # حذف من MongoDB
             if self.online and mongo_id:
                 try:
-                    from bson import ObjectId
 
                     self.mongo_db.payments.delete_one({"_id": ObjectId(mongo_id)})
                     safe_print("INFO: [Repo] تم حذف الدفعة من MongoDB.")
@@ -3561,7 +3775,6 @@ class Repository:
         # محاولة البحث بـ _mongo_id أولاً
         if self.online:
             try:
-                from bson import ObjectId
 
                 data = self.mongo_db.invoices.find_one({"_id": ObjectId(invoice_id)})
                 if data:
@@ -3637,7 +3850,7 @@ class Repository:
         existing = self.sqlite_cursor.fetchone()
         if existing:
             safe_print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل!")
-            raise Exception(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
+            raise ValueError(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
 
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
@@ -3961,8 +4174,12 @@ class Repository:
         """⚡ جلب كل المصروفات (SQLite أولاً للسرعة)"""
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            self.sqlite_cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
-            rows = self.sqlite_cursor.fetchall()
+            cursor = self.get_cursor()
+            try:
+                cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
             expenses_list = [schemas.Expense(**dict(row)) for row in rows]
             safe_print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
             return expenses_list
@@ -3986,11 +4203,113 @@ class Repository:
 
         return []
 
+    def get_expenses_paid_from_account(
+        self, account_code: str, start_iso: str, end_iso: str
+    ) -> list[schemas.Expense]:
+        """⚡ جلب المصروفات المدفوعة من حساب نقدي (يدعم البيانات القديمة)"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT * FROM expenses
+                    WHERE date >= ? AND date <= ?
+                    AND (
+                        payment_account_id = ?
+                        OR (payment_account_id IS NULL AND account_id = ?)
+                    )
+                    ORDER BY date ASC
+                """,
+                    (start_iso, end_iso, account_code, account_code),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+            return [schemas.Expense(**dict(row)) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب مصروفات حساب الدفع (SQLite): {e}")
+            return []
+
+    def sum_expenses_paid_before(self, account_code: str, before_iso: str) -> float:
+        """⚡ إجمالي المصروفات المدفوعة من حساب نقدي قبل تاريخ محدد"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(amount), 0) FROM expenses
+                    WHERE date < ?
+                    AND (
+                        payment_account_id = ?
+                        OR (payment_account_id IS NULL AND account_id = ?)
+                    )
+                """,
+                    (before_iso, account_code, account_code),
+                )
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+            return float(row[0] if row else 0.0)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حساب إجمالي مصروفات الدفع: {e}")
+            return 0.0
+
+    def get_expenses_charged_to_account(
+        self, account_code: str, start_iso: str, end_iso: str
+    ) -> list[schemas.Expense]:
+        """⚡ جلب المصروفات المحمّلة على حساب مصروفات (عند وجود حساب دفع منفصل)"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT * FROM expenses
+                    WHERE date >= ? AND date <= ?
+                    AND account_id = ?
+                    AND payment_account_id IS NOT NULL
+                    AND payment_account_id != ?
+                    ORDER BY date ASC
+                """,
+                    (start_iso, end_iso, account_code, account_code),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+            return [schemas.Expense(**dict(row)) for row in rows]
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل جلب مصروفات حساب المصروف (SQLite): {e}")
+            return []
+
+    def sum_expenses_charged_before(self, account_code: str, before_iso: str) -> float:
+        """⚡ إجمالي المصروفات المحمّلة على حساب قبل تاريخ محدد"""
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(amount), 0) FROM expenses
+                    WHERE date < ?
+                    AND account_id = ?
+                    AND payment_account_id IS NOT NULL
+                    AND payment_account_id != ?
+                """,
+                    (before_iso, account_code, account_code),
+                )
+                row = cursor.fetchone()
+            finally:
+                cursor.close()
+            return float(row[0] if row else 0.0)
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حساب إجمالي مصروفات الحساب: {e}")
+            return 0.0
+
     def get_expense_by_id(self, expense_id) -> schemas.Expense | None:
         """⚡ جلب مصروف واحد بالـ ID"""
         try:
             # ⚡ تحديد نوع الـ ID والبحث المناسب
-            if isinstance(expense_id, int) or (isinstance(expense_id, str) and expense_id.isdigit()):
+            if isinstance(expense_id, int) or (
+                isinstance(expense_id, str) and expense_id.isdigit()
+            ):
                 where_clause = "WHERE id = ?"
                 where_params = (int(expense_id),)
             else:
@@ -4016,7 +4335,9 @@ class Repository:
 
         try:
             # ⚡ تحديد نوع الـ ID والبحث المناسب
-            if isinstance(expense_id, int) or (isinstance(expense_id, str) and expense_id.isdigit()):
+            if isinstance(expense_id, int) or (
+                isinstance(expense_id, str) and expense_id.isdigit()
+            ):
                 where_clause = "WHERE id = ?"
                 where_params = (int(expense_id),)
             else:
@@ -4024,9 +4345,9 @@ class Repository:
                 where_params = (str(expense_id),)
 
             # ⚡ جلب الحقول بأمان
-            category = getattr(expense_data, 'category', '') or ''
-            description = getattr(expense_data, 'description', '') or ''
-            project_id = getattr(expense_data, 'project_id', '') or ''
+            category = getattr(expense_data, "category", "") or ""
+            description = getattr(expense_data, "description", "") or ""
+            project_id = getattr(expense_data, "project_id", "") or ""
 
             sql = f"""
                 UPDATE expenses SET
@@ -4044,7 +4365,7 @@ class Repository:
                 project_id,
                 "modified",
             ) + where_params
-            
+
             self.sqlite_cursor.execute(sql, params)
             rows_affected = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
@@ -4055,7 +4376,6 @@ class Repository:
             # تحديث في MongoDB
             if self.online:
                 try:
-                    from bson import ObjectId
 
                     expense_dict = {
                         "last_modified": now_dt,
@@ -4069,7 +4389,7 @@ class Repository:
                     }
 
                     result = None
-                    mongo_id = getattr(expense_data, '_mongo_id', None)
+                    mongo_id = getattr(expense_data, "_mongo_id", None)
                     if mongo_id:
                         result = self.mongo_db.expenses.update_one(
                             {"_id": ObjectId(mongo_id)}, {"$set": expense_dict}
@@ -4114,7 +4434,6 @@ class Repository:
             # حذف من MongoDB
             if self.online and mongo_id:
                 try:
-                    from bson import ObjectId
 
                     self.mongo_db.expenses.delete_one({"_id": ObjectId(mongo_id)})
                     safe_print("INFO: تم حذف المصروف من الأونلاين.")
@@ -4141,13 +4460,13 @@ class Repository:
         existing_project = self.get_project_by_number(project_data.name)
         if existing_project:
             safe_print(f"WARNING: المشروع '{project_data.name}' موجود بالفعل!")
-            raise Exception(f"المشروع '{project_data.name}' موجود بالفعل في النظام")
+            raise ValueError(f"المشروع '{project_data.name}' موجود بالفعل في النظام")
 
         # ✅ فحص تكرار بنفس العميل ونفس الاسم (case insensitive)
         similar_project = self._get_similar_project(project_data.name, project_data.client_id)
         if similar_project:
             safe_print(f"WARNING: يوجد مشروع مشابه '{similar_project.name}' لنفس العميل!")
-            raise Exception(f"يوجد مشروع مشابه '{similar_project.name}' لنفس العميل")
+            raise ValueError(f"يوجد مشروع مشابه '{similar_project.name}' لنفس العميل")
 
         project_data.created_at = now_dt
         project_data.last_modified = now_dt
@@ -4320,7 +4639,7 @@ class Repository:
                     safe_print(f"ERROR: فشل مزامنة المشروع الجديد: {e}")
 
         # ⚡ إبطال الـ cache بعد إضافة مشروع جديد
-        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+        if CACHE_ENABLED and hasattr(self, "_projects_cache"):
             self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الإضافة")
 
@@ -4339,7 +4658,7 @@ class Repository:
         ⚡ جلب كل المشاريع (SQLite أولاً للسرعة) - مع Cache ذكي
         """
         # ⚡ استخدام الـ cache إذا كان متاحاً
-        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+        if CACHE_ENABLED and hasattr(self, "_projects_cache"):
             cache_key = f"all_projects_{status}_{exclude_status}"
             cached_result = self._projects_cache.get(cache_key)
             if cached_result is not None:
@@ -4381,12 +4700,12 @@ class Repository:
                         except json.JSONDecodeError:
                             row_dict["milestones"] = []
                     data_list.append(schemas.Project(**row_dict))
-                
+
                 # ⚡ حفظ في الـ cache
-                if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+                if CACHE_ENABLED and hasattr(self, "_projects_cache"):
                     cache_key = f"all_projects_{status}_{exclude_status}"
                     self._projects_cache.set(cache_key, data_list)
-                
+
                 safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
                 return data_list
             finally:
@@ -4428,12 +4747,12 @@ class Repository:
                         data_list.append(schemas.Project(**d, _mongo_id=mongo_id))
                     except Exception:
                         continue
-                
+
                 # ⚡ حفظ في الـ cache
-                if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+                if CACHE_ENABLED and hasattr(self, "_projects_cache"):
                     cache_key = f"all_projects_{status}_{exclude_status}"
                     self._projects_cache.set(cache_key, data_list)
-                
+
                 safe_print(f"INFO: تم جلب {len(data_list)} مشروع من الأونلاين.")
                 return data_list
             except Exception as e:
@@ -4525,10 +4844,10 @@ class Repository:
             )
             self.sqlite_cursor.execute(sql, params)
             self.sqlite_conn.commit()
-            safe_print(f"SUCCESS: [Repo] ✅ تم تحديث المشروع في SQLite")
+            safe_print("SUCCESS: [Repo] ✅ تم تحديث المشروع في SQLite")
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
-            import traceback
+
             traceback.print_exc()
             return None
 
@@ -4544,14 +4863,15 @@ class Repository:
 
                 self.mongo_db.projects.update_one({"name": project_name}, {"$set": update_dict})
                 self.sqlite_cursor.execute(
-                    "UPDATE projects SET sync_status = 'synced' WHERE name = ?", (project_data.name,)
+                    "UPDATE projects SET sync_status = 'synced' WHERE name = ?",
+                    (project_data.name,),
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
                 safe_print(f"WARNING: [Repo] تخطي تحديث MongoDB: {e}")
 
         # ⚡ إبطال الـ cache بعد تحديث المشروع
-        if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+        if CACHE_ENABLED and hasattr(self, "_projects_cache"):
             self._projects_cache.invalidate()
             safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد التحديث")
 
@@ -4589,7 +4909,7 @@ class Repository:
             # 2. حذف من MongoDB (اختياري - لا يعطل البرنامج)
             if self.online and mongo_id and self.mongo_db is not None:
                 try:
-                    from bson import ObjectId
+
                     self.mongo_db.projects.delete_one({"_id": ObjectId(mongo_id)})
                     safe_print("INFO: [Repo] تم حذف المشروع من MongoDB")
                 except Exception as e:
@@ -4606,21 +4926,20 @@ class Repository:
                 safe_print(f"WARNING: [Repo] فشل حذف الدفعات المرتبطة: {e}")
 
             safe_print(f"SUCCESS: [Repo] ✅ تم حذف المشروع {project_name} بنجاح")
-            
+
             # ⚡ إبطال الـ cache بعد حذف المشروع
-            if CACHE_ENABLED and hasattr(self, '_projects_cache'):
+            if CACHE_ENABLED and hasattr(self, "_projects_cache"):
                 self._projects_cache.invalidate()
                 safe_print("INFO: ⚡ تم إبطال cache المشاريع بعد الحذف")
 
             # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
             Repository._dashboard_cache = None
             Repository._dashboard_cache_time = 0
-            
+
             return True
 
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حذف المشروع: {e}")
-            import traceback
 
             traceback.print_exc()
             return False
@@ -4709,10 +5028,21 @@ class Repository:
                 safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (Mongo): {e}")
 
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM expenses WHERE project_id = ?", (project_name,)
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                temp_cursor = self.sqlite_conn.cursor()
+                temp_cursor.execute("SELECT * FROM expenses WHERE project_id = ?", (project_name,))
+                rows = temp_cursor.fetchall()
+
+                if len(rows) == 0:
+                    clean_name = project_name.strip().replace("  ", " ")
+                    temp_cursor.execute(
+                        "SELECT * FROM expenses WHERE TRIM(project_id) = ? OR project_id LIKE ?",
+                        (clean_name, f"%{clean_name}%"),
+                    )
+                    rows = temp_cursor.fetchall()
+
+                temp_cursor.close()
+
             return [schemas.Expense(**dict(row)) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (SQLite): {e}")
@@ -4970,7 +5300,6 @@ class Repository:
 
     def fetch_live_exchange_rate(self, currency_code: str) -> float | None:
         """جلب سعر الصرف الحقيقي من الإنترنت"""
-        import urllib.request
 
         currency_code = currency_code.upper()
         if currency_code == "EGP":
@@ -4980,7 +5309,9 @@ class Repository:
             # API 1: Open Exchange Rates
             url = "https://open.er-api.com/v6/latest/USD"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310 - URL is hardcoded HTTPS
+            with urllib.request.urlopen(
+                req, timeout=10
+            ) as response:  # nosec B310 - URL is hardcoded HTTPS
                 data = json.loads(response.read().decode())
                 if data.get("result") == "success" and "rates" in data:
                     rates = data["rates"]
@@ -4998,7 +5329,9 @@ class Repository:
             # API 2: ExchangeRate-API
             url = f"https://api.exchangerate-api.com/v4/latest/{currency_code}"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as response:  # nosec B310 - URL is hardcoded HTTPS
+            with urllib.request.urlopen(
+                req, timeout=10
+            ) as response:  # nosec B310 - URL is hardcoded HTTPS
                 data = json.loads(response.read().decode())
                 if "rates" in data:
                     egp_rate = data["rates"].get("EGP", 0)
@@ -5086,12 +5419,14 @@ class Repository:
 
         try:
             # جلب كل العملاء مرتبين بتاريخ الإنشاء
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT id, _mongo_id, name, phone, created_at
                 FROM clients
                 WHERE status != 'مؤرشف'
                 ORDER BY created_at ASC
-            """)
+            """
+            )
             rows = self.sqlite_cursor.fetchall()
 
             seen_names = {}  # {name_lower: first_id}
@@ -5169,12 +5504,14 @@ class Repository:
         result: dict[str, Any] = {"found": 0, "removed": 0, "details": []}
 
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT id, _mongo_id, name, client_id, created_at
                 FROM projects
                 WHERE status != 'مؤرشف'
                 ORDER BY created_at ASC
-            """)
+            """
+            )
             rows = self.sqlite_cursor.fetchall()
 
             seen_projects = {}  # {(name_lower, client_id): first_id}
@@ -5240,11 +5577,13 @@ class Repository:
         result: dict[str, Any] = {"found": 0, "removed": 0, "details": []}
 
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT id, _mongo_id, project_id, date, amount, created_at
                 FROM payments
                 ORDER BY created_at ASC
-            """)
+            """
+            )
             rows = self.sqlite_cursor.fetchall()
 
             seen_payments = {}  # {(project_id, date_short, amount): first_id}
@@ -5385,12 +5724,14 @@ class Repository:
             self.sqlite_cursor.execute("UPDATE accounts SET is_group = 0")
 
             # ثانياً: تحديد الحسابات التي لها أطفال
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE accounts SET is_group = 1
                 WHERE code IN (
                     SELECT DISTINCT parent_id FROM accounts WHERE parent_id IS NOT NULL AND parent_id != ''
                 )
-            """)
+            """
+            )
 
             self.sqlite_conn.commit()
             safe_print("INFO: [Repo] تم تحديث علامات is_group للحسابات")
@@ -5429,7 +5770,6 @@ class Repository:
         now_iso = now_dt.isoformat()
 
         # تحضير البيانات
-        task_data.get("id") or self._generate_task_id()
 
         sql = """
             INSERT INTO tasks (
@@ -5766,7 +6106,6 @@ class Repository:
         """
         توليد ID فريد للمهمة
         """
-        import uuid
 
         return str(uuid.uuid4())[:8]
 
@@ -5835,7 +6174,8 @@ class Repository:
         """
         try:
             # تحديث كل المشاريع بأرقام الفواتير المحفوظة
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE projects SET invoice_number = (
                     SELECT inv.invoice_number FROM invoice_numbers inv
                     WHERE inv.project_name = projects.name
@@ -5843,15 +6183,18 @@ class Repository:
                 WHERE EXISTS (
                     SELECT 1 FROM invoice_numbers inv WHERE inv.project_name = projects.name
                 )
-            """)
+            """
+            )
             updated = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
 
             # إنشاء أرقام للمشاريع الجديدة اللي مش عندها رقم
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT id, name FROM projects
                 WHERE invoice_number IS NULL OR invoice_number = ''
-            """)
+            """
+            )
             new_projects = self.sqlite_cursor.fetchall()
 
             for row in new_projects:
@@ -5880,12 +6223,14 @@ class Repository:
     def get_all_quotations(self) -> list[dict]:
         """جلب جميع عروض الأسعار"""
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT q.*, c.name as client_display_name, c.company_name
                 FROM quotations q
                 LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
                 ORDER BY q.created_at DESC
-            """)
+            """
+            )
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_quotation_dict(row) for row in rows]
         except Exception as e:
@@ -5895,12 +6240,15 @@ class Repository:
     def get_quotation_by_id(self, quotation_id: int) -> dict | None:
         """جلب عرض سعر بالمعرف"""
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT q.*, c.name as client_display_name, c.company_name
                 FROM quotations q
                 LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
                 WHERE q.id = ?
-            """, (quotation_id,))
+            """,
+                (quotation_id,),
+            )
             row = self.sqlite_cursor.fetchone()
             return self._row_to_quotation_dict(row) if row else None
         except Exception as e:
@@ -5910,11 +6258,14 @@ class Repository:
     def get_quotations_by_client(self, client_id: str) -> list[dict]:
         """جلب عروض أسعار عميل"""
         try:
-            self.sqlite_cursor.execute("""
-                SELECT * FROM quotations 
+            self.sqlite_cursor.execute(
+                """
+                SELECT * FROM quotations
                 WHERE client_id = ? OR client_id = ?
                 ORDER BY created_at DESC
-            """, (client_id, str(client_id)))
+            """,
+                (client_id, str(client_id)),
+            )
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_quotation_dict(row) for row in rows]
         except Exception as e:
@@ -5924,13 +6275,16 @@ class Repository:
     def get_quotations_by_status(self, status: str) -> list[dict]:
         """جلب عروض الأسعار حسب الحالة"""
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT q.*, c.name as client_display_name, c.company_name
                 FROM quotations q
                 LEFT JOIN clients c ON q.client_id = c.id OR q.client_id = c._mongo_id
                 WHERE q.status = ?
                 ORDER BY q.created_at DESC
-            """, (status,))
+            """,
+                (status,),
+            )
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_quotation_dict(row) for row in rows]
         except Exception as e:
@@ -5942,8 +6296,9 @@ class Repository:
         try:
             now = datetime.now().isoformat()
             items_json = json.dumps(data.get("items", []), ensure_ascii=False)
-            
-            self.sqlite_cursor.execute("""
+
+            self.sqlite_cursor.execute(
+                """
                 INSERT INTO quotations (
                     quotation_number, client_id, client_name, issue_date, valid_until,
                     title, description, scope_of_work, items,
@@ -5952,32 +6307,35 @@ class Repository:
                     warranty, notes, internal_notes,
                     created_at, last_modified, sync_status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
-            """, (
-                data.get("quotation_number"),
-                data.get("client_id"),
-                data.get("client_name"),
-                data.get("issue_date"),
-                data.get("valid_until"),
-                data.get("title"),
-                data.get("description"),
-                data.get("scope_of_work"),
-                items_json,
-                data.get("subtotal", 0),
-                data.get("discount_rate", 0),
-                data.get("discount_amount", 0),
-                data.get("tax_rate", 0),
-                data.get("tax_amount", 0),
-                data.get("total_amount", 0),
-                data.get("currency", "EGP"),
-                data.get("status", "مسودة"),
-                data.get("terms_and_conditions"),
-                data.get("payment_terms"),
-                data.get("delivery_time"),
-                data.get("warranty"),
-                data.get("notes"),
-                data.get("internal_notes"),
-                now, now
-            ))
+            """,
+                (
+                    data.get("quotation_number"),
+                    data.get("client_id"),
+                    data.get("client_name"),
+                    data.get("issue_date"),
+                    data.get("valid_until"),
+                    data.get("title"),
+                    data.get("description"),
+                    data.get("scope_of_work"),
+                    items_json,
+                    data.get("subtotal", 0),
+                    data.get("discount_rate", 0),
+                    data.get("discount_amount", 0),
+                    data.get("tax_rate", 0),
+                    data.get("tax_amount", 0),
+                    data.get("total_amount", 0),
+                    data.get("currency", "EGP"),
+                    data.get("status", "مسودة"),
+                    data.get("terms_and_conditions"),
+                    data.get("payment_terms"),
+                    data.get("delivery_time"),
+                    data.get("warranty"),
+                    data.get("notes"),
+                    data.get("internal_notes"),
+                    now,
+                    now,
+                ),
+            )
             self.sqlite_conn.commit()
             quotation_id = self.sqlite_cursor.lastrowid
             safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء عرض سعر: {data.get('quotation_number')}")
@@ -5991,8 +6349,9 @@ class Repository:
         try:
             now = datetime.now().isoformat()
             items_json = json.dumps(data.get("items", []), ensure_ascii=False)
-            
-            self.sqlite_cursor.execute("""
+
+            self.sqlite_cursor.execute(
+                """
                 UPDATE quotations SET
                     client_id = ?, client_name = ?, issue_date = ?, valid_until = ?,
                     title = ?, description = ?, scope_of_work = ?, items = ?,
@@ -6003,31 +6362,34 @@ class Repository:
                     notes = ?, internal_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (
-                data.get("client_id"),
-                data.get("client_name"),
-                data.get("issue_date"),
-                data.get("valid_until"),
-                data.get("title"),
-                data.get("description"),
-                data.get("scope_of_work"),
-                items_json,
-                data.get("subtotal", 0),
-                data.get("discount_rate", 0),
-                data.get("discount_amount", 0),
-                data.get("tax_rate", 0),
-                data.get("tax_amount", 0),
-                data.get("total_amount", 0),
-                data.get("currency", "EGP"),
-                data.get("status"),
-                data.get("terms_and_conditions"),
-                data.get("payment_terms"),
-                data.get("delivery_time"),
-                data.get("warranty"),
-                data.get("notes"),
-                data.get("internal_notes"),
-                now, quotation_id
-            ))
+            """,
+                (
+                    data.get("client_id"),
+                    data.get("client_name"),
+                    data.get("issue_date"),
+                    data.get("valid_until"),
+                    data.get("title"),
+                    data.get("description"),
+                    data.get("scope_of_work"),
+                    items_json,
+                    data.get("subtotal", 0),
+                    data.get("discount_rate", 0),
+                    data.get("discount_amount", 0),
+                    data.get("tax_rate", 0),
+                    data.get("tax_amount", 0),
+                    data.get("total_amount", 0),
+                    data.get("currency", "EGP"),
+                    data.get("status"),
+                    data.get("terms_and_conditions"),
+                    data.get("payment_terms"),
+                    data.get("delivery_time"),
+                    data.get("warranty"),
+                    data.get("notes"),
+                    data.get("internal_notes"),
+                    now,
+                    quotation_id,
+                ),
+            )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم تحديث عرض السعر: {quotation_id}")
             return self.get_quotation_by_id(quotation_id)
@@ -6035,18 +6397,23 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل تحديث عرض السعر: {e}")
             return None
 
-    def update_quotation_status(self, quotation_id: int, status: str, extra_data: dict = None) -> bool:
+    def update_quotation_status(
+        self, quotation_id: int, status: str, extra_data: dict = None
+    ) -> bool:
         """تحديث حالة عرض السعر"""
         try:
             now = datetime.now().isoformat()
             extra = extra_data or {}
-            
+
             # تحديث الحقول الإضافية حسب الحالة
             sent_date = extra.get("sent_date") or (now if status == "مرسل" else None)
             viewed_date = extra.get("viewed_date") or (now if status == "تم الاطلاع" else None)
-            response_date = extra.get("response_date") or (now if status in ["مقبول", "مرفوض"] else None)
-            
-            self.sqlite_cursor.execute("""
+            response_date = extra.get("response_date") or (
+                now if status in ["مقبول", "مرفوض"] else None
+            )
+
+            self.sqlite_cursor.execute(
+                """
                 UPDATE quotations SET
                     status = ?,
                     sent_date = COALESCE(?, sent_date),
@@ -6054,7 +6421,9 @@ class Repository:
                     response_date = COALESCE(?, response_date),
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (status, sent_date, viewed_date, response_date, now, quotation_id))
+            """,
+                (status, sent_date, viewed_date, response_date, now, quotation_id),
+            )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم تحديث حالة العرض: {status}")
             return True
@@ -6066,14 +6435,17 @@ class Repository:
         """تحويل عرض سعر إلى مشروع"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE quotations SET
                     status = 'تم التحويل لمشروع',
                     converted_to_project_id = ?,
                     conversion_date = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (project_id, now, now, quotation_id))
+            """,
+                (project_id, now, now, quotation_id),
+            )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم تحويل العرض لمشروع: {project_id}")
             return True
@@ -6096,9 +6468,12 @@ class Repository:
         """توليد رقم عرض سعر جديد"""
         try:
             year = datetime.now().strftime("%Y")
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT COUNT(*) FROM quotations WHERE quotation_number LIKE ?
-            """, (f"QT-{year}-%",))
+            """,
+                (f"QT-{year}-%",),
+            )
             count = self.sqlite_cursor.fetchone()[0]
             return f"QT-{year}-{count + 1:04d}"
         except Exception as e:
@@ -6109,34 +6484,43 @@ class Repository:
         """جلب إحصائيات عروض الأسعار"""
         try:
             stats = {}
-            
+
             # إجمالي العروض
             self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations")
             stats["total"] = self.sqlite_cursor.fetchone()[0]
-            
+
             # حسب الحالة
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT status, COUNT(*), COALESCE(SUM(total_amount), 0)
                 FROM quotations GROUP BY status
-            """)
-            stats["by_status"] = {row[0]: {"count": row[1], "amount": row[2]} for row in self.sqlite_cursor.fetchall()}
-            
+            """
+            )
+            stats["by_status"] = {
+                row[0]: {"count": row[1], "amount": row[2]} for row in self.sqlite_cursor.fetchall()
+            }
+
             # العروض المقبولة هذا الشهر
             month_start = datetime.now().replace(day=1).strftime("%Y-%m-%d")
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT COUNT(*), COALESCE(SUM(total_amount), 0) FROM quotations
                 WHERE status = 'مقبول' AND response_date >= ?
-            """, (month_start,))
+            """,
+                (month_start,),
+            )
             row = self.sqlite_cursor.fetchone()
             stats["accepted_this_month"] = {"count": row[0], "amount": row[1]}
-            
+
             # معدل القبول
-            self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations WHERE status IN ('مقبول', 'مرفوض')")
+            self.sqlite_cursor.execute(
+                "SELECT COUNT(*) FROM quotations WHERE status IN ('مقبول', 'مرفوض')"
+            )
             responded = self.sqlite_cursor.fetchone()[0]
             self.sqlite_cursor.execute("SELECT COUNT(*) FROM quotations WHERE status = 'مقبول'")
             accepted = self.sqlite_cursor.fetchone()[0]
             stats["acceptance_rate"] = (accepted / responded * 100) if responded > 0 else 0
-            
+
             return stats
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب إحصائيات العروض: {e}")
@@ -6151,7 +6535,7 @@ class Repository:
                 items = json.loads(items_str)
         except (json.JSONDecodeError, TypeError):
             pass
-        
+
         result = {
             "id": row["id"],
             "_mongo_id": row["_mongo_id"],
@@ -6187,15 +6571,14 @@ class Repository:
             "last_modified": row["last_modified"],
             "sync_status": row["sync_status"],
         }
-        
+
         # إضافة اسم العميل من الجدول المرتبط
         if "client_display_name" in row.keys():
             result["client_display_name"] = row["client_display_name"]
         if "company_name" in row.keys():
             result["company_name"] = row["company_name"]
-        
-        return result
 
+        return result
 
     # ==================== نظام الموارد البشرية (HR System) ====================
 
@@ -6234,28 +6617,32 @@ class Repository:
         """إنشاء موظف جديد"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 INSERT INTO employees (
                     employee_id, name, national_id, email, phone, department, position,
                     hire_date, salary, status, address, bank_account, notes,
                     created_at, last_modified, sync_status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
-            """, (
-                data.get("employee_id"),
-                data.get("name"),
-                data.get("national_id"),
-                data.get("email"),
-                data.get("phone"),
-                data.get("department"),
-                data.get("position"),
-                data.get("hire_date"),
-                data.get("salary", 0),
-                data.get("status", "نشط"),
-                data.get("address"),
-                data.get("bank_account"),
-                data.get("notes"),
-                now, now
-            ))
+            """,
+                (
+                    data.get("employee_id"),
+                    data.get("name"),
+                    data.get("national_id"),
+                    data.get("email"),
+                    data.get("phone"),
+                    data.get("department"),
+                    data.get("position"),
+                    data.get("hire_date"),
+                    data.get("salary", 0),
+                    data.get("status", "نشط"),
+                    data.get("address"),
+                    data.get("bank_account"),
+                    data.get("notes"),
+                    now,
+                    now,
+                ),
+            )
             self.sqlite_conn.commit()
             employee_id = self.sqlite_cursor.lastrowid
             safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء موظف: {data.get('name')}")
@@ -6268,29 +6655,33 @@ class Repository:
         """تحديث بيانات موظف"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE employees SET
                     employee_id = ?, name = ?, national_id = ?, email = ?, phone = ?,
                     department = ?, position = ?, hire_date = ?, salary = ?, status = ?,
                     address = ?, bank_account = ?, notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (
-                data.get("employee_id"),
-                data.get("name"),
-                data.get("national_id"),
-                data.get("email"),
-                data.get("phone"),
-                data.get("department"),
-                data.get("position"),
-                data.get("hire_date"),
-                data.get("salary", 0),
-                data.get("status", "نشط"),
-                data.get("address"),
-                data.get("bank_account"),
-                data.get("notes"),
-                now, employee_id
-            ))
+            """,
+                (
+                    data.get("employee_id"),
+                    data.get("name"),
+                    data.get("national_id"),
+                    data.get("email"),
+                    data.get("phone"),
+                    data.get("department"),
+                    data.get("position"),
+                    data.get("hire_date"),
+                    data.get("salary", 0),
+                    data.get("status", "نشط"),
+                    data.get("address"),
+                    data.get("bank_account"),
+                    data.get("notes"),
+                    now,
+                    employee_id,
+                ),
+            )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم تحديث موظف: {data.get('name')}")
             return self.get_employee_by_id(employee_id)
@@ -6337,17 +6728,23 @@ class Repository:
         """جلب سجل حضور موظف"""
         try:
             if month:
-                self.sqlite_cursor.execute("""
-                    SELECT * FROM employee_attendance 
+                self.sqlite_cursor.execute(
+                    """
+                    SELECT * FROM employee_attendance
                     WHERE employee_id = ? AND date LIKE ?
                     ORDER BY date DESC
-                """, (employee_id, f"{month}%"))
+                """,
+                    (employee_id, f"{month}%"),
+                )
             else:
-                self.sqlite_cursor.execute("""
-                    SELECT * FROM employee_attendance 
+                self.sqlite_cursor.execute(
+                    """
+                    SELECT * FROM employee_attendance
                     WHERE employee_id = ?
                     ORDER BY date DESC LIMIT 31
-                """, (employee_id,))
+                """,
+                    (employee_id,),
+                )
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_attendance_dict(row) for row in rows]
         except Exception as e:
@@ -6357,13 +6754,16 @@ class Repository:
     def get_all_attendance_for_date(self, date: str) -> list[dict]:
         """جلب حضور جميع الموظفين ليوم معين"""
         try:
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT a.*, e.name as employee_name, e.department
                 FROM employee_attendance a
                 JOIN employees e ON a.employee_id = e.id
                 WHERE date(a.date) = date(?)
                 ORDER BY e.name
-            """, (date,))
+            """,
+                (date,),
+            )
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_attendance_dict(row) for row in rows]
         except Exception as e:
@@ -6375,51 +6775,62 @@ class Repository:
         try:
             now = datetime.now().isoformat()
             # تحقق من وجود سجل لنفس اليوم
-            self.sqlite_cursor.execute("""
-                SELECT id FROM employee_attendance 
+            self.sqlite_cursor.execute(
+                """
+                SELECT id FROM employee_attendance
                 WHERE employee_id = ? AND date(date) = date(?)
-            """, (data.get("employee_id"), data.get("date")))
+            """,
+                (data.get("employee_id"), data.get("date")),
+            )
             existing = self.sqlite_cursor.fetchone()
-            
+
             if existing:
                 # تحديث السجل الموجود
-                self.sqlite_cursor.execute("""
+                self.sqlite_cursor.execute(
+                    """
                     UPDATE employee_attendance SET
                         check_in_time = COALESCE(?, check_in_time),
                         check_out_time = COALESCE(?, check_out_time),
                         work_hours = ?, overtime_hours = ?, status = ?, notes = ?,
                         last_modified = ?, sync_status = 'modified_offline'
                     WHERE id = ?
-                """, (
-                    data.get("check_in_time"),
-                    data.get("check_out_time"),
-                    data.get("work_hours", 0),
-                    data.get("overtime_hours", 0),
-                    data.get("status", "حاضر"),
-                    data.get("notes"),
-                    now, existing["id"]
-                ))
+                """,
+                    (
+                        data.get("check_in_time"),
+                        data.get("check_out_time"),
+                        data.get("work_hours", 0),
+                        data.get("overtime_hours", 0),
+                        data.get("status", "حاضر"),
+                        data.get("notes"),
+                        now,
+                        existing["id"],
+                    ),
+                )
             else:
                 # إنشاء سجل جديد
-                self.sqlite_cursor.execute("""
+                self.sqlite_cursor.execute(
+                    """
                     INSERT INTO employee_attendance (
                         employee_id, date, check_in_time, check_out_time,
                         work_hours, overtime_hours, status, notes,
                         created_at, last_modified, sync_status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
-                """, (
-                    data.get("employee_id"),
-                    data.get("date"),
-                    data.get("check_in_time"),
-                    data.get("check_out_time"),
-                    data.get("work_hours", 0),
-                    data.get("overtime_hours", 0),
-                    data.get("status", "حاضر"),
-                    data.get("notes"),
-                    now, now
-                ))
+                """,
+                    (
+                        data.get("employee_id"),
+                        data.get("date"),
+                        data.get("check_in_time"),
+                        data.get("check_out_time"),
+                        data.get("work_hours", 0),
+                        data.get("overtime_hours", 0),
+                        data.get("status", "حاضر"),
+                        data.get("notes"),
+                        now,
+                        now,
+                    ),
+                )
             self.sqlite_conn.commit()
-            safe_print(f"SUCCESS: [Repo] ✅ تم تسجيل الحضور")
+            safe_print("SUCCESS: [Repo] ✅ تم تسجيل الحضور")
             return data
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تسجيل الحضور: {e}")
@@ -6463,7 +6874,7 @@ class Repository:
                 query += " AND l.status = ?"
                 params.append(status)
             query += " ORDER BY l.created_at DESC"
-            
+
             self.sqlite_cursor.execute(query, params)
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_leave_dict(row) for row in rows]
@@ -6475,24 +6886,28 @@ class Repository:
         """إنشاء طلب إجازة"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 INSERT INTO employee_leaves (
                     employee_id, leave_type, start_date, end_date, days_count,
                     reason, status, notes, created_at, last_modified, sync_status
                 ) VALUES (?, ?, ?, ?, ?, ?, 'معلق', ?, ?, ?, 'new_offline')
-            """, (
-                data.get("employee_id"),
-                data.get("leave_type", "سنوية"),
-                data.get("start_date"),
-                data.get("end_date"),
-                data.get("days_count", 1),
-                data.get("reason"),
-                data.get("notes"),
-                now, now
-            ))
+            """,
+                (
+                    data.get("employee_id"),
+                    data.get("leave_type", "سنوية"),
+                    data.get("start_date"),
+                    data.get("end_date"),
+                    data.get("days_count", 1),
+                    data.get("reason"),
+                    data.get("notes"),
+                    now,
+                    now,
+                ),
+            )
             self.sqlite_conn.commit()
             leave_id = self.sqlite_cursor.lastrowid
-            safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء طلب إجازة")
+            safe_print("SUCCESS: [Repo] ✅ تم إنشاء طلب إجازة")
             return {"id": leave_id, **data}
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل إنشاء طلب الإجازة: {e}")
@@ -6502,12 +6917,21 @@ class Repository:
         """تحديث حالة طلب إجازة"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE employee_leaves SET
                     status = ?, approved_by = ?, approval_date = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (status, approved_by, now if status in ["موافق عليه", "مرفوض"] else None, now, leave_id))
+            """,
+                (
+                    status,
+                    approved_by,
+                    now if status in ["موافق عليه", "مرفوض"] else None,
+                    now,
+                    leave_id,
+                ),
+            )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم تحديث حالة الإجازة: {status}")
             return True
@@ -6554,7 +6978,7 @@ class Repository:
                 query += " AND l.status = ?"
                 params.append(status)
             query += " ORDER BY l.created_at DESC"
-            
+
             self.sqlite_cursor.execute(query, params)
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_loan_dict(row) for row in rows]
@@ -6567,25 +6991,29 @@ class Repository:
         try:
             now = datetime.now().isoformat()
             amount = data.get("amount", 0)
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 INSERT INTO employee_loans (
                     employee_id, loan_type, amount, remaining_amount, monthly_deduction,
                     start_date, end_date, status, reason, approved_by, notes,
                     created_at, last_modified, sync_status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, 'نشط', ?, ?, ?, ?, ?, 'new_offline')
-            """, (
-                data.get("employee_id"),
-                data.get("loan_type", "سلفة"),
-                amount,
-                amount,  # remaining = amount initially
-                data.get("monthly_deduction", 0),
-                data.get("start_date"),
-                data.get("end_date"),
-                data.get("reason"),
-                data.get("approved_by"),
-                data.get("notes"),
-                now, now
-            ))
+            """,
+                (
+                    data.get("employee_id"),
+                    data.get("loan_type", "سلفة"),
+                    amount,
+                    amount,  # remaining = amount initially
+                    data.get("monthly_deduction", 0),
+                    data.get("start_date"),
+                    data.get("end_date"),
+                    data.get("reason"),
+                    data.get("approved_by"),
+                    data.get("notes"),
+                    now,
+                    now,
+                ),
+            )
             self.sqlite_conn.commit()
             loan_id = self.sqlite_cursor.lastrowid
             safe_print(f"SUCCESS: [Repo] ✅ تم إنشاء سلفة: {amount}")
@@ -6598,18 +7026,22 @@ class Repository:
         """تحديث سلفة"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE employee_loans SET
                     remaining_amount = ?, monthly_deduction = ?, status = ?, notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (
-                data.get("remaining_amount"),
-                data.get("monthly_deduction"),
-                data.get("status"),
-                data.get("notes"),
-                now, loan_id
-            ))
+            """,
+                (
+                    data.get("remaining_amount"),
+                    data.get("monthly_deduction"),
+                    data.get("status"),
+                    data.get("notes"),
+                    now,
+                    loan_id,
+                ),
+            )
             self.sqlite_conn.commit()
             return True
         except Exception as e:
@@ -6656,7 +7088,7 @@ class Repository:
                 query += " AND s.month = ?"
                 params.append(month)
             query += " ORDER BY s.month DESC, e.name"
-            
+
             self.sqlite_cursor.execute(query, params)
             rows = self.sqlite_cursor.fetchall()
             return [self._row_to_salary_dict(row) for row in rows]
@@ -6670,30 +7102,34 @@ class Repository:
             now = datetime.now().isoformat()
             employee_id = data.get("employee_id")
             month = data.get("month")
-            
+
             # تحقق من وجود راتب لنفس الشهر
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 SELECT id FROM employee_salaries WHERE employee_id = ? AND month = ?
-            """, (employee_id, month))
+            """,
+                (employee_id, month),
+            )
             existing = self.sqlite_cursor.fetchone()
-            
+
             # حساب الإجماليات
             basic = data.get("basic_salary", 0)
             allowances = data.get("allowances", 0)
             bonuses = data.get("bonuses", 0)
             overtime = data.get("overtime_amount", 0)
             gross = basic + allowances + bonuses + overtime
-            
+
             loan_ded = data.get("loan_deductions", 0)
             insurance = data.get("insurance_deduction", 0)
             tax = data.get("tax_deduction", 0)
             other_ded = data.get("other_deductions", 0)
             total_deductions = loan_ded + insurance + tax + other_ded
-            
+
             net = gross - total_deductions
-            
+
             if existing:
-                self.sqlite_cursor.execute("""
+                self.sqlite_cursor.execute(
+                    """
                     UPDATE employee_salaries SET
                         basic_salary = ?, allowances = ?, bonuses = ?,
                         overtime_hours = ?, overtime_rate = ?, overtime_amount = ?,
@@ -6702,18 +7138,31 @@ class Repository:
                         payment_status = ?, payment_date = ?, payment_method = ?, notes = ?,
                         last_modified = ?, sync_status = 'modified_offline'
                     WHERE id = ?
-                """, (
-                    basic, allowances, bonuses,
-                    data.get("overtime_hours", 0), data.get("overtime_rate", 0), overtime,
-                    loan_ded, insurance, tax, other_ded, gross, net,
-                    data.get("payment_status", "معلق"),
-                    data.get("payment_date"),
-                    data.get("payment_method"),
-                    data.get("notes"),
-                    now, existing["id"]
-                ))
+                """,
+                    (
+                        basic,
+                        allowances,
+                        bonuses,
+                        data.get("overtime_hours", 0),
+                        data.get("overtime_rate", 0),
+                        overtime,
+                        loan_ded,
+                        insurance,
+                        tax,
+                        other_ded,
+                        gross,
+                        net,
+                        data.get("payment_status", "معلق"),
+                        data.get("payment_date"),
+                        data.get("payment_method"),
+                        data.get("notes"),
+                        now,
+                        existing["id"],
+                    ),
+                )
             else:
-                self.sqlite_cursor.execute("""
+                self.sqlite_cursor.execute(
+                    """
                     INSERT INTO employee_salaries (
                         employee_id, month, basic_salary, allowances, bonuses,
                         overtime_hours, overtime_rate, overtime_amount,
@@ -6721,16 +7170,30 @@ class Repository:
                         gross_salary, net_salary, payment_status, payment_date, payment_method, notes,
                         created_at, last_modified, sync_status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new_offline')
-                """, (
-                    employee_id, month, basic, allowances, bonuses,
-                    data.get("overtime_hours", 0), data.get("overtime_rate", 0), overtime,
-                    loan_ded, insurance, tax, other_ded, gross, net,
-                    data.get("payment_status", "معلق"),
-                    data.get("payment_date"),
-                    data.get("payment_method"),
-                    data.get("notes"),
-                    now, now
-                ))
+                """,
+                    (
+                        employee_id,
+                        month,
+                        basic,
+                        allowances,
+                        bonuses,
+                        data.get("overtime_hours", 0),
+                        data.get("overtime_rate", 0),
+                        overtime,
+                        loan_ded,
+                        insurance,
+                        tax,
+                        other_ded,
+                        gross,
+                        net,
+                        data.get("payment_status", "معلق"),
+                        data.get("payment_date"),
+                        data.get("payment_method"),
+                        data.get("notes"),
+                        now,
+                        now,
+                    ),
+                )
             self.sqlite_conn.commit()
             safe_print(f"SUCCESS: [Repo] ✅ تم حفظ راتب شهر {month}")
             return data
@@ -6738,16 +7201,21 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل حفظ الراتب: {e}")
             return None
 
-    def update_salary_status(self, salary_id: int, status: str, payment_date: str = None, payment_method: str = None) -> bool:
+    def update_salary_status(
+        self, salary_id: int, status: str, payment_date: str = None, payment_method: str = None
+    ) -> bool:
         """تحديث حالة الراتب"""
         try:
             now = datetime.now().isoformat()
-            self.sqlite_cursor.execute("""
+            self.sqlite_cursor.execute(
+                """
                 UPDATE employee_salaries SET
                     payment_status = ?, payment_date = ?, payment_method = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
-            """, (status, payment_date, payment_method, now, salary_id))
+            """,
+                (status, payment_date, payment_method, now, salary_id),
+            )
             self.sqlite_conn.commit()
             return True
         except Exception as e:
@@ -6790,36 +7258,42 @@ class Repository:
         """جلب إحصائيات الموارد البشرية"""
         try:
             stats = {}
-            
+
             # عدد الموظفين
             self.sqlite_cursor.execute("SELECT COUNT(*) FROM employees")
             stats["total_employees"] = self.sqlite_cursor.fetchone()[0]
-            
+
             self.sqlite_cursor.execute("SELECT COUNT(*) FROM employees WHERE status = 'نشط'")
             stats["active_employees"] = self.sqlite_cursor.fetchone()[0]
-            
+
             # إجمالي الرواتب
-            self.sqlite_cursor.execute("SELECT COALESCE(SUM(salary), 0) FROM employees WHERE status = 'نشط'")
+            self.sqlite_cursor.execute(
+                "SELECT COALESCE(SUM(salary), 0) FROM employees WHERE status = 'نشط'"
+            )
             stats["total_salaries"] = self.sqlite_cursor.fetchone()[0]
-            
+
             # السلف النشطة
-            self.sqlite_cursor.execute("SELECT COUNT(*), COALESCE(SUM(remaining_amount), 0) FROM employee_loans WHERE status = 'نشط'")
+            self.sqlite_cursor.execute(
+                "SELECT COUNT(*), COALESCE(SUM(remaining_amount), 0) FROM employee_loans WHERE status = 'نشط'"
+            )
             row = self.sqlite_cursor.fetchone()
             stats["active_loans_count"] = row[0]
             stats["active_loans_amount"] = row[1]
-            
+
             # طلبات الإجازات المعلقة
             self.sqlite_cursor.execute("SELECT COUNT(*) FROM employee_leaves WHERE status = 'معلق'")
             stats["pending_leaves"] = self.sqlite_cursor.fetchone()[0]
-            
+
             # الموظفين حسب القسم
-            self.sqlite_cursor.execute("""
-                SELECT department, COUNT(*) FROM employees 
+            self.sqlite_cursor.execute(
+                """
+                SELECT department, COUNT(*) FROM employees
                 WHERE status = 'نشط' AND department IS NOT NULL
                 GROUP BY department
-            """)
+            """
+            )
             stats["by_department"] = {row[0]: row[1] for row in self.sqlite_cursor.fetchall()}
-            
+
             return stats
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب إحصائيات HR: {e}")
@@ -6830,5 +7304,7 @@ class Repository:
 if __name__ == "__main__":
     safe_print("--- بدء اختبار الـ Repository ---")
     repo = Repository()
-    safe_print(f"حالة الاتصال: {'أونلاين' if repo.is_online() is not None and repo.is_online() else 'أوفلاين'}")
+    safe_print(
+        f"حالة الاتصال: {'أونلاين' if repo.is_online() is not None and repo.is_online() else 'أوفلاين'}"
+    )
     safe_print("--- انتهاء الاختبار ---")

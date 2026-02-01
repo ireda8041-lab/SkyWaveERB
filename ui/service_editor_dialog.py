@@ -29,6 +29,7 @@ from ui.smart_combobox import SmartFilterComboBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -63,6 +64,7 @@ class ServiceEditorDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self._init_ui()
@@ -79,7 +81,8 @@ class ServiceEditorDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -94,7 +97,8 @@ class ServiceEditorDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -160,7 +164,8 @@ class ServiceEditorDialog(QDialog):
         # SmartFilterComboBox مع فلترة ذكية
         self.category_input = SmartFilterComboBox()
         self.category_input.setMinimumWidth(150)
-        self.category_input.setStyleSheet(f"""
+        self.category_input.setStyleSheet(
+            f"""
             QComboBox {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
@@ -199,7 +204,8 @@ class ServiceEditorDialog(QDialog):
                 min-height: 24px;
                 padding: 3px 6px;
             }}
-        """)
+        """
+        )
 
         # ⚡ تحميل الفئات الموجودة
         self._load_existing_categories()
@@ -237,7 +243,8 @@ class ServiceEditorDialog(QDialog):
         # === الحالة ===
         self.status_checkbox = QCheckBox("الخدمة نشطة")
         self.status_checkbox.setChecked(True)
-        self.status_checkbox.setStyleSheet(f"""
+        self.status_checkbox.setStyleSheet(
+            f"""
             QCheckBox {{
                 color: {COLORS['text_primary']};
                 font-size: 11px;
@@ -254,7 +261,8 @@ class ServiceEditorDialog(QDialog):
                 background-color: {COLORS['primary']};
                 border-color: {COLORS['primary']};
             }}
-        """)
+        """
+        )
         layout.addWidget(self.status_checkbox)
 
         layout.addStretch()
@@ -264,12 +272,14 @@ class ServiceEditorDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -296,6 +306,7 @@ class ServiceEditorDialog(QDialog):
 
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
+
         setup_auto_responsive_dialog(self)
 
     def _load_existing_categories(self):
@@ -330,9 +341,7 @@ class ServiceEditorDialog(QDialog):
         else:
             self.category_input.setCurrentText(category)
 
-        self.status_checkbox.setChecked(
-            self.service_to_edit.status == schemas.ServiceStatus.ACTIVE
-        )
+        self.status_checkbox.setChecked(self.service_to_edit.status == schemas.ServiceStatus.ACTIVE)
 
     def _collect_form_data(self) -> dict[str, Any]:
         status = (

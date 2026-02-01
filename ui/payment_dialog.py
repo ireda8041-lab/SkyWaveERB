@@ -31,6 +31,7 @@ from ui.smart_combobox import SmartFilterComboBox
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -41,11 +42,11 @@ except ImportError:
 def to_decimal(value) -> Decimal:
     """تحويل آمن للقيم المالية إلى Decimal"""
     if value is None:
-        return Decimal('0.00')
+        return Decimal("0.00")
     try:
-        return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
-        return Decimal('0.00')
+        return Decimal("0.00")
 
 
 class PaymentDialog(QDialog):
@@ -65,14 +66,16 @@ class PaymentDialog(QDialog):
 
         # ⚡ استخدام Decimal للدقة المالية
         self.total_amount = to_decimal(project.total_amount or 0)
-        self.total_paid = Decimal('0.00')
+        self.total_paid = Decimal("0.00")
         self.remaining_amount = self.total_amount
 
         if project_service:
             try:
                 profit_data = project_service.get_project_profitability(project.name)
                 self.total_paid = to_decimal(profit_data.get("total_paid", 0))
-                self.remaining_amount = to_decimal(profit_data.get("balance_due", float(self.total_amount)))
+                self.remaining_amount = to_decimal(
+                    profit_data.get("balance_due", float(self.total_amount))
+                )
             except Exception as e:
                 safe_print(f"WARNING: [PaymentDialog] فشل جلب بيانات الربحية: {e}")
 
@@ -83,6 +86,7 @@ class PaymentDialog(QDialog):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self._init_ui()
@@ -97,7 +101,8 @@ class PaymentDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -112,7 +117,8 @@ class PaymentDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -160,17 +166,25 @@ class PaymentDialog(QDialog):
 
         # === ملخص المشروع المالي ===
         summary_label = QLabel("ملخص المشروع المالي")
-        summary_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;")
+        summary_label.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;"
+        )
         layout.addWidget(summary_label)
 
         # كروت الملخص
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(8)
 
-        total_card = self._create_info_card("إجمالي العقد", f"{float(self.total_amount):,.2f}", "#3b82f6", "📋")
-        paid_card = self._create_info_card("المدفوع", f"{float(self.total_paid):,.2f}", "#10b981", "✅")
+        total_card = self._create_info_card(
+            "إجمالي العقد", f"{float(self.total_amount):,.2f}", "#3b82f6", "📋"
+        )
+        paid_card = self._create_info_card(
+            "المدفوع", f"{float(self.total_paid):,.2f}", "#10b981", "✅"
+        )
         remaining_color = "#ef4444" if self.remaining_amount > 0 else "#10b981"
-        remaining_card = self._create_info_card("المتبقي", f"{float(self.remaining_amount):,.2f}", remaining_color, "⏳")
+        remaining_card = self._create_info_card(
+            "المتبقي", f"{float(self.remaining_amount):,.2f}", remaining_color, "⏳"
+        )
 
         cards_layout.addWidget(total_card)
         cards_layout.addWidget(paid_card)
@@ -254,7 +268,8 @@ class PaymentDialog(QDialog):
         attach_layout.setSpacing(8)
 
         self.upload_btn = QPushButton("📎 إرفاق صورة الدفعة")
-        self.upload_btn.setStyleSheet(f"""
+        self.upload_btn.setStyleSheet(
+            f"""
             QPushButton {{
                 background-color: {COLORS['bg_medium']};
                 color: {COLORS['text_primary']};
@@ -266,7 +281,8 @@ class PaymentDialog(QDialog):
             QPushButton:hover {{
                 border-color: {COLORS['primary']};
             }}
-        """)
+        """
+        )
         self.upload_btn.clicked.connect(self.select_receipt_image)
         attach_layout.addWidget(self.upload_btn)
 
@@ -284,12 +300,14 @@ class PaymentDialog(QDialog):
 
         # منطقة الأزرار
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -315,12 +333,14 @@ class PaymentDialog(QDialog):
     def _create_info_card(self, title: str, value: str, color: str, icon: str) -> QFrame:
         """إنشاء كارت معلومات مالية"""
         card = QFrame()
-        card.setStyleSheet(f"""
+        card.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {color};
                 border-radius: 8px;
             }}
-        """)
+        """
+        )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(10, 8, 10, 8)
         card_layout.setSpacing(3)
@@ -334,14 +354,18 @@ class PaymentDialog(QDialog):
         header.addWidget(icon_lbl)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: rgba(255,255,255,0.85); font-size: 10px; background: transparent;")
+        title_lbl.setStyleSheet(
+            "color: rgba(255,255,255,0.85); font-size: 10px; background: transparent;"
+        )
         header.addWidget(title_lbl)
         header.addStretch()
 
         card_layout.addLayout(header)
 
         value_lbl = QLabel(value)
-        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 13px; background: transparent;")
+        value_lbl.setStyleSheet(
+            "color: white; font-weight: bold; font-size: 13px; background: transparent;"
+        )
         card_layout.addWidget(value_lbl)
 
         return card
@@ -376,7 +400,7 @@ class PaymentDialog(QDialog):
                 "تأكيد",
                 f"المبلغ المدخل ({float(amount):,.2f}) أكبر من المتبقي ({float(self.remaining_amount):,.2f}).\n\nهل تريد المتابعة؟",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
+                QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.No:
                 self.save_btn.setEnabled(True)
@@ -392,7 +416,9 @@ class PaymentDialog(QDialog):
             )
 
             if payment:
-                QMessageBox.information(self, "✅ تم", "تم تسجيل الدفعة بنجاح وإنشاء القيد المحاسبي.")
+                QMessageBox.information(
+                    self, "✅ تم", "تم تسجيل الدفعة بنجاح وإنشاء القيد المحاسبي."
+                )
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل تسجيل الدفعة.")
@@ -418,7 +444,7 @@ class PaymentDialog(QDialog):
             self,
             "اختر صورة الإيصال/الدفعة",
             "",
-            "Images (*.png *.jpg *.jpeg);;PDF Files (*.pdf);;All Files (*)"
+            "Images (*.png *.jpg *.jpeg);;PDF Files (*.pdf);;All Files (*)",
         )
 
         if file_path:

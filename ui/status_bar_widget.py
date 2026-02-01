@@ -3,17 +3,19 @@
 شريط الحالة مع مؤشر المزامنة والإشعارات
 """
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTime, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ui.styles import get_cairo_font
+from ui.styles import COLORS, get_cairo_font
+from version import CURRENT_VERSION
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -31,9 +33,9 @@ class SyncButton(QWidget):
     """
     زرار مزامنة احترافي مصغّر مع مؤشر حالة
     """
-    
+
     clicked = pyqtSignal()
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._status = "idle"  # idle, syncing, success, error, offline
@@ -41,15 +43,14 @@ class SyncButton(QWidget):
         self._animation_timer = None
         self._animation_frame = 0
         self.init_ui()
-    
+
     def init_ui(self):
         """إنشاء واجهة الزرار"""
-        from PyQt6.QtWidgets import QPushButton
-        
+
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 4)  # ⚡ إضافة margin سفلي لرفع الزرار للمنتصف
         layout.setSpacing(0)
-        
+
         # الزرار الرئيسي - مصغّر
         self.button = QPushButton()
         self.button.setFont(get_cairo_font(9))
@@ -58,19 +59,19 @@ class SyncButton(QWidget):
         self.button.setFixedWidth(85)
         self.button.clicked.connect(self._on_click)
         layout.addWidget(self.button, alignment=Qt.AlignmentFlag.AlignVCenter)
-        
+
         # تحديث المظهر
         self._update_appearance()
-        
+
         # مؤقت للأنيميشن
         self._animation_timer = QTimer(self)
         self._animation_timer.timeout.connect(self._animate)
-    
+
     def _on_click(self):
         """معالج النقر"""
         if self._status not in ("syncing",):
             self.clicked.emit()
-    
+
     def _update_appearance(self):
         """تحديث مظهر الزرار حسب الحالة"""
         base_style = """
@@ -90,76 +91,90 @@ class SyncButton(QWidget):
                 background: {pressed};
             }}
         """
-        
+
         if self._status == "idle":
             self.button.setText("☁ مزامنة")
-            self.button.setStyleSheet(base_style.format(
-                bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0A6CF1, stop:1 #0550B8)",
-                hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1E7EFF, stop:1 #0A6CF1)",
-                pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0550B8, stop:1 #043D8C)"
-            ))
+            self.button.setStyleSheet(
+                base_style.format(
+                    bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0A6CF1, stop:1 #0550B8)",
+                    hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1E7EFF, stop:1 #0A6CF1)",
+                    pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0550B8, stop:1 #043D8C)",
+                )
+            )
             self.button.setEnabled(True)
-            
+
         elif self._status == "syncing":
             frames = ["◐", "◓", "◑", "◒"]
             icon = frames[self._animation_frame % len(frames)]
             self.button.setText(f"{icon} جاري...")
-            self.button.setStyleSheet(base_style.format(
-                bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F59E0B, stop:1 #D97706)",
-                hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F59E0B, stop:1 #D97706)",
-                pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #D97706, stop:1 #B45309)"
-            ))
+            self.button.setStyleSheet(
+                base_style.format(
+                    bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F59E0B, stop:1 #D97706)",
+                    hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F59E0B, stop:1 #D97706)",
+                    pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #D97706, stop:1 #B45309)",
+                )
+            )
             self.button.setEnabled(False)
-            
+
         elif self._status == "success":
             self.button.setText("✓ تم")
-            self.button.setStyleSheet(base_style.format(
-                bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669)",
-                hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #34D399, stop:1 #10B981)",
-                pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #059669, stop:1 #047857)"
-            ))
+            self.button.setStyleSheet(
+                base_style.format(
+                    bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #10B981, stop:1 #059669)",
+                    hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #34D399, stop:1 #10B981)",
+                    pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #059669, stop:1 #047857)",
+                )
+            )
             self.button.setEnabled(True)
-            
+
         elif self._status == "error":
             self.button.setText("✗ فشل")
-            self.button.setStyleSheet(base_style.format(
-                bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #DC2626)",
-                hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F87171, stop:1 #EF4444)",
-                pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #DC2626, stop:1 #B91C1C)"
-            ))
+            self.button.setStyleSheet(
+                base_style.format(
+                    bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #EF4444, stop:1 #DC2626)",
+                    hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #F87171, stop:1 #EF4444)",
+                    pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #DC2626, stop:1 #B91C1C)",
+                )
+            )
             self.button.setEnabled(True)
-            
+
         elif self._status == "offline":
             self.button.setText("◌ غير متصل")
-            self.button.setStyleSheet(base_style.format(
-                bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #6B7280, stop:1 #4B5563)",
-                hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #9CA3AF, stop:1 #6B7280)",
-                pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4B5563, stop:1 #374151)"
-            ))
+            self.button.setStyleSheet(
+                base_style.format(
+                    bg="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #6B7280, stop:1 #4B5563)",
+                    hover="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #9CA3AF, stop:1 #6B7280)",
+                    pressed="qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #4B5563, stop:1 #374151)",
+                )
+            )
             self.button.setEnabled(True)
-    
+
     def _animate(self):
         """تحريك الأيقونة أثناء المزامنة"""
         self._animation_frame += 1
         self._update_appearance()
-    
+
     def set_status(self, status: str):
         """تعيين حالة الزرار"""
         self._status = status
-        
+
         if status == "syncing":
             self._animation_frame = 0
             self._animation_timer.start(200)
         else:
             self._animation_timer.stop()
-            
+
             if status == "success":
-                QTimer.singleShot(2000, lambda: self.set_status("idle") if self._status == "success" else None)
+                QTimer.singleShot(
+                    2000, lambda: self.set_status("idle") if self._status == "success" else None
+                )
             elif status == "error":
-                QTimer.singleShot(3000, lambda: self.set_status("idle") if self._status == "error" else None)
-        
+                QTimer.singleShot(
+                    3000, lambda: self.set_status("idle") if self._status == "error" else None
+                )
+
         self._update_appearance()
-    
+
     def set_progress(self, current: int, total: int):
         """تحديث التقدم"""
         if total > 0:
@@ -182,7 +197,6 @@ class SyncIndicator(QWidget):
 
     def init_ui(self):
         """إنشاء واجهة المستخدم"""
-        from ui.styles import COLORS
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -252,20 +266,21 @@ class ToastNotification(QWidget):
 
     def init_ui(self, title: str, message: str):
         """إنشاء واجهة الإشعار"""
-        from ui.styles import COLORS
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         # الحاوية الرئيسية
         main_frame = QFrame()
-        main_frame.setStyleSheet(f"""
+        main_frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {COLORS["bg_medium"]};
                 border-radius: 8px;
                 border: 1px solid {COLORS["border"]};
             }}
-        """)
+        """
+        )
 
         layout = QVBoxLayout(main_frame)
         layout.setContentsMargins(16, 12, 16, 12)
@@ -321,7 +336,6 @@ class ToastNotification(QWidget):
     def show_notification(self):
         """عرض الإشعار"""
         # تحديد الموقع (أسفل يمين الشاشة)
-        from PyQt6.QtWidgets import QApplication
 
         screen = QApplication.primaryScreen().geometry()
         x = screen.width() - self.width() - 20
@@ -362,8 +376,6 @@ class StatusBarWidget(QWidget):
         self.setVisible(True)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysShowToolTips, True)
 
-        from ui.styles import COLORS
-
         # 1. LEFT SIDE - مؤشر المزامنة وزرار المزامنة الجديد
         self.sync_indicator = SyncIndicator()
         layout.addWidget(self.sync_indicator)
@@ -386,28 +398,34 @@ class StatusBarWidget(QWidget):
         # اسم المستخدم بدون أيقونة
         self.user_label = QLabel("مستخدم")
         self.user_label.setFont(get_cairo_font(12, bold=True))
-        self.user_label.setStyleSheet(f"""
+        self.user_label.setStyleSheet(
+            f"""
             color: {COLORS["primary"]};
             background-color: transparent;
             padding: 2px 6px;
-        """)
+        """
+        )
         user_layout.addWidget(self.user_label)
 
-        user_container.setStyleSheet("""
+        user_container.setStyleSheet(
+            """
             QWidget {
                 background-color: transparent;
                 border: none;
             }
-        """)
+        """
+        )
         layout.addWidget(user_container)
 
         # الوقت الحالي
         self.time_label = QLabel()
         self.time_label.setFont(get_cairo_font(12, bold=True))
-        self.time_label.setStyleSheet(f"""
+        self.time_label.setStyleSheet(
+            f"""
             color: {COLORS["text_primary"]};
             background-color: transparent;
-        """)
+        """
+        )
         layout.addWidget(self.time_label)
 
         # تحديث الوقت كل ثانية
@@ -420,38 +438,39 @@ class StatusBarWidget(QWidget):
         layout.addStretch()
 
         # 6. معلومات النظام
-        from version import CURRENT_VERSION
 
         self.system_info = QLabel(f"Sky Wave ERP v{CURRENT_VERSION}")
         self.system_info.setFont(get_cairo_font(9))
-        self.system_info.setStyleSheet(f"""
+        self.system_info.setStyleSheet(
+            f"""
             color: {COLORS["text_secondary"]};
             background-color: transparent;
-        """)
+        """
+        )
         layout.addWidget(self.system_info)
 
         self.setLayout(layout)
 
     def _create_separator(self):
         """إنشاء فاصل احترافي"""
-        from ui.styles import COLORS
 
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.VLine)
         separator.setFixedHeight(18)
-        separator.setStyleSheet(f"""
+        separator.setStyleSheet(
+            f"""
             QFrame {{
                 color: {COLORS["border"]};
                 background-color: rgba(255, 255, 255, 0.1);
                 max-width: 1px;
             }}
-        """)
+        """
+        )
         return separator
 
     def update_time(self):
         """تحديث الوقت بصيغة 12 ساعة مع AM/PM"""
         try:
-            from PyQt6.QtCore import QTime
 
             current_time = QTime.currentTime()
             if self.time_label and not self.time_label.isHidden():
@@ -463,7 +482,7 @@ class StatusBarWidget(QWidget):
         except Exception:
             pass  # تجاهل أي أخطاء أخرى
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # pylint: disable=invalid-name
         """إيقاف الـ timer عند إغلاق الويدجت"""
         try:
             if hasattr(self, "time_timer") and self.time_timer:
@@ -483,11 +502,11 @@ class StatusBarWidget(QWidget):
 
     def update_sync_status(self, status: str, pending_count: int = 0):
         """تحديث حالة المزامنة"""
-        if hasattr(self, 'sync_indicator'):
+        if hasattr(self, "sync_indicator"):
             self.sync_indicator.update_status(status, pending_count)
-        
+
         # تحديث حالة زرار المزامنة الجديد
-        if hasattr(self, 'sync_button'):
+        if hasattr(self, "sync_button"):
             if status == "syncing":
                 self.sync_button.set_status("syncing")
             elif status == "synced":
@@ -501,9 +520,9 @@ class StatusBarWidget(QWidget):
 
     def update_sync_progress(self, current: int, total: int):
         """تحديث تقدم المزامنة"""
-        if hasattr(self, 'sync_indicator'):
+        if hasattr(self, "sync_indicator"):
             self.sync_indicator.update_progress(current, total)
-        if hasattr(self, 'sync_button'):
+        if hasattr(self, "sync_button"):
             self.sync_button.set_progress(current, total)
 
     def _on_sync_clicked(self):
@@ -519,7 +538,8 @@ class StatusBarWidget(QWidget):
                 if not hasattr(self, "realtime_indicator"):
                     self.realtime_indicator = QLabel("🔄 مزامنة فورية")
                     self.realtime_indicator.setFont(get_cairo_font(10))
-                    self.realtime_indicator.setStyleSheet("""
+                    self.realtime_indicator.setStyleSheet(
+                        """
                         QLabel {
                             color: #10B981;
                             background: rgba(16, 185, 129, 0.1);
@@ -528,7 +548,8 @@ class StatusBarWidget(QWidget):
                             padding: 4px 8px;
                             font-weight: bold;
                         }
-                    """)
+                    """
+                    )
                     self.realtime_indicator.setToolTip(
                         "المزامنة الفورية نشطة - التحديثات تظهر فوراً على جميع الأجهزة"
                     )
@@ -556,4 +577,4 @@ class StatusBarWidget(QWidget):
 
     def get_sync_indicator(self):
         """الحصول على مؤشر المزامنة"""
-        return self.sync_indicator if hasattr(self, 'sync_indicator') else None
+        return self.sync_indicator if hasattr(self, "sync_indicator") else None

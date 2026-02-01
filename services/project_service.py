@@ -439,6 +439,7 @@ class ProjectService:
                     amount=payment_data["amount"],
                     date=payment_data["date"],
                     account_id=payment_data["account_id"],
+                    method=payment_data.get("method"),
                 )
 
             # ⚡ إبطال الـ cache وإرسال إشارة التحديث
@@ -570,7 +571,12 @@ class ProjectService:
 
     # --- (الجديد) دوال الدفعات بقت جوه المشاريع ---
     def create_payment_for_project(
-        self, project: schemas.Project, amount: float, date: datetime, account_id: str
+        self,
+        project: schemas.Project,
+        amount: float,
+        date: datetime,
+        account_id: str,
+        method: str | None = None,
     ) -> schemas.Payment | None:
         """
         ⚡ إنشاء دفعة جديدة لمشروع مع التكامل المحاسبي الكامل
@@ -603,7 +609,7 @@ class ProjectService:
 
         try:
             # تحديد طريقة الدفع من الحساب
-            payment_method = self._get_payment_method_from_account(account_id)
+            payment_method = method or self._get_payment_method_from_account(account_id)
 
             # ⚡ التحقق من وجود client_id
             client_id = project.client_id
@@ -650,7 +656,7 @@ class ProjectService:
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
             self._auto_update_project_status(project.name, force_update=True)
-            
+
             # ⚡ إبطال الـ cache لضمان تحديث البيانات
             self.invalidate_cache()
 
@@ -938,31 +944,13 @@ class ProjectService:
                     "balance_due": 0,
                 }
 
-            total_revenue = project.total_amount
-            total_expenses = 0
-            total_paid = 0
+            total_revenue = float(project.total_amount or 0.0)
 
-            # ⚡ استخدام SQLite مباشرة (أسرع من MongoDB للقراءة المحلية)
-            try:
-                cursor = self.repo.get_cursor()
-                try:
-                    # جلب المصروفات
-                    cursor.execute(
-                        "SELECT SUM(amount) FROM expenses WHERE project_id = ?", (project_name,)
-                    )
-                    result = cursor.fetchone()
-                    total_expenses = result[0] if result and result[0] else 0
+            payments = self.repo.get_payments_for_project(project_name)
+            total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
 
-                    # جلب الدفعات
-                    cursor.execute(
-                        "SELECT SUM(amount) FROM payments WHERE project_id = ?", (project_name,)
-                    )
-                    result = cursor.fetchone()
-                    total_paid = result[0] if result and result[0] else 0
-                finally:
-                    cursor.close()
-            except Exception as e:
-                safe_print(f"WARNING: [ProjectService] فشل جلب البيانات: {e}")
+            expenses = self.repo.get_expenses_for_project(project_name)
+            total_expenses = sum(float(getattr(e, "amount", 0.0) or 0.0) for e in expenses)
 
             net_profit = total_revenue - total_expenses
             balance_due = max(0, total_revenue - total_paid)

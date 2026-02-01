@@ -28,6 +28,7 @@ from ui.styles import BUTTON_STYLES, COLORS
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -37,6 +38,7 @@ except ImportError:
 
 class ExchangeRateFetcher(QThread):
     """Thread لجلب أسعار الصرف الحقيقية من الإنترنت"""
+
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
 
@@ -54,18 +56,20 @@ class ExchangeRateFetcher(QThread):
             try:
                 # API مجاني يعطي أسعار مقابل USD
                 url = "https://open.er-api.com/v6/latest/USD"
-                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(
+                    req, timeout=15
+                ) as response:  # nosec B310 - Safe HTTPS API call
                     data = json.loads(response.read().decode())
-                    if data.get('result') == 'success' and 'rates' in data:
-                        rates = data['rates']
-                        egp_rate = rates.get('EGP', 0)
+                    if data.get("result") == "success" and "rates" in data:
+                        rates = data["rates"]
+                        egp_rate = rates.get("EGP", 0)
                         currency_rate = rates.get(self.currency_code, 0)
 
                         if egp_rate > 0 and currency_rate > 0:
                             # حساب سعر العملة مقابل الجنيه
                             rate = egp_rate / currency_rate
-                            source = 'Open Exchange Rates API'
+                            source = "Open Exchange Rates API"
             except Exception as e:
                 safe_print(f"API 1 failed: {e}")
 
@@ -73,14 +77,16 @@ class ExchangeRateFetcher(QThread):
             if rate is None:
                 try:
                     url = f"https://api.exchangerate-api.com/v4/latest/{self.currency_code}"
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(
+                        req, timeout=15
+                    ) as response:  # nosec B310 - Safe HTTPS API call
                         data = json.loads(response.read().decode())
-                        if 'rates' in data:
-                            egp_rate = data['rates'].get('EGP', 0)
+                        if "rates" in data:
+                            egp_rate = data["rates"].get("EGP", 0)
                             if egp_rate > 0:
                                 rate = egp_rate
-                                source = 'ExchangeRate-API'
+                                source = "ExchangeRate-API"
                 except Exception as e:
                     safe_print(f"API 2 failed: {e}")
 
@@ -88,54 +94,60 @@ class ExchangeRateFetcher(QThread):
             if rate is None:
                 try:
                     url = f"https://cdn.jsdelivr.net/gh/fawazahmed0/currency-api@1/latest/currencies/{self.currency_code.lower()}/egp.json"
-                    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(req, timeout=15) as response:  # nosec B310 - Safe HTTPS API call
+                    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(
+                        req, timeout=15
+                    ) as response:  # nosec B310 - Safe HTTPS API call
                         data = json.loads(response.read().decode())
-                        if 'egp' in data:
-                            rate = data['egp']
-                            source = 'Currency API (GitHub)'
+                        if "egp" in data:
+                            rate = data["egp"]
+                            source = "Currency API (GitHub)"
                 except Exception as e:
                     safe_print(f"API 3 failed: {e}")
 
             # إذا نجح أي API
             if rate and rate > 0:
-                self.finished.emit({
-                    'success': True,
-                    'rate': round(rate, 4),
-                    'source': source,
-                    'is_fallback': False
-                })
+                self.finished.emit(
+                    {
+                        "success": True,
+                        "rate": round(rate, 4),
+                        "source": source,
+                        "is_fallback": False,
+                    }
+                )
                 return
 
             # Fallback: أسعار تقريبية محدثة (نوفمبر 2025)
             fallback_rates = {
-                'USD': 49.50,   # دولار أمريكي
-                'EUR': 52.80,   # يورو
-                'GBP': 62.50,   # جنيه إسترليني
-                'SAR': 13.20,   # ريال سعودي
-                'AED': 13.48,   # درهم إماراتي
-                'KWD': 161.00,  # دينار كويتي
-                'QAR': 13.60,   # ريال قطري
-                'BHD': 131.50,  # دينار بحريني
-                'OMR': 128.70,  # ريال عماني
-                'JOD': 69.80,   # دينار أردني
-                'CHF': 55.00,   # فرنك سويسري
-                'CAD': 35.50,   # دولار كندي
-                'AUD': 32.00,   # دولار أسترالي
-                'JPY': 0.33,    # ين ياباني
-                'CNY': 6.85,    # يوان صيني
-                'INR': 0.59,    # روبية هندية
-                'TRY': 1.45,    # ليرة تركية
-                'EGP': 1.00,    # جنيه مصري
+                "USD": 49.50,  # دولار أمريكي
+                "EUR": 52.80,  # يورو
+                "GBP": 62.50,  # جنيه إسترليني
+                "SAR": 13.20,  # ريال سعودي
+                "AED": 13.48,  # درهم إماراتي
+                "KWD": 161.00,  # دينار كويتي
+                "QAR": 13.60,  # ريال قطري
+                "BHD": 131.50,  # دينار بحريني
+                "OMR": 128.70,  # ريال عماني
+                "JOD": 69.80,  # دينار أردني
+                "CHF": 55.00,  # فرنك سويسري
+                "CAD": 35.50,  # دولار كندي
+                "AUD": 32.00,  # دولار أسترالي
+                "JPY": 0.33,  # ين ياباني
+                "CNY": 6.85,  # يوان صيني
+                "INR": 0.59,  # روبية هندية
+                "TRY": 1.45,  # ليرة تركية
+                "EGP": 1.00,  # جنيه مصري
             }
 
             if self.currency_code in fallback_rates:
-                self.finished.emit({
-                    'success': True,
-                    'rate': fallback_rates[self.currency_code],
-                    'source': 'أسعار تقديرية (البنك المركزي المصري)',
-                    'is_fallback': True
-                })
+                self.finished.emit(
+                    {
+                        "success": True,
+                        "rate": fallback_rates[self.currency_code],
+                        "source": "أسعار تقديرية (البنك المركزي المصري)",
+                        "is_fallback": True,
+                    }
+                )
             else:
                 self.error.emit(f"العملة {self.currency_code} غير مدعومة")
 
@@ -161,10 +173,12 @@ class CurrencyEditorDialog(QDialog):
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
+
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # تطبيق شريط العنوان المخصص
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self.init_ui()
@@ -174,6 +188,7 @@ class CurrencyEditorDialog(QDialog):
 
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
+
         setup_auto_responsive_dialog(self)
 
     def init_ui(self):
@@ -189,7 +204,8 @@ class CurrencyEditorDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: transparent;
@@ -204,7 +220,8 @@ class CurrencyEditorDialog(QDialog):
                 border-radius: 5px;
                 min-height: 30px;
             }}
-        """)
+        """
+        )
 
         # محتوى التمرير
         content_widget = QWidget()
@@ -260,7 +277,8 @@ class CurrencyEditorDialog(QDialog):
 
         # زرار جلب السعر من الإنترنت
         self.fetch_rate_btn = QPushButton("🏦 جلب السعر الحالي من البنوك")
-        self.fetch_rate_btn.setStyleSheet(f"""
+        self.fetch_rate_btn.setStyleSheet(
+            f"""
             QPushButton {{
                 background-color: {COLORS['primary']};
                 color: white;
@@ -275,7 +293,8 @@ class CurrencyEditorDialog(QDialog):
             QPushButton:disabled {{
                 background-color: #4b5563;
             }}
-        """)
+        """
+        )
         self.fetch_rate_btn.clicked.connect(self.fetch_exchange_rate)
         rate_layout.addWidget(self.fetch_rate_btn)
 
@@ -305,12 +324,14 @@ class CurrencyEditorDialog(QDialog):
 
         # منطقة الأزرار (ثابتة في الأسفل)
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_light']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(15, 12, 15, 12)
         buttons_layout.setSpacing(10)
@@ -332,11 +353,11 @@ class CurrencyEditorDialog(QDialog):
 
     def load_currency_data(self):
         """تحميل بيانات العملة للتعديل"""
-        self.code_input.setText(self.currency_data.get('code', ''))
-        self.name_input.setText(self.currency_data.get('name', ''))
-        self.symbol_input.setText(self.currency_data.get('symbol', ''))
-        self.rate_input.setValue(self.currency_data.get('rate', 1.0))
-        self.active_checkbox.setChecked(self.currency_data.get('active', True))
+        self.code_input.setText(self.currency_data.get("code", ""))
+        self.name_input.setText(self.currency_data.get("name", ""))
+        self.symbol_input.setText(self.currency_data.get("symbol", ""))
+        self.rate_input.setValue(self.currency_data.get("rate", 1.0))
+        self.active_checkbox.setChecked(self.currency_data.get("active", True))
 
     def fetch_exchange_rate(self):
         """جلب سعر الصرف من الإنترنت"""
@@ -366,10 +387,10 @@ class CurrencyEditorDialog(QDialog):
         self.fetch_rate_btn.setEnabled(True)
         self.progress_bar.hide()
 
-        if result.get('success'):
-            rate = result['rate']
-            source = result.get('source', 'غير معروف')
-            is_fallback = result.get('is_fallback', False)
+        if result.get("success"):
+            rate = result["rate"]
+            source = result.get("source", "غير معروف")
+            is_fallback = result.get("is_fallback", False)
 
             self.rate_input.setValue(rate)
 
@@ -381,10 +402,11 @@ class CurrencyEditorDialog(QDialog):
                 self.source_label.setStyleSheet("color: #0A6CF1; font-size: 11px;")
 
             QMessageBox.information(
-                self, "تم",
+                self,
+                "تم",
                 f"تم جلب سعر الصرف بنجاح!\n\n"
                 f"1 {self.code_input.text().upper()} = {rate:.4f} ج.م\n\n"
-                f"المصدر: {source}"
+                f"المصدر: {source}",
             )
 
     def on_fetch_error(self, error_msg):
@@ -395,10 +417,11 @@ class CurrencyEditorDialog(QDialog):
         self.source_label.setStyleSheet("color: #ef4444; font-size: 11px;")
 
         QMessageBox.warning(
-            self, "تنبيه",
+            self,
+            "تنبيه",
             f"تعذر جلب سعر الصرف من الإنترنت.\n\n"
             f"يمكنك إدخال السعر يدوياً.\n\n"
-            f"الخطأ: {error_msg}"
+            f"الخطأ: {error_msg}",
         )
 
     def save_currency(self):
@@ -415,15 +438,15 @@ class CurrencyEditorDialog(QDialog):
             return
 
         self.result_data = {
-            'code': code,
-            'name': name,
-            'symbol': self.symbol_input.text().strip() or code,
-            'rate': self.rate_input.value(),
-            'active': self.active_checkbox.isChecked()
+            "code": code,
+            "name": name,
+            "symbol": self.symbol_input.text().strip() or code,
+            "rate": self.rate_input.value(),
+            "active": self.active_checkbox.isChecked(),
         }
 
         self.accept()
 
     def get_result(self):
         """الحصول على البيانات المحفوظة"""
-        return getattr(self, 'result_data', None)
+        return getattr(self, "result_data", None)

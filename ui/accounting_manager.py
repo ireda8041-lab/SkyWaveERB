@@ -41,30 +41,11 @@ except ImportError:
 
 # استيراد نظام الإشعارات
 try:
-    from ui.notification_system import notify_error, notify_info, notify_success, notify_warning
+    from ui.notification_system import notify_success
 except ImportError:
 
-    def notify_success(msg, title=None):
+    def notify_success(_msg, _title=None):
         pass
-
-    def notify_error(msg, title=None):
-        pass
-
-    def notify_warning(msg, title=None):
-        pass
-
-    def notify_info(msg, title=None):
-        pass
-
-
-# ✨ Import Global Events for Real-time Updates
-try:
-    from shared.events import events
-
-    EVENTS_AVAILABLE = True
-except ImportError:
-    EVENTS_AVAILABLE = False
-    # ⚡ تحذير صامت - لا نريد إزعاج المستخدم
 
 
 class AccountingManagerTab(QWidget):
@@ -117,8 +98,8 @@ class AccountingManagerTab(QWidget):
         """⚡ ربط جميع الإشارات للتحديث الفوري التلقائي - محسّن لتجنب التكرار"""
         # ⚡ ربط إشارة accounting_changed فقط (لأن data_changed مربوطة في MainWindow)
         # هذا يمنع التحديث المزدوج
-        app_signals.accounting_changed.connect(self._on_accounting_changed)
-        
+        app_signals.safe_connect(app_signals.accounting_changed, self._on_accounting_changed)
+
         # ⚡ إشارة القيود المحاسبية فقط (لأنها خاصة)
         app_signals.journal_entry_created.connect(self._on_journal_entry_created)
 
@@ -129,17 +110,17 @@ class AccountingManagerTab(QWidget):
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة
         self.invalidate_cache()
         # ⚡ إبطال cache الـ service أيضاً
-        if hasattr(self.accounting_service, '_hierarchy_cache'):
+        if hasattr(self.accounting_service, "_hierarchy_cache"):
             self.accounting_service._hierarchy_cache = None
             self.accounting_service._hierarchy_cache_time = 0
         self.load_accounts_data()
 
-    def _on_any_data_changed(self, data_type: str = None):
+    def _on_any_data_changed(self, _data_type: str = None):
         """⚡ معالج التحديث الفوري عند تغيير أي بيانات - معطل لتجنب التكرار"""
         # ⚡ معطل - التحديث يتم من MainWindow مباشرة
         pass
 
-    def _on_journal_entry_created(self, entry_id: str = None):
+    def _on_journal_entry_created(self, _entry_id: str = None):
         """⚡ معالج إنشاء قيد محاسبي جديد - تحديث فوري"""
         # إبطال الـ cache لضمان جلب البيانات الجديدة
         self.accounting_service._hierarchy_cache = None
@@ -207,13 +188,15 @@ class AccountingManagerTab(QWidget):
 
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
-        self.main_splitter.setStyleSheet("""
+        self.main_splitter.setStyleSheet(
+            """
             QSplitter::handle {
                 background-color: #334155;
                 width: 3px;
                 margin: 0 3px;
             }
-        """)
+        """
+        )
 
         # --- LEFT SIDE: SUMMARY PANEL ---
         self.summary_panel = self.create_summary_panel()
@@ -365,7 +348,9 @@ class AccountingManagerTab(QWidget):
 
             self._render_accounts_tree(tree_map)
             self.update_summary_labels(tree_map)
-            safe_print(f"INFO: [AccManager] ⚡ تم تطبيق cache الحسابات ({len(self.all_accounts_list)} حساب)")
+            safe_print(
+                f"INFO: [AccManager] ⚡ تم تطبيق cache الحسابات ({len(self.all_accounts_list)} حساب)"
+            )
         except Exception as e:
             safe_print(f"ERROR: [AccManager] فشل تطبيق cache: {e}")
 
@@ -395,7 +380,8 @@ class AccountingManagerTab(QWidget):
         if (
             not self._force_next_refresh
             and AccountingManagerTab._accounts_cache
-            and (current_time - AccountingManagerTab._accounts_cache_time) < AccountingManagerTab._ACCOUNTS_CACHE_TTL
+            and (current_time - AccountingManagerTab._accounts_cache_time)
+            < AccountingManagerTab._ACCOUNTS_CACHE_TTL
         ):
             safe_print("INFO: [AccManager] ⚡ استخدام cache الحسابات (سريع)")
             self._apply_cached_data(AccountingManagerTab._accounts_cache)
@@ -421,6 +407,7 @@ class AccountingManagerTab(QWidget):
         # دالة تحديث الواجهة
         def on_data_loaded(data):
             import time
+
             try:
                 tree_map = data["tree_map"]
                 self.all_accounts_list = data["all_accounts"]
@@ -699,7 +686,8 @@ class AccountingManagerTab(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"""
+        scroll.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background: transparent;
@@ -714,16 +702,19 @@ class AccountingManagerTab(QWidget):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         panel = QFrame()
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        panel.setStyleSheet(f"""
+        panel.setStyleSheet(
+            f"""
             QFrame {{
                 background: {COLORS["bg_dark"]};
                 border: none;
             }}
-        """)
+        """
+        )
 
         panel_layout = QVBoxLayout(panel)
         panel_layout.setSpacing(10)
@@ -731,7 +722,8 @@ class AccountingManagerTab(QWidget):
 
         # العنوان الرئيسي
         title = QLabel("📊 الملخص المالي")
-        title.setStyleSheet(f"""
+        title.setStyleSheet(
+            f"""
             font-size: 14px;
             font-weight: bold;
             font-family: 'Cairo';
@@ -739,7 +731,8 @@ class AccountingManagerTab(QWidget):
             padding: 10px;
             background: {COLORS["primary"]};
             border-radius: 8px;
-        """)
+        """
+        )
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         panel_layout.addWidget(title)
 
@@ -789,7 +782,8 @@ class AccountingManagerTab(QWidget):
 
         # زر تحديث
         refresh_btn = QPushButton("🔄 تحديث")
-        refresh_btn.setStyleSheet(f"""
+        refresh_btn.setStyleSheet(
+            f"""
             QPushButton {{
                 background: {COLORS["primary"]};
                 color: white;
@@ -803,7 +797,8 @@ class AccountingManagerTab(QWidget):
             QPushButton:hover {{
                 background: {COLORS["primary_hover"]};
             }}
-        """)
+        """
+        )
         refresh_btn.clicked.connect(self.update_summary_labels)
         panel_layout.addWidget(refresh_btn)
 
@@ -813,14 +808,16 @@ class AccountingManagerTab(QWidget):
     def _create_compact_item(self, icon: str, title: str, value: str, color: str) -> QFrame:
         """إنشاء عنصر ملخص مالي مضغوط"""
         frame = QFrame()
-        frame.setStyleSheet(f"""
+        frame.setStyleSheet(
+            f"""
             QFrame {{
                 background: {COLORS["bg_medium"]};
                 border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
                 padding: 6px;
             }}
-        """)
+        """
+        )
 
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(8, 6, 8, 6)
@@ -828,12 +825,14 @@ class AccountingManagerTab(QWidget):
 
         # الأيقونة والعنوان
         title_label = QLabel(f"{icon} {title}")
-        title_label.setStyleSheet(f"""
+        title_label.setStyleSheet(
+            f"""
             color: {COLORS["text_secondary"]};
             font-size: 11px;
             font-family: 'Cairo';
             background: transparent;
-        """)
+        """
+        )
         layout.addWidget(title_label)
 
         layout.addStretch()
@@ -841,13 +840,15 @@ class AccountingManagerTab(QWidget):
         # القيمة
         value_label = QLabel(f"{value} ج.م")
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet(f"""
+        value_label.setStyleSheet(
+            f"""
             color: {color};
             font-size: 12px;
             font-weight: bold;
             font-family: 'Cairo';
             background: transparent;
-        """)
+        """
+        )
         layout.addWidget(value_label)
 
         frame.setProperty("value_color", color)
@@ -856,7 +857,8 @@ class AccountingManagerTab(QWidget):
     def _create_profit_card(self, icon: str, title: str, value: str) -> QFrame:
         """إنشاء بطاقة صافي الربح"""
         frame = QFrame()
-        frame.setStyleSheet("""
+        frame.setStyleSheet(
+            """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 rgba(16, 185, 129, 0.15),
@@ -865,7 +867,8 @@ class AccountingManagerTab(QWidget):
                 border-radius: 8px;
                 padding: 8px;
             }
-        """)
+        """
+        )
 
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(10, 8, 10, 8)
@@ -873,25 +876,29 @@ class AccountingManagerTab(QWidget):
 
         # العنوان
         title_label = QLabel(f"{icon} {title}")
-        title_label.setStyleSheet(f"""
+        title_label.setStyleSheet(
+            f"""
             color: {COLORS["text_secondary"]};
             font-size: 11px;
             font-family: 'Cairo';
             background: transparent;
-        """)
+        """
+        )
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
 
         # القيمة
         value_label = QLabel(f"{value} ج.م")
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet("""
+        value_label.setStyleSheet(
+            """
             color: #10B981;
             font-size: 16px;
             font-weight: bold;
             font-family: 'Cairo';
             background: transparent;
-        """)
+        """
+        )
         value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(value_label)
 
@@ -1054,7 +1061,8 @@ class AccountingManagerTab(QWidget):
                     value_label.setStyleSheet(
                         "color: #10B981; font-size: 18px; font-weight: bold; background: transparent;"
                     )
-                    frame.setStyleSheet("""
+                    frame.setStyleSheet(
+                        """
                         QFrame {
                             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                 stop:0 rgba(16, 185, 129, 0.1),
@@ -1064,13 +1072,15 @@ class AccountingManagerTab(QWidget):
                             border-radius: 10px;
                             padding: 10px;
                         }
-                    """)
+                    """
+                    )
                 else:
                     value_label.setText(f"{abs(value):,.2f} جنيه (خسارة)")
                     value_label.setStyleSheet(
                         "color: #EF4444; font-size: 18px; font-weight: bold; background: transparent;"
                     )
-                    frame.setStyleSheet("""
+                    frame.setStyleSheet(
+                        """
                         QFrame {
                             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                                 stop:0 rgba(239, 68, 68, 0.1),
@@ -1080,7 +1090,8 @@ class AccountingManagerTab(QWidget):
                             border-radius: 10px;
                             padding: 10px;
                         }
-                    """)
+                    """
+                    )
         except Exception as e:
             safe_print(f"WARNING: فشل تحديث صافي الربح: {e}")
 

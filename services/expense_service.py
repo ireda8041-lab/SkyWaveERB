@@ -32,7 +32,10 @@ if TYPE_CHECKING:
 try:
     from core.notification_bridge import notify_operation
 except ImportError:
-    def notify_operation(action, entity_type, entity_name): pass
+
+    def notify_operation(action, entity_type, entity_name):
+        pass
+
 
 logger = get_logger(__name__)
 
@@ -74,6 +77,7 @@ class ExpenseService:
             قائمة بجميع المصروفات
         """
         import time
+
         try:
             # ⚡ استخدام الـ cache
             now = time.time()
@@ -114,10 +118,10 @@ class ExpenseService:
         logger.info(f"[ExpenseService] استلام طلب إضافة مصروف: {expense_data.category}")
 
         # التحقق من وجود الحسابات المطلوبة
-        if not hasattr(expense_data, 'account_id') or not expense_data.account_id:
+        if not hasattr(expense_data, "account_id") or not expense_data.account_id:
             raise ValueError("يجب تحديد حساب المصروف (account_id)")
 
-        if not hasattr(expense_data, 'payment_account_id') or not expense_data.payment_account_id:
+        if not hasattr(expense_data, "payment_account_id") or not expense_data.payment_account_id:
             raise ValueError("يجب تحديد حساب الدفع (payment_account_id)")
 
         try:
@@ -128,13 +132,15 @@ class ExpenseService:
             self.invalidate_cache()
 
             # نشر الحدث للمحاسبة (سيتم التعامل معه في accounting_service)
-            self.bus.publish('EXPENSE_CREATED', {'expense': created_expense})
+            self.bus.publish("EXPENSE_CREATED", {"expense": created_expense})
 
             # إرسال إشارة التحديث العامة
-            app_signals.emit_data_changed('expenses')
+            app_signals.emit_data_changed("expenses")
 
             # 🔔 إشعار
-            notify_operation('created', 'expense', f"{expense_data.amount:,.0f} ج.م - {expense_data.category}")
+            notify_operation(
+                "created", "expense", f"{expense_data.amount:,.0f} ج.م - {expense_data.category}"
+            )
 
             logger.info("[ExpenseService] تم إضافة المصروف وإنشاء القيد المحاسبي")
             return created_expense
@@ -164,11 +170,15 @@ class ExpenseService:
                 # ⚡ إبطال الـ cache
                 self.invalidate_cache()
                 # ⚡ إرسال البيانات بالشكل الصحيح
-                self.bus.publish('EXPENSE_UPDATED', {'expense': expense_data})
+                self.bus.publish("EXPENSE_UPDATED", {"expense": expense_data})
                 # ⚡ إرسال إشارة التحديث
-                app_signals.emit_data_changed('expenses')
+                app_signals.emit_data_changed("expenses")
                 # 🔔 إشعار
-                notify_operation('updated', 'expense', f"{expense_data.amount:,.0f} ج.م - {expense_data.category}")
+                notify_operation(
+                    "updated",
+                    "expense",
+                    f"{expense_data.amount:,.0f} ج.م - {expense_data.category}",
+                )
                 logger.info("[ExpenseService] تم تعديل المصروف بنجاح")
             return result
         except Exception as e:
@@ -192,17 +202,17 @@ class ExpenseService:
         try:
             # ⚡ جلب بيانات المصروف قبل الحذف لمعرفة الحساب
             expense = self.repo.get_expense_by_id(expense_id)
-            
+
             result = self.repo.delete_expense(expense_id)
             if result:
                 # ⚡ إبطال الـ cache
                 self.invalidate_cache()
                 # ⚡ إرسال البيانات مع المصروف المحذوف
-                self.bus.publish('EXPENSE_DELETED', {'id': expense_id, 'expense': expense})
+                self.bus.publish("EXPENSE_DELETED", {"id": expense_id, "expense": expense})
                 # ⚡ إرسال إشارة التحديث
-                app_signals.emit_data_changed('expenses')
+                app_signals.emit_data_changed("expenses")
                 # 🔔 إشعار - تحويل expense_id لـ string
-                notify_operation('deleted', 'expense', str(expense_id))
+                notify_operation("deleted", "expense", str(expense_id))
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:
@@ -227,9 +237,7 @@ class ExpenseService:
             return []
 
     def get_expenses_by_date_range(
-        self,
-        start_date: datetime,
-        end_date: datetime
+        self, start_date: datetime, end_date: datetime
     ) -> list[schemas.Expense]:
         """
         جلب المصروفات في فترة زمنية محددة
@@ -243,18 +251,13 @@ class ExpenseService:
         """
         try:
             all_expenses = self.repo.get_all_expenses()
-            return [
-                e for e in all_expenses
-                if start_date <= e.date <= end_date
-            ]
+            return [e for e in all_expenses if start_date <= e.date <= end_date]
         except Exception as e:
             logger.error(f"[ExpenseService] فشل جلب المصروفات بالفترة: {e}", exc_info=True)
             return []
 
     def get_expense_statistics(
-        self,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None
+        self, start_date: datetime | None = None, end_date: datetime | None = None
     ) -> dict[str, Any]:
         """
         جلب إحصائيات المصروفات
@@ -296,13 +299,12 @@ class ExpenseService:
                 "average": total_amount / len(expenses) if expenses else 0,
                 "by_category": by_category,
                 "by_project": by_project,
-                "period": {
-                    "start": start_date.isoformat(),
-                    "end": end_date.isoformat()
-                }
+                "period": {"start": start_date.isoformat(), "end": end_date.isoformat()},
             }
 
-            logger.info(f"[ExpenseService] إحصائيات المصروفات: {stats['count']} مصروف بإجمالي {stats['total_amount']}")
+            logger.info(
+                f"[ExpenseService] إحصائيات المصروفات: {stats['count']} مصروف بإجمالي {stats['total_amount']}"
+            )
             return stats
 
         except Exception as e:
@@ -313,7 +315,7 @@ class ExpenseService:
                 "average": 0,
                 "by_category": {},
                 "by_project": {},
-                "period": {}
+                "period": {},
             }
 
     def get_expense_categories(self) -> list[str]:

@@ -3,7 +3,6 @@
 
 import json
 import os
-import subprocess
 import sys
 
 import requests
@@ -13,6 +12,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -24,6 +24,7 @@ class UpdateChecker(QThread):
     """
     Thread للتحقق من وجود تحديثات جديدة
     """
+
     # إشارات
     update_available = pyqtSignal(str, str)  # (version, url)
     no_update = pyqtSignal()
@@ -39,19 +40,19 @@ class UpdateChecker(QThread):
         try:
             # إضافة headers لـ GitHub API
             headers = {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'SkyWaveERP-Updater'
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "SkyWaveERP-Updater",
             }
-            
+
             response = requests.get(self.check_url, headers=headers, timeout=10)
             response.raise_for_status()
 
             data = response.json()
-            
+
             # دعم كلا الصيغتين: GitHub API و version.json العادي
-            if 'tag_name' in data:
+            if "tag_name" in data:
                 # GitHub API format
-                remote_version = data.get("tag_name", "").lstrip('v')  # إزالة 'v' من البداية
+                remote_version = data.get("tag_name", "").lstrip("v")  # إزالة 'v' من البداية
                 # البحث عن ملف exe في assets
                 download_url = ""
                 for asset in data.get("assets", []):
@@ -93,8 +94,8 @@ class UpdateChecker(QThread):
             True إذا كان الإصدار البعيد أحدث
         """
         try:
-            remote_parts = [int(x) for x in remote.split('.')]
-            local_parts = [int(x) for x in local.split('.')]
+            remote_parts = [int(x) for x in remote.split(".")]
+            local_parts = [int(x) for x in local.split(".")]
 
             # مقارنة كل جزء
             for remote_part, local_part in zip(remote_parts, local_parts, strict=False):
@@ -114,6 +115,7 @@ class UpdateDownloader(QThread):
     """
     Thread لتنزيل ملف التحديث
     """
+
     # إشارات
     progress_updated = pyqtSignal(int)  # نسبة التقدم (0-100)
     download_completed = pyqtSignal(str)  # مسار الملف المحمل
@@ -135,10 +137,10 @@ class UpdateDownloader(QThread):
             response = requests.get(self.download_url, stream=True, timeout=30)
             response.raise_for_status()
 
-            total_size = int(response.headers.get('content-length', 0))
+            total_size = int(response.headers.get("content-length", 0))
             downloaded_size = 0
 
-            with open(self.save_path, 'wb') as f:
+            with open(self.save_path, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if self._is_cancelled:
                         f.close()
@@ -182,7 +184,9 @@ class UpdateService:
         self.current_version = current_version
         self.check_url = check_url
         # استخدام مجلد AppData لتجنب مشاكل الصلاحيات في Program Files
-        app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+        app_data_dir = os.path.join(
+            os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SkyWaveERP"
+        )
         os.makedirs(app_data_dir, exist_ok=True)
         self.temp_update_path = os.path.join(app_data_dir, "SkyWave-Setup-Update.exe")
 
@@ -221,7 +225,7 @@ class UpdateService:
         """
         try:
             # تحديد المجلد الحالي
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 # البرنامج مجمع (EXE)
                 current_dir = os.path.dirname(sys.executable)
             else:
@@ -243,15 +247,11 @@ class UpdateService:
             else:
                 # updater.exe غير موجود - شغّل ملف Setup مباشرة
                 safe_print("updater.exe غير موجود - تشغيل Setup مباشرة...")
-                subprocess.Popen([setup_path], shell=False)
+                os.spawnv(os.P_NOWAIT, setup_path, [setup_path])
                 return True
 
             # تشغيل المحدث في عملية منفصلة
-            subprocess.Popen(
-                command,
-                cwd=current_dir,
-                creationflags=subprocess.CREATE_NEW_CONSOLE if sys.platform == 'win32' else 0
-            )
+            os.spawnv(os.P_NOWAIT, command[0], command)
 
             return True
 

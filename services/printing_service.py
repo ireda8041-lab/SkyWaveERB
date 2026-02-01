@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines,too-many-positional-arguments
 # الملف: services/printing_service.py
 """
 خدمة الطباعة وإنتاج ملفات PDF احترافية
@@ -8,8 +9,12 @@ import os
 import platform
 import subprocess
 import sys
+import traceback
+import webbrowser
 from datetime import datetime
 from typing import Any
+
+from core.repository import Repository
 
 # استيراد دالة الطباعة الآمنة أولاً
 try:
@@ -65,18 +70,14 @@ except ImportError as e:
     safe_print("INFO: Install with: pip install Jinja2 PyQt6-WebEngine")
     TEMPLATE_SUPPORT = False
 
-from core import schemas
-
-# استيراد دالة الطباعة الآمنة
 try:
-    from core.safe_print import safe_print
-except ImportError:
+    import pdfkit
 
-    def safe_print(msg):
-        try:
-            print(msg)
-        except UnicodeEncodeError:
-            pass
+    PDFKIT_AVAILABLE = True
+except ImportError:
+    PDFKIT_AVAILABLE = False
+
+from core import schemas
 
 
 class PDFGenerator:
@@ -135,8 +136,6 @@ class PDFGenerator:
     def _register_arabic_fonts(self) -> str:
         """تسجيل خط Cairo العربي"""
         try:
-            import sys
-
             # تحديد مسار خط Cairo
             if getattr(sys, "frozen", False):
                 base_path = sys._MEIPASS
@@ -171,10 +170,9 @@ class PDFGenerator:
     ) -> ParagraphStyle:
         # استخدام TA_RIGHT كـ default إذا لم يتم تحديد alignment
         if alignment is None:
-            from reportlab.lib.enums import TA_RIGHT
-
             alignment = TA_RIGHT
-        """إنشاء نمط فقرة للنص العربي"""
+
+        # إنشاء نمط فقرة للنص العربي
         return ParagraphStyle(
             name,
             fontName=self.arabic_font_name,
@@ -493,9 +491,11 @@ class PDFGenerator:
         # المعاملات
         for txn in transactions:
             row = [
-                txn.get("date", "").strftime("%Y-%m-%d")
-                if isinstance(txn.get("date"), datetime)
-                else str(txn.get("date", "")),
+                (
+                    txn.get("date", "").strftime("%Y-%m-%d")
+                    if isinstance(txn.get("date"), datetime)
+                    else str(txn.get("date", ""))
+                ),
                 self.fix_arabic_text(txn.get("description", "")),
                 txn.get("reference", ""),
                 f"{txn.get('debit', 0):,.2f}" if txn.get("debit", 0) > 0 else "",
@@ -566,9 +566,9 @@ class PDFGenerator:
             if platform.system() == "Windows":
                 os.startfile(file_path)
             elif platform.system() == "Darwin":  # macOS
-                subprocess.run(["open", file_path])
+                subprocess.run(["open", file_path], check=False)
             else:  # Linux
-                subprocess.run(["xdg-open", file_path])
+                subprocess.run(["xdg-open", file_path], check=False)
 
             safe_print(f"INFO: [PDFGenerator] Opened PDF: {file_path}")
         except Exception as e:
@@ -625,7 +625,6 @@ class PrintingService:
             )
         except Exception as e:
             safe_print(f"ERROR: [PrintingService] Failed to print project invoice: {e}")
-            import traceback
 
             traceback.print_exc()
             return None
@@ -718,7 +717,6 @@ class PrintingService:
 
                     if auto_open and html_path:
                         # فتح HTML في المتصفح
-                        import webbrowser
 
                         webbrowser.open(f"file://{os.path.abspath(html_path)}")
 
@@ -746,22 +744,32 @@ class PrintingService:
         """تحضير البيانات للقالب"""
         # معلومات الشركة
         company_data = {
-            "company_name": self.settings_service.get_setting("company_name")
-            if self.settings_service
-            else "SkyWave ERP",
+            "company_name": (
+                self.settings_service.get_setting("company_name")
+                if self.settings_service
+                else "SkyWave ERP"
+            ),
             "company_tagline": "نظام إدارة المشاريع الذكي",
-            "company_phone": self.settings_service.get_setting("company_phone")
-            if self.settings_service
-            else "01000000000",
-            "company_email": self.settings_service.get_setting("company_email")
-            if self.settings_service
-            else "info@skywave.com",
-            "company_website": self.settings_service.get_setting("company_website")
-            if self.settings_service
-            else "www.skywave.com",
-            "company_address": self.settings_service.get_setting("company_address")
-            if self.settings_service
-            else "القاهرة، مصر",
+            "company_phone": (
+                self.settings_service.get_setting("company_phone")
+                if self.settings_service
+                else "01000000000"
+            ),
+            "company_email": (
+                self.settings_service.get_setting("company_email")
+                if self.settings_service
+                else "info@skywave.com"
+            ),
+            "company_website": (
+                self.settings_service.get_setting("company_website")
+                if self.settings_service
+                else "www.skywave.com"
+            ),
+            "company_address": (
+                self.settings_service.get_setting("company_address")
+                if self.settings_service
+                else "القاهرة، مصر"
+            ),
         }
 
         # معلومات الفاتورة
@@ -773,9 +781,11 @@ class PrintingService:
         invoice_data = {
             "invoice_number": invoice_number,
             "invoice_date": datetime.now().strftime("%Y-%m-%d"),
-            "due_date": project.due_date.strftime("%Y-%m-%d")
-            if hasattr(project, "due_date") and project.due_date
-            else "غير محدد",
+            "due_date": (
+                project.due_date.strftime("%Y-%m-%d")
+                if hasattr(project, "due_date") and project.due_date
+                else "غير محدد"
+            ),
         }
 
         # معلومات العميل
@@ -790,9 +800,11 @@ class PrintingService:
         project_data = {
             "project_name": project.name,
             "project_status": getattr(project, "status", None) or "نشط",
-            "project_duration": f"{getattr(project, 'duration_days', 0)} يوم"
-            if getattr(project, "duration_days", None)
-            else "غير محدد",
+            "project_duration": (
+                f"{getattr(project, 'duration_days', 0)} يوم"
+                if getattr(project, "duration_days", None)
+                else "غير محدد"
+            ),
         }
 
         # بنود المشروع
@@ -849,7 +861,6 @@ class PrintingService:
         # حساب المبالغ المدفوعة والمتبقية
         try:
             # جلب الدفعات من قاعدة البيانات
-            from core.repository import Repository
 
             if hasattr(self, "repo") and self.repo is not None:
                 payments = self.repo.get_payments_for_project(project.name)
@@ -917,7 +928,9 @@ class PrintingService:
 
             # محاولة 1: استخدام pdfkit مع wkhtmltopdf
             try:
-                import pdfkit
+                if not PDFKIT_AVAILABLE:
+                    safe_print("ERROR: [PrintingService] pdfkit not installed")
+                    return None
 
                 # البحث عن wkhtmltopdf
                 wkhtmltopdf_paths = [
@@ -985,7 +998,7 @@ class PrintingService:
                         "file:///" + abs_html_path.replace("\\", "/"),
                     ]
 
-                    subprocess.run(cmd, capture_output=True, timeout=30)
+                    subprocess.run(cmd, capture_output=True, timeout=30, check=False)
 
                     if os.path.exists(pdf_path):
                         safe_print(
@@ -1015,7 +1028,6 @@ class PrintingService:
 
         except Exception as e:
             safe_print(f"ERROR: [PrintingService] Failed to create PDF: {e}")
-            import traceback
 
             traceback.print_exc()
             return None
@@ -1035,9 +1047,9 @@ class PrintingService:
                 if platform.system() == "Windows":
                     os.startfile(exports_dir)
                 elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(["open", exports_dir])
+                    subprocess.run(["open", exports_dir], check=False)
                 else:  # Linux
-                    subprocess.run(["xdg-open", exports_dir])
+                    subprocess.run(["xdg-open", exports_dir], check=False)
                 safe_print(f"INFO: [PrintingService] Opened exports folder: {exports_dir}")
             else:
                 safe_print(f"WARNING: [PrintingService] Exports folder not found: {exports_dir}")

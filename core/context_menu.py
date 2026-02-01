@@ -32,6 +32,7 @@ class RightClickBlocker(QObject):
     """
     ⚡ فلتر لتتبع الكليك يمين
     """
+
     is_right_clicking = False
 
     def __init__(self, table: QTableWidget = None, parent=None):
@@ -43,7 +44,7 @@ class RightClickBlocker(QObject):
         try:
             if self.table and not self.table.isVisible():
                 return False
-                
+
             if self.table and obj == self.table.viewport():
                 if event.type() == QEvent.Type.MouseButtonPress:
                     if event.button() == Qt.MouseButton.RightButton:
@@ -52,6 +53,7 @@ class RightClickBlocker(QObject):
                     if event.button() == Qt.MouseButton.RightButton:
                         # تأخير إعادة التعيين
                         from PyQt6.QtCore import QTimer
+
                         QTimer.singleShot(200, self._reset_flag)
         except RuntimeError:
             # الـ table تم حذفه - تجاهل الخطأ
@@ -107,7 +109,7 @@ class ContextMenuManager:
         on_refresh=None,
         on_export=None,
         on_print=None,
-        custom_actions: list = None
+        custom_actions: list = None,
     ):
         """
         إعداد قائمة سياق لجدول

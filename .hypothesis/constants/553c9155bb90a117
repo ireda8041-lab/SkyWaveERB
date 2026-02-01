@@ -1,4 +1,0 @@
-# file: C:\Users\h REDA\AppData\Roaming\Python\Python314\site-packages\pymongo\client_options.py
-# hypothesis_version: 6.148.3
-
-[', ', 'DEFAULT', 'appname', 'authmechanism', 'authsource', 'auto_encryption_opts', 'compressors', 'connect', 'connecttimeoutms', 'directconnection', 'driver', 'event_listeners', 'fsync', 'heartbeatfrequencyms', 'journal', 'loadbalanced', 'localthresholdms', 'maxconnecting', 'maxidletimems', 'maxpoolsize', 'maxstalenessseconds', 'minpoolsize', 'primary', 'read_preference', 'readconcernlevel', 'readpreference', 'readpreferencetags', 'replicaset', 'retryreads', 'retrywrites', 'server_api', 'server_selector', 'servermonitoringmode', 'sockettimeoutms', 'timeoutms', 'tls', 'tlscafile', 'tlscrlfile', 'w', 'waitqueuetimeoutms', 'wtimeoutms', 'zlibcompressionlevel']

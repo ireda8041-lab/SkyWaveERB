@@ -15,11 +15,13 @@ from core.logger import get_logger
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
         except UnicodeEncodeError:
             pass
+
 
 logger = get_logger(__name__)
 
@@ -54,12 +56,23 @@ class EventBus:
 
     # قائمة الأحداث المعروفة (للتوثيق والتحقق)
     KNOWN_EVENTS: set[str] = {
-        "CLIENT_CREATED", "CLIENT_UPDATED", "CLIENT_DELETED",
-        "PROJECT_CREATED", "PROJECT_UPDATED", "PROJECT_DELETED",
-        "INVOICE_CREATED", "INVOICE_UPDATED", "INVOICE_VOIDED",
-        "EXPENSE_CREATED", "EXPENSE_UPDATED", "EXPENSE_DELETED",
-        "PAYMENT_RECORDED", "PAYMENT_DELETED",
-        "SYNC_STARTED", "SYNC_COMPLETED", "SYNC_FAILED",
+        "CLIENT_CREATED",
+        "CLIENT_UPDATED",
+        "CLIENT_DELETED",
+        "PROJECT_CREATED",
+        "PROJECT_UPDATED",
+        "PROJECT_DELETED",
+        "INVOICE_CREATED",
+        "INVOICE_UPDATED",
+        "INVOICE_VOIDED",
+        "EXPENSE_CREATED",
+        "EXPENSE_UPDATED",
+        "EXPENSE_DELETED",
+        "PAYMENT_RECORDED",
+        "PAYMENT_DELETED",
+        "SYNC_STARTED",
+        "SYNC_COMPLETED",
+        "SYNC_FAILED",
         "NOTIFICATION_CREATED",
     }
 
@@ -74,11 +87,7 @@ class EventBus:
         """الوصول للمعالجات (للتوافق مع الكود القديم)"""
         return self._handlers
 
-    def subscribe(
-        self,
-        event_name: str,
-        listener_func: Callable[[Any], None]
-    ) -> None:
+    def subscribe(self, event_name: str, listener_func: Callable[[Any], None]) -> None:
         """
         الاشتراك في حدث
 
@@ -98,11 +107,7 @@ class EventBus:
             else:
                 logger.warning(f"المستمع مشترك بالفعل في حدث: {event_name}")
 
-    def unsubscribe(
-        self,
-        event_name: str,
-        listener_func: Callable[[Any], None]
-    ) -> bool:
+    def unsubscribe(self, event_name: str, listener_func: Callable[[Any], None]) -> bool:
         """
         إلغاء الاشتراك من حدث
 
@@ -124,11 +129,7 @@ class EventBus:
                     return False
             return False
 
-    def publish(
-        self,
-        event_name: str,
-        data: Any | None = None
-    ) -> int:
+    def publish(self, event_name: str, data: Any | None = None) -> int:
         """
         نشر حدث - محسّن للسرعة
 
@@ -224,24 +225,25 @@ if __name__ == "__main__":
         # (هنا هيتحط كود إنشاء قيد اليومية)
 
     def notification_listener(invoice_data):
-        safe_print(f"  >> قسم الإشعارات سمع: جاري إرسال إيميل للعميل ببيانات الفاتورة {invoice_data['number']}")
+        safe_print(
+            f"  >> قسم الإشعارات سمع: جاري إرسال إيميل للعميل ببيانات الفاتورة {invoice_data['number']}"
+        )
 
     # 2. تشغيل الإذاعة
     bus = EventBus()
 
     # 3. الأقسام بتشترك في الإذاعة
-    bus.subscribe('INVOICE_CREATED', accountant_listener)
-    bus.subscribe('INVOICE_CREATED', notification_listener)
-    bus.subscribe('EXPENSE_CREATED', accountant_listener) # المحاسب بيسمع الفواتير والمصروفات
+    bus.subscribe("INVOICE_CREATED", accountant_listener)
+    bus.subscribe("INVOICE_CREATED", notification_listener)
+    bus.subscribe("EXPENSE_CREATED", accountant_listener)  # المحاسب بيسمع الفواتير والمصروفات
 
     safe_print("\n--- الاختبار: نشر فاتورة جديدة ---")
     # 4. قسم الفواتير بينشر "حدث"
     new_invoice = {"number": "INV-001", "total": 5000}
-    bus.publish('INVOICE_CREATED', new_invoice)
+    bus.publish("INVOICE_CREATED", new_invoice)
 
     safe_print("\n--- الاختبار: نشر مصروف جديد ---")
     # 5. قسم المصروفات بينشر "حدث"
     new_expense = {"category": "إعلانات", "amount": 1000}
     # (قسم الإشعارات مش هيسمع ده، لأنه مشترك في الفواتير بس)
-    bus.publish('EXPENSE_CREATED', new_expense)
-
+    bus.publish("EXPENSE_CREATED", new_expense)

@@ -32,6 +32,7 @@ from ui.styles import get_cairo_font
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -53,6 +54,7 @@ class ProjectProfitDialog(QDialog):
         self.setMinimumSize(950, 650)
 
         from ui.styles import setup_custom_title_bar
+
         setup_custom_title_bar(self)
 
         self._init_ui()
@@ -60,6 +62,7 @@ class ProjectProfitDialog(QDialog):
 
         # ⚡ تطبيق الستايلات المتجاوبة
         from ui.styles import setup_auto_responsive_dialog
+
         setup_auto_responsive_dialog(self)
 
     def _init_ui(self):
@@ -72,7 +75,8 @@ class ProjectProfitDialog(QDialog):
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
+        scroll_area.setStyleSheet(
+            f"""
             QScrollArea {{
                 border: none;
                 background-color: {COLORS['bg_dark']};
@@ -87,7 +91,8 @@ class ProjectProfitDialog(QDialog):
                 border-radius: 3px;
                 min-height: 20px;
             }}
-        """)
+        """
+        )
 
         content_widget = QWidget()
         content_widget.setStyleSheet(f"background-color: {COLORS['bg_dark']};")
@@ -97,19 +102,23 @@ class ProjectProfitDialog(QDialog):
 
         # === معلومات المشروع ===
         info_frame = QFrame()
-        info_frame.setStyleSheet(f"""
+        info_frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {COLORS['bg_medium']};
                 border-radius: 8px;
                 border: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         info_layout = QHBoxLayout(info_frame)
         info_layout.setContentsMargins(12, 10, 12, 10)
         info_layout.setSpacing(20)
 
         # المشروع
-        self.project_label = QLabel(f"📌 <b>المشروع:</b> <span style='color:{COLORS['primary']};'>{self.project.name}</span>")
+        self.project_label = QLabel(
+            f"📌 <b>المشروع:</b> <span style='color:{COLORS['primary']};'>{self.project.name}</span>"
+        )
         self.project_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         # العميل
@@ -118,9 +127,15 @@ class ProjectProfitDialog(QDialog):
         self.client_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         # الحالة
-        status_text = self.project.status.value if hasattr(self.project.status, 'value') else str(self.project.status)
-        status_color = "#10b981" if status_text == "نشط" else COLORS['text_secondary']
-        self.status_label = QLabel(f"🏷️ <b>الحالة:</b> <span style='color:{status_color};'>{status_text}</span>")
+        status_text = (
+            self.project.status.value
+            if hasattr(self.project.status, "value")
+            else str(self.project.status)
+        )
+        status_color = "#10b981" if status_text == "نشط" else COLORS["text_secondary"]
+        self.status_label = QLabel(
+            f"🏷️ <b>الحالة:</b> <span style='color:{status_color};'>{status_text}</span>"
+        )
         self.status_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         info_layout.addWidget(self.project_label)
@@ -163,7 +178,8 @@ class ProjectProfitDialog(QDialog):
         self.collection_progress = QProgressBar()
         self.collection_progress.setFixedHeight(12)
         self.collection_progress.setTextVisible(False)
-        self.collection_progress.setStyleSheet(f"""
+        self.collection_progress.setStyleSheet(
+            f"""
             QProgressBar {{
                 border: none;
                 border-radius: 6px;
@@ -173,7 +189,8 @@ class ProjectProfitDialog(QDialog):
                 background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3b82f6, stop:1 #2563eb);
                 border-radius: 6px;
             }}
-        """)
+        """
+        )
 
         progress_layout.addWidget(self.collection_label)
         progress_layout.addWidget(self.collection_progress)
@@ -182,23 +199,29 @@ class ProjectProfitDialog(QDialog):
         # === الجداول ===
         self.tables_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.tables_splitter.setHandleWidth(6)
-        self.tables_splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {COLORS['border']}; }}")
+        self.tables_splitter.setStyleSheet(
+            f"QSplitter::handle {{ background-color: {COLORS['border']}; }}"
+        )
 
         # جدول الدفعات
         payments_frame = QFrame()
-        payments_frame.setStyleSheet(f"""
+        payments_frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {COLORS['bg_medium']};
                 border-radius: 8px;
                 border: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         pay_layout = QVBoxLayout(payments_frame)
         pay_layout.setContentsMargins(10, 10, 10, 10)
         pay_layout.setSpacing(8)
 
         pay_title = QLabel("💳 الدفعات المسجلة")
-        pay_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        pay_title.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;"
+        )
         pay_layout.addWidget(pay_title)
 
         self.payments_table = QTableWidget()
@@ -210,19 +233,23 @@ class ProjectProfitDialog(QDialog):
 
         # جدول المصروفات
         expenses_frame = QFrame()
-        expenses_frame.setStyleSheet(f"""
+        expenses_frame.setStyleSheet(
+            f"""
             QFrame {{
                 background-color: {COLORS['bg_medium']};
                 border-radius: 8px;
                 border: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         exp_layout = QVBoxLayout(expenses_frame)
         exp_layout.setContentsMargins(10, 10, 10, 10)
         exp_layout.setSpacing(8)
 
         exp_title = QLabel("💸 المصروفات المرتبطة")
-        exp_title.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;")
+        exp_title.setStyleSheet(
+            f"color: {COLORS['text_primary']}; font-size: 14px; font-weight: bold;"
+        )
         exp_layout.addWidget(exp_title)
 
         self.expenses_table = QTableWidget()
@@ -243,12 +270,14 @@ class ProjectProfitDialog(QDialog):
 
         # === منطقة الأزرار ===
         buttons_container = QWidget()
-        buttons_container.setStyleSheet(f"""
+        buttons_container.setStyleSheet(
+            f"""
             QWidget {{
                 background-color: {COLORS['bg_medium']};
                 border-top: 1px solid {COLORS['border']};
             }}
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(14, 10, 14, 10)
         buttons_layout.setSpacing(8)
@@ -275,12 +304,14 @@ class ProjectProfitDialog(QDialog):
         card.setObjectName("KpiCard")
         card.setProperty("card_key", key)
         card.setProperty("base_color", color)
-        card.setStyleSheet(f"""
+        card.setStyleSheet(
+            f"""
             QFrame#KpiCard {{
                 background-color: {color};
                 border-radius: 8px;
             }}
-        """)
+        """
+        )
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         card_layout = QVBoxLayout(card)
@@ -296,7 +327,9 @@ class ProjectProfitDialog(QDialog):
         header.addWidget(icon_lbl)
 
         title_lbl = QLabel(title)
-        title_lbl.setStyleSheet("color: rgba(255,255,255,0.9); font-size: 12px; font-weight: bold; background: transparent;")
+        title_lbl.setStyleSheet(
+            "color: rgba(255,255,255,0.9); font-size: 12px; font-weight: bold; background: transparent;"
+        )
         header.addWidget(title_lbl)
         header.addStretch()
 
@@ -304,7 +337,9 @@ class ProjectProfitDialog(QDialog):
 
         value_lbl = QLabel("0.00")
         value_lbl.setObjectName(f"val_{key}")
-        value_lbl.setStyleSheet("color: white; font-weight: bold; font-size: 18px; background: transparent;")
+        value_lbl.setStyleSheet(
+            "color: white; font-weight: bold; font-size: 18px; background: transparent;"
+        )
         card_layout.addWidget(value_lbl)
 
         return card
@@ -323,10 +358,18 @@ class ProjectProfitDialog(QDialog):
             if col_count == 4:
                 # جدول الدفعات: التاريخ، المبلغ، الحساب، ملاحظات
                 # جدول المصروفات: التاريخ، الفئة، الوصف، المبلغ
-                header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # التاريخ/الفئة
-                header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ/الفئة
-                header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # الحساب/الوصف - يتمدد
-                header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # ملاحظات/المبلغ
+                header.setSectionResizeMode(
+                    0, QHeaderView.ResizeMode.ResizeToContents
+                )  # التاريخ/الفئة
+                header.setSectionResizeMode(
+                    1, QHeaderView.ResizeMode.ResizeToContents
+                )  # المبلغ/الفئة
+                header.setSectionResizeMode(
+                    2, QHeaderView.ResizeMode.Stretch
+                )  # الحساب/الوصف - يتمدد
+                header.setSectionResizeMode(
+                    3, QHeaderView.ResizeMode.ResizeToContents
+                )  # ملاحظات/المبلغ
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(38)
         table.setAlternatingRowColors(True)
@@ -347,50 +390,54 @@ class ProjectProfitDialog(QDialog):
         elif key == "due":
             final_color = "#f59e0b" if value > 0 else "#10b981"
 
-        card.setStyleSheet(f"""
+        card.setStyleSheet(
+            f"""
             QFrame#KpiCard {{
                 background-color: {final_color};
                 border-radius: 8px;
             }}
-        """)
+        """
+        )
 
     def load_profit_data(self):
         """⚡ تحميل بيانات الربحية في الخلفية لمنع التجميد"""
         # عرض رسالة تحميل
         self.collection_label.setText("⏳ جاري تحميل البيانات...")
         self.collection_progress.setValue(0)
-        
+
         from core.data_loader import get_data_loader
-        
+
         project_name = self.project.name
-        
+
         def fetch_profit_data():
             """جلب بيانات الربحية في thread منفصل"""
             try:
                 profit_data = self.project_service.get_project_profitability(project_name)
                 payments = self.project_service.get_payments_for_project(project_name)
                 expenses = self.project_service.get_expenses_for_project(project_name)
-                
+
                 return {
-                    'profit_data': profit_data,
-                    'payments': payments,
-                    'expenses': expenses,
-                    'error': None
+                    "profit_data": profit_data,
+                    "payments": payments,
+                    "expenses": expenses,
+                    "error": None,
                 }
             except Exception as e:
                 safe_print(f"ERROR: [ProjectProfitDialog] {e}")
-                return {'error': str(e)}
-        
+                return {"error": str(e)}
+
         def on_data_loaded(data):
             """تحديث الواجهة بالبيانات"""
             try:
-                if data.get('error'):
-                    QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {data['error']}")
+                if data.get("error"):
+                    QMessageBox.critical(
+                        self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {data['error']}"
+                    )
                     return
-                
-                profit_data = data['profit_data']
-                payments = data['payments']
-                expenses = data['expenses']
+
+                profit_data = data["profit_data"]
+                payments = data["payments"]
+                expenses = data["expenses"]
 
                 total_revenue = profit_data.get("total_revenue", 0.0)
                 total_paid = profit_data.get("total_paid", 0.0)
@@ -409,17 +456,24 @@ class ProjectProfitDialog(QDialog):
                 if total_revenue > 0:
                     percent = int((total_paid / total_revenue) * 100)
                     self.collection_progress.setValue(min(percent, 100))
-                    self.collection_label.setText(f"تم تحصيل {percent}% ({total_paid:,.2f} من {total_revenue:,.2f})")
+                    self.collection_label.setText(
+                        f"تم تحصيل {percent}% ({total_paid:,.2f} من {total_revenue:,.2f})"
+                    )
                 else:
                     self.collection_progress.setValue(0)
                     self.collection_label.setText("لا توجد قيمة للعقد")
 
                 # تحديث جدول الدفعات
                 from ui.styles import create_centered_item
+
                 self.payments_table.setRowCount(0)
                 for i, pay in enumerate(payments):
                     self.payments_table.insertRow(i)
-                    date_str = pay.date.strftime("%Y-%m-%d") if isinstance(pay.date, datetime) else str(pay.date)
+                    date_str = (
+                        pay.date.strftime("%Y-%m-%d")
+                        if isinstance(pay.date, datetime)
+                        else str(pay.date)
+                    )
                     self.payments_table.setItem(i, 0, create_centered_item(date_str))
 
                     amount_item = create_centered_item(f"{pay.amount:,.2f}")
@@ -429,13 +483,19 @@ class ProjectProfitDialog(QDialog):
 
                     account_name = self._get_account_name(pay)
                     self.payments_table.setItem(i, 2, create_centered_item(account_name))
-                    self.payments_table.setItem(i, 3, create_centered_item(getattr(pay, 'notes', '') or "-"))
+                    self.payments_table.setItem(
+                        i, 3, create_centered_item(getattr(pay, "notes", "") or "-")
+                    )
 
                 # تحديث جدول المصروفات
                 self.expenses_table.setRowCount(0)
                 for i, exp in enumerate(expenses):
                     self.expenses_table.insertRow(i)
-                    date_str = exp.date.strftime("%Y-%m-%d") if isinstance(exp.date, datetime) else str(exp.date)
+                    date_str = (
+                        exp.date.strftime("%Y-%m-%d")
+                        if isinstance(exp.date, datetime)
+                        else str(exp.date)
+                    )
                     self.expenses_table.setItem(i, 0, create_centered_item(date_str))
                     self.expenses_table.setItem(i, 1, create_centered_item(exp.category or "-"))
                     self.expenses_table.setItem(i, 2, create_centered_item(exp.description or "-"))
@@ -444,16 +504,17 @@ class ProjectProfitDialog(QDialog):
                     amount_item.setForeground(QColor("#ef4444"))
                     amount_item.setFont(get_cairo_font(10, bold=True))
                     self.expenses_table.setItem(i, 3, amount_item)
-                    
+
             except Exception as e:
                 safe_print(f"ERROR: [ProjectProfitDialog] فشل تحديث الواجهة: {e}")
                 import traceback
+
                 traceback.print_exc()
-        
+
         def on_error(error_msg):
             safe_print(f"ERROR: [ProjectProfitDialog] {error_msg}")
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء تحميل البيانات: {error_msg}")
-        
+
         # ⚡ تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -461,19 +522,23 @@ class ProjectProfitDialog(QDialog):
             load_function=fetch_profit_data,
             on_success=on_data_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _get_account_name(self, payment) -> str:
         """جلب اسم الحساب"""
-        if not hasattr(payment, 'account_id') or not payment.account_id:
+        if not hasattr(payment, "account_id") or not payment.account_id:
             return "-"
         try:
-            if hasattr(self.project_service, 'accounting_service'):
-                account = self.project_service.accounting_service.repo.get_account_by_code(payment.account_id)
+            if hasattr(self.project_service, "accounting_service"):
+                account = self.project_service.accounting_service.repo.get_account_by_code(
+                    payment.account_id
+                )
                 if account:
                     return account.name
-                account = self.project_service.accounting_service.repo.get_account_by_id(payment.account_id)
+                account = self.project_service.accounting_service.repo.get_account_by_id(
+                    payment.account_id
+                )
                 return account.name if account else str(payment.account_id)
             return str(payment.account_id)
         except Exception:
@@ -484,7 +549,7 @@ class ProjectProfitDialog(QDialog):
         super().resizeEvent(event)
         width = self.width()
 
-        if hasattr(self, 'tables_splitter'):
+        if hasattr(self, "tables_splitter"):
             if width < 700:
                 if self.tables_splitter.orientation() != Qt.Orientation.Vertical:
                     self.tables_splitter.setOrientation(Qt.Orientation.Vertical)

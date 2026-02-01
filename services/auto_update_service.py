@@ -40,19 +40,19 @@ class BackgroundUpdateChecker(QThread):
         try:
             # إضافة headers لـ GitHub API
             headers = {
-                'Accept': 'application/vnd.github.v3+json',
-                'User-Agent': 'SkyWaveERP-Updater'
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "SkyWaveERP-Updater",
             }
-            
+
             response = requests.get(self.check_url, headers=headers, timeout=15)
             response.raise_for_status()
 
             data = response.json()
-            
+
             # دعم كلا الصيغتين: GitHub API و version.json العادي
-            if 'tag_name' in data:
+            if "tag_name" in data:
                 # GitHub API format
-                remote_version = data.get("tag_name", "").lstrip('v')
+                remote_version = data.get("tag_name", "").lstrip("v")
                 download_url = ""
                 for asset in data.get("assets", []):
                     if asset.get("name", "").endswith(".exe"):
@@ -156,10 +156,7 @@ class AutoUpdateService(QObject):
         logger.info("بدء التحقق من التحديثات...")
         self.update_check_started.emit()
 
-        self._checker_thread = BackgroundUpdateChecker(
-            self.current_version,
-            self.check_url
-        )
+        self._checker_thread = BackgroundUpdateChecker(self.current_version, self.check_url)
         self._checker_thread.update_found.connect(self._on_update_found)
         self._checker_thread.check_completed.connect(self._on_check_completed)
         self._checker_thread.error_occurred.connect(self._on_error)
@@ -171,11 +168,7 @@ class AutoUpdateService(QObject):
 
     def _on_update_found(self, version: str, url: str, changelog: str):
         """عند العثور على تحديث"""
-        self._pending_update = {
-            "version": version,
-            "url": url,
-            "changelog": changelog
-        }
+        self._pending_update = {"version": version, "url": url, "changelog": changelog}
         self.update_available.emit(version, url, changelog)
         logger.info(f"تحديث جديد: {version}")
 
@@ -199,7 +192,9 @@ class AutoUpdateService(QObject):
 
     def _get_settings_path(self) -> str:
         """مسار ملف الإعدادات - في مجلد AppData لتجنب مشاكل الصلاحيات"""
-        app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SkyWaveERP')
+        app_data_dir = os.path.join(
+            os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SkyWaveERP"
+        )
         os.makedirs(app_data_dir, exist_ok=True)
         return os.path.join(app_data_dir, "update_settings.json")
 

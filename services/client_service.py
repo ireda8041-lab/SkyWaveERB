@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 # ⚡ استيراد محسّن السرعة
 try:
     from core.speed_optimizer import LRUCache, cached  # noqa: F401
+
     CACHE_ENABLED = True
 except ImportError:
     CACHE_ENABLED = False
@@ -36,7 +37,10 @@ except ImportError:
 try:
     from core.notification_bridge import notify_operation
 except ImportError:
-    def notify_operation(action, entity_type, entity_name): pass
+
+    def notify_operation(action, entity_type, entity_name):
+        pass
+
 
 logger = get_logger(__name__)
 
@@ -95,18 +99,19 @@ class ClientService:
             created_client = self.repo.create_client(client_data)
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
-            app_signals.emit_data_changed('clients')
+            app_signals.emit_data_changed("clients")
 
             # 🔔 إشعار مخصص (يُرسل لجميع الأجهزة)
-            if hasattr(client_data, 'logo_data') and client_data.logo_data:
+            if hasattr(client_data, "logo_data") and client_data.logo_data:
                 from ui.notification_system import notify_success
+
                 notify_success(
                     f"تم إضافة العميل '{created_client.name}' مع الصورة 🖼️",
                     "👥 عميل جديد",
-                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                    sync=True,  # ⚡ إرسال لجميع الأجهزة
                 )
             else:
-                notify_operation('created', 'client', created_client.name)
+                notify_operation("created", "client", created_client.name)
 
             logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
             return created_client
@@ -136,52 +141,66 @@ class ClientService:
                 raise Exception("العميل غير موجود للتعديل")
 
             # ⚡ التعامل الذكي مع logo_data
-            if 'logo_data' in new_data:
-                if new_data['logo_data'] == "__DELETE__":
+            if "logo_data" in new_data:
+                if new_data["logo_data"] == "__DELETE__":
                     # المستخدم يريد حذف الصورة صراحة
-                    new_data['logo_data'] = ""
-                    new_data['logo_path'] = ""
+                    new_data["logo_data"] = ""
+                    new_data["logo_path"] = ""
                     logger.info("[ClientService] 🗑️ حذف logo_data")
-                elif new_data['logo_data']:
+                elif new_data["logo_data"]:
                     # صورة جديدة
-                    logger.info(f"[ClientService] 📷 تحديث logo_data ({len(new_data['logo_data'])} حرف)")
+                    logger.info(
+                        f"[ClientService] 📷 تحديث logo_data ({len(new_data['logo_data'])} حرف)"
+                    )
                 else:
                     # logo_data فارغ - الاحتفاظ بالقديم
                     if existing_client.logo_data:
-                        new_data['logo_data'] = existing_client.logo_data
-                        logger.info(f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)")
+                        new_data["logo_data"] = existing_client.logo_data
+                        logger.info(
+                            f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)"
+                        )
             else:
                 # logo_data غير موجود في new_data - الاحتفاظ بالقديم
                 if existing_client.logo_data:
-                    new_data['logo_data'] = existing_client.logo_data
-                    logger.info(f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)")
+                    new_data["logo_data"] = existing_client.logo_data
+                    logger.info(
+                        f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)"
+                    )
 
             updated_client_schema = existing_client.model_copy(update=new_data)
             saved_client = self.repo.update_client(client_id, updated_client_schema)
             self.invalidate_cache()  # ⚡ إبطال الـ cache
             # ⚡ إرسال إشارة التحديث
-            app_signals.emit_data_changed('clients')
+            app_signals.emit_data_changed("clients")
 
             # 🔔 إشعار مخصص حسب نوع التحديث (يُرسل لجميع الأجهزة)
-            if 'logo_data' in new_data and new_data.get('logo_data') and new_data['logo_data'] != "__DELETE__":
+            if (
+                "logo_data" in new_data
+                and new_data.get("logo_data")
+                and new_data["logo_data"] != "__DELETE__"
+            ):
                 # تم تحديث الصورة
                 from ui.notification_system import notify_success
+
                 notify_success(
                     f"تم تحديث صورة العميل '{updated_client_schema.name}'",
                     "تحديث صورة",
-                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                    sync=True,  # ⚡ إرسال لجميع الأجهزة
                 )
-            elif 'logo_data' in new_data and (not new_data.get('logo_data') or new_data['logo_data'] == ""):
+            elif "logo_data" in new_data and (
+                not new_data.get("logo_data") or new_data["logo_data"] == ""
+            ):
                 # تم حذف الصورة
                 from ui.notification_system import notify_info
+
                 notify_info(
                     f"تم حذف صورة العميل '{updated_client_schema.name}'",
                     "حذف صورة",
-                    sync=True  # ⚡ إرسال لجميع الأجهزة
+                    sync=True,  # ⚡ إرسال لجميع الأجهزة
                 )
             else:
                 # تحديث عادي
-                notify_operation('updated', 'client', updated_client_schema.name)
+                notify_operation("updated", "client", updated_client_schema.name)
 
             logger.info(f"[ClientService] ✅ تم تعديل العميل {updated_client_schema.name}")
             return saved_client
@@ -242,9 +261,9 @@ class ClientService:
             if success:
                 self.invalidate_cache()  # ⚡ إبطال الـ cache
                 # ⚡ إرسال إشارة التحديث
-                app_signals.emit_data_changed('clients')
+                app_signals.emit_data_changed("clients")
                 # 🔔 إشعار - تحويل client_id لـ string
-                notify_operation('deleted', 'client', str(client_id))
+                notify_operation("deleted", "client", str(client_id))
                 logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:
@@ -265,10 +284,7 @@ class ClientService:
             return []
 
     def search_clients(
-        self,
-        query: str,
-        fields: list[str] | None = None,
-        limit: int = 20
+        self, query: str, fields: list[str] | None = None, limit: int = 20
     ) -> list[schemas.Client]:
         """
         البحث في العملاء
@@ -336,10 +352,12 @@ class ClientService:
                 "total_archived": len(archived_clients),
                 "total": len(active_clients) + len(archived_clients),
                 "by_type": client_types,
-                "by_country": countries
+                "by_country": countries,
             }
 
-            logger.info(f"[ClientService] إحصائيات العملاء: {stats['total_active']} نشط، {stats['total_archived']} مؤرشف")
+            logger.info(
+                f"[ClientService] إحصائيات العملاء: {stats['total_active']} نشط، {stats['total_archived']} مؤرشف"
+            )
             return stats
 
         except Exception as e:
@@ -349,13 +367,13 @@ class ClientService:
                 "total_archived": 0,
                 "total": 0,
                 "by_type": {},
-                "by_country": {}
+                "by_country": {},
             }
 
     def get_client_financial_totals(self) -> tuple[dict, dict]:
         """
         ✅ جلب الإجماليات المالية للعملاء (المشاريع والمدفوعات)
-        
+
         Returns:
             tuple: (client_projects_total, client_payments_total)
                 - client_projects_total: {client_id: total_amount}
@@ -365,37 +383,39 @@ class ClientService:
             cursor = self.repo.get_cursor()
             try:
                 # إجمالي المشاريع لكل عميل
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT client_id, SUM(total_amount) as total_projects
                     FROM projects
                     WHERE status != 'مؤرشف' AND status != 'ملغي'
                     GROUP BY client_id
-                """)
+                """
+                )
                 projects_result = cursor.fetchall()
-                
+
                 client_projects_total = {
-                    str(row[0]): float(row[1]) if row[1] else 0.0
-                    for row in projects_result
+                    str(row[0]): float(row[1]) if row[1] else 0.0 for row in projects_result
                 }
-                
+
                 # إجمالي المدفوعات لكل عميل
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT client_id, SUM(amount) as total_paid
                     FROM payments
                     WHERE client_id IS NOT NULL AND client_id != ''
                     GROUP BY client_id
-                """)
+                """
+                )
                 payments_result = cursor.fetchall()
-                
+
                 client_payments_total = {
-                    str(row[0]): float(row[1]) if row[1] else 0.0
-                    for row in payments_result
+                    str(row[0]): float(row[1]) if row[1] else 0.0 for row in payments_result
                 }
-                
+
                 return client_projects_total, client_payments_total
             finally:
                 cursor.close()
-                
+
         except Exception as e:
             logger.error(f"[ClientService] فشل جلب الإجماليات المالية: {e}", exc_info=True)
             return {}, {}

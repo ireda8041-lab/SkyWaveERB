@@ -8,6 +8,7 @@ from core.signals import app_signals
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -24,54 +25,54 @@ class NotificationBridge:
 
     # ترجمة أنواع العناصر
     ENTITY_NAMES = {
-        'project': 'مشروع',
-        'client': 'عميل',
-        'expense': 'مصروف',
-        'payment': 'دفعة',
-        'account': 'حساب',
-        'service': 'خدمة',
-        'task': 'مهمة',
-        'invoice': 'فاتورة',
-        'journal': 'قيد',
-        'employee': 'موظف',
-        'loan': 'سلفة',
-        'salary': 'راتب',
-        'attendance': 'حضور',
-        'leave': 'إجازة',
-        'projects': 'المشاريع',
-        'clients': 'العملاء',
-        'expenses': 'المصروفات',
-        'payments': 'الدفعات',
-        'accounts': 'الحسابات',
-        'services': 'الخدمات',
-        'tasks': 'المهام',
-        'employees': 'الموظفين',
-        'loans': 'السلف',
-        'salaries': 'المرتبات',
+        "project": "مشروع",
+        "client": "عميل",
+        "expense": "مصروف",
+        "payment": "دفعة",
+        "account": "حساب",
+        "service": "خدمة",
+        "task": "مهمة",
+        "invoice": "فاتورة",
+        "journal": "قيد",
+        "employee": "موظف",
+        "loan": "سلفة",
+        "salary": "راتب",
+        "attendance": "حضور",
+        "leave": "إجازة",
+        "projects": "المشاريع",
+        "clients": "العملاء",
+        "expenses": "المصروفات",
+        "payments": "الدفعات",
+        "accounts": "الحسابات",
+        "services": "الخدمات",
+        "tasks": "المهام",
+        "employees": "الموظفين",
+        "loans": "السلف",
+        "salaries": "المرتبات",
     }
 
     # ترجمة العمليات
     ACTION_NAMES = {
-        'created': 'تم إضافة',
-        'updated': 'تم تعديل',
-        'deleted': 'تم حذف',
-        'paid': 'تم دفع',
-        'synced': 'تمت مزامنة',
-        'archived': 'تم أرشفة',
-        'restored': 'تم استعادة',
-        'printed': 'تم طباعة',
+        "created": "تم إضافة",
+        "updated": "تم تعديل",
+        "deleted": "تم حذف",
+        "paid": "تم دفع",
+        "synced": "تمت مزامنة",
+        "archived": "تم أرشفة",
+        "restored": "تم استعادة",
+        "printed": "تم طباعة",
     }
 
     # أيقونات العمليات
     ACTION_ICONS = {
-        'created': '✅',
-        'updated': '📝',
-        'deleted': '🗑️',
-        'paid': '💰',
-        'synced': '🔄',
-        'archived': '📦',
-        'restored': '♻️',
-        'printed': '🖨️',
+        "created": "✅",
+        "updated": "📝",
+        "deleted": "🗑️",
+        "paid": "💰",
+        "synced": "🔄",
+        "archived": "📦",
+        "restored": "♻️",
+        "printed": "🖨️",
     }
 
     def __new__(cls):
@@ -105,13 +106,13 @@ class NotificationBridge:
             # بناء الرسالة
             action_text = self.ACTION_NAMES.get(action, action)
             entity_text = self.ENTITY_NAMES.get(entity_type, entity_type)
-            icon = self.ACTION_ICONS.get(action, '📌')
+            icon = self.ACTION_ICONS.get(action, "📌")
 
             message = f"{entity_name}"
             title = f"{icon} {action_text} {entity_text}"
 
             # إرسال الإشعار
-            if action == 'deleted':
+            if action == "deleted":
                 notify_warning(message, title)
             else:
                 notify_success(message, title)
@@ -124,7 +125,7 @@ class NotificationBridge:
         try:
             from ui.notification_system import notify_info
 
-            synced = results.get('synced', 0)
+            synced = results.get("synced", 0)
             if synced > 0:
                 notify_info(f"تم رفع {synced} عملية", "🔄 مزامنة", sync=False)
 
@@ -135,6 +136,7 @@ class NotificationBridge:
         """معالجة فشل المزامنة"""
         try:
             from ui.notification_system import notify_error
+
             notify_error("فشل في المزامنة", "❌ خطأ", sync=False)
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
@@ -146,6 +148,7 @@ def setup_notification_bridge():
 
 
 # === دوال مساعدة للإشعارات من أي مكان ===
+
 
 def notify_operation(action: str, entity_type: str, entity_name: str):
     """

@@ -13,11 +13,11 @@ def get_base_path():
     الحصول على المسار الأساسي للتطبيق
     يعمل مع PyInstaller (onefile و onedir) و Python العادي
     """
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # التطبيق يعمل كـ EXE
         # في onedir: المسار هو مجلد الـ EXE
         # في onefile: المسار هو _MEIPASS
-        if hasattr(sys, '_MEIPASS'):
+        if hasattr(sys, "_MEIPASS"):
             return sys._MEIPASS
         else:
             return os.path.dirname(sys.executable)

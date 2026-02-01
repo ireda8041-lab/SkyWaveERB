@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines,too-many-public-methods
 # الملف: ui/settings_tab.py
 """
 تاب الإعدادات المتقدمة - يشمل:
@@ -8,18 +9,25 @@
 - النسخ الاحتياطي
 """
 
+import glob
 import json
 import os
+import sys
+import traceback
+import webbrowser
 from datetime import datetime
+from pathlib import Path
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QRegularExpression, Qt, QTimer
+from PyQt6.QtGui import QPixmap, QRegularExpressionValidator, QValidator
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
-    QLabel,
+    QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -28,6 +36,9 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSpinBox,
     QTableWidget,
     QTabWidget,
     QTextEdit,
@@ -35,11 +46,28 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.auth_models import AuthService, PermissionManager
+from core.data_loader import get_data_loader
 from core.repository import Repository
 from services.settings_service import SettingsService
+from services.update_service import UpdateService
 from ui.currency_editor_dialog import CurrencyEditorDialog
 from ui.smart_combobox import SmartFilterComboBox
-from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item
+from ui.styles import (
+    BUTTON_STYLES,
+    TABLE_STYLE_DARK,
+    apply_arrows_to_all_widgets,
+    apply_rtl_alignment_to_all_fields,
+    create_centered_item,
+    fix_table_rtl,
+    setup_custom_title_bar,
+)
+from ui.template_settings import TemplateSettings
+from ui.todo_manager import TaskService
+from ui.universal_search import UniversalSearchBar
+from ui.user_editor_dialog import UserEditorDialog
+from ui.user_permissions_dialog import UserPermissionsDialog
+from version import APP_NAME, CURRENT_VERSION, UPDATE_CHECK_URL
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -72,12 +100,13 @@ class SettingsTab(QWidget):
         self.setLayout(main_layout)
 
         # جعل التاب متجاوب مع حجم الشاشة
-        from PyQt6.QtWidgets import QSizePolicy
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # إنشاء التابات الفرعية
         self.tabs = QTabWidget()
+
+        self.tabs.setTabPosition(QTabWidget.TabPosition.North)
 
         # ⚡ جعل التابات الفرعية تتمدد لتملأ العرض تلقائياً
         self.tabs.tabBar().setExpanding(True)
@@ -111,7 +140,6 @@ class SettingsTab(QWidget):
         self.setup_default_accounts_tab()
 
         # تاب قوالب الفواتير
-        from ui.template_settings import TemplateSettings
 
         self.template_tab = TemplateSettings(self.settings_service)
         self.tabs.addTab(self.template_tab, "🎨 قوالب الفواتير")
@@ -132,7 +160,6 @@ class SettingsTab(QWidget):
         self.setup_update_tab()
 
         # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
 
         apply_arrows_to_all_widgets(self)
 
@@ -144,9 +171,32 @@ class SettingsTab(QWidget):
         # self.load_users() - يتم استدعاؤها من MainWindow
 
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
-        from ui.styles import apply_rtl_alignment_to_all_fields
 
         apply_rtl_alignment_to_all_fields(self)
+
+    def _search_settings_tabs(self, text: str):
+        if not text:
+            return
+
+        query = text.strip().lower()
+        if not query:
+            return
+
+        for i in range(self.tabs.count()):
+            label = (self.tabs.tabText(i) or "").lower()
+            if query in label:
+                self.tabs.setCurrentIndex(i)
+                return
+
+    def _apply_settings_tab_search(self):
+        text = ""
+        if not text:
+            return
+
+        for i in range(self.tabs.count()):
+            if text in (self.tabs.tabText(i) or "").lower():
+                self.tabs.setCurrentIndex(i)
+                return
 
     def _on_sub_tab_changed(self, index):
         """معالج تغيير التاب الفرعي - محسّن لتجنب التحميل المتكرر"""
@@ -159,8 +209,11 @@ class SettingsTab(QWidget):
                 self.load_users()
         elif "بيانات الشركة" in tab_text:
             # تحميل بيانات الشركة فقط إذا كانت الحقول فارغة
-            if not self.company_name_input.text():
-                self.load_settings_data()
+            try:
+                if not self._ensure_company_ui() or not self.company_name_input.text():
+                    self.load_settings_data()
+            except Exception:
+                pass
         elif "العملات" in tab_text:
             if self.currencies_table.rowCount() == 0:
                 self.load_currencies()
@@ -176,12 +229,12 @@ class SettingsTab(QWidget):
 
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
-        from PyQt6.QtWidgets import QFrame, QGridLayout, QScrollArea, QSizePolicy
 
         # ⚡ منطقة التمرير للشاشات الصغيرة
-        scroll_area = QScrollArea()
+        scroll_area = QScrollArea(self.company_tab)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        scroll_area.setStyleSheet(
+            """
             QScrollArea {
                 border: none;
                 background: transparent;
@@ -196,9 +249,10 @@ class SettingsTab(QWidget):
                 border-radius: 4px;
                 min-height: 30px;
             }
-        """)
+        """
+        )
 
-        scroll_content = QWidget()
+        scroll_content = QWidget(scroll_area)
         layout = QVBoxLayout(scroll_content)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 15, 20, 15)
@@ -230,15 +284,17 @@ class SettingsTab(QWidget):
         main_h.setSpacing(20)
 
         # === الجانب الأيسر: الحقول ===
-        fields_frame = QFrame()
-        fields_frame.setStyleSheet("""
+        fields_frame = QFrame(scroll_content)
+        fields_frame.setStyleSheet(
+            """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
                 border: 1px solid rgba(45, 74, 111, 0.5);
                 border-radius: 12px;
             }
-        """)
+        """
+        )
         fields_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         fields_container = QVBoxLayout(fields_frame)
         fields_container.setContentsMargins(20, 20, 20, 20)
@@ -253,6 +309,8 @@ class SettingsTab(QWidget):
         fields_layout.setSpacing(10)
         fields_layout.setColumnStretch(0, 1)
         fields_layout.setColumnStretch(1, 1)
+
+        fields_container.addLayout(fields_layout)
 
         # اسم الشركة
         name_lbl = QLabel("🏢 اسم الشركة")
@@ -317,8 +375,6 @@ class SettingsTab(QWidget):
         fields_layout.addWidget(vat_lbl, 6, 0)
         fields_layout.addWidget(self.company_vat_input, 7, 0)
 
-        fields_container.addLayout(fields_layout)
-
         # ⚡ قسم البيانات البنكية
         bank_title = QLabel("🏦 بيانات الدفع")
         bank_title.setStyleSheet(section_title_style)
@@ -329,17 +385,44 @@ class SettingsTab(QWidget):
         bank_layout.setColumnStretch(0, 1)
         bank_layout.setColumnStretch(1, 1)
 
+        fields_container.addLayout(bank_layout)
+
+        bank_name_lbl = QLabel("🏦 اسم البنك")
+        bank_name_lbl.setStyleSheet(label_style)
+        self.bank_name_input = QLineEdit()
+        self.bank_name_input.setPlaceholderText("مثال: Banque Misr")
+        self.bank_name_input.setStyleSheet(input_style)
+        bank_layout.addWidget(bank_name_lbl, 0, 0)
+        bank_layout.addWidget(self.bank_name_input, 1, 0)
+
+        bank_account_lbl = QLabel("💳 رقم الحساب / IBAN")
+        bank_account_lbl.setStyleSheet(label_style)
+        self.bank_account_input = QLineEdit()
+        self.bank_account_input.setPlaceholderText("مثال: EG00 0000 0000 0000 0000 0000 000")
+        self.bank_account_input.setStyleSheet(input_style)
+        bank_layout.addWidget(bank_account_lbl, 0, 1)
+        bank_layout.addWidget(self.bank_account_input, 1, 1)
+
+        vodafone_lbl = QLabel("📱 فودافون كاش")
+        vodafone_lbl.setStyleSheet(label_style)
+        self.vodafone_cash_input = QLineEdit()
+        self.vodafone_cash_input.setPlaceholderText("+20 10 123 4567")
+        self.vodafone_cash_input.setStyleSheet(input_style)
+        bank_layout.addWidget(vodafone_lbl, 2, 0)
+        bank_layout.addWidget(self.vodafone_cash_input, 3, 0)
 
         # === الجانب الأيمن: اللوجو ===
-        logo_frame = QFrame()
-        logo_frame.setStyleSheet("""
+        logo_frame = QFrame(scroll_content)
+        logo_frame.setStyleSheet(
+            """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
                 border: 1px solid rgba(45, 74, 111, 0.5);
                 border-radius: 12px;
             }
-        """)
+        """
+        )
         logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         logo_frame.setMinimumWidth(200)
         logo_container = QVBoxLayout(logo_frame)
@@ -352,11 +435,50 @@ class SettingsTab(QWidget):
         logo_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_container.addWidget(logo_title)
 
+        self.company_preview_frame = QFrame()
+        self.company_preview_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: rgba(15, 41, 66, 0.55);
+                border: 1px solid rgba(45, 74, 111, 0.6);
+                border-radius: 12px;
+            }
+        """
+        )
+        preview_layout = QVBoxLayout(self.company_preview_frame)
+        preview_layout.setContentsMargins(12, 10, 12, 10)
+        preview_layout.setSpacing(4)
+
+        self.company_preview_name = QLabel("—")
+        self.company_preview_name.setStyleSheet(
+            "color: white; font-size: 14px; font-weight: bold; font-family: 'Cairo';"
+        )
+        self.company_preview_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.company_preview_tagline = QLabel("")
+        self.company_preview_tagline.setStyleSheet(
+            "color: #93C5FD; font-size: 11px; font-family: 'Cairo';"
+        )
+        self.company_preview_tagline.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.company_preview_meta = QLabel("")
+        self.company_preview_meta.setStyleSheet(
+            "color: #94a3b8; font-size: 10px; font-family: 'Cairo';"
+        )
+        self.company_preview_meta.setWordWrap(True)
+        self.company_preview_meta.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        preview_layout.addWidget(self.company_preview_name)
+        preview_layout.addWidget(self.company_preview_tagline)
+        preview_layout.addWidget(self.company_preview_meta)
+        logo_container.addWidget(self.company_preview_frame)
+
         # إطار اللوجو المحسن
         self.logo_preview = QLabel()
         self.logo_preview.setFixedSize(150, 150)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_preview.setStyleSheet("""
+        self.logo_preview.setStyleSheet(
+            """
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #0d2137, stop:1 #0a1929);
@@ -365,7 +487,8 @@ class SettingsTab(QWidget):
                 color: #64748B;
                 font-size: 12px;
             }
-        """)
+        """
+        )
         self.logo_preview.setText("📷\nلا يوجد شعار")
         logo_container.addWidget(self.logo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -374,7 +497,8 @@ class SettingsTab(QWidget):
         btn_layout.setSpacing(10)
 
         self.select_logo_btn = QPushButton("📷 اختيار صورة")
-        self.select_logo_btn.setStyleSheet("""
+        self.select_logo_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #0A6CF1, stop:1 #2563eb);
@@ -389,11 +513,13 @@ class SettingsTab(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #2563eb, stop:1 #3b82f6);
             }
-        """)
+        """
+        )
         self.select_logo_btn.clicked.connect(self.select_logo_file)
 
         self.remove_logo_btn = QPushButton("🗑️ حذف")
-        self.remove_logo_btn.setStyleSheet("""
+        self.remove_logo_btn.setStyleSheet(
+            """
             QPushButton {
                 background: rgba(239, 68, 68, 0.2);
                 color: #FCA5A5;
@@ -407,7 +533,8 @@ class SettingsTab(QWidget):
                 background: rgba(239, 68, 68, 0.4);
                 color: white;
             }
-        """)
+        """
+        )
         self.remove_logo_btn.clicked.connect(self._remove_logo)
 
         btn_layout.addWidget(self.select_logo_btn)
@@ -421,6 +548,7 @@ class SettingsTab(QWidget):
         logo_container.addWidget(hint_lbl)
 
         logo_container.addStretch()
+        main_h.addWidget(fields_frame, 2)
         main_h.addWidget(logo_frame, 1)
 
         layout.addLayout(main_h, 1)
@@ -431,7 +559,8 @@ class SettingsTab(QWidget):
 
         self.save_company_btn = QPushButton("💾 حفظ بيانات الشركة")
         self.save_company_btn.setMinimumWidth(250)
-        self.save_company_btn.setStyleSheet("""
+        self.save_company_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
@@ -449,7 +578,12 @@ class SettingsTab(QWidget):
             QPushButton:pressed {
                 background: #047857;
             }
-        """)
+            QPushButton:disabled {
+                background: rgba(16, 185, 129, 0.25);
+                color: rgba(255, 255, 255, 0.55);
+            }
+        """
+        )
         self.save_company_btn.clicked.connect(self.save_settings)
         save_container.addWidget(self.save_company_btn)
         save_container.addStretch()
@@ -458,16 +592,63 @@ class SettingsTab(QWidget):
 
         scroll_area.setWidget(scroll_content)
 
+        self._company_scroll_area = scroll_area
+        self._company_scroll_content = scroll_content
+
         # إضافة scroll_area للتاب
         tab_layout = QVBoxLayout(self.company_tab)
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.addWidget(scroll_area)
+
+        self._company_input_style = input_style
+        self._company_input_style_invalid = (
+            input_style
+            + """
+            QLineEdit { border: 2px solid #ef4444; }
+            QLineEdit:focus { border: 2px solid #ef4444; background: #0f2942; }
+        """
+        )
+
+        email_re = QRegularExpression(r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$")
+        phone_re = QRegularExpression(r"^$|^\+?[0-9\s\-]{7,}$")
+        website_re = QRegularExpression(r"^$|^(https?://)?([A-Za-z0-9-]+\.)+[A-Za-z]{2,}(/.*)?$")
+
+        self.company_email_input.setValidator(QRegularExpressionValidator(email_re, self))
+        self.company_phone_input.setValidator(QRegularExpressionValidator(phone_re, self))
+        self.company_website_input.setValidator(QRegularExpressionValidator(website_re, self))
+
+        for w in (
+            self.company_name_input,
+            self.company_tagline_input,
+            self.company_address_input,
+            self.company_phone_input,
+            self.company_email_input,
+            self.company_website_input,
+            self.company_vat_input,
+            self.bank_name_input,
+            self.bank_account_input,
+            self.vodafone_cash_input,
+        ):
+            w.textChanged.connect(self._on_company_form_changed)
+
+        self._on_company_form_changed()
+
+    def _ensure_company_ui(self) -> bool:
+        try:
+            if hasattr(self, "company_name_input") and self.company_name_input:
+                _ = self.company_name_input.text()
+                return True
+        except Exception:
+            pass
+
+        return False
 
     def _remove_logo(self):
         """حذف اللوجو الحالي"""
         self.logo_preview.clear()
         self.logo_preview.setText("📷\nلا يوجد شعار")
         self.logo_preview.setProperty("logo_path", "")
+        self._on_company_form_changed()
 
     def setup_currency_tab(self):
         """إعداد تاب إدارة العملات"""
@@ -475,14 +656,16 @@ class SettingsTab(QWidget):
 
         # معلومات العملة الأساسية
         base_info = QLabel("💰 العملة الأساسية للنظام: الجنيه المصري (EGP)")
-        base_info.setStyleSheet("""
+        base_info.setStyleSheet(
+            """
             background-color: #0A6CF1;
             color: white;
             padding: 10px;
             border-radius: 6px;
             font-weight: bold;
             font-size: 14px;
-        """)
+        """
+        )
         layout.addWidget(base_info)
 
         # أزرار التحكم
@@ -538,7 +721,6 @@ class SettingsTab(QWidget):
         self.currencies_table.setTabKeyNavigation(False)
         self.currencies_table.setStyleSheet(self._get_table_style())
         # إصلاح مشكلة انعكاس الأعمدة في RTL
-        from ui.styles import fix_table_rtl
 
         fix_table_rtl(self.currencies_table)
         layout.addWidget(self.currencies_table)
@@ -551,7 +733,6 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self.users_tab)
 
         # التحقق من صلاحية إدارة المستخدمين
-        from core.auth_models import PermissionManager
 
         can_manage_users = True
         if self.current_user:
@@ -631,7 +812,6 @@ class SettingsTab(QWidget):
         self.users_table.setTabKeyNavigation(False)
         self.users_table.setStyleSheet(self._get_table_style())
         # إصلاح مشكلة انعكاس الأعمدة في RTL
-        from ui.styles import fix_table_rtl
 
         fix_table_rtl(self.users_table)
         # دعم النقر المزدوج للتعديل
@@ -640,12 +820,12 @@ class SettingsTab(QWidget):
 
     def setup_backup_tab(self):
         """⚡ إعداد تاب النسخ الاحتياطي - تصميم احترافي محسّن"""
-        from PyQt6.QtWidgets import QFrame, QScrollArea, QSizePolicy
-        
+
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        scroll_area.setStyleSheet(
+            """
             QScrollArea { border: none; background: transparent; }
             QScrollBar:vertical {
                 background: #0d2137; width: 8px; border-radius: 4px;
@@ -653,8 +833,9 @@ class SettingsTab(QWidget):
             QScrollBar::handle:vertical {
                 background: #3d6a9f; border-radius: 4px; min-height: 30px;
             }
-        """)
-        
+        """
+        )
+
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
         layout.setSpacing(15)
@@ -662,7 +843,8 @@ class SettingsTab(QWidget):
 
         # === قسم إنشاء نسخة احتياطية ===
         backup_group = QGroupBox("💾 إنشاء نسخة احتياطية")
-        backup_group.setStyleSheet("""
+        backup_group.setStyleSheet(
+            """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
                 border: 1px solid #374151; border-radius: 10px;
@@ -676,7 +858,8 @@ class SettingsTab(QWidget):
                 padding: 2px 15px;
                 color: #10B981;
             }
-        """)
+        """
+        )
         backup_layout = QVBoxLayout()
         backup_layout.setSpacing(12)
 
@@ -692,7 +875,8 @@ class SettingsTab(QWidget):
         # شريط التقدم (مخفي افتراضياً)
         self.backup_progress = QProgressBar()
         self.backup_progress.setVisible(False)
-        self.backup_progress.setStyleSheet("""
+        self.backup_progress.setStyleSheet(
+            """
             QProgressBar {
                 border: 1px solid #374151; border-radius: 5px;
                 background: #0d2137; height: 20px; text-align: center;
@@ -702,14 +886,16 @@ class SettingsTab(QWidget):
                     stop:0 #10B981, stop:1 #34d399);
                 border-radius: 4px;
             }
-        """)
+        """
+        )
         backup_layout.addWidget(self.backup_progress)
 
         # أزرار النسخ الاحتياطي
         backup_btns = QHBoxLayout()
-        
+
         self.create_backup_btn = QPushButton("💾 إنشاء نسخة احتياطية الآن")
-        self.create_backup_btn.setStyleSheet("""
+        self.create_backup_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
@@ -718,12 +904,14 @@ class SettingsTab(QWidget):
             }
             QPushButton:hover { background: #059669; }
             QPushButton:disabled { background: #374151; color: #6b7280; }
-        """)
+        """
+        )
         self.create_backup_btn.clicked.connect(self.create_backup)
         backup_btns.addWidget(self.create_backup_btn)
-        
+
         self.auto_backup_btn = QPushButton("⏰ نسخ احتياطي تلقائي")
-        self.auto_backup_btn.setStyleSheet("""
+        self.auto_backup_btn.setStyleSheet(
+            """
             QPushButton {
                 background: rgba(59, 130, 246, 0.2);
                 color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4);
@@ -731,10 +919,11 @@ class SettingsTab(QWidget):
                 font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: rgba(59, 130, 246, 0.4); }
-        """)
+        """
+        )
         self.auto_backup_btn.clicked.connect(self._setup_auto_backup)
         backup_btns.addWidget(self.auto_backup_btn)
-        
+
         backup_btns.addStretch()
         backup_layout.addLayout(backup_btns)
         backup_group.setLayout(backup_layout)
@@ -742,7 +931,8 @@ class SettingsTab(QWidget):
 
         # === قسم استرجاع نسخة احتياطية ===
         restore_group = QGroupBox("📥 استرجاع نسخة احتياطية")
-        restore_group.setStyleSheet("""
+        restore_group.setStyleSheet(
+            """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
                 border: 1px solid #374151; border-radius: 10px;
@@ -756,7 +946,8 @@ class SettingsTab(QWidget):
                 padding: 2px 15px;
                 color: #f59e0b;
             }
-        """)
+        """
+        )
         restore_layout = QVBoxLayout()
         restore_layout.setSpacing(12)
 
@@ -767,15 +958,18 @@ class SettingsTab(QWidget):
             "• لا يمكن التراجع عن هذه العملية"
         )
         warning_label.setWordWrap(True)
-        warning_label.setStyleSheet("""
+        warning_label.setStyleSheet(
+            """
             color: #fbbf24; background-color: rgba(245, 158, 11, 0.15);
             padding: 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.3);
             font-size: 12px;
-        """)
+        """
+        )
         restore_layout.addWidget(warning_label)
 
         self.restore_backup_btn = QPushButton("📥 استرجاع نسخة احتياطية")
-        self.restore_backup_btn.setStyleSheet("""
+        self.restore_backup_btn.setStyleSheet(
+            """
             QPushButton {
                 background: rgba(239, 68, 68, 0.2);
                 color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.4);
@@ -783,7 +977,8 @@ class SettingsTab(QWidget):
                 font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: rgba(239, 68, 68, 0.4); color: white; }
-        """)
+        """
+        )
         self.restore_backup_btn.clicked.connect(self.restore_backup)
         restore_layout.addWidget(self.restore_backup_btn)
         restore_group.setLayout(restore_layout)
@@ -791,7 +986,8 @@ class SettingsTab(QWidget):
 
         # === قسم معلومات قاعدة البيانات ===
         db_group = QGroupBox("📊 معلومات قاعدة البيانات")
-        db_group.setStyleSheet("""
+        db_group.setStyleSheet(
+            """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
                 border: 1px solid #374151; border-radius: 10px;
@@ -805,16 +1001,19 @@ class SettingsTab(QWidget):
                 padding: 2px 15px;
                 color: #60a5fa;
             }
-        """)
+        """
+        )
         db_layout = QVBoxLayout()
         db_layout.setSpacing(10)
 
         self.db_stats_label = QLabel("⏳ جاري تحميل الإحصائيات...")
-        self.db_stats_label.setStyleSheet("""
+        self.db_stats_label.setStyleSheet(
+            """
             color: #d1d5db; font-size: 12px; line-height: 1.6;
             background: rgba(13, 33, 55, 0.5); padding: 15px;
             border-radius: 8px; border: 1px solid #374151;
-        """)
+        """
+        )
         db_layout.addWidget(self.db_stats_label)
 
         db_btns = QHBoxLayout()
@@ -822,12 +1021,12 @@ class SettingsTab(QWidget):
         self.refresh_stats_btn.setStyleSheet(BUTTON_STYLES["primary"])
         self.refresh_stats_btn.clicked.connect(self.load_db_stats)
         db_btns.addWidget(self.refresh_stats_btn)
-        
+
         self.optimize_db_btn = QPushButton("⚡ تحسين قاعدة البيانات")
         self.optimize_db_btn.setStyleSheet(BUTTON_STYLES["info"])
         self.optimize_db_btn.clicked.connect(self._optimize_database)
         db_btns.addWidget(self.optimize_db_btn)
-        
+
         db_btns.addStretch()
         db_layout.addLayout(db_btns)
         db_group.setLayout(db_layout)
@@ -835,7 +1034,8 @@ class SettingsTab(QWidget):
 
         # === قسم سجل النسخ الاحتياطية ===
         history_group = QGroupBox("📋 سجل النسخ الاحتياطية")
-        history_group.setStyleSheet("""
+        history_group.setStyleSheet(
+            """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
                 border: 1px solid #374151; border-radius: 10px;
@@ -848,13 +1048,14 @@ class SettingsTab(QWidget):
                 padding: 2px 15px;
                 color: #93C5FD;
             }
-        """)
+        """
+        )
         history_layout = QVBoxLayout()
-        
+
         self.backup_history_label = QLabel("لا توجد نسخ احتياطية سابقة")
         self.backup_history_label.setStyleSheet("color: #6b7280; font-size: 12px; padding: 10px;")
         history_layout.addWidget(self.backup_history_label)
-        
+
         history_group.setLayout(history_layout)
         layout.addWidget(history_group)
 
@@ -877,7 +1078,7 @@ class SettingsTab(QWidget):
             "النسخ الاحتياطي التلقائي",
             "🔜 قريباً!\n\n"
             "سيتم إضافة ميزة النسخ الاحتياطي التلقائي في التحديث القادم.\n\n"
-            "حالياً يمكنك إنشاء نسخة احتياطية يدوياً."
+            "حالياً يمكنك إنشاء نسخة احتياطية يدوياً.",
         )
 
     def _optimize_database(self):
@@ -886,16 +1087,16 @@ class SettingsTab(QWidget):
             if not self.repository:
                 QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة!")
                 return
-            
+
             reply = QMessageBox.question(
                 self,
                 "تحسين قاعدة البيانات",
                 "سيتم تحسين قاعدة البيانات وضغطها.\n\n"
                 "هذه العملية قد تستغرق بضع ثوانٍ.\n\n"
                 "هل تريد المتابعة؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
-            
+
             if reply == QMessageBox.StandardButton.Yes:
                 cursor = self.repository.get_cursor()
                 try:
@@ -906,24 +1107,22 @@ class SettingsTab(QWidget):
                         "✅ نجاح",
                         "تم تحسين قاعدة البيانات بنجاح!\n\n"
                         "• تم ضغط الملفات\n"
-                        "• تم تحديث الفهارس"
+                        "• تم تحديث الفهارس",
                     )
                 finally:
                     cursor.close()
-                    
+
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل تحسين قاعدة البيانات:\n{e}")
 
     def _load_backup_history(self):
         """تحميل سجل النسخ الاحتياطية"""
         try:
-            import os
-            import glob
-            
+
             # البحث عن ملفات النسخ الاحتياطية
             backup_files = glob.glob("skywave_backup_*.json")
             backup_files.extend(glob.glob("exports/skywave_backup_*.json"))
-            
+
             if backup_files:
                 history_text = "📁 النسخ الاحتياطية المتاحة:\n\n"
                 for f in sorted(backup_files, reverse=True)[:5]:  # آخر 5 نسخ
@@ -933,7 +1132,7 @@ class SettingsTab(QWidget):
                 self.backup_history_label.setText(history_text)
             else:
                 self.backup_history_label.setText("لا توجد نسخ احتياطية سابقة في المجلد الحالي")
-                
+
         except Exception as e:
             safe_print(f"WARNING: فشل تحميل سجل النسخ الاحتياطية: {e}")
 
@@ -1010,11 +1209,15 @@ class SettingsTab(QWidget):
                 # ⚡ حفظ اللوجو كـ Base64 للمزامنة بين الأجهزة
                 if self.settings_service.save_logo_from_file(file_path):
                     safe_print("INFO: [SettingsTab] تم حفظ اللوجو للمزامنة")
+                self._on_company_form_changed()
 
     def load_settings_data(self):
         safe_print("INFO: [SettingsTab] جاري تحميل الإعدادات...")
         try:
             settings = self.settings_service.get_settings()
+
+            if not self._ensure_company_ui():
+                return
 
             self.company_name_input.setText(settings.get("company_name", ""))
             self.company_tagline_input.setText(settings.get("company_tagline", ""))
@@ -1060,10 +1263,30 @@ class SettingsTab(QWidget):
             else:
                 self.logo_preview.setText("📷\nلا يوجد شعار")
 
+            self._company_settings_snapshot = {
+                "company_name": self.company_name_input.text(),
+                "company_tagline": self.company_tagline_input.text(),
+                "company_address": self.company_address_input.text(),
+                "company_phone": self.company_phone_input.text(),
+                "company_email": self.company_email_input.text(),
+                "company_website": self.company_website_input.text(),
+                "company_vat": self.company_vat_input.text(),
+                "company_logo_path": self.logo_preview.property("logo_path") or "",
+                "bank_name": (
+                    self.bank_name_input.text() if hasattr(self, "bank_name_input") else ""
+                ),
+                "bank_account": (
+                    self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
+                ),
+                "vodafone_cash": (
+                    self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
+                ),
+            }
+
+            self._on_company_form_changed()
             safe_print("INFO: [SettingsTab] ✅ تم تحميل الإعدادات")
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
-            import traceback
 
             traceback.print_exc()
 
@@ -1096,15 +1319,98 @@ class SettingsTab(QWidget):
             if hasattr(self, "vodafone_cash_input"):
                 new_settings["vodafone_cash"] = self.vodafone_cash_input.text()
 
-            self.settings_service.save_settings(new_settings)
+            self.settings_service.update_settings(new_settings)
 
             # ⚡ رفع الإعدادات للسحابة
             if hasattr(self, "repository") and self.repository:
                 self.settings_service.sync_settings_to_cloud(self.repository)
 
             QMessageBox.information(self, "نجاح", "تم حفظ بيانات الشركة بنجاح ✅")
+            self._company_settings_snapshot = {
+                "company_name": self.company_name_input.text(),
+                "company_tagline": self.company_tagline_input.text(),
+                "company_address": self.company_address_input.text(),
+                "company_phone": self.company_phone_input.text(),
+                "company_email": self.company_email_input.text(),
+                "company_website": self.company_website_input.text(),
+                "company_vat": self.company_vat_input.text(),
+                "company_logo_path": logo_path,
+                "bank_name": (
+                    self.bank_name_input.text() if hasattr(self, "bank_name_input") else ""
+                ),
+                "bank_account": (
+                    self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
+                ),
+                "vodafone_cash": (
+                    self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
+                ),
+            }
+            self._on_company_form_changed()
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل حفظ الإعدادات: {e}")
+
+    def _on_company_form_changed(self):
+        if not self._ensure_company_ui():
+            return
+
+        self._update_company_preview()
+        invalid = []
+
+        def _is_input_acceptable(w: QLineEdit) -> bool:
+            try:
+                validator = w.validator()
+                if validator is None:
+                    return True
+                state = validator.validate(w.text(), 0)[0]
+                return state == QValidator.State.Acceptable
+            except Exception:
+                return True
+
+        for w in (self.company_email_input, self.company_phone_input, self.company_website_input):
+            ok = _is_input_acceptable(w)
+            w.setStyleSheet(self._company_input_style if ok else self._company_input_style_invalid)
+            if not ok:
+                invalid.append(w)
+
+        required_ok = bool(self.company_name_input.text().strip())
+        self.company_name_input.setStyleSheet(
+            self._company_input_style if required_ok else self._company_input_style_invalid
+        )
+
+        snapshot = getattr(self, "_company_settings_snapshot", None) or {}
+        current = {
+            "company_name": self.company_name_input.text(),
+            "company_tagline": self.company_tagline_input.text(),
+            "company_address": self.company_address_input.text(),
+            "company_phone": self.company_phone_input.text(),
+            "company_email": self.company_email_input.text(),
+            "company_website": self.company_website_input.text(),
+            "company_vat": self.company_vat_input.text(),
+            "company_logo_path": self.logo_preview.property("logo_path") or "",
+            "bank_name": self.bank_name_input.text() if hasattr(self, "bank_name_input") else "",
+            "bank_account": (
+                self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
+            ),
+            "vodafone_cash": (
+                self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
+            ),
+        }
+        has_changes = current != snapshot
+        can_save = required_ok and not invalid and has_changes
+        self.save_company_btn.setEnabled(can_save)
+
+    def _update_company_preview(self):
+        name = (self.company_name_input.text() or "").strip() or "—"
+        tagline = (self.company_tagline_input.text() or "").strip()
+        phone = (self.company_phone_input.text() or "").strip()
+        email = (self.company_email_input.text() or "").strip()
+        website = (self.company_website_input.text() or "").strip()
+
+        self.company_preview_name.setText(name)
+        self.company_preview_tagline.setText(tagline)
+
+        parts = [p for p in (phone, email, website) if p]
+        self.company_preview_meta.setText(" • ".join(parts))
 
     def load_currencies(self):
         """تحميل العملات من قاعدة البيانات - محسّن"""
@@ -1359,15 +1665,13 @@ class SettingsTab(QWidget):
         )
         if not file_path:
             return
-            
+
         # تعطيل الزر وإظهار التقدم
         self.create_backup_btn.setEnabled(False)
         self.create_backup_btn.setText("⏳ جاري إنشاء النسخة...")
         self.backup_progress.setVisible(True)
         self.backup_progress.setValue(0)
-        
-        from core.data_loader import get_data_loader
-        
+
         def do_backup():
             """تنفيذ النسخ الاحتياطي في الخلفية"""
             backup_data = {
@@ -1388,7 +1692,7 @@ class SettingsTab(QWidget):
                 "tasks": [],
                 "settings": {},
             }
-            
+
             # ⚡ جلب كل البيانات بشكل متوازي
             data_sources = [
                 ("clients", self.repository.get_all_clients),
@@ -1401,7 +1705,7 @@ class SettingsTab(QWidget):
                 ("journal_entries", self.repository.get_all_journal_entries),
                 ("payments", self.repository.get_all_payments),
             ]
-            
+
             for key, fetch_func in data_sources:
                 try:
                     data = fetch_func()
@@ -1412,48 +1716,50 @@ class SettingsTab(QWidget):
                             backup_data[key] = [self._serialize_object(data)]
                 except Exception as e:
                     safe_print(f"WARNING: فشل جلب {key}: {e}")
-            
+
             # جلب المهام
             try:
-                from ui.todo_manager import TaskService
+
                 task_service = TaskService()
                 tasks = task_service.get_all_tasks()
                 backup_data["tasks"] = [self._serialize_object(t) for t in tasks]
             except Exception:
                 pass
-            
+
             # جلب الإعدادات
             try:
                 backup_data["settings"] = self.settings_service.get_settings()
             except Exception:
                 pass
-            
+
             # حفظ الملف
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
-            
+
             return backup_data
-        
+
         def on_success(backup_data):
             """معالج النجاح"""
             self.create_backup_btn.setEnabled(True)
             self.create_backup_btn.setText("💾 إنشاء نسخة احتياطية الآن")
             self.backup_progress.setVisible(False)
-            
+
             # حساب الإحصائيات
-            total_records = sum([
-                len(backup_data.get("clients", [])),
-                len(backup_data.get("services", [])),
-                len(backup_data.get("projects", [])),
-                len(backup_data.get("invoices", [])),
-                len(backup_data.get("expenses", [])),
-                len(backup_data.get("accounts", [])),
-                len(backup_data.get("currencies", [])),
-                len(backup_data.get("journal_entries", [])),
-                len(backup_data.get("payments", [])),
-                len(backup_data.get("tasks", [])),
-            ])
-            
+            total_records = sum(
+                [
+                    len(backup_data.get("clients", [])),
+                    len(backup_data.get("services", [])),
+                    len(backup_data.get("projects", [])),
+                    len(backup_data.get("invoices", [])),
+                    len(backup_data.get("expenses", [])),
+                    len(backup_data.get("accounts", [])),
+                    len(backup_data.get("currencies", [])),
+                    len(backup_data.get("journal_entries", [])),
+                    len(backup_data.get("payments", [])),
+                    len(backup_data.get("tasks", [])),
+                ]
+            )
+
             QMessageBox.information(
                 self,
                 "✅ نجاح",
@@ -1464,19 +1770,19 @@ class SettingsTab(QWidget):
                 f"• الخدمات: {len(backup_data.get('services', []))}\n"
                 f"• المشاريع: {len(backup_data.get('projects', []))}\n"
                 f"• المصروفات: {len(backup_data.get('expenses', []))}\n"
-                f"• المهام: {len(backup_data.get('tasks', []))}"
+                f"• المهام: {len(backup_data.get('tasks', []))}",
             )
-            
+
             # تحديث سجل النسخ الاحتياطية
             self._load_backup_history()
-        
+
         def on_error(error_msg):
             """معالج الخطأ"""
             self.create_backup_btn.setEnabled(True)
             self.create_backup_btn.setText("💾 إنشاء نسخة احتياطية الآن")
             self.backup_progress.setVisible(False)
             QMessageBox.critical(self, "❌ خطأ", f"فشل إنشاء النسخة الاحتياطية:\n{error_msg}")
-        
+
         # ⚡ تنفيذ في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -1484,7 +1790,7 @@ class SettingsTab(QWidget):
             load_function=do_backup,
             on_success=on_success,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def _serialize_object(self, obj):
@@ -1563,26 +1869,27 @@ class SettingsTab(QWidget):
         """⚡ تحميل إحصائيات قاعدة البيانات في الخلفية لمنع التجميد"""
         # عرض رسالة تحميل
         self.db_stats_label.setText("⏳ جاري تحميل الإحصائيات...")
-        
+
         if self.repository is None:
-            self.db_stats_label.setText("""
+            self.db_stats_label.setText(
+                """
 📊 إحصائيات قاعدة البيانات:
 
 ⚠️ قاعدة البيانات غير متصلة
 يرجى التحقق من الاتصال
-            """)
+            """
+            )
             return
-        
-        from core.data_loader import get_data_loader
-        
+
         def fetch_stats():
             """جلب الإحصائيات في thread منفصل"""
             try:
                 cursor = self.repository.get_cursor()
                 try:
                     # ⚡ استعلام واحد بدلاً من 8 استعلامات منفصلة
-                    cursor.execute("""
-                        SELECT 
+                    cursor.execute(
+                        """
+                        SELECT
                             (SELECT COUNT(*) FROM clients) as clients,
                             (SELECT COUNT(*) FROM services) as services,
                             (SELECT COUNT(*) FROM invoices) as invoices,
@@ -1590,9 +1897,10 @@ class SettingsTab(QWidget):
                             (SELECT COUNT(*) FROM accounts) as accounts,
                             (SELECT COUNT(*) FROM currencies) as currencies,
                             (SELECT COUNT(*) FROM journal_entries) as journal_entries
-                    """)
+                    """
+                    )
                     result = cursor.fetchone()
-                    
+
                     clients_count = result[0] if result else 0
                     services_count = result[1] if result else 0
                     invoices_count = result[2] if result else 0
@@ -1600,7 +1908,7 @@ class SettingsTab(QWidget):
                     accounts_count = result[4] if result else 0
                     currencies_count = result[5] if result else 0
                     journal_count = result[6] if result else 0
-                    
+
                     # جلب عدد المشاريع بشكل منفصل (قد لا يكون الجدول موجوداً)
                     try:
                         cursor.execute("SELECT COUNT(*) FROM projects")
@@ -1610,40 +1918,45 @@ class SettingsTab(QWidget):
                         projects_count = 0
                 finally:
                     cursor.close()
-                
+
                 # حالة الاتصال
                 is_online = self.repository.online is not None and self.repository.online
-                
+
                 return {
-                    'clients': clients_count,
-                    'services': services_count,
-                    'projects': projects_count,
-                    'invoices': invoices_count,
-                    'expenses': expenses_count,
-                    'accounts': accounts_count,
-                    'currencies': currencies_count,
-                    'journal': journal_count,
-                    'is_online': is_online
+                    "clients": clients_count,
+                    "services": services_count,
+                    "projects": projects_count,
+                    "invoices": invoices_count,
+                    "expenses": expenses_count,
+                    "accounts": accounts_count,
+                    "currencies": currencies_count,
+                    "journal": journal_count,
+                    "is_online": is_online,
                 }
             except Exception as e:
                 safe_print(f"ERROR: فشل جلب الإحصائيات: {e}")
-                return {'error': str(e)}
-        
+                return {"error": str(e)}
+
         def on_stats_loaded(data):
             """تحديث الواجهة بالإحصائيات"""
             try:
-                if 'error' in data:
+                if "error" in data:
                     self.db_stats_label.setText(f"❌ خطأ في جلب الإحصائيات: {data['error']}")
                     return
-                
+
                 total = (
-                    data['clients'] + data['services'] + data['invoices'] +
-                    data['expenses'] + data['accounts'] + data['currencies'] +
-                    data['journal'] + data['projects']
+                    data["clients"]
+                    + data["services"]
+                    + data["invoices"]
+                    + data["expenses"]
+                    + data["accounts"]
+                    + data["currencies"]
+                    + data["journal"]
+                    + data["projects"]
                 )
-                
-                connection_status = "✅ متصل" if data['is_online'] else "⚠️ غير متصل"
-                
+
+                connection_status = "✅ متصل" if data["is_online"] else "⚠️ غير متصل"
+
                 stats_text = f"""
 📊 إحصائيات قاعدة البيانات:
 
@@ -1663,10 +1976,10 @@ class SettingsTab(QWidget):
                 self.db_stats_label.setText(stats_text)
             except Exception as e:
                 self.db_stats_label.setText(f"❌ خطأ في عرض الإحصائيات: {e}")
-        
+
         def on_error(error_msg):
             self.db_stats_label.setText(f"❌ خطأ: {error_msg}")
-        
+
         # ⚡ تحميل في الخلفية
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -1674,7 +1987,7 @@ class SettingsTab(QWidget):
             load_function=fetch_stats,
             on_success=on_stats_loaded,
             on_error=on_error,
-            use_thread_pool=True
+            use_thread_pool=True,
         )
 
     def setup_default_accounts_tab(self):
@@ -1688,13 +2001,15 @@ class SettingsTab(QWidget):
             "يجب أن تكون هذه الحسابات موجودة في دليل الحسابات."
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("""
+        info_label.setStyleSheet(
+            """
             background-color: #1e3a8a;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
         layout.addWidget(info_label)
 
         # نموذج الحسابات الافتراضية
@@ -1725,7 +2040,8 @@ class SettingsTab(QWidget):
         buttons_layout = QHBoxLayout()
 
         self.refresh_accounts_btn = QPushButton("🔄 تحديث القوائم")
-        self.refresh_accounts_btn.setStyleSheet("""
+        self.refresh_accounts_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #3b82f6;
                 color: white;
@@ -1736,11 +2052,13 @@ class SettingsTab(QWidget):
             QPushButton:hover {
                 background-color: #2563eb;
             }
-        """)
+        """
+        )
         self.refresh_accounts_btn.clicked.connect(self.load_default_accounts)
 
         self.save_default_accounts_btn = QPushButton("💾 حفظ الإعدادات")
-        self.save_default_accounts_btn.setStyleSheet("""
+        self.save_default_accounts_btn.setStyleSheet(
+            """
             QPushButton {
                 background-color: #0A6CF1;
                 color: white;
@@ -1751,7 +2069,8 @@ class SettingsTab(QWidget):
             QPushButton:hover {
                 background-color: #0A6CF1;
             }
-        """)
+        """
+        )
         self.save_default_accounts_btn.clicked.connect(self.save_default_accounts)
 
         buttons_layout.addWidget(self.refresh_accounts_btn)
@@ -1860,7 +2179,7 @@ class SettingsTab(QWidget):
             # حفظ الإعدادات
             current_settings = self.settings_service.get_settings()
             current_settings.update(all_accounts)  # حفظ الكل (بما فيها None للحسابات غير المحددة)
-            self.settings_service.save_settings(current_settings)
+            self.settings_service.update_settings(current_settings)
 
             # عرض رسالة نجاح مع عدد الحسابات المحفوظة
             saved_count = len(default_accounts)
@@ -1939,7 +2258,6 @@ class SettingsTab(QWidget):
 
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل المستخدمين: {e}")
-            import traceback
 
             traceback.print_exc()
         finally:
@@ -1950,15 +2268,12 @@ class SettingsTab(QWidget):
     def add_user(self):
         """إضافة مستخدم جديد"""
         # التحقق من الصلاحية
-        from core.auth_models import AuthService, PermissionManager
 
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
             QMessageBox.warning(self, "تنبيه", "ليس لديك صلاحية إضافة مستخدمين.")
             return
-
-        from ui.user_editor_dialog import UserEditorDialog
 
         # إنشاء خدمة المصادقة
         auth_service = AuthService(self.repository)
@@ -1971,7 +2286,6 @@ class SettingsTab(QWidget):
     def edit_user(self):
         """تعديل مستخدم"""
         # التحقق من الصلاحية
-        from core.auth_models import AuthService, PermissionManager
 
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
@@ -1992,8 +2306,6 @@ class SettingsTab(QWidget):
 
         username = username_item.text()
         safe_print(f"INFO: [SettingsTab] جاري تعديل المستخدم: {username}")
-
-        from ui.user_editor_dialog import UserEditorDialog
 
         # إنشاء خدمة المصادقة
         auth_service = AuthService(self.repository)
@@ -2016,7 +2328,6 @@ class SettingsTab(QWidget):
     def edit_user_permissions(self):
         """تحرير صلاحيات المستخدم"""
         # التحقق من الصلاحية
-        from core.auth_models import AuthService, PermissionManager
 
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
@@ -2049,7 +2360,6 @@ class SettingsTab(QWidget):
         safe_print(f"INFO: [SettingsTab] تم جلب بيانات المستخدم للصلاحيات: {user.username}")
 
         # فتح نافذة تحرير الصلاحيات
-        from ui.user_permissions_dialog import UserPermissionsDialog
 
         dialog = UserPermissionsDialog(user, self.repository, self)
         if dialog.exec():
@@ -2059,7 +2369,6 @@ class SettingsTab(QWidget):
     def delete_user(self):
         """حذف مستخدم"""
         # التحقق من الصلاحية
-        from core.auth_models import PermissionManager
 
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
@@ -2115,7 +2424,6 @@ class SettingsTab(QWidget):
     def activate_user(self):
         """تفعيل مستخدم معطل"""
         # التحقق من الصلاحية
-        from core.auth_models import PermissionManager
 
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
@@ -2166,12 +2474,12 @@ class SettingsTab(QWidget):
 
     def setup_sync_tab(self):
         """إعداد تاب المزامنة اللحظية - نظام احترافي كامل"""
-        from PyQt6.QtWidgets import QScrollArea, QFrame, QGridLayout, QCheckBox, QSpinBox
 
         # منطقة التمرير
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        scroll_area.setStyleSheet(
+            """
             QScrollArea {
                 border: none;
                 background: transparent;
@@ -2186,7 +2494,8 @@ class SettingsTab(QWidget):
                 border-radius: 4px;
                 min-height: 30px;
             }
-        """)
+        """
+        )
 
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
@@ -2195,7 +2504,8 @@ class SettingsTab(QWidget):
 
         # === حالة المزامنة الحالية ===
         status_frame = QFrame()
-        status_frame.setStyleSheet("""
+        status_frame.setStyleSheet(
+            """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(10, 108, 241, 0.2), stop:1 rgba(10, 108, 241, 0.05));
@@ -2203,7 +2513,8 @@ class SettingsTab(QWidget):
                 border-radius: 12px;
                 padding: 20px;
             }
-        """)
+        """
+        )
         status_layout = QVBoxLayout(status_frame)
 
         status_title = QLabel("📊 حالة المزامنة اللحظية")
@@ -2211,13 +2522,15 @@ class SettingsTab(QWidget):
         status_layout.addWidget(status_title)
 
         self.sync_status_label = QLabel("🔄 جاري التحقق من حالة المزامنة...")
-        self.sync_status_label.setStyleSheet("""
+        self.sync_status_label.setStyleSheet(
+            """
             color: #F1F5F9;
             font-size: 14px;
             padding: 10px;
             background: rgba(13, 33, 55, 0.5);
             border-radius: 8px;
-        """)
+        """
+        )
         self.sync_status_label.setWordWrap(True)
         status_layout.addWidget(self.sync_status_label)
 
@@ -2225,7 +2538,8 @@ class SettingsTab(QWidget):
 
         # === إعدادات المزامنة التلقائية ===
         auto_sync_group = QGroupBox("⚙️ إعدادات المزامنة التلقائية")
-        auto_sync_group.setStyleSheet("""
+        auto_sync_group.setStyleSheet(
+            """
             QGroupBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
@@ -2241,14 +2555,16 @@ class SettingsTab(QWidget):
                 left: 10px;
                 padding: 0 5px;
             }
-        """)
+        """
+        )
         auto_sync_layout = QGridLayout()
         auto_sync_layout.setSpacing(15)
 
         # تفعيل المزامنة التلقائية
         self.auto_sync_enabled = QCheckBox("🔄 تفعيل المزامنة التلقائية")
         self.auto_sync_enabled.setChecked(True)
-        self.auto_sync_enabled.setStyleSheet("""
+        self.auto_sync_enabled.setStyleSheet(
+            """
             QCheckBox {
                 color: #F1F5F9;
                 font-size: 13px;
@@ -2265,7 +2581,8 @@ class SettingsTab(QWidget):
                 background: #0A6CF1;
                 border-color: #0A6CF1;
             }
-        """)
+        """
+        )
         auto_sync_layout.addWidget(self.auto_sync_enabled, 0, 0, 1, 2)
 
         # فترة المزامنة الكاملة
@@ -2275,7 +2592,8 @@ class SettingsTab(QWidget):
         self.full_sync_interval.setRange(1, 60)
         self.full_sync_interval.setValue(5)
         self.full_sync_interval.setSuffix(" دقيقة")
-        self.full_sync_interval.setStyleSheet("""
+        self.full_sync_interval.setStyleSheet(
+            """
             QSpinBox {
                 background: #0d2137;
                 color: #F1F5F9;
@@ -2287,7 +2605,8 @@ class SettingsTab(QWidget):
             QSpinBox:focus {
                 border: 2px solid #0A6CF1;
             }
-        """)
+        """
+        )
         auto_sync_layout.addWidget(full_sync_label, 1, 0)
         auto_sync_layout.addWidget(self.full_sync_interval, 1, 1)
 
@@ -2298,7 +2617,8 @@ class SettingsTab(QWidget):
         self.quick_sync_interval.setRange(10, 300)
         self.quick_sync_interval.setValue(60)
         self.quick_sync_interval.setSuffix(" ثانية")
-        self.quick_sync_interval.setStyleSheet("""
+        self.quick_sync_interval.setStyleSheet(
+            """
             QSpinBox {
                 background: #0d2137;
                 color: #F1F5F9;
@@ -2310,7 +2630,8 @@ class SettingsTab(QWidget):
             QSpinBox:focus {
                 border: 2px solid #0A6CF1;
             }
-        """)
+        """
+        )
         auto_sync_layout.addWidget(quick_sync_label, 2, 0)
         auto_sync_layout.addWidget(self.quick_sync_interval, 2, 1)
 
@@ -2321,7 +2642,8 @@ class SettingsTab(QWidget):
         self.connection_check_interval.setRange(10, 120)
         self.connection_check_interval.setValue(30)
         self.connection_check_interval.setSuffix(" ثانية")
-        self.connection_check_interval.setStyleSheet("""
+        self.connection_check_interval.setStyleSheet(
+            """
             QSpinBox {
                 background: #0d2137;
                 color: #F1F5F9;
@@ -2333,7 +2655,8 @@ class SettingsTab(QWidget):
             QSpinBox:focus {
                 border: 2px solid #0A6CF1;
             }
-        """)
+        """
+        )
         auto_sync_layout.addWidget(connection_check_label, 3, 0)
         auto_sync_layout.addWidget(self.connection_check_interval, 3, 1)
 
@@ -2342,19 +2665,22 @@ class SettingsTab(QWidget):
 
         # === أزرار التحكم ===
         buttons_frame = QFrame()
-        buttons_frame.setStyleSheet("""
+        buttons_frame.setStyleSheet(
+            """
             QFrame {
                 background: transparent;
                 border: none;
             }
-        """)
+        """
+        )
         buttons_layout = QHBoxLayout(buttons_frame)
         buttons_layout.setSpacing(10)
 
         # زر حفظ الإعدادات
         self.save_sync_settings_btn = QPushButton("💾 حفظ الإعدادات")
         self.save_sync_settings_btn.setMinimumHeight(45)
-        self.save_sync_settings_btn.setStyleSheet("""
+        self.save_sync_settings_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
@@ -2372,13 +2698,15 @@ class SettingsTab(QWidget):
             QPushButton:pressed {
                 background: #047857;
             }
-        """)
+        """
+        )
         self.save_sync_settings_btn.clicked.connect(self.save_sync_settings)
 
         # زر مزامنة فورية
         self.manual_sync_btn = QPushButton("🔄 مزامنة فورية الآن")
         self.manual_sync_btn.setMinimumHeight(45)
-        self.manual_sync_btn.setStyleSheet("""
+        self.manual_sync_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #0A6CF1, stop:1 #2563eb);
@@ -2396,13 +2724,15 @@ class SettingsTab(QWidget):
             QPushButton:pressed {
                 background: #1e40af;
             }
-        """)
+        """
+        )
         self.manual_sync_btn.clicked.connect(self.trigger_manual_sync)
 
         # زر تحديث الحالة
         self.refresh_sync_status_btn = QPushButton("🔄 تحديث الحالة")
         self.refresh_sync_status_btn.setMinimumHeight(45)
-        self.refresh_sync_status_btn.setStyleSheet("""
+        self.refresh_sync_status_btn.setStyleSheet(
+            """
             QPushButton {
                 background: rgba(59, 130, 246, 0.2);
                 color: #60a5fa;
@@ -2415,7 +2745,8 @@ class SettingsTab(QWidget):
             QPushButton:hover {
                 background: rgba(59, 130, 246, 0.3);
             }
-        """)
+        """
+        )
         self.refresh_sync_status_btn.clicked.connect(self.refresh_sync_status)
 
         buttons_layout.addWidget(self.save_sync_settings_btn)
@@ -2427,14 +2758,16 @@ class SettingsTab(QWidget):
 
         # === معلومات إضافية ===
         info_frame = QFrame()
-        info_frame.setStyleSheet("""
+        info_frame.setStyleSheet(
+            """
             QFrame {
                 background: rgba(16, 185, 129, 0.1);
                 border: 1px solid rgba(16, 185, 129, 0.3);
                 border-radius: 8px;
                 padding: 15px;
             }
-        """)
+        """
+        )
         info_layout = QVBoxLayout(info_frame)
 
         info_title = QLabel("ℹ️ معلومات مهمة")
@@ -2472,12 +2805,10 @@ class SettingsTab(QWidget):
     def load_sync_settings(self):
         """تحميل إعدادات المزامنة من ملف التكوين"""
         try:
-            import json
-            from pathlib import Path
 
             config_path = Path("sync_config.json")
             if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     config = json.load(f)
 
                 self.auto_sync_enabled.setChecked(config.get("enabled", True))
@@ -2492,8 +2823,6 @@ class SettingsTab(QWidget):
     def save_sync_settings(self):
         """حفظ إعدادات المزامنة وتطبيقها"""
         try:
-            import json
-            from pathlib import Path
 
             # إعداد التكوين الجديد
             config = {
@@ -2575,13 +2904,15 @@ class SettingsTab(QWidget):
                 self.sync_status_label.setText(
                     "⚠️ نظام المزامنة غير متاح\n\nيرجى التأكد من الاتصال بقاعدة البيانات"
                 )
-                self.sync_status_label.setStyleSheet("""
+                self.sync_status_label.setStyleSheet(
+                    """
                     color: #F59E0B;
                     font-size: 14px;
                     padding: 10px;
                     background: rgba(245, 158, 11, 0.1);
                     border-radius: 8px;
-                """)
+                """
+                )
                 return
 
             sync_manager = self.repository.unified_sync
@@ -2614,8 +2945,6 @@ class SettingsTab(QWidget):
 
             last_sync = metrics.get("last_sync_time")
             if last_sync:
-                from datetime import datetime
-
                 try:
                     last_sync_dt = datetime.fromisoformat(last_sync)
                     status_text += f"• آخر مزامنة: {last_sync_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -2650,14 +2979,16 @@ class SettingsTab(QWidget):
                 bg_color = "rgba(239, 68, 68, 0.1)"
                 border_color = "#ef4444"
 
-            self.sync_status_label.setStyleSheet(f"""
+            self.sync_status_label.setStyleSheet(
+                f"""
                 color: #F1F5F9;
                 font-size: 13px;
                 padding: 15px;
                 background: {bg_color};
                 border: 1px solid {border_color};
                 border-radius: 8px;
-            """)
+            """
+            )
 
         except Exception as e:
             self.sync_status_label.setText(f"❌ خطأ في تحديث الحالة:\n{e}")
@@ -2719,14 +3050,16 @@ class SettingsTab(QWidget):
 
         # معلومات
         info_label = QLabel("💳 إدارة طرق الدفع التي تظهر في الفواتير والمشاريع")
-        info_label.setStyleSheet("""
+        info_label.setStyleSheet(
+            """
             background-color: #0A6CF1;
             color: white;
             padding: 12px;
             border-radius: 8px;
             font-weight: bold;
             font-size: 13px;
-        """)
+        """
+        )
         layout.addWidget(info_label)
 
         # أزرار التحكم
@@ -2757,23 +3090,57 @@ class SettingsTab(QWidget):
 
         # جدول طرق الدفع
         self.payment_methods_table = QTableWidget()
-        self.payment_methods_table.setColumnCount(4)
-        self.payment_methods_table.setHorizontalHeaderLabels(["#", "اسم طريقة الدفع", "الوصف", "الحالة"])
+        self.payment_methods_table.setColumnCount(5)
+        self.payment_methods_table.setHorizontalHeaderLabels(
+            ["#", "اسم طريقة الدفع", "الوصف", "تفاصيل الفاتورة", "الحالة"]
+        )
         h_header = self.payment_methods_table.horizontalHeader()
         if h_header:
             h_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             h_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             h_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+            h_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         self.payment_methods_table.setAlternatingRowColors(True)
         self.payment_methods_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.payment_methods_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.payment_methods_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.payment_methods_table.setStyleSheet(self._get_table_style())
-        from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.payment_methods_table)
         self.payment_methods_table.doubleClicked.connect(self.edit_payment_method)
+
+        self.payment_methods_search = UniversalSearchBar(
+            self.payment_methods_table,
+            placeholder="🔍 بحث في طرق الدفع...",
+        )
+        layout.addWidget(self.payment_methods_search)
         layout.addWidget(self.payment_methods_table)
+
+        preview_group = QGroupBox("👁️ معاينة طريقة الدفع في الفاتورة")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.setContentsMargins(12, 16, 12, 12)
+        preview_layout.setSpacing(8)
+        self.payment_method_preview = QTextEdit()
+        self.payment_method_preview.setReadOnly(True)
+        self.payment_method_preview.setFixedHeight(90)
+        self.payment_method_preview.setStyleSheet(
+            """
+            QTextEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }
+            """
+        )
+        self.payment_method_preview.setPlaceholderText("اختر طريقة دفع لعرض تفاصيلها")
+        preview_layout.addWidget(self.payment_method_preview)
+        layout.addWidget(preview_group)
+
+        self.payment_methods_table.itemSelectionChanged.connect(self._update_payment_method_preview)
 
         # تحميل البيانات
         self.load_payment_methods()
@@ -2782,79 +3149,98 @@ class SettingsTab(QWidget):
         """تحميل طرق الدفع من قاعدة البيانات"""
         try:
             self.payment_methods_table.setRowCount(0)
-            
+
             # جلب طرق الدفع من الإعدادات
             payment_methods = self.settings_service.get_setting("payment_methods") or []
-            
+
             # إذا لم تكن موجودة، إنشاء قائمة افتراضية
             if not payment_methods:
                 payment_methods = [
-                    {"name": "نقدي", "description": "الدفع النقدي", "active": True},
-                    {"name": "تحويل بنكي", "description": "تحويل عبر البنك", "active": True},
-                    {"name": "فودافون كاش", "description": "محفظة فودافون كاش", "active": True},
-                    {"name": "انستاباي", "description": "تحويل عبر انستاباي", "active": True},
+                    {"name": "نقدي", "description": "الدفع النقدي", "details": "", "active": True},
+                    {
+                        "name": "تحويل بنكي",
+                        "description": "تحويل عبر البنك",
+                        "details": "",
+                        "active": True,
+                    },
+                    {
+                        "name": "فودافون كاش",
+                        "description": "محفظة فودافون كاش",
+                        "details": "",
+                        "active": True,
+                    },
+                    {
+                        "name": "انستاباي",
+                        "description": "تحويل عبر انستاباي",
+                        "details": "",
+                        "active": True,
+                    },
                 ]
-                self.settings_service.save_setting("payment_methods", payment_methods)
+                self.settings_service.update_setting("payment_methods", payment_methods)
 
             self.payment_methods_table.setRowCount(len(payment_methods))
             for i, method in enumerate(payment_methods):
+                if isinstance(method, dict) and "details" not in method:
+                    method["details"] = ""
                 self.payment_methods_table.setItem(i, 0, create_centered_item(str(i + 1)))
-                self.payment_methods_table.setItem(i, 1, create_centered_item(method.get("name", "")))
-                self.payment_methods_table.setItem(i, 2, create_centered_item(method.get("description", "")))
+                self.payment_methods_table.setItem(
+                    i, 1, create_centered_item(method.get("name", ""))
+                )
+                self.payment_methods_table.setItem(
+                    i, 2, create_centered_item(method.get("description", ""))
+                )
+                details_preview = method.get("details", "")
+                details_preview = details_preview.replace("\n", " ").strip()
+                if len(details_preview) > 60:
+                    details_preview = details_preview[:60] + "..."
+                self.payment_methods_table.setItem(i, 3, create_centered_item(details_preview))
                 status = "✅ مفعّل" if method.get("active", True) else "❌ معطّل"
-                self.payment_methods_table.setItem(i, 3, create_centered_item(status))
+                self.payment_methods_table.setItem(i, 4, create_centered_item(status))
+
+            self.settings_service.update_setting("payment_methods", payment_methods)
 
             safe_print(f"INFO: [SettingsTab] تم تحميل {len(payment_methods)} طريقة دفع")
+            self._update_payment_method_preview()
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل طرق الدفع: {e}")
 
     def add_payment_method(self):
         """إضافة طريقة دفع جديدة"""
-        from PyQt6.QtWidgets import QInputDialog
-        
-        name, ok = QInputDialog.getText(self, "إضافة طريقة دفع", "اسم طريقة الدفع:")
-        if ok and name.strip():
-            desc, _ = QInputDialog.getText(self, "إضافة طريقة دفع", "الوصف (اختياري):")
-            
-            payment_methods = self.settings_service.get_setting("payment_methods") or []
-            payment_methods.append({
-                "name": name.strip(),
-                "description": desc.strip() if desc else "",
-                "active": True
-            })
-            self.settings_service.save_setting("payment_methods", payment_methods)
-            self.load_payment_methods()
-            QMessageBox.information(self, "✅ نجاح", f"تم إضافة طريقة الدفع: {name}")
+        dialog = PaymentMethodDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            if data and data.get("name"):
+                payment_methods = self.settings_service.get_setting("payment_methods") or []
+                payment_methods.append(data)
+                self.settings_service.update_setting("payment_methods", payment_methods)
+                self.load_payment_methods()
+                QMessageBox.information(
+                    self, "✅ نجاح", f"تم إضافة طريقة الدفع: {data.get('name')}"
+                )
 
     def edit_payment_method(self):
         """تعديل طريقة دفع"""
-        from PyQt6.QtWidgets import QInputDialog
-        
         selected = self.payment_methods_table.selectedIndexes()
         if not selected:
             QMessageBox.warning(self, "تنبيه", "الرجاء اختيار طريقة دفع للتعديل")
             return
-        
+
         row = selected[0].row()
         payment_methods = self.settings_service.get_setting("payment_methods") or []
-        
+
         if row >= len(payment_methods):
             return
-        
+
         method = payment_methods[row]
-        
-        name, ok = QInputDialog.getText(self, "تعديل طريقة دفع", "اسم طريقة الدفع:", text=method.get("name", ""))
-        if ok and name.strip():
-            desc, _ = QInputDialog.getText(self, "تعديل طريقة دفع", "الوصف:", text=method.get("description", ""))
-            
-            payment_methods[row] = {
-                "name": name.strip(),
-                "description": desc.strip() if desc else "",
-                "active": method.get("active", True)
-            }
-            self.settings_service.save_setting("payment_methods", payment_methods)
-            self.load_payment_methods()
-            QMessageBox.information(self, "✅ نجاح", "تم تعديل طريقة الدفع")
+
+        dialog = PaymentMethodDialog(self, method)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            if data and data.get("name"):
+                payment_methods[row] = data
+                self.settings_service.update_setting("payment_methods", payment_methods)
+                self.load_payment_methods()
+                QMessageBox.information(self, "✅ نجاح", "تم تعديل طريقة الدفع")
 
     def delete_payment_method(self):
         """حذف طريقة دفع"""
@@ -2862,26 +3248,65 @@ class SettingsTab(QWidget):
         if not selected:
             QMessageBox.warning(self, "تنبيه", "الرجاء اختيار طريقة دفع للحذف")
             return
-        
+
         row = selected[0].row()
         payment_methods = self.settings_service.get_setting("payment_methods") or []
-        
+
         if row >= len(payment_methods):
             return
-        
+
         method_name = payment_methods[row].get("name", "")
-        
+
         reply = QMessageBox.question(
-            self, "تأكيد الحذف",
+            self,
+            "تأكيد الحذف",
             f"هل أنت متأكد من حذف طريقة الدفع: {method_name}؟",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             payment_methods.pop(row)
-            self.settings_service.save_setting("payment_methods", payment_methods)
+            self.settings_service.update_setting("payment_methods", payment_methods)
             self.load_payment_methods()
             QMessageBox.information(self, "✅ نجاح", "تم حذف طريقة الدفع")
+
+    def _update_payment_method_preview(self):
+        try:
+            if not hasattr(self, "payment_method_preview"):
+                return
+
+            selected = (
+                self.payment_methods_table.selectedIndexes()
+                if hasattr(self, "payment_methods_table")
+                else []
+            )
+            payment_methods = self.settings_service.get_setting("payment_methods") or []
+
+            if not selected:
+                self.payment_method_preview.setText("")
+                return
+
+            row = selected[0].row()
+            if row >= len(payment_methods):
+                self.payment_method_preview.setText("")
+                return
+
+            method = payment_methods[row] if isinstance(payment_methods[row], dict) else {}
+            name = method.get("name", "")
+            desc = method.get("description", "")
+            details = method.get("details", "")
+            active = method.get("active", True)
+
+            status = "مفعّل" if active else "معطّل"
+            text = f"اسم: {name}\nالحالة: {status}"
+            if desc:
+                text += f"\nالوصف: {desc}"
+            if details:
+                text += f"\n\nتفاصيل الفاتورة:\n{details}"
+            self.payment_method_preview.setText(text)
+
+        except Exception:
+            pass
 
     def setup_project_notes_tab(self):
         """إعداد تاب ملاحظات المشاريع - قوالب الملاحظات الافتراضية"""
@@ -2891,14 +3316,16 @@ class SettingsTab(QWidget):
 
         # معلومات
         info_label = QLabel("📝 إدارة قوالب الملاحظات الافتراضية للمشاريع والفواتير")
-        info_label.setStyleSheet("""
+        info_label.setStyleSheet(
+            """
             background-color: #10b981;
             color: white;
             padding: 12px;
             border-radius: 8px;
             font-weight: bold;
             font-size: 13px;
-        """)
+        """
+        )
         layout.addWidget(info_label)
 
         # أزرار التحكم
@@ -2941,10 +3368,41 @@ class SettingsTab(QWidget):
         self.note_templates_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.note_templates_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.note_templates_table.setStyleSheet(self._get_table_style())
-        from ui.styles import fix_table_rtl
+
         fix_table_rtl(self.note_templates_table)
         self.note_templates_table.doubleClicked.connect(self.edit_note_template)
+
+        self.note_templates_search = UniversalSearchBar(
+            self.note_templates_table,
+            placeholder="🔍 بحث في قوالب الملاحظات...",
+        )
+        layout.addWidget(self.note_templates_search)
         layout.addWidget(self.note_templates_table)
+
+        preview_group = QGroupBox("👁️ معاينة القالب")
+        preview_layout = QVBoxLayout(preview_group)
+        preview_layout.setContentsMargins(12, 16, 12, 12)
+        preview_layout.setSpacing(8)
+        self.note_template_preview = QTextEdit()
+        self.note_template_preview.setReadOnly(True)
+        self.note_template_preview.setFixedHeight(140)
+        self.note_template_preview.setStyleSheet(
+            """
+            QTextEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }
+            """
+        )
+        self.note_template_preview.setPlaceholderText("اختر قالب لعرض محتواه")
+        preview_layout.addWidget(self.note_template_preview)
+        layout.addWidget(preview_group)
+
+        self.note_templates_table.itemSelectionChanged.connect(self._update_note_template_preview)
 
         # تحميل البيانات
         self.load_note_templates()
@@ -2953,10 +3411,10 @@ class SettingsTab(QWidget):
         """تحميل قوالب الملاحظات من قاعدة البيانات"""
         try:
             self.note_templates_table.setRowCount(0)
-            
+
             # جلب قوالب الملاحظات من الإعدادات
             note_templates = self.settings_service.get_setting("project_note_templates") or []
-            
+
             # إذا لم تكن موجودة، إنشاء قائمة افتراضية
             if not note_templates:
                 note_templates = [
@@ -2970,26 +3428,61 @@ class SettingsTab(QWidget):
 • الدفعة الثانية: 25% عند التسليم الأولي.
 • الدفعة النهائية: 25% عند التسليم النهائي.
 
-• يبدأ التنفيذ بعد استلام الدفعة الأولى."""
+• يبدأ التنفيذ بعد استلام الدفعة الأولى.""",
                     },
                     {
                         "name": "قالب مختصر",
-                        "content": "• مدة التنفيذ: ___ يوم.\n• الدفع: 50% مقدم - 50% عند التسليم."
+                        "content": "• مدة التنفيذ: ___ يوم.\n• الدفع: 50% مقدم - 50% عند التسليم.",
                     },
                 ]
-                self.settings_service.save_setting("project_note_templates", note_templates)
+                self.settings_service.update_setting("project_note_templates", note_templates)
 
             self.note_templates_table.setRowCount(len(note_templates))
             for i, template in enumerate(note_templates):
                 self.note_templates_table.setItem(i, 0, create_centered_item(str(i + 1)))
-                self.note_templates_table.setItem(i, 1, create_centered_item(template.get("name", "")))
+                self.note_templates_table.setItem(
+                    i, 1, create_centered_item(template.get("name", ""))
+                )
                 # عرض أول 50 حرف من المحتوى
-                content_preview = template.get("content", "")[:50] + "..." if len(template.get("content", "")) > 50 else template.get("content", "")
+                content_preview = (
+                    template.get("content", "")[:50] + "..."
+                    if len(template.get("content", "")) > 50
+                    else template.get("content", "")
+                )
                 self.note_templates_table.setItem(i, 2, create_centered_item(content_preview))
 
             safe_print(f"INFO: [SettingsTab] تم تحميل {len(note_templates)} قالب ملاحظات")
+            self._update_note_template_preview()
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل قوالب الملاحظات: {e}")
+
+    def _update_note_template_preview(self):
+        try:
+            if not hasattr(self, "note_template_preview"):
+                return
+
+            selected = (
+                self.note_templates_table.selectedIndexes()
+                if hasattr(self, "note_templates_table")
+                else []
+            )
+            templates = self.settings_service.get_setting("project_note_templates") or []
+
+            if not selected:
+                self.note_template_preview.setText("")
+                return
+
+            row = selected[0].row()
+            if row >= len(templates):
+                self.note_template_preview.setText("")
+                return
+
+            t = templates[row] if isinstance(templates[row], dict) else {}
+            name = t.get("name", "")
+            content = t.get("content", "")
+            self.note_template_preview.setText(f"{name}\n\n{content}".strip())
+        except Exception:
+            pass
 
     def add_note_template(self):
         """إضافة قالب ملاحظات جديد"""
@@ -2999,7 +3492,7 @@ class SettingsTab(QWidget):
             if name and content:
                 note_templates = self.settings_service.get_setting("project_note_templates") or []
                 note_templates.append({"name": name, "content": content})
-                self.settings_service.save_setting("project_note_templates", note_templates)
+                self.settings_service.update_setting("project_note_templates", note_templates)
                 self.load_note_templates()
                 QMessageBox.information(self, "✅ نجاح", f"تم إضافة القالب: {name}")
 
@@ -3009,21 +3502,21 @@ class SettingsTab(QWidget):
         if not selected:
             QMessageBox.warning(self, "تنبيه", "الرجاء اختيار قالب للتعديل")
             return
-        
+
         row = selected[0].row()
         note_templates = self.settings_service.get_setting("project_note_templates") or []
-        
+
         if row >= len(note_templates):
             return
-        
+
         template = note_templates[row]
-        
+
         dialog = NoteTemplateDialog(self, template.get("name", ""), template.get("content", ""))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             name, content = dialog.get_data()
             if name and content:
                 note_templates[row] = {"name": name, "content": content}
-                self.settings_service.save_setting("project_note_templates", note_templates)
+                self.settings_service.update_setting("project_note_templates", note_templates)
                 self.load_note_templates()
                 QMessageBox.information(self, "✅ نجاح", "تم تعديل القالب")
 
@@ -3033,24 +3526,25 @@ class SettingsTab(QWidget):
         if not selected:
             QMessageBox.warning(self, "تنبيه", "الرجاء اختيار قالب للحذف")
             return
-        
+
         row = selected[0].row()
         note_templates = self.settings_service.get_setting("project_note_templates") or []
-        
+
         if row >= len(note_templates):
             return
-        
+
         template_name = note_templates[row].get("name", "")
-        
+
         reply = QMessageBox.question(
-            self, "تأكيد الحذف",
+            self,
+            "تأكيد الحذف",
             f"هل أنت متأكد من حذف القالب: {template_name}؟",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             note_templates.pop(row)
-            self.settings_service.save_setting("project_note_templates", note_templates)
+            self.settings_service.update_setting("project_note_templates", note_templates)
             self.load_note_templates()
             QMessageBox.information(self, "✅ نجاح", "تم حذف القالب")
 
@@ -3059,7 +3553,6 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self.update_tab)
 
         # معلومات الإصدار الحالي
-        from version import APP_NAME, CURRENT_VERSION
 
         version_group = QGroupBox("📱 معلومات الإصدار")
         version_layout = QVBoxLayout()
@@ -3084,13 +3577,15 @@ class SettingsTab(QWidget):
         self.update_status_label = QLabel("اضغط على 'التحقق من التحديثات' للبحث عن إصدارات جديدة")
         self.update_status_label.setWordWrap(True)
         self.update_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #1e3a8a;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
         update_info_layout.addWidget(self.update_status_label)
 
         update_info_group.setLayout(update_info_layout)
@@ -3099,7 +3594,8 @@ class SettingsTab(QWidget):
         # شريط التقدم (مخفي في البداية)
         self.update_progress_bar = QProgressBar()
         self.update_progress_bar.setVisible(False)
-        self.update_progress_bar.setStyleSheet("""
+        self.update_progress_bar.setStyleSheet(
+            """
             QProgressBar {
                 border: 2px solid #3b82f6;
                 border-radius: 8px;
@@ -3112,7 +3608,8 @@ class SettingsTab(QWidget):
                 background-color: #0A6CF1;
                 border-radius: 6px;
             }
-        """)
+        """
+        )
         layout.addWidget(self.update_progress_bar)
 
         # أزرار التحكم
@@ -3164,20 +3661,20 @@ class SettingsTab(QWidget):
 
     def check_for_updates(self):
         """التحقق من وجود تحديثات جديدة"""
-        from services.update_service import UpdateService
-        from version import CURRENT_VERSION, UPDATE_CHECK_URL
 
         # تعطيل الزرار أثناء الفحص
         self.check_update_btn.setEnabled(False)
         self.check_update_btn.setText("⏳ جاري التحقق...")
         self.update_status_label.setText("🔍 جاري البحث عن تحديثات جديدة...")
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #f59e0b;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إنشاء خدمة التحديث
         self.update_service = UpdateService(CURRENT_VERSION, UPDATE_CHECK_URL)
@@ -3201,13 +3698,15 @@ class SettingsTab(QWidget):
         self.update_status_label.setText(
             f"🎉 يتوفر إصدار جديد!\n\nالإصدار الجديد: {version}\nاضغط على 'تنزيل التحديث' للبدء"
         )
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إظهار زرار التنزيل
         self.download_update_btn.setVisible(True)
@@ -3218,18 +3717,19 @@ class SettingsTab(QWidget):
 
     def on_no_update(self):
         """عند عدم توفر تحديثات"""
-        from version import CURRENT_VERSION
 
         self.update_status_label.setText(
             f"✅ أنت تستخدم أحدث إصدار!\n\nالإصدار الحالي: {CURRENT_VERSION}"
         )
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
@@ -3242,25 +3742,29 @@ class SettingsTab(QWidget):
             self.update_status_label.setText(
                 "⚠️ لا توجد تحديثات متاحة حالياً\n\nسيتم التحقق مرة أخرى لاحقاً"
             )
-            self.update_status_label.setStyleSheet("""
+            self.update_status_label.setStyleSheet(
+                """
                 background-color: #f59e0b;
                 color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+            )
         else:
             # For other errors, show the original error message
             self.update_status_label.setText(
                 f"❌ حدث خطأ أثناء التحقق من التحديثات:\n\n{error_message}"
             )
-            self.update_status_label.setStyleSheet("""
+            self.update_status_label.setStyleSheet(
+                """
                 background-color: #ef4444;
                 color: white;
                 padding: 15px;
                 border-radius: 8px;
                 font-size: 13px;
-            """)
+            """
+            )
 
         # إعادة تفعيل زرار الفحص
         self.check_update_btn.setEnabled(True)
@@ -3296,13 +3800,15 @@ class SettingsTab(QWidget):
         self.update_progress_bar.setValue(0)
 
         self.update_status_label.setText("⬇️ جاري تنزيل التحديث...")
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #3b82f6;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إنشاء Thread للتنزيل
         self.update_downloader = self.update_service.download_update(self.update_download_url)
@@ -3326,13 +3832,15 @@ class SettingsTab(QWidget):
         self.update_status_label.setText(
             "✅ تم تنزيل التحديث بنجاح!\n\nاضغط على 'تثبيت التحديث' لإكمال العملية"
         )
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #0A6CF1;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إخفاء زرار التنزيل وإظهار زرار التثبيت
         self.download_update_btn.setVisible(False)
@@ -3346,13 +3854,15 @@ class SettingsTab(QWidget):
         self.update_progress_bar.setVisible(False)
 
         self.update_status_label.setText(f"❌ فشل تنزيل التحديث:\n\n{error_message}")
-        self.update_status_label.setStyleSheet("""
+        self.update_status_label.setStyleSheet(
+            """
             background-color: #ef4444;
             color: white;
             padding: 15px;
             border-radius: 8px;
             font-size: 13px;
-        """)
+        """
+        )
 
         # إعادة تفعيل الأزرار
         self.download_update_btn.setEnabled(True)
@@ -3368,7 +3878,6 @@ class SettingsTab(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply == QMessageBox.StandardButton.Yes:
-                import webbrowser
 
                 webbrowser.open(self.update_download_url)
         else:
@@ -3396,7 +3905,6 @@ class SettingsTab(QWidget):
 
             if success:
                 # إغلاق البرنامج
-                import sys
 
                 sys.exit(0)
             else:
@@ -3422,7 +3930,7 @@ class NoteTemplateDialog(QDialog):
 
         # تطبيق شريط العنوان المخصص
         try:
-            from ui.styles import setup_custom_title_bar
+
             setup_custom_title_bar(self)
         except (ImportError, AttributeError):
             pass
@@ -3439,7 +3947,8 @@ class NoteTemplateDialog(QDialog):
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("مثال: قالب الشروط والأحكام")
         self.name_input.setText(name)
-        self.name_input.setStyleSheet("""
+        self.name_input.setStyleSheet(
+            """
             QLineEdit {
                 background: #0d2137;
                 color: #F1F5F9;
@@ -3451,7 +3960,8 @@ class NoteTemplateDialog(QDialog):
             QLineEdit:focus {
                 border: 2px solid #0A6CF1;
             }
-        """)
+        """
+        )
         layout.addWidget(self.name_input)
 
         # محتوى القالب
@@ -3462,7 +3972,8 @@ class NoteTemplateDialog(QDialog):
         self.content_input = QTextEdit()
         self.content_input.setPlaceholderText("اكتب محتوى القالب هنا...")
         self.content_input.setText(content)
-        self.content_input.setStyleSheet("""
+        self.content_input.setStyleSheet(
+            """
             QTextEdit {
                 background: #0d2137;
                 color: #F1F5F9;
@@ -3474,7 +3985,8 @@ class NoteTemplateDialog(QDialog):
             QTextEdit:focus {
                 border: 2px solid #0A6CF1;
             }
-        """)
+        """
+        )
         layout.addWidget(self.content_input, 1)
 
         # أزرار
@@ -3482,7 +3994,8 @@ class NoteTemplateDialog(QDialog):
         buttons_layout.addStretch()
 
         save_btn = QPushButton("💾 حفظ")
-        save_btn.setStyleSheet("""
+        save_btn.setStyleSheet(
+            """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
@@ -3495,11 +4008,13 @@ class NoteTemplateDialog(QDialog):
             QPushButton:hover {
                 background: #059669;
             }
-        """)
+        """
+        )
         save_btn.clicked.connect(self.accept)
 
         cancel_btn = QPushButton("إلغاء")
-        cancel_btn.setStyleSheet("""
+        cancel_btn.setStyleSheet(
+            """
             QPushButton {
                 background: rgba(107, 114, 128, 0.3);
                 color: #9CA3AF;
@@ -3510,7 +4025,8 @@ class NoteTemplateDialog(QDialog):
             QPushButton:hover {
                 background: rgba(107, 114, 128, 0.5);
             }
-        """)
+        """
+        )
         cancel_btn.clicked.connect(self.reject)
 
         buttons_layout.addWidget(save_btn)
@@ -3520,3 +4036,157 @@ class NoteTemplateDialog(QDialog):
     def get_data(self) -> tuple[str, str]:
         """الحصول على البيانات المدخلة"""
         return self.name_input.text().strip(), self.content_input.toPlainText().strip()
+
+
+class PaymentMethodDialog(QDialog):
+    def __init__(self, parent=None, method_data: dict | None = None):
+        super().__init__(parent)
+        method_data = method_data or {}
+
+        title = (
+            "💳 إضافة طريقة دفع" if not method_data else f"💳 تعديل: {method_data.get('name', '')}"
+        )
+        self.setWindowTitle(title)
+        self.setMinimumWidth(540)
+        self.setMinimumHeight(420)
+
+        try:
+
+            setup_custom_title_bar(self)
+        except (ImportError, AttributeError):
+            pass
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        label_style = "color: #60a5fa; font-weight: bold;"
+        input_style = """
+            QLineEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            QLineEdit:focus { border: 2px solid #0A6CF1; }
+        """
+        text_style = """
+            QTextEdit {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 10px;
+                font-size: 12px;
+            }
+            QTextEdit:focus { border: 2px solid #0A6CF1; }
+        """
+
+        name_label = QLabel("اسم طريقة الدفع:")
+        name_label.setStyleSheet(label_style)
+        layout.addWidget(name_label)
+        self.name_input = QLineEdit()
+        self.name_input.setStyleSheet(input_style)
+        self.name_input.setPlaceholderText("مثال: تحويل بنكي")
+        self.name_input.setText(method_data.get("name", ""))
+        layout.addWidget(self.name_input)
+
+        desc_label = QLabel("وصف داخلي (اختياري):")
+        desc_label.setStyleSheet(label_style)
+        layout.addWidget(desc_label)
+        self.description_input = QLineEdit()
+        self.description_input.setStyleSheet(input_style)
+        self.description_input.setPlaceholderText("مثال: تحويل عبر بنك مصر")
+        self.description_input.setText(method_data.get("description", ""))
+        layout.addWidget(self.description_input)
+
+        details_label = QLabel("تفاصيل تظهر في الفاتورة:")
+        details_label.setStyleSheet(label_style)
+        layout.addWidget(details_label)
+        self.details_input = QTextEdit()
+        self.details_input.setStyleSheet(text_style)
+        self.details_input.setPlaceholderText("مثال: رقم الحساب/IBAN/رقم محفظة/اسم المستخدم...")
+        self.details_input.setText(method_data.get("details", ""))
+        layout.addWidget(self.details_input, 1)
+
+        active_row = QHBoxLayout()
+        active_row.setSpacing(10)
+        active_label = QLabel("الحالة:")
+        active_label.setStyleSheet(label_style)
+        active_row.addWidget(active_label)
+        self.active_combo = QComboBox()
+        self.active_combo.addItem("✅ مفعّل", True)
+        self.active_combo.addItem("❌ معطّل", False)
+        self.active_combo.setFixedHeight(32)
+        self.active_combo.setStyleSheet(
+            """
+            QComboBox {
+                background: #0d2137;
+                color: #F1F5F9;
+                border: 1px solid #2d4a6f;
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            QComboBox:focus { border: 2px solid #0A6CF1; }
+            """
+        )
+        active_val = method_data.get("active", True)
+        self.active_combo.setCurrentIndex(0 if active_val else 1)
+        active_row.addWidget(self.active_combo)
+        active_row.addStretch()
+        layout.addLayout(active_row)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addStretch()
+
+        save_btn = QPushButton("💾 حفظ")
+        save_btn.setStyleSheet(
+            """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #10b981, stop:1 #34d399);
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 10px 30px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #059669; }
+            """
+        )
+        save_btn.clicked.connect(self.accept)
+
+        cancel_btn = QPushButton("إلغاء")
+        cancel_btn.setStyleSheet(
+            """
+            QPushButton {
+                background: rgba(107, 114, 128, 0.3);
+                color: #9CA3AF;
+                border: 1px solid #374151;
+                border-radius: 8px;
+                padding: 10px 30px;
+            }
+            QPushButton:hover { background: rgba(107, 114, 128, 0.5); }
+            """
+        )
+        cancel_btn.clicked.connect(self.reject)
+
+        buttons_layout.addWidget(save_btn)
+        buttons_layout.addWidget(cancel_btn)
+        layout.addLayout(buttons_layout)
+
+    def get_data(self) -> dict:
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "تنبيه", "اسم طريقة الدفع مطلوب")
+            return {}
+
+        return {
+            "name": name,
+            "description": self.description_input.text().strip(),
+            "details": self.details_input.toPlainText().strip(),
+            "active": bool(self.active_combo.currentData()),
+        }

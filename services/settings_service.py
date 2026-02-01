@@ -52,7 +52,9 @@ class SettingsService:
         """⚡ دمج الإعدادات من الملف المحلي (يحدث القيم الموجودة)"""
         try:
             if os.path.exists(_LOCAL_SETTINGS_FILE):
-                safe_print(f"INFO: [SettingsService] جاري تحميل الإعدادات من {_LOCAL_SETTINGS_FILE}")
+                safe_print(
+                    f"INFO: [SettingsService] جاري تحميل الإعدادات من {_LOCAL_SETTINGS_FILE}"
+                )
                 with open(_LOCAL_SETTINGS_FILE, encoding="utf-8") as f:
                     local_settings = json.load(f)
 
@@ -62,9 +64,11 @@ class SettingsService:
                     if key not in self.settings or self.settings[key] != value:
                         self.settings[key] = value
                         updated_count += 1
-                
+
                 if updated_count > 0:
-                    safe_print(f"INFO: [SettingsService] ✅ تم تحديث {updated_count} إعداد من الملف المحلي")
+                    safe_print(
+                        f"INFO: [SettingsService] ✅ تم تحديث {updated_count} إعداد من الملف المحلي"
+                    )
                     # حفظ الإعدادات المدمجة
                     self.save_settings(self.settings)
         except Exception as e:

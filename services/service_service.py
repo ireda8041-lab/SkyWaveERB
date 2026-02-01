@@ -12,7 +12,10 @@ from services.settings_service import SettingsService
 try:
     from core.notification_bridge import notify_operation
 except ImportError:
-    def notify_operation(action, entity_type, entity_name): pass
+
+    def notify_operation(action, entity_type, entity_name):
+        pass
+
 
 logger = get_logger(__name__)
 
@@ -87,9 +90,9 @@ class ServiceService:
             new_service_schema = schemas.Service(**service_data)
             created_service = self.repo.create_service(new_service_schema)
             # ⚡ إرسال إشارة التحديث
-            app_signals.emit_data_changed('services')
+            app_signals.emit_data_changed("services")
             # 🔔 إشعار
-            notify_operation('created', 'service', created_service.name)
+            notify_operation("created", "service", created_service.name)
             logger.info(f"[ServiceService] تم إضافة الخدمة {created_service.name} بنجاح")
             return created_service
         except Exception as e:
@@ -119,11 +122,11 @@ class ServiceService:
             updated_service_schema = existing_service.model_copy(update=new_data)
             saved_service = self.repo.update_service(service_id, updated_service_schema)
             # ⚡ إرسال إشارة التحديث
-            app_signals.emit_data_changed('services')
+            app_signals.emit_data_changed("services")
 
             if saved_service is not None:
                 # 🔔 إشعار
-                notify_operation('updated', 'service', saved_service.name)
+                notify_operation("updated", "service", saved_service.name)
                 logger.info(f"[ServiceService] تم تعديل الخدمة {saved_service.name} بنجاح")
             return saved_service
         except Exception as e:
@@ -152,9 +155,9 @@ class ServiceService:
             success = self.repo.delete_service_permanently(service_id)
             if success:
                 # ⚡ إرسال إشارة التحديث
-                app_signals.emit_data_changed('services')
+                app_signals.emit_data_changed("services")
                 # 🔔 إشعار
-                notify_operation('deleted', 'service', service_name)
+                notify_operation("deleted", "service", service_name)
                 logger.info("[ServiceService] ✅ تم حذف الخدمة نهائياً")
             return success
         except Exception as e:

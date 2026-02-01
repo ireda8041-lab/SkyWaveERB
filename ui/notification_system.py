@@ -1,3 +1,4 @@
+# pylint: disable=too-many-positional-arguments
 # الملف: ui/notification_system.py
 """
 نظام الإشعارات العام للبرنامج
@@ -6,9 +7,11 @@
 """
 
 import hashlib
+import os
 import platform
+import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt, QThread, QTimer, pyqtSignal
@@ -27,6 +30,7 @@ from ui.styles import COLORS
 try:
     from core.safe_print import safe_print
 except ImportError:
+
     def safe_print(msg):
         try:
             print(msg)
@@ -45,18 +49,22 @@ def _get_stable_device_id() -> str:
     """إنشاء معرف ثابت للجهاز"""
     try:
         machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
-        device_hash = hashlib.md5(machine_info.encode()).hexdigest()[:8]
+        try:
+            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
+        except TypeError:
+            digest = hashlib.sha256(machine_info.encode()).hexdigest()
+        device_hash = digest[:8]
         return device_hash
     except Exception:
-        import os
+
         device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
         if os.path.exists(device_file):
-            with open(device_file) as f:
+            with open(device_file, encoding="utf-8") as f:
                 return f.read().strip()
         else:
             new_id = str(uuid.uuid4())[:8]
             try:
-                with open(device_file, 'w') as f:
+                with open(device_file, "w", encoding="utf-8") as f:
                     f.write(new_id)
             except OSError:
                 # فشل حفظ Device ID
@@ -80,7 +88,7 @@ class ToastNotification(QWidget):
         title: str = None,
         duration: int = 4000,
         source_device: str = None,
-        parent=None
+        parent=None,
     ):
         super().__init__(parent)
         self.message = message
@@ -94,9 +102,9 @@ class ToastNotification(QWidget):
 
     def _setup_ui(self):
         self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool |
-            Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -114,14 +122,16 @@ class ToastNotification(QWidget):
         # الحاوية الرئيسية
         container = QWidget()
         container.setObjectName("notif_container")
-        container.setStyleSheet(f"""
+        container.setStyleSheet(
+            f"""
             QWidget#notif_container {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 {COLORS['bg_dark']}, stop:1 {COLORS['bg_medium']});
                 border: 1px solid {accent}50;
                 border-radius: 12px;
             }}
-        """)
+        """
+        )
 
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 10, 0)
@@ -130,11 +140,13 @@ class ToastNotification(QWidget):
         # شريط اللون الجانبي
         color_bar = QWidget()
         color_bar.setFixedWidth(5)
-        color_bar.setStyleSheet(f"""
+        color_bar.setStyleSheet(
+            f"""
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                 stop:0 {accent}, stop:1 {dark_accent});
             border-radius: 12px 0 0 12px;
-        """)
+        """
+        )
         layout.addWidget(color_bar)
 
         # منطقة المحتوى
@@ -145,20 +157,24 @@ class ToastNotification(QWidget):
         # أيقونة دائرية
         icon_container = QWidget()
         icon_container.setFixedSize(40, 40)
-        icon_container.setStyleSheet(f"""
+        icon_container.setStyleSheet(
+            f"""
             background: {accent}25;
             border-radius: 20px;
-        """)
+        """
+        )
         icon_layout = QVBoxLayout(icon_container)
         icon_layout.setContentsMargins(0, 0, 0, 0)
         icon_label = QLabel(icon)
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_label.setStyleSheet(f"""
+        icon_label.setStyleSheet(
+            f"""
             font-size: 18px;
             color: {accent};
             background: transparent;
             font-weight: bold;
-        """)
+        """
+        )
         icon_layout.addWidget(icon_label)
         content_layout.addWidget(icon_container)
 
@@ -172,23 +188,27 @@ class ToastNotification(QWidget):
             if self.source_device and self.source_device != DEVICE_ID:
                 title_text += " 🌐"
             title_label = QLabel(title_text)
-            title_label.setStyleSheet(f"""
+            title_label.setStyleSheet(
+                f"""
                 color: {COLORS['text_primary']};
                 font-size: 13px;
                 font-weight: bold;
                 font-family: 'Cairo';
                 background: transparent;
-            """)
+            """
+            )
             text_layout.addWidget(title_label)
 
         msg_label = QLabel(self.message)
         msg_label.setWordWrap(True)
-        msg_label.setStyleSheet(f"""
+        msg_label.setStyleSheet(
+            f"""
             color: {COLORS['text_secondary']};
             font-size: 11px;
             font-family: 'Cairo';
             background: transparent;
-        """)
+        """
+        )
         text_layout.addWidget(msg_label)
 
         content_layout.addLayout(text_layout, 1)
@@ -197,7 +217,8 @@ class ToastNotification(QWidget):
         close_btn = QPushButton("×")
         close_btn.setFixedSize(26, 26)
         close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(f"""
+        close_btn.setStyleSheet(
+            f"""
             QPushButton {{
                 background: transparent;
                 color: {COLORS['text_secondary']};
@@ -210,7 +231,8 @@ class ToastNotification(QWidget):
                 background: {COLORS['bg_light']}50;
                 color: {COLORS['text_primary']};
             }}
-        """)
+        """
+        )
         close_btn.clicked.connect(self.close_notification)
         content_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignTop)
 
@@ -256,7 +278,7 @@ class ToastNotification(QWidget):
         self.closed.emit()
         self.deleteLater()
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event):  # pylint: disable=invalid-name
         self.close_notification()
 
 
@@ -271,16 +293,23 @@ class NotificationSyncWorker(QThread):
         self.repo = None
         self._seen_ids = set()
         self._check_interval = 180000  # ⚡ 3 دقائق بدلاً من دقيقتين
+        self._last_cleanup = 0.0
 
     def set_repository(self, repo):
         self.repo = repo
-        safe_print(f"INFO: [NotificationSync] Repository set, online={getattr(repo, 'online', False)}")
+        safe_print(
+            f"INFO: [NotificationSync] Repository set, online={getattr(repo, 'online', False)}"
+        )
 
     def run(self):
         safe_print(f"INFO: [NotificationSync] Worker started for device {DEVICE_ID}")
         while self.is_running:
             try:
-                if self.repo is not None and getattr(self.repo, 'online', False) and getattr(self.repo, 'mongo_db', None) is not None:
+                if (
+                    self.repo is not None
+                    and getattr(self.repo, "online", False)
+                    and getattr(self.repo, "mongo_db", None) is not None
+                ):
                     self._check_new_notifications()
             except Exception as e:
                 safe_print(f"WARNING: [NotificationSync] {e}")
@@ -293,14 +322,17 @@ class NotificationSyncWorker(QThread):
                 return
 
             collection = self.repo.mongo_db.notifications
-            from datetime import timedelta
+
             check_time = (datetime.now() - timedelta(seconds=30)).isoformat()
 
             try:
-                notifications = list(collection.find({
-                    "created_at": {"$gt": check_time},
-                    "device_id": {"$ne": DEVICE_ID}
-                }).sort("created_at", -1).limit(10))
+                notifications = list(
+                    collection.find(
+                        {"created_at": {"$gt": check_time}, "device_id": {"$ne": DEVICE_ID}}
+                    )
+                    .sort("created_at", -1)
+                    .limit(10)
+                )
             except Exception as e:
                 safe_print(f"ERROR: [NotificationSync] MongoDB query failed: {e}")
                 return
@@ -315,26 +347,32 @@ class NotificationSyncWorker(QThread):
                     if len(self._seen_ids) > 100:
                         self._seen_ids = set(list(self._seen_ids)[-50:])
 
-                    safe_print(f"INFO: [NotificationSync] Received from {notif.get('device_id')}: {notif.get('title')}")
+                    safe_print(
+                        f"INFO: [NotificationSync] Received from {notif.get('device_id')}: {notif.get('title')}"
+                    )
 
-                    self.new_notification.emit({
-                        "message": notif.get("message", ""),
-                        "type": notif.get("type", "info"),
-                        "title": notif.get("title"),
-                        "device_id": notif.get("device_id")
-                    })
+                    self.new_notification.emit(
+                        {
+                            "message": notif.get("message", ""),
+                            "type": notif.get("type", "info"),
+                            "title": notif.get("title"),
+                            "device_id": notif.get("device_id"),
+                        }
+                    )
                 except Exception as e:
                     safe_print(f"ERROR: [NotificationSync] فشل معالجة إشعار واحد: {e}")
                     continue  # تجاهل الإشعار المعطوب والمتابعة
 
             # تنظيف الإشعارات القديمة (مع معالجة الأخطاء)
-            import time
-            if not hasattr(self, '_last_cleanup') or time.time() - self._last_cleanup > 60:
+
+            if not hasattr(self, "_last_cleanup") or time.time() - self._last_cleanup > 60:
                 try:
                     old_time = (datetime.now() - timedelta(hours=1)).isoformat()
                     result = collection.delete_many({"created_at": {"$lt": old_time}})
                     if result.deleted_count > 0:
-                        safe_print(f"INFO: [NotificationSync] تم حذف {result.deleted_count} إشعار قديم")
+                        safe_print(
+                            f"INFO: [NotificationSync] تم حذف {result.deleted_count} إشعار قديم"
+                        )
                 except Exception as e:
                     safe_print(f"WARNING: [NotificationSync] فشل تنظيف الإشعارات القديمة: {e}")
                 self._last_cleanup = time.time()
@@ -365,6 +403,7 @@ class NotificationManager(QObject):
     _margin = 20
     _repo = None
     _sync_worker = None
+    _initialized = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -406,7 +445,7 @@ class NotificationManager(QObject):
             notification_type=type_map.get(data.get("type"), NotificationType.INFO),
             title=data.get("title"),
             duration=5000,
-            source_device=data.get("device_id")
+            source_device=data.get("device_id"),
         )
         notification.closed.connect(lambda: manager._on_notification_closed(notification))
 
@@ -426,7 +465,7 @@ class NotificationManager(QObject):
         notification_type: NotificationType = NotificationType.INFO,
         title: str = None,
         duration: int = 4000,
-        sync: bool = True
+        sync: bool = True,
     ):
         manager = cls()
 
@@ -435,7 +474,7 @@ class NotificationManager(QObject):
             notification_type=notification_type,
             title=title,
             duration=duration,
-            source_device=DEVICE_ID
+            source_device=DEVICE_ID,
         )
         notification.closed.connect(lambda: manager._on_notification_closed(notification))
 
@@ -450,13 +489,15 @@ class NotificationManager(QObject):
 
         if sync and manager._repo is not None and manager._repo.online:
             try:
-                manager._repo.mongo_db.notifications.insert_one({
-                    "message": message,
-                    "type": notification_type.value,
-                    "title": title,
-                    "device_id": DEVICE_ID,
-                    "created_at": datetime.now().isoformat()
-                })
+                manager._repo.mongo_db.notifications.insert_one(
+                    {
+                        "message": message,
+                        "type": notification_type.value,
+                        "title": title,
+                        "device_id": DEVICE_ID,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                )
             except Exception as e:
                 safe_print(f"ERROR: [NotificationManager] Sync failed: {e}")
 
@@ -509,11 +550,14 @@ class NotificationManager(QObject):
 def notify_success(message: str, title: str = None, sync: bool = True):
     NotificationManager.success(message, title, sync=sync)
 
+
 def notify_error(message: str, title: str = None, sync: bool = True):
     NotificationManager.error(message, title, sync=sync)
 
+
 def notify_warning(message: str, title: str = None, sync: bool = True):
     NotificationManager.warning(message, title, sync=sync)
+
 
 def notify_info(message: str, title: str = None, sync: bool = True):
     NotificationManager.info(message, title, sync=sync)
