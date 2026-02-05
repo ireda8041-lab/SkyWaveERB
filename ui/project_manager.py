@@ -327,6 +327,8 @@ class ProjectEditorDialog(QDialog):
 
         self.init_ui()
 
+        app_signals.safe_connect(app_signals.clients_changed, self._on_clients_changed)
+
     def init_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setSpacing(8)  # ⚡ زيادة المسافات قليلاً
@@ -1441,6 +1443,7 @@ class ProjectEditorDialog(QDialog):
                         break
 
                 if new_client:
+                    self._reload_clients_combo(new_client)
                     QMessageBox.information(
                         self, "نجح", f"تم إضافة العميل '{new_client.name}' بنجاح!"
                     )
@@ -1501,6 +1504,36 @@ class ProjectEditorDialog(QDialog):
             return self._add_new_client(client_name)
 
         return None
+
+    def _reload_clients_combo(self, select_client: schemas.Client | None = None):
+        current = select_client or self.client_combo.currentData()
+        current_id = getattr(current, "_mongo_id", None) or getattr(current, "id", None)
+        current_name = getattr(current, "name", None)
+        self.clients_list = self.client_service.get_all_clients()
+        self.client_combo.blockSignals(True)
+        try:
+            self.client_combo.clear()
+            self.client_combo.addItem("--- اختر العميل ---", userData=None)
+            for client in self.clients_list:
+                self.client_combo.addItem(client.name, userData=client)
+            if current_id or current_name:
+                for i in range(self.client_combo.count()):
+                    data = self.client_combo.itemData(i)
+                    if not data:
+                        continue
+                    data_id = getattr(data, "_mongo_id", None) or getattr(data, "id", None)
+                    data_name = getattr(data, "name", None)
+                    if current_id is not None and str(data_id) == str(current_id):
+                        self.client_combo.setCurrentIndex(i)
+                        break
+                    if current_name and data_name == current_name:
+                        self.client_combo.setCurrentIndex(i)
+                        break
+        finally:
+            self.client_combo.blockSignals(False)
+
+    def _on_clients_changed(self):
+        self._reload_clients_combo()
 
     def check_and_add_service(self, service_name: str) -> schemas.Service | None:
         """التحقق من الخدمة وإضافتها إذا لم تكن موجودة"""

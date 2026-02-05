@@ -532,12 +532,10 @@ class SkyWaveERPApp:
         # ⚡ تهيئة الـ timers بعد بدء event loop
         QTimer.singleShot(100, self._init_background_timers)
 
-        # ⚡ تأخير بدء المزامنة لتسريع فتح البرنامج
-        QTimer.singleShot(10000, start_auto_sync_system)  # ⚡ 10 ثواني للمزامنة التلقائية
-        # ⚡ تفعيل المزامنة الفورية بعد 15 ثانية
-        QTimer.singleShot(15000, start_realtime_sync)
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 10 ثواني")
-        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد 15 ثواني")
+        QTimer.singleShot(2000, start_auto_sync_system)
+        QTimer.singleShot(2000, start_realtime_sync)
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد ثانيتين")
+        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد ثانيتين")
 
         # 🔴 تفعيل نظام التحديثات الحية (Live Updates)
         def start_live_updates():
@@ -565,9 +563,8 @@ class SkyWaveERPApp:
             except Exception as e:
                 logger.warning("[MainApp] ⚠️ خطأ في بدء التحديثات الحية: %s", e)
 
-        # بدء التحديثات الحية بعد 10 ثوانٍ
-        QTimer.singleShot(10000, start_live_updates)
-        logger.info("[MainApp] 🔴 نظام التحديثات الحية سيبدأ بعد 10 ثوانٍ")
+        QTimer.singleShot(2000, start_live_updates)
+        logger.info("[MainApp] 🔴 نظام التحديثات الحية سيبدأ بعد ثانيتين")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)

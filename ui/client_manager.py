@@ -391,7 +391,7 @@ class ClientManagerTab(QWidget):
         self.selected_client = None
         self.update_buttons_state(False)
 
-    def load_clients_data(self):
+    def load_clients_data(self, force_refresh: bool = False):
         """⚡ تحميل بيانات العملاء في الخلفية لمنع التجميد"""
         safe_print("INFO: [ClientManager] جاري تحميل بيانات العملاء...")
 
@@ -470,7 +470,7 @@ class ClientManagerTab(QWidget):
 
         cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
         cached = self._get_cached_clients_data(cache_key)
-        if cached is not None:
+        if cached is not None and not force_refresh:
             on_data_loaded(cached)
             return
 
@@ -840,14 +840,14 @@ class ClientManagerTab(QWidget):
         # ⚡ إبطال الـ cache لضمان جلب البيانات الجديدة (بما فيها الصور)
         if hasattr(self.client_service, "invalidate_cache"):
             self.client_service.invalidate_cache()
-        self.load_clients_data()
+        self.load_clients_data(force_refresh=True)
 
     def open_editor(self, client_to_edit: schemas.Client | None):
         dialog = ClientEditorDialog(
             client_service=self.client_service, client_to_edit=client_to_edit, parent=self
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_clients_data()
+            self.load_clients_data(force_refresh=True)
 
     def open_editor_for_selected(self):
         if not self.selected_client:
@@ -906,8 +906,11 @@ class ClientManagerTab(QWidget):
                 )
 
                 # تحديث الجدول
+                self._invalidate_clients_cache()
+                if hasattr(self.client_service, "invalidate_cache"):
+                    self.client_service.invalidate_cache()
                 self.selected_client = None
-                self.load_clients_data()
+                self.load_clients_data(force_refresh=True)
 
             except Exception as e:
                 QMessageBox.critical(self, "❌ خطأ", f"فشل حذف العميل:\n{str(e)}")

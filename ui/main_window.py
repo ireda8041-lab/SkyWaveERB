@@ -813,6 +813,12 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "todo_tab") and hasattr(self.todo_tab, "load_tasks"):
                     QTimer.singleShot(100, self.todo_tab.load_tasks)
 
+            elif table_name == "currencies":
+                if not self._can_refresh("currencies", min_interval=1.0):
+                    return
+                if hasattr(self, "settings_tab") and hasattr(self.settings_tab, "load_currencies"):
+                    QTimer.singleShot(100, self.settings_tab.load_currencies)
+
             if (
                 hasattr(self, "dashboard_tab")
                 and hasattr(self.dashboard_tab, "refresh_data")
@@ -1506,6 +1512,9 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(100, self._refresh_accounting_tab)
             elif table_name == "tasks":
                 QTimer.singleShot(100, self._refresh_tasks_tab)
+            elif table_name == "currencies":
+                if hasattr(self, "settings_tab") and hasattr(self.settings_tab, "load_currencies"):
+                    QTimer.singleShot(100, self.settings_tab.load_currencies)
             # تجاهل الأنواع الأخرى بصمت
 
         except Exception as e:

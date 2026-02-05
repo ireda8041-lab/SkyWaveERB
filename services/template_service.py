@@ -73,9 +73,11 @@ except Exception:
 
 qwebengine_available = False
 try:
-    from PyQt6.QtWebEngineWidgets import QWebEngineView
+    if not getattr(sys, "frozen", False):
+        import importlib
 
-    qwebengine_available = True
+        importlib.import_module("PyQt6.QtWebEngineWidgets")
+        qwebengine_available = True
 except Exception:
     pass
 
@@ -1216,13 +1218,14 @@ class TemplateService(BaseService):
     def _generate_pdf_with_qt(self, html_content: str, pdf_path: str) -> str | None:
         """توليد PDF باستخدام PyQt6 - محسّن للسرعة"""
         try:
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
 
             app = QApplication.instance()
             if not app:
                 app = QApplication([])
 
             web_view = QWebEngineView()
-            pdf_done = [False]
+            pdf_done = [True]
             loop = QEventLoop()
 
             def on_pdf_saved(file_path):
@@ -1267,7 +1270,10 @@ class TemplateService(BaseService):
 
         try:
             if sys.platform == "win32":
-                os.startfile(file_path)
+                if getattr(sys, "frozen", False):
+                    subprocess.run(["explorer", "/select,", file_path], check=False)
+                else:
+                    os.startfile(file_path)
             elif sys.platform == "darwin":
                 subprocess.run(["open", file_path], check=False)
             else:

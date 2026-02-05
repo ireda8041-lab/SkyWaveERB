@@ -215,7 +215,7 @@ class ExpenseManagerTab(QWidget):
             on_refresh=self.load_expenses_data,
         )
 
-    def load_expenses_data(self):
+    def load_expenses_data(self, force_refresh: bool = False):
         """⚡ تحميل المصروفات في الخلفية لمنع التجميد"""
         safe_print("INFO: [ExpenseManager] جاري تحميل المصروفات...")
 
@@ -262,8 +262,14 @@ class ExpenseManagerTab(QWidget):
             if sorting_enabled:
                 self.expenses_table.setSortingEnabled(True)
 
+        if force_refresh:
+            self._expenses_cache.clear()
+            self._expenses_cache_ts.clear()
+            if hasattr(self.expense_service, "invalidate_cache"):
+                self.expense_service.invalidate_cache()
+
         cached = self._get_cached_expenses()
-        if cached is not None:
+        if cached is not None and not force_refresh:
             on_data_loaded(cached)
             return
 
@@ -364,12 +370,7 @@ class ExpenseManagerTab(QWidget):
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
-        self._expenses_cache.clear()
-        self._expenses_cache_ts.clear()
-        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.expense_service, "invalidate_cache"):
-            self.expense_service.invalidate_cache()
-        self.load_expenses_data()
+        self.load_expenses_data(force_refresh=True)
 
     def get_selected_expense(self) -> schemas.Expense | None:
         """الحصول على المصروف المحدد"""
@@ -394,7 +395,7 @@ class ExpenseManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_expenses_data()
+            self.load_expenses_data(force_refresh=True)
 
     def open_edit_dialog(self):
         """فتح dialog تعديل المصروف"""
@@ -411,7 +412,7 @@ class ExpenseManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_expenses_data()
+            self.load_expenses_data(force_refresh=True)
 
     def delete_selected_expense(self):
         """حذف المصروف المحدد"""
@@ -436,7 +437,7 @@ class ExpenseManagerTab(QWidget):
             result = self.expense_service.delete_expense(expense_id)
             if result:
                 QMessageBox.information(self, "تم", "تم حذف المصروف بنجاح.")
-                self.load_expenses_data()
+                self.load_expenses_data(force_refresh=True)
             else:
                 QMessageBox.warning(self, "خطأ", "فشل حذف المصروف.")
         except Exception as e:

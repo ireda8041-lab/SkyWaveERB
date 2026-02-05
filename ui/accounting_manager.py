@@ -113,7 +113,7 @@ class AccountingManagerTab(QWidget):
         if hasattr(self.accounting_service, "_hierarchy_cache"):
             self.accounting_service._hierarchy_cache = None
             self.accounting_service._hierarchy_cache_time = 0
-        self.load_accounts_data()
+        self.load_accounts_data(force_refresh=True)
 
     def _on_any_data_changed(self, _data_type: str = None):
         """⚡ معالج التحديث الفوري عند تغيير أي بيانات - معطل لتجنب التكرار"""
@@ -125,7 +125,7 @@ class AccountingManagerTab(QWidget):
         # إبطال الـ cache لضمان جلب البيانات الجديدة
         self.accounting_service._hierarchy_cache = None
         self.accounting_service._hierarchy_cache_time = 0
-        self.load_accounts_data()
+        self.load_accounts_data(force_refresh=True)
 
     def on_data_changed(self):
         """معالج التحديث الفوري عند تغيير البيانات (للتوافق)"""
@@ -361,7 +361,7 @@ class AccountingManagerTab(QWidget):
         self._force_next_refresh = True
         safe_print("INFO: [AccManager] ⚡ تم إبطال cache الحسابات")
 
-    def load_accounts_data(self):
+    def load_accounts_data(self, force_refresh: bool = False):
         """⚡ تحميل الحسابات في الخلفية لمنع التجميد (مع cache ذكي)"""
         import time
 
@@ -369,6 +369,9 @@ class AccountingManagerTab(QWidget):
 
         # ⚡ حماية من التحديث المتكرر (الحد الأدنى 0.5 ثانية بين كل تحديث)
         current_time = time.time()
+        if force_refresh:
+            self.invalidate_cache()
+            self._last_refresh_time = 0
         if self._is_loading:
             safe_print("WARNING: [AccManager] ⏳ تحميل جاري بالفعل - تم تجاهل الطلب")
             return
@@ -397,7 +400,9 @@ class AccountingManagerTab(QWidget):
         def fetch_accounts():
             try:
                 # ⚡ استخدام cache الـ service (بدون force_refresh)
-                tree_map = self.accounting_service.get_hierarchy_with_balances(force_refresh=False)
+                tree_map = self.accounting_service.get_hierarchy_with_balances(
+                    force_refresh=force_refresh
+                )
                 all_accounts = self.accounting_service.repo.get_all_accounts()
                 return {"tree_map": tree_map, "all_accounts": all_accounts}
             except Exception as e:
@@ -637,7 +642,7 @@ class AccountingManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_accounts_data()
+            self.load_accounts_data(force_refresh=True)
 
     def open_account_editor_for_selected(self):
         selected = self.get_selected_account()
@@ -651,7 +656,7 @@ class AccountingManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_accounts_data()
+            self.load_accounts_data(force_refresh=True)
 
     def delete_selected_account(self):
         selected = self.get_selected_account()
@@ -673,7 +678,7 @@ class AccountingManagerTab(QWidget):
                 account_id = selected._mongo_id or str(selected.id)
                 self.accounting_service.delete_account(account_id)
                 notify_success(f"تم حذف الحساب '{selected.name}'", "حذف حساب")
-                self.load_accounts_data()
+                self.load_accounts_data(force_refresh=True)
             except Exception as e:
                 QMessageBox.critical(self, "خطأ", f"فشل الحذف: {e}")
 

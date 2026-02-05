@@ -415,6 +415,15 @@ class InvoicePrintingService:
         except Exception as e:
             safe_print(f"WARNING: [InvoicePrintingService] فشل WeasyPrint: {e}")
 
+        if getattr(sys, "frozen", False):
+            html_path = str(self.exports_dir / f"{filename}.html")
+            try:
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                return html_path
+            except Exception:
+                return None
+
         # محاولة 2: استخدام PyQt6 لتحويل HTML إلى PDF
         try:
             safe_print("INFO: [InvoicePrintingService] استخدام PyQt6 لتوليد PDF...")
@@ -531,14 +540,21 @@ class InvoicePrintingService:
         Returns:
             True إذا نجح، False إذا فشل
         """
-        import subprocess
-
         try:
             if sys.platform == "win32":
-                os.startfile(file_path)
+                if getattr(sys, "frozen", False):
+                    import subprocess
+
+                    subprocess.run(["explorer", "/select,", file_path], check=False)
+                else:
+                    os.startfile(file_path)
             elif sys.platform == "darwin":  # macOS
+                import subprocess
+
                 subprocess.run(["open", file_path], check=False)
             else:  # Linux
+                import subprocess
+
                 subprocess.run(["xdg-open", file_path], check=False)
 
             safe_print(f"✅ [InvoicePrintingService] تم فتح الملف: {file_path}")

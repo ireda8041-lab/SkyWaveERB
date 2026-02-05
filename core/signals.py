@@ -6,7 +6,7 @@
 ⚡ محسّن لمنع التكرارات والـ Memory Leaks
 """
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 
 class AppSignals(QObject):
@@ -115,6 +115,12 @@ class AppSignals(QObject):
         if data_type in ("projects", "expenses", "payments", "invoices", "accounts", "accounting"):
             if self._should_emit("accounting"):
                 self.accounting_changed.emit()
+
+        if self._sync_manager and hasattr(self._sync_manager, "instant_sync"):
+            try:
+                QTimer.singleShot(0, lambda: self._sync_manager.instant_sync(data_type))
+            except Exception:
+                pass
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""

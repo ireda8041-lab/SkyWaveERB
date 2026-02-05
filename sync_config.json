@@ -1,8 +1,8 @@
 {
   "enabled": true,
-  "auto_sync_interval": 300,
-  "quick_sync_interval": 300,
-  "connection_check_interval": 30,
+  "auto_sync_interval": 60,
+  "quick_sync_interval": 5,
+  "connection_check_interval": 5,
   "max_retries": 2,
   "timeout": 5,
   "tables_to_sync": [

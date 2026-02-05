@@ -59,7 +59,19 @@ class RealtimeSyncManager(QObject):
     sync_completed = pyqtSignal(str)  # (collection_name)
 
     # الجداول المراقبة - تقليل العدد للأداء
-    COLLECTIONS = ["clients", "projects", "payments", "expenses", "accounts"]
+    COLLECTIONS = [
+        "accounts",
+        "clients",
+        "services",
+        "projects",
+        "invoices",
+        "payments",
+        "expenses",
+        "journal_entries",
+        "currencies",
+        "notifications",
+        "tasks",
+    ]
 
     def __init__(self, repository, parent=None):
         super().__init__(parent)
@@ -88,8 +100,7 @@ class RealtimeSyncManager(QObject):
             return
 
         if not self.repo.online or self.repo.mongo_db is None:
-            logger.warning("[RealtimeSync] MongoDB غير متاح - المزامنة الفورية معطّلة")
-            return
+            logger.warning("[RealtimeSync] MongoDB غير متاح حالياً - سيتم إعادة المحاولة تلقائياً")
 
         self._shutdown = False
         self._stop_event.clear()
@@ -130,7 +141,7 @@ class RealtimeSyncManager(QObject):
             while not self._stop_event.is_set() and not self._shutdown:
                 try:
                     if self.repo.mongo_db is None or self.repo.mongo_client is None:
-                        time.sleep(10)  # ⚡ زيادة الانتظار عند عدم الاتصال
+                        time.sleep(2)
                         continue
 
                     # مراقبة كل collection بالتناوب
@@ -144,7 +155,7 @@ class RealtimeSyncManager(QObject):
                             # مراقبة التغييرات مع timeout قصير جداً
                             with collection.watch(
                                 full_document="updateLookup",
-                                max_await_time_ms=500,  # ⚡ تقليل الـ timeout لـ 500ms
+                                max_await_time_ms=250,
                             ) as stream:
                                 for _change in stream:
                                     if self._stop_event.is_set() or self._shutdown:
@@ -175,14 +186,13 @@ class RealtimeSyncManager(QObject):
                                 e,
                             )
 
-                    # ⚡ زيادة الانتظار بين الدورات لـ 5 ثواني
-                    time.sleep(5)
+                    time.sleep(0.5)
 
                 except Exception as e:
                     if self._shutdown:
                         break
                     logger.debug("[RealtimeSync] خطأ في المراقبة الموحدة: %s", e)
-                    time.sleep(10)  # ⚡ زيادة الانتظار عند الخطأ
+                    time.sleep(2)
 
             logger.debug("[RealtimeSync] انتهاء المراقبة الموحدة")
 
@@ -354,7 +364,7 @@ class RealtimeSyncManager(QObject):
         # تحويل القوائم والكائنات إلى JSON
         json_fields = ["items", "lines", "data", "milestones"]
         for field in json_fields:
-            if field in data and isinstance(data[field], (list, dict)):
+            if field in data and isinstance(data[field], list | dict):
                 data[field] = json.dumps(data[field], ensure_ascii=False)
 
         # التأكد من الحقول المطلوبة

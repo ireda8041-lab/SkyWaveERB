@@ -930,7 +930,7 @@ class PaymentsManagerTab(QWidget):
             on_refresh=self.load_payments_data,
         )
 
-    def load_payments_data(self):
+    def load_payments_data(self, force_refresh: bool = False):
         """⚡ تحميل الدفعات في الخلفية لمنع التجميد"""
         safe_print("INFO: [PaymentsManager] جاري تحميل الدفعات...")
 
@@ -1054,6 +1054,13 @@ class PaymentsManagerTab(QWidget):
             safe_print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")
             self.payments_table.blockSignals(False)
             self.payments_table.setUpdatesEnabled(True)
+
+        if force_refresh:
+            self._invalidate_lookup_cache()
+            if hasattr(self.project_service, "invalidate_cache"):
+                self.project_service.invalidate_cache()
+            if hasattr(self.client_service, "invalidate_cache"):
+                self.client_service.invalidate_cache()
 
         # تحميل في الخلفية
         data_loader = get_data_loader()
@@ -1186,7 +1193,7 @@ class PaymentsManagerTab(QWidget):
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
         if hasattr(self.project_service, "invalidate_cache"):
             self.project_service.invalidate_cache()
-        self.load_payments_data()
+        self.load_payments_data(force_refresh=True)
 
     def get_selected_payment(self) -> schemas.Payment | None:
         """الحصول على الدفعة المحددة"""
@@ -1235,7 +1242,7 @@ class PaymentsManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_payments_data()
+            self.load_payments_data(force_refresh=True)
 
     def _get_cash_accounts(self) -> list[schemas.Account]:
         """جلب حسابات النقدية والبنوك"""
@@ -1327,7 +1334,7 @@ class PaymentsManagerTab(QWidget):
     def _on_payment_created(self, payment):
         """⚡ استجابة لإنشاء دفعة جديدة"""
         safe_print(f"INFO: [PaymentsManager] تم إنشاء دفعة جديدة: {payment.amount}")
-        self.load_payments_data()
+        self.load_payments_data(force_refresh=True)
 
     def apply_permissions(self):
         """تطبيق الصلاحيات حسب دور المستخدم"""
@@ -1394,7 +1401,7 @@ class PaymentsManagerTab(QWidget):
                 QMessageBox.information(
                     self, "تم الحذف", "تم حذف الدفعة وعكس القيد المحاسبي وتحديث حالة المشروع بنجاح."
                 )
-                self.load_payments_data()
+                self.load_payments_data(force_refresh=True)
             else:
                 QMessageBox.warning(self, "خطأ", "فشل حذف الدفعة.")
 

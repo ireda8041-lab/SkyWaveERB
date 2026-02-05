@@ -159,9 +159,10 @@ class UnifiedSyncManagerV3(QObject):
                 self._sync_single_table_from_cloud(table)
                 logger.debug("⚡ تم مزامنة %s فوراً", table)
             else:
-                # مزامنة كل الجداول
                 self._push_pending_changes()
-                logger.debug("⚡ تم رفع التغييرات المحلية فوراً")
+                for table_name in self.TABLES:
+                    self._sync_single_table_from_cloud(table_name)
+                logger.debug("⚡ تم مزامنة كل الجداول فوراً")
         except Exception as e:
             logger.debug("خطأ في المزامنة الفورية: %s", e)
 
@@ -393,9 +394,10 @@ class UnifiedSyncManagerV3(QObject):
             if self._shutdown:
                 return
             try:
-                # ⚡ رفع التغييرات المحلية فقط - لا نحمّل كل شيء
                 self._push_pending_changes()
-                logger.debug("✅ مزامنة تلقائية: تم رفع التغييرات")
+                for table_name in self.TABLES:
+                    self._sync_table_from_cloud(table_name)
+                logger.debug("✅ مزامنة تلقائية: تم رفع وجلب التغييرات")
             except Exception as e:
                 logger.debug("مزامنة تلقائية: %s", e)
 

@@ -235,7 +235,7 @@ class ServiceManagerTab(QWidget):
         self.selected_service = None
         self.update_buttons_state(False)
 
-    def load_services_data(self) -> None:
+    def load_services_data(self, force_refresh: bool = False) -> None:
         """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
         logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
 
@@ -286,9 +286,15 @@ class ServiceManagerTab(QWidget):
             if sorting_enabled:
                 self.services_table.setSortingEnabled(True)
 
+        if force_refresh:
+            self._services_cache.clear()
+            self._services_cache_ts.clear()
+            if hasattr(self.service_service, "invalidate_cache"):
+                self.service_service.invalidate_cache()
+
         cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
         cached = self._get_cached_services(cache_key)
-        if cached is not None:
+        if cached is not None and not force_refresh:
             on_data_loaded(cached)
             return
 
@@ -387,12 +393,7 @@ class ServiceManagerTab(QWidget):
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
-        self._services_cache.clear()
-        self._services_cache_ts.clear()
-        # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
-        if hasattr(self.service_service, "invalidate_cache"):
-            self.service_service.invalidate_cache()
-        self.load_services_data()
+        self.load_services_data(force_refresh=True)
 
     def _get_cached_services(self, key: str) -> list[schemas.Service] | None:
         ts = self._services_cache_ts.get(key)
@@ -415,7 +416,7 @@ class ServiceManagerTab(QWidget):
             parent=self,
         )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.load_services_data()
+            self.load_services_data(force_refresh=True)
 
     def open_editor_for_selected(self):
         if self.selected_service:
@@ -447,7 +448,7 @@ class ServiceManagerTab(QWidget):
             self.service_service.delete_service(service_id)
             QMessageBox.information(self, "تم", "تمت الأرشفة بنجاح")
             logger.info("[ServiceManager] تم أرشفة الخدمة: %s", self.selected_service.name)
-            self.load_services_data()
+            self.load_services_data(force_refresh=True)
         except Exception as e:
             logger.error("[ServiceManager] فشل أرشفة الخدمة: %s", e, exc_info=True)
             QMessageBox.critical(self, "خطأ", f"فشل الأرشفة: {e}")

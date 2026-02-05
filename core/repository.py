@@ -5279,6 +5279,12 @@ class Repository:
 
             self.sqlite_conn.commit()
             safe_print(f"INFO: [Repo] تم حفظ العملة {code} محلياً")
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_data_changed("currencies")
+            except Exception:
+                pass
 
             # 2. المزامنة مع MongoDB
             if self.online:
@@ -5334,6 +5340,12 @@ class Repository:
                     safe_print(f"WARNING: [Repo] فشل حذف العملة من MongoDB: {e}")
 
             safe_print(f"INFO: [Repo] تم حذف العملة {code}")
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_data_changed("currencies")
+            except Exception:
+                pass
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حذف العملة {code}: {e}")
