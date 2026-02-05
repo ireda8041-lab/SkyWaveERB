@@ -15,6 +15,7 @@ from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
+    QComboBox,
     QDateEdit,
     QFrame,
     QGridLayout,
@@ -397,10 +398,10 @@ class FinancialChart(_ChartBase):
             self.axes.set_ylim(0, max(values) * 1.25)
 
         # إضافة القيم فوق الأعمدة
-        for bar in bars:
-            height = bar.get_height()
+        for bar_rect in bars:
+            height = bar_rect.get_height()
             self.axes.text(
-                bar.get_x() + bar.get_width() / 2.0,
+                bar_rect.get_x() + bar_rect.get_width() / 2.0,
                 height,
                 f"{height:,.0f}",
                 ha="center",
@@ -648,8 +649,6 @@ class PeriodSelector(QFrame):
         "custom": "فترة مخصصة",
     }
 
-    SETTINGS_FILE = "skywave_settings.json"
-
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
         self._current_period = "this_month"
@@ -660,8 +659,8 @@ class PeriodSelector(QFrame):
             "SkyWaveERP",
         )
         os.makedirs(data_dir, exist_ok=True)
-        self.SETTINGS_FILE = os.path.join(data_dir, "skywave_settings.json")
-        if not os.path.exists(self.SETTINGS_FILE):
+        self.settings_file = os.path.join(data_dir, "skywave_settings.json")
+        if not os.path.exists(self.settings_file):
             legacy_paths = [os.path.join(os.getcwd(), "skywave_settings.json")]
             if getattr(sys, "frozen", False):
                 legacy_paths.append(
@@ -674,10 +673,10 @@ class PeriodSelector(QFrame):
                 if (
                     legacy
                     and os.path.exists(legacy)
-                    and os.path.abspath(legacy) != os.path.abspath(self.SETTINGS_FILE)
+                    and os.path.abspath(legacy) != os.path.abspath(self.settings_file)
                 ):
                     try:
-                        shutil.copy2(legacy, self.SETTINGS_FILE)
+                        shutil.copy2(legacy, self.settings_file)
                         break
                     except Exception:
                         pass
@@ -874,8 +873,8 @@ class PeriodSelector(QFrame):
         """حفظ الاختيار في ملف الإعدادات"""
         try:
             settings = {}
-            if os.path.exists(self.SETTINGS_FILE):
-                with open(self.SETTINGS_FILE, encoding="utf-8") as f:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, encoding="utf-8") as f:
                     settings = json.load(f)
 
             # تحديث إعدادات لوحة التحكم
@@ -896,7 +895,7 @@ class PeriodSelector(QFrame):
 
             settings["dashboard"] = dashboard_settings
 
-            with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
+            with open(self.settings_file, "w", encoding="utf-8") as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
 
         except Exception as e:
@@ -905,10 +904,10 @@ class PeriodSelector(QFrame):
     def load_selection(self) -> None:
         """تحميل الاختيار المحفوظ"""
         try:
-            if not os.path.exists(self.SETTINGS_FILE):
+            if not os.path.exists(self.settings_file):
                 return
 
-            with open(self.SETTINGS_FILE, encoding="utf-8") as f:
+            with open(self.settings_file, encoding="utf-8") as f:
                 settings = json.load(f)
 
             dashboard_settings = settings.get("dashboard", {})
@@ -1000,7 +999,7 @@ class FlowLayout(QVBoxLayout):
         self._items = []
         self._rows = []
 
-    def addFlowWidget(self, widget):
+    def add_flow_widget(self, widget):
         """إضافة widget للـ flow"""
         self._items.append(widget)
 
@@ -1015,7 +1014,10 @@ class DashboardTab(QWidget):
         # ⚡ حماية من التحديث المتكرر
         self._last_refresh_time = 0
         self._is_refreshing = False
-        self._MIN_REFRESH_INTERVAL = 5  # 5 ثواني بين كل تحديث
+        self._min_refresh_interval = 5  # 5 ثواني بين كل تحديث
+        self._recent_current_page = 1
+        self._recent_page_size = 10
+        self._recent_items: list = []
 
         # سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1200,6 +1202,42 @@ class DashboardTab(QWidget):
         self.recent_table.verticalHeader().setDefaultSectionSize(32)
         table_layout.addWidget(self.recent_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.recent_prev_button = QPushButton("◀ السابق")
+        self.recent_prev_button.setStyleSheet(
+            "QPushButton { background-color: #1e3a8a; color: white; padding: 4px 10px; }"
+        )
+        self.recent_prev_button.setFixedHeight(24)
+        self.recent_prev_button.clicked.connect(self._go_recent_prev_page)
+
+        self.recent_next_button = QPushButton("التالي ▶")
+        self.recent_next_button.setStyleSheet(
+            "QPushButton { background-color: #1e3a8a; color: white; padding: 4px 10px; }"
+        )
+        self.recent_next_button.setFixedHeight(24)
+        self.recent_next_button.clicked.connect(self._go_recent_next_page)
+
+        self.recent_page_info_label = QLabel("صفحة 1 / 1")
+        self.recent_page_info_label.setStyleSheet(
+            "color: #94a3b8; font-size: 11px; font-family: 'Cairo';"
+        )
+
+        self.recent_page_size_combo = QComboBox()
+        self.recent_page_size_combo.addItems(["5", "10", "20", "كل"])
+        self.recent_page_size_combo.setCurrentText("10")
+        self.recent_page_size_combo.currentTextChanged.connect(self._on_recent_page_size_changed)
+
+        pagination_layout.addWidget(self.recent_prev_button)
+        pagination_layout.addWidget(self.recent_next_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.recent_page_size_combo)
+        pagination_layout.addWidget(self.recent_page_info_label)
+        table_layout.addLayout(pagination_layout)
+
         # إضافة للـ splitter
         self.bottom_splitter.addWidget(self.chart_container)
         self.bottom_splitter.addWidget(self.table_container)
@@ -1257,7 +1295,7 @@ class DashboardTab(QWidget):
         if self._is_refreshing:
             safe_print("WARNING: [Dashboard] ⏳ تحديث جاري بالفعل - تم تجاهل الطلب")
             return
-        if (current_time - self._last_refresh_time) < self._MIN_REFRESH_INTERVAL:
+        if (current_time - self._last_refresh_time) < self._min_refresh_interval:
             safe_print("WARNING: [Dashboard] ⏳ تحديث متكرر سريع - تم تجاهل الطلب")
             return
 
@@ -1301,37 +1339,8 @@ class DashboardTab(QWidget):
                 # تحديث الرسم البياني (نفس البيانات بالضبط)
                 self.chart.plot_data(sales, expenses, net_profit)
 
-                # تحديث جدول آخر العمليات
-                self.recent_table.setSortingEnabled(False)
-                if not recent:
-                    self.recent_hint_lbl.setText("لا توجد عمليات لعرضها حالياً.")
-                    self.recent_table.setRowCount(0)
-                else:
-                    self.recent_hint_lbl.setText("")
-                    self.recent_table.setRowCount(len(recent))
-                    for i, entry in enumerate(recent):
-                        if isinstance(entry, dict):
-                            date_val = entry.get("date", "")
-                            desc_val = entry.get("description", "")
-                            amount_val = entry.get("amount", 0)
-                        else:
-                            date_val = str(entry[0]) if len(entry) > 0 else ""
-                            desc_val = str(entry[1]) if len(entry) > 1 else ""
-                            amount_val = entry[2] if len(entry) > 2 else 0
-
-                        amount_float = float(amount_val or 0)
-                        amount_item = create_centered_item(f"{amount_float:,.2f}")
-                        amount_item.setTextAlignment(
-                            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
-                        )
-                        amount_item.setForeground(
-                            QBrush(QColor("#22c55e" if amount_float >= 0 else "#ef4444"))
-                        )
-
-                        self.recent_table.setItem(i, 0, create_centered_item(date_val))
-                        self.recent_table.setItem(i, 1, create_centered_item(desc_val))
-                        self.recent_table.setItem(i, 2, amount_item)
-                self.recent_table.setSortingEnabled(True)
+                self._recent_items = recent
+                self._render_recent_page()
 
                 self.last_update_lbl.setText(
                     f"آخر تحديث: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
@@ -1362,3 +1371,95 @@ class DashboardTab(QWidget):
             on_error=on_error,
             use_thread_pool=True,
         )
+
+    def _get_recent_total_pages(self) -> int:
+        total = len(self._recent_items)
+        if total == 0:
+            return 1
+        if self._recent_page_size <= 0:
+            return 1
+        return (total + self._recent_page_size - 1) // self._recent_page_size
+
+    def _render_recent_page(self):
+        total_pages = self._get_recent_total_pages()
+        if self._recent_current_page > total_pages:
+            self._recent_current_page = total_pages
+        if self._recent_current_page < 1:
+            self._recent_current_page = 1
+
+        if not self._recent_items:
+            self.recent_hint_lbl.setText("لا توجد عمليات لعرضها حالياً.")
+            self.recent_table.setRowCount(0)
+            self._update_recent_controls(total_pages)
+            return
+
+        self.recent_hint_lbl.setText("")
+        if self._recent_page_size <= 0:
+            page_items = self._recent_items
+        else:
+            start_index = (self._recent_current_page - 1) * self._recent_page_size
+            end_index = start_index + self._recent_page_size
+            page_items = self._recent_items[start_index:end_index]
+
+        self._populate_recent_table(page_items)
+        self._update_recent_controls(total_pages)
+
+    def _populate_recent_table(self, items: list):
+        prev_sorting = self.recent_table.isSortingEnabled()
+        prev_block = self.recent_table.blockSignals(True)
+        self.recent_table.setSortingEnabled(False)
+        self.recent_table.setUpdatesEnabled(False)
+        try:
+            self.recent_table.setRowCount(len(items))
+            for i, entry in enumerate(items):
+                if isinstance(entry, dict):
+                    date_val = entry.get("date", "")
+                    desc_val = entry.get("description", "")
+                    amount_val = entry.get("amount", 0)
+                else:
+                    date_val = str(entry[0]) if len(entry) > 0 else ""
+                    desc_val = str(entry[1]) if len(entry) > 1 else ""
+                    amount_val = entry[2] if len(entry) > 2 else 0
+
+                amount_float = float(amount_val or 0)
+                amount_item = create_centered_item(f"{amount_float:,.2f}")
+                amount_item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+                )
+                amount_item.setForeground(
+                    QBrush(QColor("#22c55e" if amount_float >= 0 else "#ef4444"))
+                )
+
+                self.recent_table.setItem(i, 0, create_centered_item(date_val))
+                self.recent_table.setItem(i, 1, create_centered_item(desc_val))
+                self.recent_table.setItem(i, 2, amount_item)
+        finally:
+            self.recent_table.setUpdatesEnabled(True)
+            self.recent_table.setSortingEnabled(prev_sorting)
+            self.recent_table.blockSignals(prev_block)
+
+    def _update_recent_controls(self, total_pages: int):
+        self.recent_page_info_label.setText(f"صفحة {self._recent_current_page} / {total_pages}")
+        self.recent_prev_button.setEnabled(self._recent_current_page > 1)
+        self.recent_next_button.setEnabled(self._recent_current_page < total_pages)
+
+    def _on_recent_page_size_changed(self, value: str):
+        if value == "كل":
+            self._recent_page_size = max(1, len(self._recent_items))
+        else:
+            try:
+                self._recent_page_size = int(value)
+            except Exception:
+                self._recent_page_size = 10
+        self._recent_current_page = 1
+        self._render_recent_page()
+
+    def _go_recent_prev_page(self):
+        if self._recent_current_page > 1:
+            self._recent_current_page -= 1
+            self._render_recent_page()
+
+    def _go_recent_next_page(self):
+        if self._recent_current_page < self._get_recent_total_pages():
+            self._recent_current_page += 1
+            self._render_recent_page()

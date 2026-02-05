@@ -3,6 +3,9 @@
 جسر الإشعارات - يربط إشارات التطبيق بنظام الإشعارات
 """
 
+from PyQt6.QtCore import QObject, Qt
+from PyQt6.QtWidgets import QApplication
+
 from core.signals import app_signals
 
 try:
@@ -17,7 +20,7 @@ except ImportError:
             pass
 
 
-class NotificationBridge:
+class NotificationBridge(QObject):
     """جسر يربط إشارات التطبيق بنظام الإشعارات"""
 
     _instance = None
@@ -78,6 +81,7 @@ class NotificationBridge:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            QObject.__init__(cls._instance)
         return cls._instance
 
     @classmethod
@@ -87,13 +91,20 @@ class NotificationBridge:
             return
 
         bridge = cls()
+        if QApplication.instance() is None:
+            safe_print("WARNING: [NotificationBridge] QApplication غير مُهيأ - تخطي ربط الإشعارات")
+            return
 
         # ربط إشارة العمليات التفصيلية
-        app_signals.operation_completed.connect(bridge._on_operation)
+        app_signals.operation_completed.connect(
+            bridge._on_operation, Qt.ConnectionType.QueuedConnection
+        )
 
         # ربط إشارات المزامنة
-        app_signals.sync_completed.connect(bridge._on_sync_completed)
-        app_signals.sync_failed.connect(bridge._on_sync_failed)
+        app_signals.sync_completed.connect(
+            bridge._on_sync_completed, Qt.ConnectionType.QueuedConnection
+        )
+        app_signals.sync_failed.connect(bridge._on_sync_failed, Qt.ConnectionType.QueuedConnection)
 
         cls._connected = True
         safe_print("INFO: [NotificationBridge] Connected to app signals")

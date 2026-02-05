@@ -205,7 +205,7 @@ class DatabaseContextManager:
 
 
 # Singleton instance - يُنشأ عند الحاجة
-_db_context: DatabaseContextManager | None = None
+_DB_CONTEXT: DatabaseContextManager | None = None
 
 
 def get_db_context(repository: Repository) -> DatabaseContextManager:
@@ -218,13 +218,13 @@ def get_db_context(repository: Repository) -> DatabaseContextManager:
     Returns:
         DatabaseContextManager instance
     """
-    global _db_context
-    if _db_context is None:
-        _db_context = DatabaseContextManager(repository)
-    return _db_context
+    global _DB_CONTEXT
+    if _DB_CONTEXT is None:
+        _DB_CONTEXT = DatabaseContextManager(repository)
+    return _DB_CONTEXT
 
 
 def reset_db_context():
     """إعادة تعيين مدير السياق (للاختبارات)"""
-    global _db_context
-    _db_context = None
+    global _DB_CONTEXT
+    _DB_CONTEXT = None

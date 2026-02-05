@@ -81,20 +81,20 @@ class BackgroundDataLoader(QObject):
         super().__init__(parent)
         self._active_workers = {}
         self._thread_pool = QThreadPool.globalInstance()
-        # ⚡ استخدام كل الـ CPU cores للسرعة القصوى
         import os
 
         cpu_count = os.cpu_count() or 4
-        self._thread_pool.setMaxThreadCount(cpu_count)
+        max_threads = min(cpu_count, 6)
+        self._thread_pool.setMaxThreadCount(max_threads)
 
     def load_async(
         self,
         operation_name: str,
         load_function: Callable,
+        *args,
         on_success: Callable | None = None,
         on_error: Callable | None = None,
         use_thread_pool: bool = True,
-        *args,
         **kwargs,
     ):
         """تحميل البيانات بشكل غير متزامن - محسّن للسرعة"""
@@ -142,12 +142,12 @@ class BackgroundDataLoader(QObject):
 
 
 # Singleton instance
-_data_loader_instance: BackgroundDataLoader | None = None
+_DATA_LOADER_INSTANCE: BackgroundDataLoader | None = None
 
 
 def get_data_loader() -> BackgroundDataLoader:
     """الحصول على instance واحد من DataLoader"""
-    global _data_loader_instance
-    if _data_loader_instance is None:
-        _data_loader_instance = BackgroundDataLoader()
-    return _data_loader_instance
+    global _DATA_LOADER_INSTANCE
+    if _DATA_LOADER_INSTANCE is None:
+        _DATA_LOADER_INSTANCE = BackgroundDataLoader()
+    return _DATA_LOADER_INSTANCE

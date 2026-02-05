@@ -34,7 +34,7 @@ users = cursor.fetchall()
 
 print("\n=== جميع المستخدمين ===")
 for u in users:
-    STATUS = "✅ نشط" if u[2] else "❌ معطل"
-    print(f"  - {u[0]} ({u[1]}) {STATUS}")
+    status_label = "✅ نشط" if u[2] else "❌ معطل"
+    print(f"  - {u[0]} ({u[1]}) {status_label}")
 
 conn.close()

@@ -6,6 +6,7 @@
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -257,8 +258,6 @@ class TemplateSettings(QWidget):
     def open_template_manager(self):
         """فتح مدير القوالب في نافذة منفصلة"""
         try:
-            from PyQt6.QtWidgets import QDialog, QVBoxLayout
-
             dialog = QDialog(self)
             dialog.setWindowTitle("إدارة قوالب الفواتير")
             dialog.setModal(True)

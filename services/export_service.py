@@ -317,9 +317,9 @@ class ExportService:
             if platform.system() == "Windows":
                 os.startfile(filepath)
             elif platform.system() == "Darwin":  # macOS
-                subprocess.run(["open", filepath])
+                subprocess.run(["open", filepath], check=False)
             else:  # Linux
-                subprocess.run(["xdg-open", filepath])
+                subprocess.run(["xdg-open", filepath], check=False)
 
             safe_print(f"INFO: [ExportService] Opened file: {filepath}")
         except Exception as e:

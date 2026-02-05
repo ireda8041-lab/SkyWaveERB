@@ -66,7 +66,7 @@ class BackgroundUpdateChecker(QThread):
                 changelog = data.get("changelog", "")
 
             if remote_version and compare_versions(remote_version, self.current_version) > 0:
-                logger.info(f"تحديث جديد متاح: {remote_version}")
+                logger.info("تحديث جديد متاح: %s", remote_version)
                 self.update_found.emit(remote_version, download_url, changelog)
                 self.check_completed.emit(True)
             else:
@@ -74,11 +74,11 @@ class BackgroundUpdateChecker(QThread):
                 self.check_completed.emit(False)
 
         except requests.RequestException as e:
-            logger.warning(f"فشل التحقق من التحديثات: {e}")
+            logger.warning("فشل التحقق من التحديثات: %s", e)
             self.error_occurred.emit(str(e))
             self.check_completed.emit(False)
         except Exception as e:
-            logger.error(f"خطأ في التحقق من التحديثات: {e}")
+            logger.error("خطأ في التحقق من التحديثات: %s", e)
             self.error_occurred.emit(str(e))
             self.check_completed.emit(False)
 
@@ -112,7 +112,7 @@ class AutoUpdateService(QObject):
         # تحميل آخر وقت فحص
         self._load_last_check_time()
 
-        logger.info(f"خدمة التحديث التلقائي جاهزة - الإصدار الحالي: {self.current_version}")
+        logger.info("خدمة التحديث التلقائي جاهزة - الإصدار الحالي: %s", self.current_version)
 
     def start(self):
         """بدء خدمة التحديث التلقائي"""
@@ -127,7 +127,7 @@ class AutoUpdateService(QObject):
 
         # بدء المؤقت الدوري
         self._timer.start(self.check_interval)
-        logger.info(f"بدء التحقق الدوري كل {AUTO_UPDATE_INTERVAL_HOURS} ساعات")
+        logger.info("بدء التحقق الدوري كل %s ساعات", AUTO_UPDATE_INTERVAL_HOURS)
 
     def stop(self):
         """إيقاف خدمة التحديث التلقائي"""
@@ -140,7 +140,7 @@ class AutoUpdateService(QObject):
                     # QTimer تم حذفه بالفعل
                     pass
         except Exception as e:
-            logger.debug(f"تحذير عند إيقاف المؤقت: {e}")
+            logger.debug("تحذير عند إيقاف المؤقت: %s", e)
 
         if self._checker_thread and self._checker_thread.isRunning():
             self._checker_thread.quit()
@@ -170,7 +170,7 @@ class AutoUpdateService(QObject):
         """عند العثور على تحديث"""
         self._pending_update = {"version": version, "url": url, "changelog": changelog}
         self.update_available.emit(version, url, changelog)
-        logger.info(f"تحديث جديد: {version}")
+        logger.info("تحديث جديد: %s", version)
 
     def _on_check_completed(self, has_update: bool):
         """عند اكتمال الفحص"""
@@ -180,7 +180,7 @@ class AutoUpdateService(QObject):
 
     def _on_error(self, error: str):
         """عند حدوث خطأ"""
-        logger.warning(f"خطأ في التحقق من التحديثات: {error}")
+        logger.warning("خطأ في التحقق من التحديثات: %s", error)
 
     def get_pending_update(self) -> dict | None:
         """الحصول على التحديث المعلق"""
@@ -208,7 +208,7 @@ class AutoUpdateService(QObject):
                     if "last_check" in data:
                         self._last_check = datetime.fromisoformat(data["last_check"])
         except Exception as e:
-            logger.debug(f"فشل تحميل وقت الفحص: {e}")
+            logger.debug("فشل تحميل وقت الفحص: %s", e)
 
     def _save_last_check_time(self):
         """حفظ آخر وقت فحص"""
@@ -224,16 +224,16 @@ class AutoUpdateService(QObject):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            logger.debug(f"فشل حفظ وقت الفحص: {e}")
+            logger.debug("فشل حفظ وقت الفحص: %s", e)
 
 
 # Singleton instance
-_auto_update_service: AutoUpdateService | None = None
+_AUTO_UPDATE_SERVICE: AutoUpdateService | None = None
 
 
 def get_auto_update_service() -> AutoUpdateService:
     """الحصول على خدمة التحديث التلقائي (Singleton)"""
-    global _auto_update_service
-    if _auto_update_service is None:
-        _auto_update_service = AutoUpdateService()
-    return _auto_update_service
+    global _AUTO_UPDATE_SERVICE
+    if _AUTO_UPDATE_SERVICE is None:
+        _AUTO_UPDATE_SERVICE = AutoUpdateService()
+    return _AUTO_UPDATE_SERVICE

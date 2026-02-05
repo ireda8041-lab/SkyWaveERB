@@ -41,6 +41,9 @@ class SettingsService:
         "default_notes": "شكراً لثقتكم في Sky Wave. نسعد بخدمتكم دائماً.",
         "company_logo_path": "",
         "company_logo_data": "",  # ⚡ اللوجو كـ Base64 للمزامنة بين الأجهزة
+        "print_client_logo_width_px": 120,
+        "print_client_logo_max_height_px": 40,
+        "print_client_logo_max_width_percent": 22,
     }
 
     def __init__(self):
@@ -112,6 +115,13 @@ class SettingsService:
     def update_setting(self, key: str, value: Any):
         """تحديث إعداد معين وحفظه"""
         self.settings[key] = value
+        self.save_settings(self.settings)
+
+    def update_settings(self, new_settings: dict[str, Any]):
+        if not isinstance(new_settings, dict):
+            return
+        for k, v in new_settings.items():
+            self.settings[k] = v
         self.save_settings(self.settings)
 
     # ==========================================

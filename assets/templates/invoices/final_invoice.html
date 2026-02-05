@@ -667,15 +667,13 @@
                         <div class="mini-methods">
                             {% if payment_methods and payment_methods|length > 0 %}
                                 {% for method in payment_methods %}
-                                    {% if method.active %}
-                                        <span><b>• {{ method.name }}:</b> {{ method.details if method.details else method.description }}</span>
-                                    {% endif %}
+                                    <span>
+                                        {% if method.name %}<b>{{ loop.index }}️⃣ {{ method.name }}:</b>{% endif %}
+                                        {% if method.details %} {{ method.details|replace('\n', '<br>')|safe }}{% elif method.description %} {{ method.description }}{% endif %}
+                                    </span>
                                 {% endfor %}
                             {% else %}
-                                <span><b>1️⃣ فودافون كاش:</b> 01067894321 - 0102196520</span>
-                                <span><b>2️⃣ إنستا باي:</b> 01067894321 - skywaveads@instapay</span>
-                                <span><b>3️⃣ تحويل بنكي - بنك مصر:</b> حساب: 2630333000086626 | SWIFT: BMISEGCXXXX</span>
-                                <span><b>4️⃣ تحويل دولي - بنك مصر:</b> IBAN: EG020002026302630333000086626</span>
+                                <span>لا توجد طرق دفع مفعلة</span>
                             {% endif %}
                         </div>
                     </div>

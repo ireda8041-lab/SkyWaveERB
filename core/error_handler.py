@@ -128,7 +128,10 @@ class ErrorHandler:
         # إرسال إشعار للمطور (يمكن إضافة إيميل أو Slack لاحقاً)
         logger = logging.getLogger("SkyWaveERP")
         logger.critical(
-            f"CRITICAL ERROR in {context}: {type(exception).__name__} - {str(exception)}"
+            "CRITICAL ERROR in %s: %s - %s",
+            context,
+            type(exception).__name__,
+            exception,
         )
         safe_print(f"⚠️ CRITICAL ERROR: {type(exception).__name__} in {context}")
 
@@ -190,7 +193,7 @@ class ErrorHandler:
             show_dialog: هل نعرض نافذة منبثقة؟
         """
         logger = logging.getLogger("SkyWaveERP")
-        logger.warning(f"[{context}] {message}")
+        logger.warning("[%s] %s", context, message)
 
         if show_dialog:
             msg_box = QMessageBox()
@@ -211,7 +214,7 @@ class ErrorHandler:
             show_dialog: هل نعرض نافذة منبثقة؟
         """
         logger = logging.getLogger("SkyWaveERP")
-        logger.info(f"[{context}] {message}")
+        logger.info("[%s] %s", context, message)
 
         if show_dialog:
             msg_box = QMessageBox()

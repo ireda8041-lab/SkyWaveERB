@@ -1,8 +1,8 @@
-# Build Sky Wave ERP v2.0.4 Release
+# Build Sky Wave ERP v2.1.1 Release
 # Script to build and prepare release
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Building Sky Wave ERP v2.0.4" -ForegroundColor Green
+Write-Host "Building Sky Wave ERP v2.1.1" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -56,7 +56,7 @@ if ($LASTEXITCODE -eq 0) {
 # Step 5: Verify executable
 Write-Host ""
 Write-Host "Step 5: Verifying executable..." -ForegroundColor Yellow
-$exePath = "dist\SkyWaveERP.exe"
+$exePath = "dist\SkyWaveERP\SkyWaveERP.exe"
 if (Test-Path $exePath) {
     $fileSize = (Get-Item $exePath).Length / 1MB
     $fileSizeRounded = [math]::Round($fileSize, 2)
@@ -89,12 +89,12 @@ Write-Host "Build completed successfully!" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Files:" -ForegroundColor Yellow
-Write-Host "  - Executable: dist\SkyWaveERP.exe" -ForegroundColor Cyan
-if (Test-Path "installer_output\SkyWaveERP-Setup-2.0.4.exe") {
-    Write-Host "  - Installer: installer_output\SkyWaveERP-Setup-2.0.4.exe" -ForegroundColor Cyan
+Write-Host "  - Executable: dist\SkyWaveERP\SkyWaveERP.exe" -ForegroundColor Cyan
+if (Test-Path "installer_output\SkyWaveERP-Setup-2.1.1.exe") {
+    Write-Host "  - Installer: installer_output\SkyWaveERP-Setup-2.1.1.exe" -ForegroundColor Cyan
 }
 Write-Host ""
-Write-Host "Version: v2.0.4" -ForegroundColor Yellow
+Write-Host "Version: v2.1.1" -ForegroundColor Yellow
 $currentDate = Get-Date -Format "yyyy-MM-dd"
 Write-Host "Date: $currentDate" -ForegroundColor Yellow
 Write-Host ""

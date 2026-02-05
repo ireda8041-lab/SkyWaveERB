@@ -566,6 +566,11 @@ class ClientEditorDialog(QDialog):
             return ""
 
         try:
+            if os.path.splitext(image_path)[1].lower() == ".svg":
+                with open(image_path, "rb") as f:
+                    svg_data = f.read()
+                return f"data:image/svg+xml;base64,{base64.b64encode(svg_data).decode('utf-8')}"
+
             from PyQt6.QtCore import QBuffer, QIODevice
             from PyQt6.QtGui import QPixmap
 

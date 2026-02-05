@@ -624,6 +624,9 @@ class SkyWaveERPApp:
             return
         self._cleanup_done = True
 
+        import time
+
+        t0 = time.monotonic()
         logger.info("[MainApp] جاري تنظيف الموارد قبل الإغلاق...")
 
         # إيقاف جميع المؤقتات
@@ -702,6 +705,14 @@ class SkyWaveERPApp:
         except Exception as e:
             logger.debug("[MainApp] تحذير عند إغلاق قاعدة البيانات: %s", e)
 
+        try:
+            from core.unified_system import cleanup_all_systems
+
+            cleanup_all_systems()
+        except Exception as e:
+            logger.debug("[MainApp] تحذير عند تنظيف الأنظمة: %s", e)
+
+        logger.info("[MainApp] ⏱️ زمن الإغلاق: %.2fs", time.monotonic() - t0)
         logger.info("[MainApp] ✅ تم تنظيف جميع الموارد بنجاح")
 
     def _on_update_available(self, main_window, version, url, changelog):
@@ -744,11 +755,21 @@ class SkyWaveERPApp:
     def _sync_settings_safe(self):
         """مزامنة الإعدادات بشكل آمن"""
         try:
-            import time
+            import threading
 
-            time.sleep(3)  # انتظار اتصال MongoDB
-            if self.repository.online is not None and self.repository.online:
-                self.settings_service.sync_settings_from_cloud(self.repository)
+            if not getattr(self, "repository", None) or not getattr(self, "settings_service", None):
+                return
+
+            if not getattr(self.repository, "online", False):
+                return
+
+            def worker():
+                try:
+                    self.settings_service.sync_settings_from_cloud(self.repository)
+                except Exception as e:
+                    logger.error("خطأ في مزامنة الإعدادات: %s", e)
+
+            threading.Thread(target=worker, daemon=True).start()
         except Exception as e:
             logger.error("خطأ في مزامنة الإعدادات: %s", e)
 

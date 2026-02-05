@@ -6,7 +6,7 @@ def test_period_selector_uses_appdata_path(qt_app, tmp_path, monkeypatch):
     from ui.dashboard_tab import PeriodSelector
 
     selector = PeriodSelector()
-    assert str(tmp_path) in selector.SETTINGS_FILE
+    assert str(tmp_path) in selector.settings_file
 
 
 def test_get_date_range_custom_falls_back_without_recursion(qt_app, tmp_path, monkeypatch):

@@ -4,6 +4,7 @@
 ⚡ محسّن: إضافة دفعة جديدة، تصفية، تصدير، تكامل محاسبي كامل
 """
 
+import time
 from decimal import ROUND_HALF_UP, Decimal
 
 from PyQt6.QtCore import QDate, Qt, pyqtSignal
@@ -723,7 +724,7 @@ class PaymentEditorDialog(QDialog):
             if result:
                 # ⚡ إعادة حساب أرصدة الحسابات المتأثرة فوراً
                 if self.accounting_service:
-                    self.accounting_service._recalculate_cash_balances()
+                    self.accounting_service._schedule_cash_recalc()
 
                 # ⚡ إرسال إشارات التحديث
                 from core.signals import app_signals
@@ -762,6 +763,15 @@ class PaymentsManagerTab(QWidget):
 
         self.payments_list: list[schemas.Payment] = []
         self.clients_cache: dict[str, str] = {}  # cache للعملاء
+        self._lookups_cache: dict[str, dict] = {}
+        self._lookups_cache_ts: dict[str, float] = {}
+        self._lookups_cache_ttl_s = 30.0
+        self._current_page = 1
+        self._page_size = 100
+        self._page_accounts_cache: dict = {}
+        self._page_projects_cache: dict = {}
+        self._page_clients_cache: dict = {}
+        self._total_payments_sum = 0.0
 
         # 📱 تجاوب: سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
@@ -774,7 +784,10 @@ class PaymentsManagerTab(QWidget):
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
 
-        app_signals.payments_changed.connect(self._on_payments_changed)
+        app_signals.safe_connect(app_signals.payments_changed, self._on_payments_changed)
+        app_signals.safe_connect(app_signals.clients_changed, self._invalidate_lookup_cache)
+        app_signals.safe_connect(app_signals.projects_changed, self._invalidate_lookup_cache)
+        app_signals.safe_connect(app_signals.accounts_changed, self._invalidate_lookup_cache)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_payments_data() - يتم استدعاؤها من MainWindow
@@ -868,6 +881,37 @@ class PaymentsManagerTab(QWidget):
         fix_table_rtl(self.payments_table)
         layout.addWidget(self.payments_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setFont(get_cairo_font(11, bold=True))
+        self.page_info_label.setStyleSheet("color: #94a3b8;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        layout.addLayout(pagination_layout)
+
         # إجمالي الدفعات
         self.total_label = QLabel("إجمالي التحصيلات: 0.00 ج.م")
         self.total_label.setFont(get_cairo_font(14, bold=True))
@@ -893,6 +937,9 @@ class PaymentsManagerTab(QWidget):
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
+        sorting_enabled = self.payments_table.isSortingEnabled()
+        if sorting_enabled:
+            self.payments_table.setSortingEnabled(False)
         self.payments_table.setUpdatesEnabled(False)
         self.payments_table.blockSignals(True)
         self.payments_table.setRowCount(0)
@@ -901,28 +948,64 @@ class PaymentsManagerTab(QWidget):
         def fetch_payments():
             try:
                 payments = self.accounting_service.repo.get_all_payments()
-                all_accounts = self.accounting_service.repo.get_all_accounts()
-                accounts_cache = {acc.code: acc for acc in all_accounts}
 
-                all_projects = self.project_service.get_all_projects()
-                projects_cache = {proj.name: proj for proj in all_projects}
+                accounts_cache = self._get_cached_lookup("accounts")
+                if accounts_cache is None:
+                    if hasattr(self.accounting_service, "get_all_accounts_cached"):
+                        all_accounts = self.accounting_service.get_all_accounts_cached()
+                    else:
+                        all_accounts = self.accounting_service.repo.get_all_accounts()
+                    accounts_cache = {}
+                    for acc in all_accounts:
+                        code = getattr(acc, "code", None)
+                        if code is not None and code != "":
+                            accounts_cache[code] = acc
+                            accounts_cache[str(code)] = acc
+                        acc_id = getattr(acc, "id", None)
+                        if acc_id is not None:
+                            accounts_cache[acc_id] = acc
+                            accounts_cache[str(acc_id)] = acc
+                    self._set_cached_lookup("accounts", accounts_cache)
 
-                clients = self.client_service.get_all_clients()
-                clients_cache = {}
-                for c in clients:
-                    # ⚡ إضافة العميل بكل المفاتيح الممكنة للبحث السريع
-                    clients_cache[c.name] = c  # بالاسم
-                    if c._mongo_id:
-                        clients_cache[c._mongo_id] = c  # بالـ MongoDB ID
-                        clients_cache[str(c._mongo_id)] = c  # كـ string
-                    if c.id:
-                        clients_cache[str(c.id)] = c  # بالـ SQLite ID
-                        clients_cache[int(c.id)] = c  # كـ int
-                    # ⚡ إضافة بالاسم المنظف (بدون مسافات زائدة)
-                    if c.name:
-                        clients_cache[c.name.strip()] = c
+                projects_cache = self._get_cached_lookup("projects")
+                if projects_cache is None:
+                    all_projects = self.project_service.get_all_projects()
+                    projects_cache = {}
+                    for proj in all_projects or []:
+                        try:
+                            proj_name = (getattr(proj, "name", None) or "").strip()
+                            if proj_name:
+                                projects_cache[proj_name] = proj
+                            proj_id = getattr(proj, "id", None)
+                            if proj_id is not None:
+                                projects_cache[str(proj_id)] = proj
+                                projects_cache[proj_id] = proj
+                            proj_mongo_id = getattr(proj, "_mongo_id", None)
+                            if proj_mongo_id:
+                                projects_cache[str(proj_mongo_id)] = proj
+                                projects_cache[proj_mongo_id] = proj
+                            proj_code = (getattr(proj, "project_code", None) or "").strip()
+                            if proj_code:
+                                projects_cache[proj_code] = proj
+                        except Exception:
+                            continue
+                    self._set_cached_lookup("projects", projects_cache)
 
-                safe_print(f"DEBUG: [PaymentsManager] تم تحميل {len(clients)} عميل في الـ cache")
+                clients_cache = self._get_cached_lookup("clients")
+                if clients_cache is None:
+                    clients = self.client_service.get_all_clients()
+                    clients_cache = {}
+                    for c in clients:
+                        clients_cache[c.name] = c
+                        if c._mongo_id:
+                            clients_cache[c._mongo_id] = c
+                            clients_cache[str(c._mongo_id)] = c
+                        if c.id:
+                            clients_cache[str(c.id)] = c
+                            clients_cache[int(c.id)] = c
+                        if c.name:
+                            clients_cache[c.name.strip()] = c
+                    self._set_cached_lookup("clients", clients_cache)
 
                 return {
                     "payments": payments,
@@ -946,100 +1029,14 @@ class PaymentsManagerTab(QWidget):
         def on_data_loaded(data):
             try:
                 self.payments_list = data["payments"]
-                accounts_cache = data["accounts_cache"]
-                projects_cache = data["projects_cache"]
-                data["clients_cache"]
-
-                total_sum = 0.0
-
-                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
-                self.payments_table.setRowCount(len(self.payments_list))
-                for i, payment in enumerate(self.payments_list):
-                    num_item = create_centered_item(str(i + 1))
-                    num_item.setData(Qt.ItemDataRole.UserRole, payment)
-                    self.payments_table.setItem(i, 0, num_item)
-
-                    date_str = payment.date.strftime("%Y-%m-%d") if payment.date else ""
-                    self.payments_table.setItem(i, 1, create_centered_item(date_str))
-
-                    type_item = create_centered_item("💰 وارد")
-                    type_item.setForeground(QColor("#0A6CF1"))
-                    self.payments_table.setItem(i, 2, type_item)
-
-                    client_name = "عميل غير محدد"
-                    project_name = payment.project_id or "مشروع غير محدد"
-
-                    # ⚡ إصلاح: البحث عن العميل بطرق متعددة ومحسّنة
-                    # 1. أولاً: البحث في المشروع للحصول على client_id الصحيح
-                    if payment.project_id:
-                        if payment.project_id in projects_cache:
-                            project = projects_cache[payment.project_id]
-                            project_name = project.name
-                            if project.client_id and project.client_id.strip():
-                                # البحث عن العميل في الـ cache بطرق متعددة
-                                client_id = project.client_id.strip()
-                                if client_id in data["clients_cache"]:
-                                    client = data["clients_cache"][client_id]
-                                    client_name = client.name
-                                else:
-                                    # استخدام client_id كما هو إذا لم نجد العميل
-                                    client_name = client_id
-                        else:
-                            # المشروع غير موجود في الـ cache - ابحث بالاسم الجزئي
-                            for proj_name, proj in projects_cache.items():
-                                if (
-                                    payment.project_id in proj_name
-                                    or proj_name in payment.project_id
-                                ):
-                                    project_name = proj.name
-                                    if proj.client_id and proj.client_id.strip():
-                                        client_id = proj.client_id.strip()
-                                        if client_id in data["clients_cache"]:
-                                            client = data["clients_cache"][client_id]
-                                            client_name = client.name
-                                        else:
-                                            client_name = client_id
-                                    break
-
-                    # 2. ثانياً: استخدام client_id من الدفعة مباشرة كـ fallback
-                    if (
-                        client_name == "عميل غير محدد"
-                        and payment.client_id
-                        and payment.client_id.strip()
-                    ):
-                        client_id = payment.client_id.strip()
-                        if client_id in data["clients_cache"]:
-                            client = data["clients_cache"][client_id]
-                            client_name = client.name
-                        else:
-                            client_name = client_id
-
-                    self.payments_table.setItem(
-                        i, 3, create_centered_item(f"{client_name} - {project_name}")
-                    )
-
-                    amount_item = create_centered_item(f"{payment.amount:,.2f}")
-                    amount_item.setForeground(QColor("#0A6CF1"))
-                    self.payments_table.setItem(i, 4, amount_item)
-
-                    payment_method = self._get_payment_method_from_account(
-                        payment.account_id, accounts_cache
-                    )
-                    self.payments_table.setItem(i, 5, create_centered_item(payment_method))
-
-                    account_display = "---"
-                    if payment.account_id and payment.account_id in accounts_cache:
-                        account = accounts_cache[payment.account_id]
-                        account_display = f"{account.name} ({account.code})"
-                    elif payment.account_id:
-                        account_display = payment.account_id
-
-                    self.payments_table.setItem(i, 6, create_centered_item(account_display))
-
-                    self.payments_table.setRowHeight(i, 40)
-                    total_sum += payment.amount
-
-                self.total_label.setText(f"إجمالي التحصيلات: {total_sum:,.2f} ج.م")
+                self._page_accounts_cache = data["accounts_cache"]
+                self._page_projects_cache = data["projects_cache"]
+                self._page_clients_cache = data["clients_cache"]
+                self._total_payments_sum = sum(p.amount for p in self.payments_list)
+                self.total_label.setText(f"إجمالي التحصيلات: {self._total_payments_sum:,.2f} ج.م")
+                if self._current_page < 1:
+                    self._current_page = 1
+                self._render_current_page()
                 safe_print(f"INFO: [PaymentsManager] ✅ تم تحميل {len(self.payments_list)} دفعة.")
 
             except Exception as e:
@@ -1050,6 +1047,8 @@ class PaymentsManagerTab(QWidget):
             finally:
                 self.payments_table.blockSignals(False)
                 self.payments_table.setUpdatesEnabled(True)
+                if sorting_enabled:
+                    self.payments_table.setSortingEnabled(True)
 
         def on_error(error_msg):
             safe_print(f"ERROR: [PaymentsManager] فشل تحميل الدفعات: {error_msg}")
@@ -1065,6 +1064,121 @@ class PaymentsManagerTab(QWidget):
             on_error=on_error,
             use_thread_pool=True,
         )
+
+    def _get_total_pages(self) -> int:
+        total = len(self.payments_list)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_items = self.payments_list
+            start_index = 0
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_items = self.payments_list[start_index:end_index]
+
+        self._populate_payments_table(page_items, start_index)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_payments_table(self, payments: list[schemas.Payment], start_index: int):
+        accounts_cache = self._page_accounts_cache
+        projects_cache = self._page_projects_cache
+        clients_cache = self._page_clients_cache
+
+        self.payments_table.setRowCount(len(payments))
+        for i, payment in enumerate(payments):
+            row_number = start_index + i + 1
+            num_item = create_centered_item(str(row_number))
+            num_item.setData(Qt.ItemDataRole.UserRole, payment)
+            self.payments_table.setItem(i, 0, num_item)
+
+            date_str = payment.date.strftime("%Y-%m-%d") if payment.date else ""
+            self.payments_table.setItem(i, 1, create_centered_item(date_str))
+
+            type_item = create_centered_item("💰 وارد")
+            type_item.setForeground(QColor("#0A6CF1"))
+            self.payments_table.setItem(i, 2, type_item)
+
+            client_name = "عميل غير محدد"
+            project_name = payment.project_id or "مشروع غير محدد"
+
+            if payment.project_id:
+                proj_key = str(payment.project_id).strip()
+                project = projects_cache.get(payment.project_id) or projects_cache.get(proj_key)
+                if project:
+                    project_name = getattr(project, "name", proj_key) or proj_key
+                    client_id = (getattr(project, "client_id", "") or "").strip()
+                    if client_id:
+                        client = clients_cache.get(client_id) or clients_cache.get(str(client_id))
+                        client_name = client.name if client else client_id
+
+            if client_name == "عميل غير محدد" and payment.client_id and payment.client_id.strip():
+                client_id = payment.client_id.strip()
+                if client_id in clients_cache:
+                    client = clients_cache[client_id]
+                    client_name = client.name
+                else:
+                    client_name = client_id
+
+            self.payments_table.setItem(
+                i, 3, create_centered_item(f"{client_name} - {project_name}")
+            )
+
+            amount_item = create_centered_item(f"{payment.amount:,.2f}")
+            amount_item.setForeground(QColor("#0A6CF1"))
+            self.payments_table.setItem(i, 4, amount_item)
+
+            payment_method = self._get_payment_method_from_account(
+                payment.account_id, accounts_cache
+            )
+            self.payments_table.setItem(i, 5, create_centered_item(payment_method))
+
+            account_display = "---"
+            if payment.account_id and payment.account_id in accounts_cache:
+                account = accounts_cache[payment.account_id]
+                account_display = f"{account.name} ({account.code})"
+            elif payment.account_id:
+                account_display = payment.account_id
+
+            self.payments_table.setItem(i, 6, create_centered_item(account_display))
+            self.payments_table.setRowHeight(i, 40)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self.payments_list))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""
@@ -1144,8 +1258,8 @@ class PaymentsManagerTab(QWidget):
             return "---"
 
         account = accounts_cache[account_code]
-        account_name = (account.name or "").lower()
-        code = account_code
+        account_name = (getattr(account, "name", "") or "").lower()
+        code = str(account_code)
 
         # ⚡ البحث بالاسم أولاً (الأكثر دقة)
         if (
@@ -1180,6 +1294,24 @@ class PaymentsManagerTab(QWidget):
             return "Bank Transfer"
 
         return "Other"
+
+    def _get_cached_lookup(self, key: str) -> dict | None:
+        ts = self._lookups_cache_ts.get(key)
+        if ts is None:
+            return None
+        if (time.monotonic() - ts) > self._lookups_cache_ttl_s:
+            self._lookups_cache.pop(key, None)
+            self._lookups_cache_ts.pop(key, None)
+            return None
+        return self._lookups_cache.get(key)
+
+    def _set_cached_lookup(self, key: str, value: dict) -> None:
+        self._lookups_cache[key] = value
+        self._lookups_cache_ts[key] = time.monotonic()
+
+    def _invalidate_lookup_cache(self):
+        self._lookups_cache.clear()
+        self._lookups_cache_ts.clear()
 
     def open_add_dialog(self):
         """⚡ فتح نافذة إضافة دفعة جديدة"""

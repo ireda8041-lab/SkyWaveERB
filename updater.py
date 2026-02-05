@@ -263,6 +263,7 @@ class UpdateManager:
                     ["tasklist", "/FI", "IMAGENAME eq SkyWaveERP.exe"],
                     capture_output=True,
                     text=True,
+                    check=False,
                     shell=False,
                 )
                 if "skywaveerp" not in result.stdout.lower():

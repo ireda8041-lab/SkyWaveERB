@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sys
+import time
 import traceback
 import webbrowser
 from datetime import datetime
@@ -95,6 +96,23 @@ class SettingsTab(QWidget):
         self.settings_service = settings_service
         self.repository = repository
         self.current_user = current_user
+        self._users_cache: list = []
+        self._users_cache_ts: float | None = None
+        self._users_cache_ttl_s = 20.0
+        self._users_current_page = 1
+        self._users_page_size = 100
+        self._users_all: list = []
+        self._currencies_current_page = 1
+        self._currencies_page_size = 100
+        self._currencies_all: list[dict] = []
+        self._payment_methods_current_page = 1
+        self._payment_methods_page_size = 100
+        self._payment_methods_all: list[dict] = []
+        self._payment_methods_page_start = 0
+        self._note_templates_current_page = 1
+        self._note_templates_page_size = 100
+        self._note_templates_all: list[dict] = []
+        self._note_templates_page_start = 0
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -102,6 +120,28 @@ class SettingsTab(QWidget):
         # جعل التاب متجاوب مع حجم الشاشة
 
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        header = QFrame()
+        header.setObjectName("settingsHeader")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 10, 12, 10)
+        header_layout.setSpacing(10)
+
+        title = QLabel("⚙️ الإعدادات")
+        title.setObjectName("settingsTitle")
+        header_layout.addWidget(title, 0)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(
+            "🔍 ابحث عن تبويب إعدادات (مثل: العملات، المستخدمين، النسخ الاحتياطي...)"
+        )
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.returnPressed.connect(
+            lambda: self._search_settings_tabs(self.search_input.text())
+        )
+        self.search_input.setVisible(False)
+        header_layout.addStretch(1)
+
+        main_layout.addWidget(header)
 
         # إنشاء التابات الفرعية
         self.tabs = QTabWidget()
@@ -111,8 +151,51 @@ class SettingsTab(QWidget):
         # ⚡ جعل التابات الفرعية تتمدد لتملأ العرض تلقائياً
         self.tabs.tabBar().setExpanding(True)
         self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
+        self.tabs.setDocumentMode(True)
+        self.tabs.setUsesScrollButtons(True)
 
         main_layout.addWidget(self.tabs)
+
+        self.setStyleSheet(
+            """
+            QFrame#settingsHeader {
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 12px;
+            }
+            QLabel#settingsTitle {
+                font-size: 16px;
+                font-weight: 700;
+            }
+            QLineEdit {
+                padding: 8px 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: rgba(0, 0, 0, 0.18);
+            }
+            QLineEdit:focus {
+                border: 1px solid rgba(45, 140, 255, 0.85);
+            }
+            QTabWidget::pane {
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 12px;
+                top: -1px;
+            }
+            QTabBar::tab {
+                padding: 10px 14px;
+                margin: 0 2px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-bottom: none;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                background: rgba(0, 0, 0, 0.14);
+            }
+            QTabBar::tab:selected {
+                background: rgba(45, 140, 255, 0.22);
+                border-color: rgba(45, 140, 255, 0.55);
+            }
+            """
+        )
 
         # تاب بيانات الشركة
         self.company_tab = QWidget()
@@ -230,75 +313,109 @@ class SettingsTab(QWidget):
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
 
-        # ⚡ منطقة التمرير للشاشات الصغيرة
-        scroll_area = QScrollArea(self.company_tab)
+        outer_layout = QVBoxLayout(self.company_tab)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setStyleSheet(
             """
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
+            QScrollArea { border: none; background: transparent; }
             QScrollBar:vertical {
-                background: #0d2137;
-                width: 8px;
-                border-radius: 4px;
+                background: #0d2137; width: 8px; border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #3d6a9f;
-                border-radius: 4px;
-                min-height: 30px;
+                background: #3d6a9f; border-radius: 4px; min-height: 30px;
             }
         """
         )
 
-        scroll_content = QWidget(scroll_area)
+        scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setSpacing(12)
+        layout.setContentsMargins(18, 16, 18, 16)
 
-        # ستايل الحقول المحسن
+        # ستايل الحقول المحسن (أكثر دقة)
         input_style = """
             QLineEdit {
-                background: #0d2137;
-                color: #F1F5F9;
-                border: 1px solid #2d4a6f;
-                border-radius: 8px;
-                padding: 10px 14px;
+                background: #0b1d33;
+                color: #E2E8F0;
+                border: 1px solid rgba(99, 146, 207, 0.35);
+                border-radius: 10px;
+                padding: 10px 12px;
                 font-size: 13px;
-                min-height: 20px;
+                min-height: 18px;
             }
             QLineEdit:focus {
-                border: 2px solid #0A6CF1;
-                background: #0f2942;
-            }
-            QLineEdit:hover {
-                border: 1px solid #4d8ac9;
+                border: 2px solid #3b82f6;
+                background: #0d223b;
             }
         """
-        label_style = "color: #60a5fa; font-size: 12px; font-weight: bold; margin-bottom: 2px;"
-        section_title_style = "color: #93C5FD; font-size: 14px; font-weight: bold; padding: 5px 0;"
+        label_style = "color: #93C5FD; font-size: 11px; font-weight: bold; margin-bottom: 2px;"
+        section_title_style = "color: #E2E8F0; font-size: 14px; font-weight: bold; padding: 2px 0;"
 
         # === التخطيط الأفقي الرئيسي ===
+        summary_frame = QFrame()
+        summary_frame.setStyleSheet(
+            """
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(18, 48, 86, 0.85), stop:1 rgba(10, 30, 55, 0.85));
+                border: 1px solid rgba(80, 140, 220, 0.35);
+                border-radius: 14px;
+            }
+        """
+        )
+        summary_layout = QHBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(16, 12, 16, 12)
+        summary_layout.setSpacing(10)
+        summary_title = QLabel("🏢 ملف الشركة")
+        summary_title.setStyleSheet("color: #E2E8F0; font-size: 16px; font-weight: bold;")
+        summary_subtitle = QLabel("حدّث بيانات شركتك وشعارك لطباعة احترافية")
+        summary_subtitle.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        summary_text = QVBoxLayout()
+        summary_text.setSpacing(2)
+        summary_text.addWidget(summary_title)
+        summary_text.addWidget(summary_subtitle)
+        summary_layout.addLayout(summary_text)
+        summary_layout.addStretch()
+        badge = QLabel("محفوظ محلياً")
+        badge.setStyleSheet(
+            """
+            QLabel {
+                background: rgba(16, 185, 129, 0.18);
+                color: #34d399;
+                border: 1px solid rgba(16, 185, 129, 0.35);
+                border-radius: 10px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """
+        )
+        summary_layout.addWidget(badge)
+        layout.addWidget(summary_frame)
+
         main_h = QHBoxLayout()
-        main_h.setSpacing(20)
+        main_h.setSpacing(14)
+        main_h.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # === الجانب الأيسر: الحقول ===
-        fields_frame = QFrame(scroll_content)
+        fields_frame = QFrame()
         fields_frame.setStyleSheet(
             """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
-                border: 1px solid rgba(45, 74, 111, 0.5);
-                border-radius: 12px;
+                    stop:0 rgba(12, 33, 60, 0.85), stop:1 rgba(8, 22, 40, 0.85));
+                border: 1px solid rgba(80, 140, 220, 0.3);
+                border-radius: 14px;
             }
         """
         )
-        fields_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        fields_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         fields_container = QVBoxLayout(fields_frame)
-        fields_container.setContentsMargins(20, 20, 20, 20)
-        fields_container.setSpacing(12)
+        fields_container.setContentsMargins(18, 16, 18, 16)
+        fields_container.setSpacing(8)
 
         # عنوان القسم
         fields_title = QLabel("📋 بيانات الشركة الأساسية")
@@ -312,14 +429,22 @@ class SettingsTab(QWidget):
 
         fields_container.addLayout(fields_layout)
 
+        def build_field(label_widget, input_widget):
+            field = QWidget()
+            field_layout = QVBoxLayout(field)
+            field_layout.setContentsMargins(0, 0, 0, 0)
+            field_layout.setSpacing(4)
+            field_layout.addWidget(label_widget)
+            field_layout.addWidget(input_widget)
+            return field
+
         # اسم الشركة
         name_lbl = QLabel("🏢 اسم الشركة")
         name_lbl.setStyleSheet(label_style)
         self.company_name_input = QLineEdit()
         self.company_name_input.setPlaceholderText("أدخل اسم الشركة...")
         self.company_name_input.setStyleSheet(input_style)
-        fields_layout.addWidget(name_lbl, 0, 0)
-        fields_layout.addWidget(self.company_name_input, 1, 0)
+        fields_layout.addWidget(build_field(name_lbl, self.company_name_input), 0, 0)
 
         # الشعار (Tagline)
         tagline_lbl = QLabel("✨ الشعار")
@@ -327,8 +452,7 @@ class SettingsTab(QWidget):
         self.company_tagline_input = QLineEdit()
         self.company_tagline_input.setPlaceholderText("وكالة تسويق رقمي متكاملة")
         self.company_tagline_input.setStyleSheet(input_style)
-        fields_layout.addWidget(tagline_lbl, 0, 1)
-        fields_layout.addWidget(self.company_tagline_input, 1, 1)
+        fields_layout.addWidget(build_field(tagline_lbl, self.company_tagline_input), 0, 1)
 
         # العنوان
         addr_lbl = QLabel("📍 العنوان")
@@ -336,8 +460,7 @@ class SettingsTab(QWidget):
         self.company_address_input = QLineEdit()
         self.company_address_input.setPlaceholderText("العنوان الكامل...")
         self.company_address_input.setStyleSheet(input_style)
-        fields_layout.addWidget(addr_lbl, 2, 0)
-        fields_layout.addWidget(self.company_address_input, 3, 0)
+        fields_layout.addWidget(build_field(addr_lbl, self.company_address_input), 1, 0)
 
         # الهاتف
         phone_lbl = QLabel("📱 رقم الهاتف")
@@ -345,8 +468,7 @@ class SettingsTab(QWidget):
         self.company_phone_input = QLineEdit()
         self.company_phone_input.setPlaceholderText("+20 10 123 4567")
         self.company_phone_input.setStyleSheet(input_style)
-        fields_layout.addWidget(phone_lbl, 2, 1)
-        fields_layout.addWidget(self.company_phone_input, 3, 1)
+        fields_layout.addWidget(build_field(phone_lbl, self.company_phone_input), 1, 1)
 
         # البريد
         email_lbl = QLabel("📧 البريد الإلكتروني")
@@ -354,8 +476,7 @@ class SettingsTab(QWidget):
         self.company_email_input = QLineEdit()
         self.company_email_input.setPlaceholderText("info@company.com")
         self.company_email_input.setStyleSheet(input_style)
-        fields_layout.addWidget(email_lbl, 4, 0)
-        fields_layout.addWidget(self.company_email_input, 5, 0)
+        fields_layout.addWidget(build_field(email_lbl, self.company_email_input), 2, 0)
 
         # الموقع
         web_lbl = QLabel("🌐 موقع الشركة")
@@ -363,8 +484,7 @@ class SettingsTab(QWidget):
         self.company_website_input = QLineEdit()
         self.company_website_input.setPlaceholderText("www.company.com")
         self.company_website_input.setStyleSheet(input_style)
-        fields_layout.addWidget(web_lbl, 4, 1)
-        fields_layout.addWidget(self.company_website_input, 5, 1)
+        fields_layout.addWidget(build_field(web_lbl, self.company_website_input), 2, 1)
 
         # الرقم الضريبي
         vat_lbl = QLabel("🔢 الرقم الضريبي")
@@ -372,62 +492,25 @@ class SettingsTab(QWidget):
         self.company_vat_input = QLineEdit()
         self.company_vat_input.setPlaceholderText("أدخل الرقم الضريبي")
         self.company_vat_input.setStyleSheet(input_style)
-        fields_layout.addWidget(vat_lbl, 6, 0)
-        fields_layout.addWidget(self.company_vat_input, 7, 0)
-
-        # ⚡ قسم البيانات البنكية
-        bank_title = QLabel("🏦 بيانات الدفع")
-        bank_title.setStyleSheet(section_title_style)
-        fields_container.addWidget(bank_title)
-
-        bank_layout = QGridLayout()
-        bank_layout.setSpacing(10)
-        bank_layout.setColumnStretch(0, 1)
-        bank_layout.setColumnStretch(1, 1)
-
-        fields_container.addLayout(bank_layout)
-
-        bank_name_lbl = QLabel("🏦 اسم البنك")
-        bank_name_lbl.setStyleSheet(label_style)
-        self.bank_name_input = QLineEdit()
-        self.bank_name_input.setPlaceholderText("مثال: Banque Misr")
-        self.bank_name_input.setStyleSheet(input_style)
-        bank_layout.addWidget(bank_name_lbl, 0, 0)
-        bank_layout.addWidget(self.bank_name_input, 1, 0)
-
-        bank_account_lbl = QLabel("💳 رقم الحساب / IBAN")
-        bank_account_lbl.setStyleSheet(label_style)
-        self.bank_account_input = QLineEdit()
-        self.bank_account_input.setPlaceholderText("مثال: EG00 0000 0000 0000 0000 0000 000")
-        self.bank_account_input.setStyleSheet(input_style)
-        bank_layout.addWidget(bank_account_lbl, 0, 1)
-        bank_layout.addWidget(self.bank_account_input, 1, 1)
-
-        vodafone_lbl = QLabel("📱 فودافون كاش")
-        vodafone_lbl.setStyleSheet(label_style)
-        self.vodafone_cash_input = QLineEdit()
-        self.vodafone_cash_input.setPlaceholderText("+20 10 123 4567")
-        self.vodafone_cash_input.setStyleSheet(input_style)
-        bank_layout.addWidget(vodafone_lbl, 2, 0)
-        bank_layout.addWidget(self.vodafone_cash_input, 3, 0)
+        fields_layout.addWidget(build_field(vat_lbl, self.company_vat_input), 3, 0)
 
         # === الجانب الأيمن: اللوجو ===
-        logo_frame = QFrame(scroll_content)
+        logo_frame = QFrame()
         logo_frame.setStyleSheet(
             """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(13, 33, 55, 0.7), stop:1 rgba(10, 25, 45, 0.7));
-                border: 1px solid rgba(45, 74, 111, 0.5);
-                border-radius: 12px;
+                    stop:0 rgba(12, 33, 60, 0.85), stop:1 rgba(8, 22, 40, 0.85));
+                border: 1px solid rgba(80, 140, 220, 0.3);
+                border-radius: 14px;
             }
         """
         )
-        logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         logo_frame.setMinimumWidth(200)
         logo_container = QVBoxLayout(logo_frame)
-        logo_container.setContentsMargins(20, 20, 20, 20)
-        logo_container.setSpacing(12)
+        logo_container.setContentsMargins(16, 14, 16, 16)
+        logo_container.setSpacing(10)
         logo_container.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
 
         logo_title = QLabel("🖼️ شعار الشركة")
@@ -439,8 +522,8 @@ class SettingsTab(QWidget):
         self.company_preview_frame.setStyleSheet(
             """
             QFrame {
-                background-color: rgba(15, 41, 66, 0.55);
-                border: 1px solid rgba(45, 74, 111, 0.6);
+                background-color: rgba(12, 32, 54, 0.7);
+                border: 1px solid rgba(90, 150, 230, 0.25);
                 border-radius: 12px;
             }
         """
@@ -451,7 +534,7 @@ class SettingsTab(QWidget):
 
         self.company_preview_name = QLabel("—")
         self.company_preview_name.setStyleSheet(
-            "color: white; font-size: 14px; font-weight: bold; font-family: 'Cairo';"
+            "color: white; font-size: 13px; font-weight: bold; font-family: 'Cairo';"
         )
         self.company_preview_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -475,17 +558,17 @@ class SettingsTab(QWidget):
 
         # إطار اللوجو المحسن
         self.logo_preview = QLabel()
-        self.logo_preview.setFixedSize(150, 150)
+        self.logo_preview.setFixedSize(140, 140)
         self.logo_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logo_preview.setStyleSheet(
             """
             QLabel {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
                     stop:0 #0d2137, stop:1 #0a1929);
-                border: 2px dashed #3d6a9f;
-                border-radius: 12px;
+                border: 1px dashed rgba(120, 180, 255, 0.5);
+                border-radius: 14px;
                 color: #64748B;
-                font-size: 12px;
+                font-size: 11px;
             }
         """
         )
@@ -501,17 +584,17 @@ class SettingsTab(QWidget):
             """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0A6CF1, stop:1 #2563eb);
+                    stop:0 #3b82f6, stop:1 #2563eb);
                 color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 10px 16px;
+                border-radius: 10px;
+                padding: 10px 18px;
                 font-size: 12px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2563eb, stop:1 #3b82f6);
+                    stop:0 #2563eb, stop:1 #1d4ed8);
             }
         """
         )
@@ -521,16 +604,16 @@ class SettingsTab(QWidget):
         self.remove_logo_btn.setStyleSheet(
             """
             QPushButton {
-                background: rgba(239, 68, 68, 0.2);
-                color: #FCA5A5;
-                border: 1px solid rgba(239, 68, 68, 0.4);
-                border-radius: 8px;
-                padding: 10px 16px;
+                background: rgba(239, 68, 68, 0.15);
+                color: #fecaca;
+                border: 1px solid rgba(239, 68, 68, 0.35);
+                border-radius: 10px;
+                padding: 10px 18px;
                 font-size: 12px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background: rgba(239, 68, 68, 0.4);
+                background: rgba(239, 68, 68, 0.35);
                 color: white;
             }
         """
@@ -543,40 +626,40 @@ class SettingsTab(QWidget):
 
         # نص توضيحي
         hint_lbl = QLabel("PNG, JPG • 200×200 px\n✅ يتم مزامنته تلقائياً")
-        hint_lbl.setStyleSheet("color: #64748B; font-size: 10px;")
+        hint_lbl.setStyleSheet("color: #94a3b8; font-size: 10px;")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_container.addWidget(hint_lbl)
 
-        logo_container.addStretch()
         main_h.addWidget(fields_frame, 2)
         main_h.addWidget(logo_frame, 1)
 
-        layout.addLayout(main_h, 1)
+        layout.addLayout(main_h)
+        layout.addStretch(1)
 
         # ⚡ زر الحفظ المحسن
         save_container = QHBoxLayout()
         save_container.addStretch()
 
         self.save_company_btn = QPushButton("💾 حفظ بيانات الشركة")
-        self.save_company_btn.setMinimumWidth(250)
+        self.save_company_btn.setMinimumWidth(260)
         self.save_company_btn.setStyleSheet(
             """
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #10b981, stop:1 #34d399);
+                    stop:0 #22c55e, stop:1 #16a34a);
                 color: white;
                 border: none;
-                border-radius: 10px;
-                padding: 14px 40px;
+                border-radius: 12px;
+                padding: 14px 44px;
                 font-size: 14px;
                 font-weight: bold;
             }
             QPushButton:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #059669, stop:1 #10b981);
+                    stop:0 #16a34a, stop:1 #15803d);
             }
             QPushButton:pressed {
-                background: #047857;
+                background: #15803d;
             }
             QPushButton:disabled {
                 background: rgba(16, 185, 129, 0.25);
@@ -591,14 +674,7 @@ class SettingsTab(QWidget):
         layout.addLayout(save_container)
 
         scroll_area.setWidget(scroll_content)
-
-        self._company_scroll_area = scroll_area
-        self._company_scroll_content = scroll_content
-
-        # إضافة scroll_area للتاب
-        tab_layout = QVBoxLayout(self.company_tab)
-        tab_layout.setContentsMargins(0, 0, 0, 0)
-        tab_layout.addWidget(scroll_area)
+        outer_layout.addWidget(scroll_area)
 
         self._company_input_style = input_style
         self._company_input_style_invalid = (
@@ -625,9 +701,6 @@ class SettingsTab(QWidget):
             self.company_email_input,
             self.company_website_input,
             self.company_vat_input,
-            self.bank_name_input,
-            self.bank_account_input,
-            self.vodafone_cash_input,
         ):
             w.textChanged.connect(self._on_company_form_changed)
 
@@ -728,6 +801,36 @@ class SettingsTab(QWidget):
         # ⚡ لا نحمل البيانات هنا - سيتم التحميل عند فتح التاب
         # self.load_currencies()
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.curr_prev_page_button = QPushButton("◀ السابق")
+        self.curr_prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.curr_prev_page_button.setFixedHeight(26)
+        self.curr_prev_page_button.clicked.connect(self._go_curr_prev_page)
+
+        self.curr_next_page_button = QPushButton("التالي ▶")
+        self.curr_next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.curr_next_page_button.setFixedHeight(26)
+        self.curr_next_page_button.clicked.connect(self._go_curr_next_page)
+
+        self.curr_page_info_label = QLabel("صفحة 1 / 1")
+        self.curr_page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.curr_page_size_combo = QComboBox()
+        self.curr_page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.curr_page_size_combo.setCurrentText("100")
+        self.curr_page_size_combo.currentTextChanged.connect(self._on_curr_page_size_changed)
+
+        pagination_layout.addWidget(self.curr_prev_page_button)
+        pagination_layout.addWidget(self.curr_next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.curr_page_size_combo)
+        pagination_layout.addWidget(self.curr_page_info_label)
+        layout.addLayout(pagination_layout)
+
     def setup_users_tab(self):
         """إعداد تاب إدارة المستخدمين"""
         layout = QVBoxLayout(self.users_tab)
@@ -818,6 +921,36 @@ class SettingsTab(QWidget):
         self.users_table.doubleClicked.connect(self.edit_user)
         layout.addWidget(self.users_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.users_prev_page_button = QPushButton("◀ السابق")
+        self.users_prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.users_prev_page_button.setFixedHeight(26)
+        self.users_prev_page_button.clicked.connect(self._go_users_prev_page)
+
+        self.users_next_page_button = QPushButton("التالي ▶")
+        self.users_next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.users_next_page_button.setFixedHeight(26)
+        self.users_next_page_button.clicked.connect(self._go_users_next_page)
+
+        self.users_page_info_label = QLabel("صفحة 1 / 1")
+        self.users_page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.users_page_size_combo = QComboBox()
+        self.users_page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.users_page_size_combo.setCurrentText("100")
+        self.users_page_size_combo.currentTextChanged.connect(self._on_users_page_size_changed)
+
+        pagination_layout.addWidget(self.users_prev_page_button)
+        pagination_layout.addWidget(self.users_next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.users_page_size_combo)
+        pagination_layout.addWidget(self.users_page_info_label)
+        layout.addLayout(pagination_layout)
+
     def setup_backup_tab(self):
         """⚡ إعداد تاب النسخ الاحتياطي - تصميم احترافي محسّن"""
 
@@ -839,7 +972,48 @@ class SettingsTab(QWidget):
         scroll_content = QWidget()
         layout = QVBoxLayout(scroll_content)
         layout.setSpacing(15)
-        layout.setContentsMargins(20, 15, 20, 15)
+        layout.setContentsMargins(22, 18, 22, 18)
+
+        header_frame = QFrame()
+        header_frame.setStyleSheet(
+            """
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(14, 42, 78, 0.85), stop:1 rgba(9, 28, 52, 0.9));
+                border: 1px solid rgba(90, 150, 230, 0.35);
+                border-radius: 14px;
+            }
+        """
+        )
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(16, 12, 16, 12)
+        header_layout.setSpacing(10)
+        header_title = QLabel("💾 إدارة النسخ الاحتياطية")
+        header_title.setStyleSheet("color: #E2E8F0; font-size: 16px; font-weight: bold;")
+        header_subtitle = QLabel("حماية بياناتك بضغطة واحدة مع استرجاع آمن")
+        header_subtitle.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        header_text = QVBoxLayout()
+        header_text.setSpacing(2)
+        header_text.addWidget(header_title)
+        header_text.addWidget(header_subtitle)
+        header_layout.addLayout(header_text)
+        header_layout.addStretch()
+        header_badge = QLabel("آمن ومشفر")
+        header_badge.setStyleSheet(
+            """
+            QLabel {
+                background: rgba(59, 130, 246, 0.2);
+                color: #93C5FD;
+                border: 1px solid rgba(59, 130, 246, 0.35);
+                border-radius: 10px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """
+        )
+        header_layout.addWidget(header_badge)
+        layout.addWidget(header_frame)
 
         # === قسم إنشاء نسخة احتياطية ===
         backup_group = QGroupBox("💾 إنشاء نسخة احتياطية")
@@ -847,15 +1021,15 @@ class SettingsTab(QWidget):
             """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
-                border: 1px solid #374151; border-radius: 10px;
-                margin-top: 12px; padding: 15px;
+                border: 1px solid rgba(90, 150, 230, 0.3); border-radius: 12px;
+                margin-top: 10px; padding: 16px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(16, 185, 129, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+                    stop:0 rgba(16, 185, 129, 0.12), stop:1 rgba(8, 26, 50, 0.6));
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 2px 15px;
+                subcontrol-position: top right;
+                padding: 2px 12px;
                 color: #10B981;
             }
         """
@@ -869,7 +1043,7 @@ class SettingsTab(QWidget):
             "• قيود اليومية • الإعدادات والعملات"
         )
         backup_desc.setWordWrap(True)
-        backup_desc.setStyleSheet("color: #9ca3af; font-size: 12px; line-height: 1.5;")
+        backup_desc.setStyleSheet("color: #cbd5f5; font-size: 12px; line-height: 1.6;")
         backup_layout.addWidget(backup_desc)
 
         # شريط التقدم (مخفي افتراضياً)
@@ -878,8 +1052,8 @@ class SettingsTab(QWidget):
         self.backup_progress.setStyleSheet(
             """
             QProgressBar {
-                border: 1px solid #374151; border-radius: 5px;
-                background: #0d2137; height: 20px; text-align: center;
+                border: 1px solid rgba(90, 150, 230, 0.3); border-radius: 7px;
+                background: rgba(13, 33, 55, 0.7); height: 20px; text-align: center;
             }
             QProgressBar::chunk {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -899,8 +1073,8 @@ class SettingsTab(QWidget):
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #10b981, stop:1 #34d399);
-                color: white; border: none; border-radius: 8px;
-                padding: 12px 25px; font-size: 13px; font-weight: bold;
+                color: white; border: none; border-radius: 10px;
+                padding: 12px 26px; font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: #059669; }
             QPushButton:disabled { background: #374151; color: #6b7280; }
@@ -914,8 +1088,8 @@ class SettingsTab(QWidget):
             """
             QPushButton {
                 background: rgba(59, 130, 246, 0.2);
-                color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4);
-                border-radius: 8px; padding: 12px 25px;
+                color: #93C5FD; border: 1px solid rgba(59, 130, 246, 0.4);
+                border-radius: 10px; padding: 12px 25px;
                 font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: rgba(59, 130, 246, 0.4); }
@@ -935,16 +1109,16 @@ class SettingsTab(QWidget):
             """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
-                border: 1px solid #374151; border-radius: 10px;
-                margin-top: 12px; padding: 15px;
+                border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px;
+                margin-top: 10px; padding: 16px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(239, 68, 68, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+                    stop:0 rgba(245, 158, 11, 0.08), stop:1 rgba(8, 26, 50, 0.6));
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 2px 15px;
-                color: #f59e0b;
+                subcontrol-position: top right;
+                padding: 2px 12px;
+                color: #FBBF24;
             }
         """
         )
@@ -960,8 +1134,8 @@ class SettingsTab(QWidget):
         warning_label.setWordWrap(True)
         warning_label.setStyleSheet(
             """
-            color: #fbbf24; background-color: rgba(245, 158, 11, 0.15);
-            padding: 12px; border-radius: 8px; border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #fde68a; background-color: rgba(245, 158, 11, 0.12);
+            padding: 12px; border-radius: 10px; border: 1px solid rgba(245, 158, 11, 0.3);
             font-size: 12px;
         """
         )
@@ -973,7 +1147,7 @@ class SettingsTab(QWidget):
             QPushButton {
                 background: rgba(239, 68, 68, 0.2);
                 color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.4);
-                border-radius: 8px; padding: 12px 25px;
+                border-radius: 10px; padding: 12px 25px;
                 font-size: 13px; font-weight: bold;
             }
             QPushButton:hover { background: rgba(239, 68, 68, 0.4); color: white; }
@@ -990,16 +1164,16 @@ class SettingsTab(QWidget):
             """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
-                border: 1px solid #374151; border-radius: 10px;
-                margin-top: 12px; padding: 15px;
+                border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 12px;
+                margin-top: 10px; padding: 16px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(59, 130, 246, 0.1), stop:1 rgba(5, 32, 69, 0.5));
+                    stop:0 rgba(59, 130, 246, 0.1), stop:1 rgba(8, 26, 50, 0.6));
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 2px 15px;
-                color: #60a5fa;
+                subcontrol-position: top right;
+                padding: 2px 12px;
+                color: #93C5FD;
             }
         """
         )
@@ -1009,9 +1183,9 @@ class SettingsTab(QWidget):
         self.db_stats_label = QLabel("⏳ جاري تحميل الإحصائيات...")
         self.db_stats_label.setStyleSheet(
             """
-            color: #d1d5db; font-size: 12px; line-height: 1.6;
-            background: rgba(13, 33, 55, 0.5); padding: 15px;
-            border-radius: 8px; border: 1px solid #374151;
+            color: #e2e8f0; font-size: 12px; line-height: 1.7;
+            background: rgba(13, 33, 55, 0.6); padding: 15px;
+            border-radius: 10px; border: 1px solid rgba(90, 150, 230, 0.25);
         """
         )
         db_layout.addWidget(self.db_stats_label)
@@ -1038,14 +1212,14 @@ class SettingsTab(QWidget):
             """
             QGroupBox {
                 font-size: 14px; font-weight: bold;
-                border: 1px solid #374151; border-radius: 10px;
-                margin-top: 12px; padding: 15px;
-                background: rgba(10, 42, 85, 0.3);
+                border: 1px solid rgba(90, 150, 230, 0.3); border-radius: 12px;
+                margin-top: 10px; padding: 16px;
+                background: rgba(12, 33, 60, 0.55);
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 2px 15px;
+                subcontrol-position: top right;
+                padding: 2px 12px;
                 color: #93C5FD;
             }
         """
@@ -1053,7 +1227,7 @@ class SettingsTab(QWidget):
         history_layout = QVBoxLayout()
 
         self.backup_history_label = QLabel("لا توجد نسخ احتياطية سابقة")
-        self.backup_history_label.setStyleSheet("color: #6b7280; font-size: 12px; padding: 10px;")
+        self.backup_history_label.setStyleSheet("color: #94a3b8; font-size: 12px; padding: 12px;")
         history_layout.addWidget(self.backup_history_label)
 
         history_group.setLayout(history_layout)
@@ -1227,22 +1401,14 @@ class SettingsTab(QWidget):
             self.company_website_input.setText(settings.get("company_website", ""))
             self.company_vat_input.setText(settings.get("company_vat", ""))
 
-            # ⚡ بيانات البنك
-            if hasattr(self, "bank_name_input"):
-                self.bank_name_input.setText(settings.get("bank_name", ""))
-            if hasattr(self, "bank_account_input"):
-                self.bank_account_input.setText(settings.get("bank_account", ""))
-            if hasattr(self, "vodafone_cash_input"):
-                self.vodafone_cash_input.setText(settings.get("vodafone_cash", ""))
-
             logo_path = settings.get("company_logo_path", "")
 
             # ⚡ أولاً: محاولة تحميل من Base64 (للمزامنة بين الأجهزة)
             pixmap = self.settings_service.get_logo_as_pixmap()
             if pixmap and not pixmap.isNull():
                 scaled = pixmap.scaled(
-                    140,
-                    140,
+                    120,
+                    120,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -1253,8 +1419,8 @@ class SettingsTab(QWidget):
                 pixmap = QPixmap(logo_path)
                 if not pixmap.isNull():
                     scaled = pixmap.scaled(
-                        140,
-                        140,
+                        120,
+                        120,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
@@ -1272,15 +1438,6 @@ class SettingsTab(QWidget):
                 "company_website": self.company_website_input.text(),
                 "company_vat": self.company_vat_input.text(),
                 "company_logo_path": self.logo_preview.property("logo_path") or "",
-                "bank_name": (
-                    self.bank_name_input.text() if hasattr(self, "bank_name_input") else ""
-                ),
-                "bank_account": (
-                    self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
-                ),
-                "vodafone_cash": (
-                    self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
-                ),
             }
 
             self._on_company_form_changed()
@@ -1311,14 +1468,6 @@ class SettingsTab(QWidget):
                 "company_logo_data": logo_data,  # ⚡ الحفاظ على اللوجو
             }
 
-            # ⚡ بيانات البنك
-            if hasattr(self, "bank_name_input"):
-                new_settings["bank_name"] = self.bank_name_input.text()
-            if hasattr(self, "bank_account_input"):
-                new_settings["bank_account"] = self.bank_account_input.text()
-            if hasattr(self, "vodafone_cash_input"):
-                new_settings["vodafone_cash"] = self.vodafone_cash_input.text()
-
             self.settings_service.update_settings(new_settings)
 
             # ⚡ رفع الإعدادات للسحابة
@@ -1335,15 +1484,6 @@ class SettingsTab(QWidget):
                 "company_website": self.company_website_input.text(),
                 "company_vat": self.company_vat_input.text(),
                 "company_logo_path": logo_path,
-                "bank_name": (
-                    self.bank_name_input.text() if hasattr(self, "bank_name_input") else ""
-                ),
-                "bank_account": (
-                    self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
-                ),
-                "vodafone_cash": (
-                    self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
-                ),
             }
             self._on_company_form_changed()
         except Exception as e:
@@ -1387,13 +1527,6 @@ class SettingsTab(QWidget):
             "company_website": self.company_website_input.text(),
             "company_vat": self.company_vat_input.text(),
             "company_logo_path": self.logo_preview.property("logo_path") or "",
-            "bank_name": self.bank_name_input.text() if hasattr(self, "bank_name_input") else "",
-            "bank_account": (
-                self.bank_account_input.text() if hasattr(self, "bank_account_input") else ""
-            ),
-            "vodafone_cash": (
-                self.vodafone_cash_input.text() if hasattr(self, "vodafone_cash_input") else ""
-            ),
         }
         has_changes = current != snapshot
         can_save = required_ok and not invalid and has_changes
@@ -1414,52 +1547,127 @@ class SettingsTab(QWidget):
 
     def load_currencies(self):
         """تحميل العملات من قاعدة البيانات - محسّن"""
-        # ⚡ تعطيل التحديثات للسرعة
         self.currencies_table.setUpdatesEnabled(False)
         self.currencies_table.setRowCount(0)
 
-        try:
+        data_loader = get_data_loader()
+
+        def fetch_currencies():
             currencies = []
             if self.repository is not None:
                 currencies = self.repository.get_all_currencies()
                 if not currencies:
                     self.repository.init_default_currencies()
                     currencies = self.repository.get_all_currencies()
-
             if not currencies:
                 currencies = self._get_default_currencies()
+            return currencies
 
-            # ⚡ تعيين عدد الصفوف مرة واحدة
-            self.currencies_table.setRowCount(len(currencies))
+        def on_loaded(currencies):
+            try:
+                self._currencies_all = currencies
+                self._render_currencies_page()
+            finally:
+                self.currencies_table.setUpdatesEnabled(True)
 
-            for i, curr in enumerate(currencies):
-                code = curr.get("code", "")
-                name = curr.get("name", "")
-                symbol = curr.get("symbol", "")
-                rate = curr.get("rate", 1.0)
-                is_base = curr.get("is_base", False)
-                active = curr.get("active", True)
+        def on_error(error_msg: str):
+            try:
+                safe_print(f"ERROR: فشل تحميل العملات: {error_msg}")
+            finally:
+                self.currencies_table.setUpdatesEnabled(True)
 
-                self.currencies_table.setItem(i, 0, create_centered_item(str(i + 1)))
-                self.currencies_table.setItem(i, 1, create_centered_item(code))
+        data_loader.load_async(
+            operation_name="settings_currencies",
+            load_function=fetch_currencies,
+            on_success=on_loaded,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
-                name_display = name
-                if is_base:
-                    name_display += " ⭐"
-                self.currencies_table.setItem(i, 2, create_centered_item(name_display))
+    def _get_currencies_total_pages(self) -> int:
+        total = len(self._currencies_all)
+        if total == 0:
+            return 1
+        if self._currencies_page_size <= 0:
+            return 1
+        return (total + self._currencies_page_size - 1) // self._currencies_page_size
 
-                self.currencies_table.setItem(i, 3, create_centered_item(symbol))
+    def _render_currencies_page(self):
+        total_pages = self._get_currencies_total_pages()
+        if self._currencies_current_page > total_pages:
+            self._currencies_current_page = total_pages
+        if self._currencies_current_page < 1:
+            self._currencies_current_page = 1
 
-                rate_display = f"{rate:.2f}"
-                if is_base:
-                    rate_display += " (أساسية)"
-                self.currencies_table.setItem(i, 4, create_centered_item(rate_display))
+        if not self._currencies_all:
+            self.currencies_table.setRowCount(1)
+            empty_item = create_centered_item("لا توجد عملات")
+            self.currencies_table.setItem(0, 0, empty_item)
+            self.currencies_table.setSpan(0, 0, 1, self.currencies_table.columnCount())
+            self._update_currencies_pagination_controls(total_pages)
+            return
 
-                status = "✅ نشط" if active else "❌ غير نشط"
-                self.currencies_table.setItem(i, 5, create_centered_item(status))
-        finally:
-            # ⚡ إعادة تفعيل التحديثات
-            self.currencies_table.setUpdatesEnabled(True)
+        if self._currencies_page_size <= 0:
+            page_items = self._currencies_all
+            start_index = 0
+        else:
+            start_index = (self._currencies_current_page - 1) * self._currencies_page_size
+            end_index = start_index + self._currencies_page_size
+            page_items = self._currencies_all[start_index:end_index]
+
+        self._populate_currencies_table(page_items, start_index)
+        self._update_currencies_pagination_controls(total_pages)
+
+    def _populate_currencies_table(self, currencies: list[dict], start_index: int):
+        self.currencies_table.setRowCount(len(currencies))
+        for i, curr in enumerate(currencies):
+            code = curr.get("code", "")
+            name = curr.get("name", "")
+            symbol = curr.get("symbol", "")
+            rate = curr.get("rate", 1.0)
+            is_base = curr.get("is_base", False)
+            active = curr.get("active", True)
+
+            row_number = start_index + i + 1
+            self.currencies_table.setItem(i, 0, create_centered_item(str(row_number)))
+            self.currencies_table.setItem(i, 1, create_centered_item(code))
+
+            name_display = name + (" ⭐" if is_base else "")
+            self.currencies_table.setItem(i, 2, create_centered_item(name_display))
+
+            self.currencies_table.setItem(i, 3, create_centered_item(symbol))
+
+            rate_display = f"{rate:.2f}" + (" (أساسية)" if is_base else "")
+            self.currencies_table.setItem(i, 4, create_centered_item(rate_display))
+
+            status = "✅ نشط" if active else "❌ غير نشط"
+            self.currencies_table.setItem(i, 5, create_centered_item(status))
+
+    def _update_currencies_pagination_controls(self, total_pages: int):
+        self.curr_page_info_label.setText(f"صفحة {self._currencies_current_page} / {total_pages}")
+        self.curr_prev_page_button.setEnabled(self._currencies_current_page > 1)
+        self.curr_next_page_button.setEnabled(self._currencies_current_page < total_pages)
+
+    def _on_curr_page_size_changed(self, value: str):
+        if value == "كل":
+            self._currencies_page_size = max(1, len(self._currencies_all))
+        else:
+            try:
+                self._currencies_page_size = int(value)
+            except Exception:
+                self._currencies_page_size = 100
+        self._currencies_current_page = 1
+        self._render_currencies_page()
+
+    def _go_curr_prev_page(self):
+        if self._currencies_current_page > 1:
+            self._currencies_current_page -= 1
+            self._render_currencies_page()
+
+    def _go_curr_next_page(self):
+        if self._currencies_current_page < self._get_currencies_total_pages():
+            self._currencies_current_page += 1
+            self._render_currencies_page()
 
     def add_currency(self):
         """إضافة عملة جديدة"""
@@ -1992,46 +2200,130 @@ class SettingsTab(QWidget):
 
     def setup_default_accounts_tab(self):
         """إعداد تاب الحسابات الافتراضية"""
-        layout = QVBoxLayout(self.default_accounts_tab)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(
+            """
+            QScrollArea { border: none; background: transparent; }
+            QScrollBar:vertical {
+                background: #0d2137; width: 8px; border-radius: 4px;
+            }
+            QScrollBar::handle:vertical {
+                background: #3d6a9f; border-radius: 4px; min-height: 30px;
+            }
+        """
+        )
 
-        # معلومات توضيحية
+        scroll_content = QWidget()
+        layout = QVBoxLayout(scroll_content)
+        layout.setSpacing(14)
+        layout.setContentsMargins(22, 18, 22, 18)
+
+        header_frame = QFrame()
+        header_frame.setStyleSheet(
+            """
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(14, 42, 78, 0.85), stop:1 rgba(9, 28, 52, 0.9));
+                border: 1px solid rgba(90, 150, 230, 0.35);
+                border-radius: 14px;
+            }
+        """
+        )
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(16, 12, 16, 12)
+        header_layout.setSpacing(10)
+        header_title = QLabel("🔗 الحسابات الافتراضية")
+        header_title.setStyleSheet("color: #E2E8F0; font-size: 16px; font-weight: bold;")
+        header_subtitle = QLabel("تحديد الحسابات المستخدمة تلقائياً في العمليات اليومية")
+        header_subtitle.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        header_text = QVBoxLayout()
+        header_text.setSpacing(2)
+        header_text.addWidget(header_title)
+        header_text.addWidget(header_subtitle)
+        header_layout.addLayout(header_text)
+        header_layout.addStretch()
+        layout.addWidget(header_frame)
+
         info_label = QLabel(
-            "🔗 ربط الحسابات الافتراضية للنظام\n\n"
             "حدد الحسابات المحاسبية التي سيستخدمها النظام تلقائياً في العمليات السريعة.\n"
             "يجب أن تكون هذه الحسابات موجودة في دليل الحسابات."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet(
             """
-            background-color: #1e3a8a;
-            color: white;
-            padding: 15px;
-            border-radius: 8px;
-            font-size: 13px;
+            background: rgba(12, 33, 60, 0.7);
+            color: #cbd5f5;
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(90, 150, 230, 0.25);
+            font-size: 12px;
         """
         )
         layout.addWidget(info_label)
 
-        # نموذج الحسابات الافتراضية
         form_group = QGroupBox("⚙️ إعدادات الحسابات الافتراضية")
+        form_group.setStyleSheet(
+            """
+            QGroupBox {
+                font-size: 14px; font-weight: bold;
+                border: 1px solid rgba(90, 150, 230, 0.3); border-radius: 12px;
+                padding: 16px; background: rgba(12, 33, 60, 0.55);
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top right;
+                padding: 2px 12px;
+                color: #93C5FD;
+            }
+        """
+        )
         form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+        form_layout.setVerticalSpacing(10)
+
+        label_style = "color: #93C5FD; font-size: 11px; font-weight: bold;"
+        combo_style = """
+            QComboBox {
+                background: #0b1d33;
+                color: #E2E8F0;
+                border: 1px solid rgba(99, 146, 207, 0.35);
+                border-radius: 10px;
+                padding: 8px 10px;
+                min-height: 18px;
+            }
+            QComboBox:focus { border: 2px solid #3b82f6; }
+        """
 
         # الخزينة الافتراضية (SmartFilterComboBox مع فلترة)
         self.default_treasury_combo = SmartFilterComboBox()
+        self.default_treasury_combo.setStyleSheet(combo_style)
 
         # حساب الإيرادات الافتراضي (SmartFilterComboBox مع فلترة)
         self.default_revenue_combo = SmartFilterComboBox()
+        self.default_revenue_combo.setStyleSheet(combo_style)
 
         # حساب الضرائب الافتراضي (SmartFilterComboBox مع فلترة)
         self.default_tax_combo = SmartFilterComboBox()
+        self.default_tax_combo.setStyleSheet(combo_style)
 
         # حساب العملاء الافتراضي (SmartFilterComboBox مع فلترة)
         self.default_client_combo = SmartFilterComboBox()
+        self.default_client_combo.setStyleSheet(combo_style)
 
-        form_layout.addRow(QLabel("💰 الخزينة الافتراضية (1111):"), self.default_treasury_combo)
-        form_layout.addRow(QLabel("📈 إيرادات الخدمات (4100):"), self.default_revenue_combo)
-        form_layout.addRow(QLabel("📊 الضرائب المستحقة (2102):"), self.default_tax_combo)
-        form_layout.addRow(QLabel("👥 حساب العملاء (1140):"), self.default_client_combo)
+        treasury_lbl = QLabel("💰 الخزينة الافتراضية (1111):")
+        treasury_lbl.setStyleSheet(label_style)
+        revenue_lbl = QLabel("📈 إيرادات الخدمات (4100):")
+        revenue_lbl.setStyleSheet(label_style)
+        tax_lbl = QLabel("📊 الضرائب المستحقة (2102):")
+        tax_lbl.setStyleSheet(label_style)
+        client_lbl = QLabel("👥 حساب العملاء (1140):")
+        client_lbl.setStyleSheet(label_style)
+        form_layout.addRow(treasury_lbl, self.default_treasury_combo)
+        form_layout.addRow(revenue_lbl, self.default_revenue_combo)
+        form_layout.addRow(tax_lbl, self.default_tax_combo)
+        form_layout.addRow(client_lbl, self.default_client_combo)
 
         form_group.setLayout(form_layout)
         layout.addWidget(form_group)
@@ -2043,14 +2335,16 @@ class SettingsTab(QWidget):
         self.refresh_accounts_btn.setStyleSheet(
             """
             QPushButton {
-                background-color: #3b82f6;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #3b82f6, stop:1 #2563eb);
                 color: white;
                 padding: 10px 20px;
                 font-weight: bold;
-                border-radius: 6px;
+                border-radius: 10px;
             }
             QPushButton:hover {
-                background-color: #2563eb;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #2563eb, stop:1 #1d4ed8);
             }
         """
         )
@@ -2060,14 +2354,16 @@ class SettingsTab(QWidget):
         self.save_default_accounts_btn.setStyleSheet(
             """
             QPushButton {
-                background-color: #0A6CF1;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #22c55e, stop:1 #16a34a);
                 color: white;
                 padding: 10px 20px;
                 font-weight: bold;
-                border-radius: 6px;
+                border-radius: 10px;
             }
             QPushButton:hover {
-                background-color: #0A6CF1;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #16a34a, stop:1 #15803d);
             }
         """
         )
@@ -2077,8 +2373,12 @@ class SettingsTab(QWidget):
         buttons_layout.addWidget(self.save_default_accounts_btn)
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
-
         layout.addStretch()
+
+        scroll_area.setWidget(scroll_content)
+        tab_layout = QVBoxLayout(self.default_accounts_tab)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll_area)
 
         # ⚡ لا نحمل البيانات هنا - سيتم التحميل عند فتح التاب
         # self.load_default_accounts()
@@ -2089,53 +2389,89 @@ class SettingsTab(QWidget):
             QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة")
             return
 
-        try:
-            all_accounts = self.repository.get_all_accounts()
+        self.default_treasury_combo.setEnabled(False)
+        self.default_revenue_combo.setEnabled(False)
+        self.default_tax_combo.setEnabled(False)
+        self.default_client_combo.setEnabled(False)
 
-            # فلترة الحسابات حسب النوع
-            cash_accounts = [
-                acc
-                for acc in all_accounts
-                if acc.code and acc.code.startswith("11") and not getattr(acc, "is_group", False)
-            ]
-            revenue_accounts = [
-                acc
-                for acc in all_accounts
-                if acc.code and acc.code.startswith("4") and not getattr(acc, "is_group", False)
-            ]
-            tax_accounts = [
-                acc
-                for acc in all_accounts
-                if acc.code and acc.code.startswith("21") and not getattr(acc, "is_group", False)
-            ]
-            client_accounts = [
-                acc for acc in all_accounts if acc.code and acc.code.startswith("114")
-            ]
+        data_loader = get_data_loader()
 
-            # ملء القوائم المنسدلة
-            self._populate_account_combo(self.default_treasury_combo, cash_accounts, "1111")
-            self._populate_account_combo(self.default_revenue_combo, revenue_accounts, "4100")
-            self._populate_account_combo(self.default_tax_combo, tax_accounts, "2102")
-            self._populate_account_combo(self.default_client_combo, client_accounts, "1140")
+        def fetch_accounts():
+            return self.repository.get_all_accounts()
 
-            # تحميل القيم المحفوظة
-            settings = self.settings_service.get_settings()
-            self._select_account_by_code(
-                self.default_treasury_combo, settings.get("default_treasury_account", "1111")
-            )
-            self._select_account_by_code(
-                self.default_revenue_combo, settings.get("default_revenue_account", "4100")
-            )
-            self._select_account_by_code(
-                self.default_tax_combo, settings.get("default_tax_account", "2102")
-            )
-            self._select_account_by_code(
-                self.default_client_combo, settings.get("default_client_account", "1140")
-            )
+        def on_loaded(all_accounts):
+            try:
+                cash_accounts = [
+                    acc
+                    for acc in all_accounts
+                    if acc.code
+                    and acc.code.startswith("11")
+                    and not getattr(acc, "is_group", False)
+                ]
+                revenue_accounts = [
+                    acc
+                    for acc in all_accounts
+                    if acc.code and acc.code.startswith("4") and not getattr(acc, "is_group", False)
+                ]
+                tax_accounts = [
+                    acc
+                    for acc in all_accounts
+                    if acc.code
+                    and acc.code.startswith("21")
+                    and not getattr(acc, "is_group", False)
+                ]
+                client_accounts = [
+                    acc for acc in all_accounts if acc.code and acc.code.startswith("114")
+                ]
 
-        except Exception as e:
-            safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
-            QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
+                self._populate_account_combo(self.default_treasury_combo, cash_accounts, "1111")
+                self._populate_account_combo(self.default_revenue_combo, revenue_accounts, "4100")
+                self._populate_account_combo(self.default_tax_combo, tax_accounts, "2102")
+                self._populate_account_combo(self.default_client_combo, client_accounts, "1140")
+
+                settings = self.settings_service.get_settings()
+                self._select_account_by_code(
+                    self.default_treasury_combo,
+                    settings.get("default_treasury_account", "1111"),
+                )
+                self._select_account_by_code(
+                    self.default_revenue_combo,
+                    settings.get("default_revenue_account", "4100"),
+                )
+                self._select_account_by_code(
+                    self.default_tax_combo,
+                    settings.get("default_tax_account", "2102"),
+                )
+                self._select_account_by_code(
+                    self.default_client_combo,
+                    settings.get("default_client_account", "1140"),
+                )
+            except Exception as e:
+                safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
+                QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
+            finally:
+                self.default_treasury_combo.setEnabled(True)
+                self.default_revenue_combo.setEnabled(True)
+                self.default_tax_combo.setEnabled(True)
+                self.default_client_combo.setEnabled(True)
+
+        def on_error(error_msg: str):
+            try:
+                safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {error_msg}")
+                QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {error_msg}")
+            finally:
+                self.default_treasury_combo.setEnabled(True)
+                self.default_revenue_combo.setEnabled(True)
+                self.default_tax_combo.setEnabled(True)
+                self.default_client_combo.setEnabled(True)
+
+        data_loader.load_async(
+            operation_name="settings_default_accounts",
+            load_function=fetch_accounts,
+            on_success=on_loaded,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
     def _populate_account_combo(self, combo, accounts: list, default_code: str | None = None):
         """ملء ComboBox بالحسابات"""
@@ -2199,71 +2535,154 @@ class SettingsTab(QWidget):
             safe_print("WARNING: [SettingsTab] لا يوجد repository!")
             return
 
-        try:
-            # ⚡ تعطيل التحديثات أثناء الملء (أسرع بكثير!)
-            self.users_table.setUpdatesEnabled(False)
-            self.users_table.setRowCount(0)
+        self.users_table.setUpdatesEnabled(False)
+        self.users_table.setRowCount(0)
 
-            # ⚡ جلب المستخدمين من قاعدة البيانات (بدون انتظار MongoDB)
-            users = self.repository.get_all_users()
-            safe_print(f"INFO: [SettingsTab] تم جلب {len(users)} مستخدم")
+        data_loader = get_data_loader()
 
-            if len(users) == 0:
-                safe_print("WARNING: [SettingsTab] لا يوجد مستخدمين")
-                return
+        def fetch_users():
+            return self.repository.get_all_users()
 
-            # ⚡ تعيين عدد الصفوف مرة واحدة
-            self.users_table.setRowCount(len(users))
+        def on_users_loaded(users):
+            try:
+                safe_print(f"INFO: [SettingsTab] تم جلب {len(users)} مستخدم")
+                self._set_cached_users(users)
+                self._users_all = users
 
-            for i, user in enumerate(users):
-                # العمود 0: الرقم التسلسلي
-                self.users_table.setItem(i, 0, create_centered_item(str(i + 1)))
+                self._render_users_page()
+                safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {len(users)} مستخدم")
+            except Exception as e:
+                safe_print(f"ERROR: [SettingsTab] فشل ملء جدول المستخدمين: {e}")
+                traceback.print_exc()
+            finally:
+                self.users_table.setUpdatesEnabled(True)
+                self.users_table.viewport().update()
 
-                # العمود 1: اسم المستخدم (نخزن الـ ID هنا)
-                username_item = create_centered_item(user.username)
-                user_id = (
-                    user.id if user.id else (user.mongo_id if hasattr(user, "mongo_id") else None)
-                )
-                username_item.setData(Qt.ItemDataRole.UserRole, user_id)
-                self.users_table.setItem(i, 1, username_item)
+        def on_error(error_msg: str):
+            try:
+                safe_print(f"ERROR: [SettingsTab] فشل تحميل المستخدمين: {error_msg}")
+            finally:
+                self.users_table.setUpdatesEnabled(True)
+                self.users_table.viewport().update()
 
-                # العمود 2: الاسم الكامل
-                self.users_table.setItem(i, 2, create_centered_item(user.full_name or ""))
+        cached = self._get_cached_users()
+        if cached is not None:
+            on_users_loaded(cached)
+            return
 
-                # العمود 3: البريد الإلكتروني
-                self.users_table.setItem(i, 3, create_centered_item(user.email or ""))
+        data_loader.load_async(
+            operation_name="settings_users",
+            load_function=fetch_users,
+            on_success=on_users_loaded,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
-                # العمود 4: الدور
-                if hasattr(user.role, "value"):
-                    role_value = user.role.value
-                else:
-                    role_value = str(user.role)
-                role_display_map = {
-                    "admin": "🔑 مدير النظام",
-                    "accountant": "📊 محاسب",
-                    "sales": "💼 مندوب مبيعات",
-                }
-                role_display = role_display_map.get(role_value.lower(), role_value)
-                self.users_table.setItem(i, 4, create_centered_item(role_display))
+    def _get_users_total_pages(self) -> int:
+        total = len(self._users_all)
+        if total == 0:
+            return 1
+        if self._users_page_size <= 0:
+            return 1
+        return (total + self._users_page_size - 1) // self._users_page_size
 
-                # العمود 5: الحالة
-                status = "✅ نشط" if user.is_active else "❌ غير نشط"
-                self.users_table.setItem(i, 5, create_centered_item(status))
+    def _render_users_page(self):
+        total_pages = self._get_users_total_pages()
+        if self._users_current_page > total_pages:
+            self._users_current_page = total_pages
+        if self._users_current_page < 1:
+            self._users_current_page = 1
 
-                # العمود 6: تاريخ الإنشاء
-                created_date = user.created_at[:10] if user.created_at else ""
-                self.users_table.setItem(i, 6, create_centered_item(created_date))
+        if not self._users_all:
+            self.users_table.setRowCount(1)
+            empty_item = create_centered_item("لا توجد بيانات مستخدمين")
+            self.users_table.setItem(0, 0, empty_item)
+            self.users_table.setSpan(0, 0, 1, self.users_table.columnCount())
+            self._update_users_pagination_controls(total_pages)
+            return
 
-            safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {len(users)} مستخدم")
+        if self._users_page_size <= 0:
+            page_users = self._users_all
+            start_index = 0
+        else:
+            start_index = (self._users_current_page - 1) * self._users_page_size
+            end_index = start_index + self._users_page_size
+            page_users = self._users_all[start_index:end_index]
 
-        except Exception as e:
-            safe_print(f"ERROR: [SettingsTab] فشل تحميل المستخدمين: {e}")
+        self._populate_users_table(page_users, start_index)
+        self._update_users_pagination_controls(total_pages)
 
-            traceback.print_exc()
-        finally:
-            # ⚡ إعادة تفعيل التحديثات
-            self.users_table.setUpdatesEnabled(True)
-            self.users_table.viewport().update()
+    def _populate_users_table(self, users: list, start_index: int):
+        self.users_table.setRowCount(len(users))
+        for i, user in enumerate(users):
+            row_number = start_index + i + 1
+            self.users_table.setItem(i, 0, create_centered_item(str(row_number)))
+
+            username_item = create_centered_item(user.username)
+            user_id = user.id if user.id else (user.mongo_id if hasattr(user, "mongo_id") else None)
+            username_item.setData(Qt.ItemDataRole.UserRole, user_id)
+            self.users_table.setItem(i, 1, username_item)
+
+            self.users_table.setItem(i, 2, create_centered_item(user.full_name or ""))
+            self.users_table.setItem(i, 3, create_centered_item(user.email or ""))
+
+            role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
+            role_display_map = {
+                "admin": "🔑 مدير النظام",
+                "accountant": "📊 محاسب",
+                "sales": "💼 مندوب مبيعات",
+            }
+            role_display = role_display_map.get(role_value.lower(), role_value)
+            self.users_table.setItem(i, 4, create_centered_item(role_display))
+
+            status = "✅ نشط" if user.is_active else "❌ غير نشط"
+            self.users_table.setItem(i, 5, create_centered_item(status))
+
+            created_date = user.created_at[:10] if user.created_at else ""
+            self.users_table.setItem(i, 6, create_centered_item(created_date))
+
+    def _update_users_pagination_controls(self, total_pages: int):
+        self.users_page_info_label.setText(f"صفحة {self._users_current_page} / {total_pages}")
+        self.users_prev_page_button.setEnabled(self._users_current_page > 1)
+        self.users_next_page_button.setEnabled(self._users_current_page < total_pages)
+
+    def _on_users_page_size_changed(self, value: str):
+        if value == "كل":
+            self._users_page_size = max(1, len(self._users_all))
+        else:
+            try:
+                self._users_page_size = int(value)
+            except Exception:
+                self._users_page_size = 100
+        self._users_current_page = 1
+        self._render_users_page()
+
+    def _go_users_prev_page(self):
+        if self._users_current_page > 1:
+            self._users_current_page -= 1
+            self._render_users_page()
+
+    def _go_users_next_page(self):
+        if self._users_current_page < self._get_users_total_pages():
+            self._users_current_page += 1
+            self._render_users_page()
+
+    def _get_cached_users(self) -> list | None:
+        if self._users_cache_ts is None:
+            return None
+        if (time.monotonic() - self._users_cache_ts) > self._users_cache_ttl_s:
+            self._users_cache = []
+            self._users_cache_ts = None
+            return None
+        return self._users_cache
+
+    def _set_cached_users(self, users: list) -> None:
+        self._users_cache = users
+        self._users_cache_ts = time.monotonic()
+
+    def _invalidate_users_cache(self):
+        self._users_cache = []
+        self._users_cache_ts = None
 
     def add_user(self):
         """إضافة مستخدم جديد"""
@@ -2280,6 +2699,7 @@ class SettingsTab(QWidget):
 
         dialog = UserEditorDialog(auth_service, parent=self)
         if dialog.exec():
+            self._invalidate_users_cache()
             self.load_users()
             QMessageBox.information(self, "تم", "تم إضافة المستخدم بنجاح.")
 
@@ -2323,6 +2743,7 @@ class SettingsTab(QWidget):
         # فتح نافذة التعديل مع بيانات المستخدم
         dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
         if dialog.exec():
+            self._invalidate_users_cache()
             self.load_users()  # إعادة تحميل الجدول بعد التعديل
 
     def edit_user_permissions(self):
@@ -2363,6 +2784,7 @@ class SettingsTab(QWidget):
 
         dialog = UserPermissionsDialog(user, self.repository, self)
         if dialog.exec():
+            self._invalidate_users_cache()
             self.load_users()  # إعادة تحميل الجدول
             QMessageBox.information(self, "تم", "تم تحديث صلاحيات المستخدم بنجاح.")
 
@@ -2413,6 +2835,7 @@ class SettingsTab(QWidget):
                 success = self.repository.update_user_by_username(username, {"is_active": False})
 
                 if success:
+                    self._invalidate_users_cache()
                     self.load_users()
                     QMessageBox.information(self, "تم", "تم تعطيل المستخدم بنجاح.")
                 else:
@@ -2464,6 +2887,7 @@ class SettingsTab(QWidget):
                 success = self.repository.update_user_by_username(username, {"is_active": True})
 
                 if success:
+                    self._invalidate_users_cache()
                     self.load_users()
                     QMessageBox.information(self, "تم", "تم تفعيل المستخدم بنجاح.")
                 else:
@@ -3117,6 +3541,36 @@ class SettingsTab(QWidget):
         layout.addWidget(self.payment_methods_search)
         layout.addWidget(self.payment_methods_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.pm_prev_page_button = QPushButton("◀ السابق")
+        self.pm_prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.pm_prev_page_button.setFixedHeight(26)
+        self.pm_prev_page_button.clicked.connect(self._go_pm_prev_page)
+
+        self.pm_next_page_button = QPushButton("التالي ▶")
+        self.pm_next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.pm_next_page_button.setFixedHeight(26)
+        self.pm_next_page_button.clicked.connect(self._go_pm_next_page)
+
+        self.pm_page_info_label = QLabel("صفحة 1 / 1")
+        self.pm_page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.pm_page_size_combo = QComboBox()
+        self.pm_page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.pm_page_size_combo.setCurrentText("100")
+        self.pm_page_size_combo.currentTextChanged.connect(self._on_pm_page_size_changed)
+
+        pagination_layout.addWidget(self.pm_prev_page_button)
+        pagination_layout.addWidget(self.pm_next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.pm_page_size_combo)
+        pagination_layout.addWidget(self.pm_page_info_label)
+        layout.addLayout(pagination_layout)
+
         preview_group = QGroupBox("👁️ معاينة طريقة الدفع في الفاتورة")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setContentsMargins(12, 16, 12, 12)
@@ -3178,24 +3632,8 @@ class SettingsTab(QWidget):
                 ]
                 self.settings_service.update_setting("payment_methods", payment_methods)
 
-            self.payment_methods_table.setRowCount(len(payment_methods))
-            for i, method in enumerate(payment_methods):
-                if isinstance(method, dict) and "details" not in method:
-                    method["details"] = ""
-                self.payment_methods_table.setItem(i, 0, create_centered_item(str(i + 1)))
-                self.payment_methods_table.setItem(
-                    i, 1, create_centered_item(method.get("name", ""))
-                )
-                self.payment_methods_table.setItem(
-                    i, 2, create_centered_item(method.get("description", ""))
-                )
-                details_preview = method.get("details", "")
-                details_preview = details_preview.replace("\n", " ").strip()
-                if len(details_preview) > 60:
-                    details_preview = details_preview[:60] + "..."
-                self.payment_methods_table.setItem(i, 3, create_centered_item(details_preview))
-                status = "✅ مفعّل" if method.get("active", True) else "❌ معطّل"
-                self.payment_methods_table.setItem(i, 4, create_centered_item(status))
+            self._payment_methods_all = payment_methods
+            self._render_payment_methods_page()
 
             self.settings_service.update_setting("payment_methods", payment_methods)
 
@@ -3203,6 +3641,89 @@ class SettingsTab(QWidget):
             self._update_payment_method_preview()
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل طرق الدفع: {e}")
+
+    def _get_payment_methods_total_pages(self) -> int:
+        total = len(self._payment_methods_all)
+        if total == 0:
+            return 1
+        if self._payment_methods_page_size <= 0:
+            return 1
+        return (total + self._payment_methods_page_size - 1) // self._payment_methods_page_size
+
+    def _render_payment_methods_page(self):
+        total_pages = self._get_payment_methods_total_pages()
+        if self._payment_methods_current_page > total_pages:
+            self._payment_methods_current_page = total_pages
+        if self._payment_methods_current_page < 1:
+            self._payment_methods_current_page = 1
+
+        if not self._payment_methods_all:
+            self.payment_methods_table.setRowCount(1)
+            empty_item = create_centered_item("لا توجد طرق دفع")
+            self.payment_methods_table.setItem(0, 0, empty_item)
+            self.payment_methods_table.setSpan(0, 0, 1, self.payment_methods_table.columnCount())
+            self._update_payment_methods_pagination_controls(total_pages)
+            self._payment_methods_page_start = 0
+            return
+
+        if self._payment_methods_page_size <= 0:
+            page_items = self._payment_methods_all
+            self._payment_methods_page_start = 0
+        else:
+            start_index = (self._payment_methods_current_page - 1) * self._payment_methods_page_size
+            end_index = start_index + self._payment_methods_page_size
+            page_items = self._payment_methods_all[start_index:end_index]
+            self._payment_methods_page_start = start_index
+
+        self._populate_payment_methods_table(page_items, self._payment_methods_page_start)
+        self._update_payment_methods_pagination_controls(total_pages)
+
+    def _populate_payment_methods_table(self, methods: list[dict], start_index: int):
+        self.payment_methods_table.setRowCount(len(methods))
+        for i, method in enumerate(methods):
+            if isinstance(method, dict) and "details" not in method:
+                method["details"] = ""
+            row_number = start_index + i + 1
+            self.payment_methods_table.setItem(i, 0, create_centered_item(str(row_number)))
+            self.payment_methods_table.setItem(i, 1, create_centered_item(method.get("name", "")))
+            self.payment_methods_table.setItem(
+                i, 2, create_centered_item(method.get("description", ""))
+            )
+            details_preview = method.get("details", "")
+            details_preview = details_preview.replace("\n", " ").strip()
+            if len(details_preview) > 60:
+                details_preview = details_preview[:60] + "..."
+            self.payment_methods_table.setItem(i, 3, create_centered_item(details_preview))
+            status = "✅ مفعّل" if method.get("active", True) else "❌ معطّل"
+            self.payment_methods_table.setItem(i, 4, create_centered_item(status))
+
+    def _update_payment_methods_pagination_controls(self, total_pages: int):
+        self.pm_page_info_label.setText(
+            f"صفحة {self._payment_methods_current_page} / {total_pages}"
+        )
+        self.pm_prev_page_button.setEnabled(self._payment_methods_current_page > 1)
+        self.pm_next_page_button.setEnabled(self._payment_methods_current_page < total_pages)
+
+    def _on_pm_page_size_changed(self, value: str):
+        if value == "كل":
+            self._payment_methods_page_size = max(1, len(self._payment_methods_all))
+        else:
+            try:
+                self._payment_methods_page_size = int(value)
+            except Exception:
+                self._payment_methods_page_size = 100
+        self._payment_methods_current_page = 1
+        self._render_payment_methods_page()
+
+    def _go_pm_prev_page(self):
+        if self._payment_methods_current_page > 1:
+            self._payment_methods_current_page -= 1
+            self._render_payment_methods_page()
+
+    def _go_pm_next_page(self):
+        if self._payment_methods_current_page < self._get_payment_methods_total_pages():
+            self._payment_methods_current_page += 1
+            self._render_payment_methods_page()
 
     def add_payment_method(self):
         """إضافة طريقة دفع جديدة"""
@@ -3226,18 +3747,19 @@ class SettingsTab(QWidget):
             return
 
         row = selected[0].row()
+        real_index = self._payment_methods_page_start + row
         payment_methods = self.settings_service.get_setting("payment_methods") or []
 
-        if row >= len(payment_methods):
+        if real_index >= len(payment_methods):
             return
 
-        method = payment_methods[row]
+        method = payment_methods[real_index]
 
         dialog = PaymentMethodDialog(self, method)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
             if data and data.get("name"):
-                payment_methods[row] = data
+                payment_methods[real_index] = data
                 self.settings_service.update_setting("payment_methods", payment_methods)
                 self.load_payment_methods()
                 QMessageBox.information(self, "✅ نجاح", "تم تعديل طريقة الدفع")
@@ -3250,12 +3772,13 @@ class SettingsTab(QWidget):
             return
 
         row = selected[0].row()
+        real_index = self._payment_methods_page_start + row
         payment_methods = self.settings_service.get_setting("payment_methods") or []
 
-        if row >= len(payment_methods):
+        if real_index >= len(payment_methods):
             return
 
-        method_name = payment_methods[row].get("name", "")
+        method_name = payment_methods[real_index].get("name", "")
 
         reply = QMessageBox.question(
             self,
@@ -3265,7 +3788,7 @@ class SettingsTab(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            payment_methods.pop(row)
+            payment_methods.pop(real_index)
             self.settings_service.update_setting("payment_methods", payment_methods)
             self.load_payment_methods()
             QMessageBox.information(self, "✅ نجاح", "تم حذف طريقة الدفع")
@@ -3280,18 +3803,21 @@ class SettingsTab(QWidget):
                 if hasattr(self, "payment_methods_table")
                 else []
             )
-            payment_methods = self.settings_service.get_setting("payment_methods") or []
+            payment_methods = self._payment_methods_all
 
             if not selected:
                 self.payment_method_preview.setText("")
                 return
 
             row = selected[0].row()
-            if row >= len(payment_methods):
+            real_index = self._payment_methods_page_start + row
+            if real_index >= len(payment_methods):
                 self.payment_method_preview.setText("")
                 return
 
-            method = payment_methods[row] if isinstance(payment_methods[row], dict) else {}
+            method = (
+                payment_methods[real_index] if isinstance(payment_methods[real_index], dict) else {}
+            )
             name = method.get("name", "")
             desc = method.get("description", "")
             details = method.get("details", "")
@@ -3379,6 +3905,36 @@ class SettingsTab(QWidget):
         layout.addWidget(self.note_templates_search)
         layout.addWidget(self.note_templates_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.notes_prev_page_button = QPushButton("◀ السابق")
+        self.notes_prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.notes_prev_page_button.setFixedHeight(26)
+        self.notes_prev_page_button.clicked.connect(self._go_notes_prev_page)
+
+        self.notes_next_page_button = QPushButton("التالي ▶")
+        self.notes_next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.notes_next_page_button.setFixedHeight(26)
+        self.notes_next_page_button.clicked.connect(self._go_notes_next_page)
+
+        self.notes_page_info_label = QLabel("صفحة 1 / 1")
+        self.notes_page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.notes_page_size_combo = QComboBox()
+        self.notes_page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.notes_page_size_combo.setCurrentText("100")
+        self.notes_page_size_combo.currentTextChanged.connect(self._on_notes_page_size_changed)
+
+        pagination_layout.addWidget(self.notes_prev_page_button)
+        pagination_layout.addWidget(self.notes_next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.notes_page_size_combo)
+        pagination_layout.addWidget(self.notes_page_info_label)
+        layout.addLayout(pagination_layout)
+
         preview_group = QGroupBox("👁️ معاينة القالب")
         preview_layout = QVBoxLayout(preview_group)
         preview_layout.setContentsMargins(12, 16, 12, 12)
@@ -3437,24 +3993,90 @@ class SettingsTab(QWidget):
                 ]
                 self.settings_service.update_setting("project_note_templates", note_templates)
 
-            self.note_templates_table.setRowCount(len(note_templates))
-            for i, template in enumerate(note_templates):
-                self.note_templates_table.setItem(i, 0, create_centered_item(str(i + 1)))
-                self.note_templates_table.setItem(
-                    i, 1, create_centered_item(template.get("name", ""))
-                )
-                # عرض أول 50 حرف من المحتوى
-                content_preview = (
-                    template.get("content", "")[:50] + "..."
-                    if len(template.get("content", "")) > 50
-                    else template.get("content", "")
-                )
-                self.note_templates_table.setItem(i, 2, create_centered_item(content_preview))
+            self._note_templates_all = note_templates
+            self._render_note_templates_page()
 
             safe_print(f"INFO: [SettingsTab] تم تحميل {len(note_templates)} قالب ملاحظات")
             self._update_note_template_preview()
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل قوالب الملاحظات: {e}")
+
+    def _get_note_templates_total_pages(self) -> int:
+        total = len(self._note_templates_all)
+        if total == 0:
+            return 1
+        if self._note_templates_page_size <= 0:
+            return 1
+        return (total + self._note_templates_page_size - 1) // self._note_templates_page_size
+
+    def _render_note_templates_page(self):
+        total_pages = self._get_note_templates_total_pages()
+        if self._note_templates_current_page > total_pages:
+            self._note_templates_current_page = total_pages
+        if self._note_templates_current_page < 1:
+            self._note_templates_current_page = 1
+
+        if not self._note_templates_all:
+            self.note_templates_table.setRowCount(1)
+            empty_item = create_centered_item("لا توجد قوالب")
+            self.note_templates_table.setItem(0, 0, empty_item)
+            self.note_templates_table.setSpan(0, 0, 1, self.note_templates_table.columnCount())
+            self._update_note_templates_pagination_controls(total_pages)
+            self._note_templates_page_start = 0
+            return
+
+        if self._note_templates_page_size <= 0:
+            page_items = self._note_templates_all
+            self._note_templates_page_start = 0
+        else:
+            start_index = (self._note_templates_current_page - 1) * self._note_templates_page_size
+            end_index = start_index + self._note_templates_page_size
+            page_items = self._note_templates_all[start_index:end_index]
+            self._note_templates_page_start = start_index
+
+        self._populate_note_templates_table(page_items, self._note_templates_page_start)
+        self._update_note_templates_pagination_controls(total_pages)
+
+    def _populate_note_templates_table(self, templates: list[dict], start_index: int):
+        self.note_templates_table.setRowCount(len(templates))
+        for i, template in enumerate(templates):
+            row_number = start_index + i + 1
+            self.note_templates_table.setItem(i, 0, create_centered_item(str(row_number)))
+            self.note_templates_table.setItem(i, 1, create_centered_item(template.get("name", "")))
+            content_preview = (
+                template.get("content", "")[:50] + "..."
+                if len(template.get("content", "")) > 50
+                else template.get("content", "")
+            )
+            self.note_templates_table.setItem(i, 2, create_centered_item(content_preview))
+
+    def _update_note_templates_pagination_controls(self, total_pages: int):
+        self.notes_page_info_label.setText(
+            f"صفحة {self._note_templates_current_page} / {total_pages}"
+        )
+        self.notes_prev_page_button.setEnabled(self._note_templates_current_page > 1)
+        self.notes_next_page_button.setEnabled(self._note_templates_current_page < total_pages)
+
+    def _on_notes_page_size_changed(self, value: str):
+        if value == "كل":
+            self._note_templates_page_size = max(1, len(self._note_templates_all))
+        else:
+            try:
+                self._note_templates_page_size = int(value)
+            except Exception:
+                self._note_templates_page_size = 100
+        self._note_templates_current_page = 1
+        self._render_note_templates_page()
+
+    def _go_notes_prev_page(self):
+        if self._note_templates_current_page > 1:
+            self._note_templates_current_page -= 1
+            self._render_note_templates_page()
+
+    def _go_notes_next_page(self):
+        if self._note_templates_current_page < self._get_note_templates_total_pages():
+            self._note_templates_current_page += 1
+            self._render_note_templates_page()
 
     def _update_note_template_preview(self):
         try:
@@ -3466,18 +4088,19 @@ class SettingsTab(QWidget):
                 if hasattr(self, "note_templates_table")
                 else []
             )
-            templates = self.settings_service.get_setting("project_note_templates") or []
+            templates = self._note_templates_all
 
             if not selected:
                 self.note_template_preview.setText("")
                 return
 
             row = selected[0].row()
-            if row >= len(templates):
+            real_index = self._note_templates_page_start + row
+            if real_index >= len(templates):
                 self.note_template_preview.setText("")
                 return
 
-            t = templates[row] if isinstance(templates[row], dict) else {}
+            t = templates[real_index] if isinstance(templates[real_index], dict) else {}
             name = t.get("name", "")
             content = t.get("content", "")
             self.note_template_preview.setText(f"{name}\n\n{content}".strip())
@@ -3504,18 +4127,19 @@ class SettingsTab(QWidget):
             return
 
         row = selected[0].row()
+        real_index = self._note_templates_page_start + row
         note_templates = self.settings_service.get_setting("project_note_templates") or []
 
-        if row >= len(note_templates):
+        if real_index >= len(note_templates):
             return
 
-        template = note_templates[row]
+        template = note_templates[real_index]
 
         dialog = NoteTemplateDialog(self, template.get("name", ""), template.get("content", ""))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             name, content = dialog.get_data()
             if name and content:
-                note_templates[row] = {"name": name, "content": content}
+                note_templates[real_index] = {"name": name, "content": content}
                 self.settings_service.update_setting("project_note_templates", note_templates)
                 self.load_note_templates()
                 QMessageBox.information(self, "✅ نجاح", "تم تعديل القالب")
@@ -3528,12 +4152,13 @@ class SettingsTab(QWidget):
             return
 
         row = selected[0].row()
+        real_index = self._note_templates_page_start + row
         note_templates = self.settings_service.get_setting("project_note_templates") or []
 
-        if row >= len(note_templates):
+        if real_index >= len(note_templates):
             return
 
-        template_name = note_templates[row].get("name", "")
+        template_name = note_templates[real_index].get("name", "")
 
         reply = QMessageBox.question(
             self,
@@ -3543,7 +4168,7 @@ class SettingsTab(QWidget):
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            note_templates.pop(row)
+            note_templates.pop(real_index)
             self.settings_service.update_setting("project_note_templates", note_templates)
             self.load_note_templates()
             QMessageBox.information(self, "✅ نجاح", "تم حذف القالب")

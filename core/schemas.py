@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ClientStatus(str, Enum):
@@ -112,14 +112,14 @@ class Account(BaseSchema):
     description: str | None = None  # وصف الحساب
     status: AccountStatus = AccountStatus.ACTIVE
 
-    def model_post_init(self, __context: Any) -> None:
-        """مزامنة parent_code و parent_id بعد إنشاء الكائن"""
-        # إذا كان parent_id موجود و parent_code فارغ، انسخ القيمة
+    @model_validator(mode="after")
+    def _sync_parent_fields(self):
+        """مزامنة parent_code و parent_id بعد إنشاء الكائن."""
         if self.parent_id and not self.parent_code:
             self.parent_code = self.parent_id
-        # إذا كان parent_code موجود و parent_id فارغ، انسخ القيمة
         elif self.parent_code and not self.parent_id:
             self.parent_id = self.parent_code
+        return self
 
     def add_debit(self, amount: float):
         """إضافة مبلغ مدين"""

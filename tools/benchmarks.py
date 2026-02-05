@@ -21,20 +21,28 @@ def _measure(label: str, fn, runs: int = 50):
 
 
 def main():
+    import functools
+
     from core.event_bus import EventBus
     from core.repository import Repository
     from services.accounting_service import AccountingService
 
     print("== SkyWaveERP Benchmarks ==")
 
-    repo = _measure("Repository()", lambda: Repository(), runs=1)
-    bus = _measure("EventBus()", lambda: EventBus(), runs=1)
+    repo = _measure("Repository()", Repository, runs=1)
+    bus = _measure("EventBus()", EventBus, runs=1)
 
-    svc = _measure("AccountingService(repo,bus)", lambda: AccountingService(repo, bus), runs=1)
+    svc = _measure(
+        "AccountingService(repo,bus)", functools.partial(AccountingService, repo, bus), runs=1
+    )
 
     _measure("get_dashboard_stats()", svc.get_dashboard_stats, runs=10)
-    _measure("get_recent_journal_entries(8)", lambda: svc.get_recent_journal_entries(8), runs=10)
-    _measure("get_recent_activity(8)", lambda: svc.get_recent_activity(8), runs=10)
+    _measure(
+        "get_recent_journal_entries(8)",
+        functools.partial(svc.get_recent_journal_entries, 8),
+        runs=10,
+    )
+    _measure("get_recent_activity(8)", functools.partial(svc.get_recent_activity, 8), runs=10)
 
 
 if __name__ == "__main__":

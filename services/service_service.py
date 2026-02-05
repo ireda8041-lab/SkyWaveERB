@@ -2,6 +2,7 @@
 
 
 from core import schemas
+from core.cache_manager import get_cache, invalidate_cache
 from core.event_bus import EventBus
 from core.logger import get_logger
 from core.repository import Repository
@@ -54,9 +55,15 @@ class ServiceService:
             قائمة بجميع الخدمات النشطة
         """
         try:
-            return self.repo.get_all_services()
+            cache = get_cache("services")
+            cached = cache.get("active")
+            if cached is not None:
+                return cached
+            services = self.repo.get_all_services()
+            cache.set("active", services)
+            return services
         except Exception as e:
-            logger.error(f"[ServiceService] فشل جلب الخدمات: {e}", exc_info=True)
+            logger.error("[ServiceService] فشل جلب الخدمات: %s", e, exc_info=True)
             return []
 
     def get_archived_services(self) -> list[schemas.Service]:
@@ -67,9 +74,15 @@ class ServiceService:
             قائمة بجميع الخدمات المؤرشفة
         """
         try:
-            return self.repo.get_archived_services()
+            cache = get_cache("services")
+            cached = cache.get("archived")
+            if cached is not None:
+                return cached
+            services = self.repo.get_archived_services()
+            cache.set("archived", services)
+            return services
         except Exception as e:
-            logger.error(f"[ServiceService] فشل جلب الخدمات المؤرشفة: {e}", exc_info=True)
+            logger.error("[ServiceService] فشل جلب الخدمات المؤرشفة: %s", e, exc_info=True)
             return []
 
     def create_service(self, service_data: dict) -> schemas.Service:
@@ -85,18 +98,19 @@ class ServiceService:
         Raises:
             Exception: في حالة فشل إضافة الخدمة
         """
-        logger.info(f"[ServiceService] استلام طلب إضافة خدمة: {service_data.get('name')}")
+        logger.info("[ServiceService] استلام طلب إضافة خدمة: %s", service_data.get("name"))
         try:
             new_service_schema = schemas.Service(**service_data)
             created_service = self.repo.create_service(new_service_schema)
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed("services")
+            invalidate_cache("services")
             # 🔔 إشعار
             notify_operation("created", "service", created_service.name)
-            logger.info(f"[ServiceService] تم إضافة الخدمة {created_service.name} بنجاح")
+            logger.info("[ServiceService] تم إضافة الخدمة %s بنجاح", created_service.name)
             return created_service
         except Exception as e:
-            logger.error(f"[ServiceService] فشل إضافة الخدمة: {e}", exc_info=True)
+            logger.error("[ServiceService] فشل إضافة الخدمة: %s", e, exc_info=True)
             raise
 
     def update_service(self, service_id: str, new_data: dict) -> schemas.Service | None:
@@ -113,24 +127,25 @@ class ServiceService:
         Raises:
             Exception: في حالة عدم وجود الخدمة أو فشل التحديث
         """
-        logger.info(f"[ServiceService] استلام طلب تعديل الخدمة ID: {service_id}")
+        logger.info("[ServiceService] استلام طلب تعديل الخدمة ID: %s", service_id)
         try:
             existing_service = self.repo.get_service_by_id(service_id)
             if not existing_service:
-                raise Exception("الخدمة غير موجودة للتعديل")
+                raise ValueError("الخدمة غير موجودة للتعديل")
 
             updated_service_schema = existing_service.model_copy(update=new_data)
             saved_service = self.repo.update_service(service_id, updated_service_schema)
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed("services")
+            invalidate_cache("services")
 
             if saved_service is not None:
                 # 🔔 إشعار
                 notify_operation("updated", "service", saved_service.name)
-                logger.info(f"[ServiceService] تم تعديل الخدمة {saved_service.name} بنجاح")
+                logger.info("[ServiceService] تم تعديل الخدمة %s بنجاح", saved_service.name)
             return saved_service
         except Exception as e:
-            logger.error(f"[ServiceService] فشل تعديل الخدمة: {e}", exc_info=True)
+            logger.error("[ServiceService] فشل تعديل الخدمة: %s", e, exc_info=True)
             raise
 
     def delete_service(self, service_id: str) -> bool:
@@ -146,7 +161,7 @@ class ServiceService:
         Raises:
             Exception: في حالة فشل عملية الحذف
         """
-        logger.info(f"[ServiceService] استلام طلب حذف الخدمة نهائياً ID: {service_id}")
+        logger.info("[ServiceService] استلام طلب حذف الخدمة نهائياً ID: %s", service_id)
         try:
             # جلب اسم الخدمة قبل الحذف
             existing_service = self.repo.get_service_by_id(service_id)
@@ -156,10 +171,11 @@ class ServiceService:
             if success:
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed("services")
+                invalidate_cache("services")
                 # 🔔 إشعار
                 notify_operation("deleted", "service", service_name)
                 logger.info("[ServiceService] ✅ تم حذف الخدمة نهائياً")
             return success
         except Exception as e:
-            logger.error(f"[ServiceService] فشل حذف الخدمة: {e}", exc_info=True)
+            logger.error("[ServiceService] فشل حذف الخدمة: %s", e, exc_info=True)
             raise

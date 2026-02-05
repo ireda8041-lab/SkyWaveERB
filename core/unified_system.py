@@ -602,15 +602,15 @@ resource_manager = SafeResourceManager()
 cache_manager = SmartCacheManager()
 
 # مدير قاعدة البيانات (يُنشأ عند الحاجة)
-_db_context: SafeDatabaseContext | None = None
+_DB_CONTEXT: SafeDatabaseContext | None = None
 
 
 def get_db_context(repository: Repository) -> SafeDatabaseContext:
     """الحصول على مدير سياق قاعدة البيانات"""
-    global _db_context
-    if _db_context is None:
-        _db_context = SafeDatabaseContext(repository)
-    return _db_context
+    global _DB_CONTEXT
+    if _DB_CONTEXT is None:
+        _DB_CONTEXT = SafeDatabaseContext(repository)
+    return _DB_CONTEXT
 
 
 def get_signal_manager() -> SafeSignalManager:
@@ -632,12 +632,18 @@ def get_cache_manager() -> SmartCacheManager:
 # 🧹 دوال التنظيف الشاملة
 # ============================================================
 
+_CLEANUP_DONE = False
+
 
 def cleanup_all_systems():
     """
     تنظيف جميع الأنظمة عند إغلاق التطبيق
     يجب استدعاؤها في aboutToQuit أو _cleanup_on_exit
     """
+    global _CLEANUP_DONE  # pylint: disable=global-statement
+    if _CLEANUP_DONE:
+        return
+    _CLEANUP_DONE = True
     logger.info("🧹 بدء تنظيف جميع الأنظمة...")
 
     # 1. فصل جميع الإشارات
@@ -650,8 +656,8 @@ def cleanup_all_systems():
     cache_manager.invalidate_all()
 
     # 4. إغلاق الـ cursors
-    if _db_context:
-        _db_context.close_all_cursors()
+    if _DB_CONTEXT:
+        _DB_CONTEXT.close_all_cursors()
 
     logger.info("✅ تم تنظيف جميع الأنظمة")
 

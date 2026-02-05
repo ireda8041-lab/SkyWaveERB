@@ -15,10 +15,10 @@ class _FakeLoader:
         self,
         operation_name,
         load_function,
+        *args,
         on_success=None,
         on_error=None,
         use_thread_pool=True,
-        *args,
         **kwargs,
     ):
         if on_error:
@@ -29,12 +29,15 @@ def test_dashboard_refresh_data_reenables_button_on_error(qt_app, monkeypatch):
     import core.data_loader
     from ui.dashboard_tab import DashboardTab
 
-    monkeypatch.setattr(core.data_loader, "get_data_loader", lambda: _FakeLoader())
+    def _get_fake_loader():
+        return _FakeLoader()
+
+    monkeypatch.setattr(core.data_loader, "get_data_loader", _get_fake_loader)
 
     fake = type("FakeDashboard", (), {})()
     fake._is_refreshing = False
     fake._last_refresh_time = 0
-    fake._MIN_REFRESH_INTERVAL = 0
+    fake._min_refresh_interval = 0
     fake.refresh_btn = _DummyButton()
 
     DashboardTab.refresh_data(fake)

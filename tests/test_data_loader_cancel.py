@@ -10,10 +10,14 @@ def test_data_loader_cancel_prevents_execution_and_signal(qt_app):
         return 123
 
     runnable = DataLoaderRunnable(load_function)
-    runnable.signals.finished.connect(lambda value: finished.append(value))
+
+    def _on_finished(value):
+        finished.append(value)
+
+    runnable.signals.finished.connect(_on_finished)
 
     runnable.cancel()
     runnable.run()
 
-    assert called == []
-    assert finished == []
+    assert not called
+    assert not finished

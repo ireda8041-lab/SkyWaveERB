@@ -4,10 +4,14 @@
 """
 
 
+import time
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
@@ -53,6 +57,12 @@ class ExpenseManagerTab(QWidget):
         self.project_service = project_service
 
         self.expenses_list: list[schemas.Expense] = []
+        self._expenses_cache: dict[str, list[schemas.Expense]] = {}
+        self._expenses_cache_ts: dict[str, float] = {}
+        self._expenses_cache_ttl_s = 20.0
+        self._current_page = 1
+        self._page_size = 100
+        self._total_expenses_sum = 0.0
 
         # 📱 تجاوب: سياسة التمدد الكامل
         from PyQt6.QtWidgets import QSizePolicy
@@ -64,7 +74,7 @@ class ExpenseManagerTab(QWidget):
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
 
-        app_signals.expenses_changed.connect(self._on_expenses_changed)
+        app_signals.safe_connect(app_signals.expenses_changed, self._on_expenses_changed)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_expenses_data() - يتم استدعاؤها من MainWindow
@@ -157,6 +167,36 @@ class ExpenseManagerTab(QWidget):
 
         layout.addWidget(self.expenses_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setStyleSheet("color: #94a3b8;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        layout.addLayout(pagination_layout)
+
         # إجمالي المصروفات
         self.total_label = QLabel("إجمالي المصروفات: 0.00 ج.م")
         self.total_label.setFont(get_cairo_font(14, bold=True))
@@ -182,6 +222,9 @@ class ExpenseManagerTab(QWidget):
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
+        sorting_enabled = self.expenses_table.isSortingEnabled()
+        if sorting_enabled:
+            self.expenses_table.setSortingEnabled(False)
         self.expenses_table.setUpdatesEnabled(False)
         self.expenses_table.blockSignals(True)
         self.expenses_table.setRowCount(0)
@@ -198,40 +241,31 @@ class ExpenseManagerTab(QWidget):
         def on_data_loaded(expenses):
             try:
                 self.expenses_list = expenses
-                total_sum = 0.0
-
-                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
-                self.expenses_table.setRowCount(len(self.expenses_list))
-                for i, exp in enumerate(self.expenses_list):
-                    num_item = create_centered_item(str(i + 1))
-                    num_item.setData(Qt.ItemDataRole.UserRole, exp)
-                    self.expenses_table.setItem(i, 0, num_item)
-
-                    date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
-                    self.expenses_table.setItem(i, 1, create_centered_item(date_str))
-                    self.expenses_table.setItem(i, 2, create_centered_item(exp.category or ""))
-                    self.expenses_table.setItem(i, 3, create_centered_item(exp.description or ""))
-                    self.expenses_table.setItem(i, 4, create_centered_item(exp.project_id or "---"))
-
-                    amount_item = create_centered_item(f"{exp.amount:,.2f}")
-                    amount_item.setForeground(QColor("#ef4444"))
-                    self.expenses_table.setItem(i, 5, amount_item)
-
-                    total_sum += exp.amount
-
-                self.total_label.setText(f"إجمالي المصروفات: {total_sum:,.2f} ج.م")
+                self._total_expenses_sum = sum(exp.amount for exp in self.expenses_list)
+                self.total_label.setText(f"إجمالي المصروفات: {self._total_expenses_sum:,.2f} ج.م")
+                self._render_current_page()
                 safe_print(f"INFO: [ExpenseManager] ✅ تم تحميل {len(self.expenses_list)} مصروف.")
+                self._set_cached_expenses(expenses)
 
             except Exception as e:
                 safe_print(f"ERROR: [ExpenseManager] فشل تحديث الجدول: {e}")
             finally:
                 self.expenses_table.blockSignals(False)
                 self.expenses_table.setUpdatesEnabled(True)
+                if sorting_enabled:
+                    self.expenses_table.setSortingEnabled(True)
 
         def on_error(error_msg):
             safe_print(f"ERROR: [ExpenseManager] فشل تحميل المصروفات: {error_msg}")
             self.expenses_table.blockSignals(False)
             self.expenses_table.setUpdatesEnabled(True)
+            if sorting_enabled:
+                self.expenses_table.setSortingEnabled(True)
+
+        cached = self._get_cached_expenses()
+        if cached is not None:
+            on_data_loaded(cached)
+            return
 
         # تحميل في الخلفية
         data_loader = get_data_loader()
@@ -243,9 +277,95 @@ class ExpenseManagerTab(QWidget):
             use_thread_pool=True,
         )
 
+    def _get_total_pages(self) -> int:
+        total = len(self.expenses_list)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_items = self.expenses_list
+            start_index = 0
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_items = self.expenses_list[start_index:end_index]
+
+        self._populate_expenses_table(page_items, start_index)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_expenses_table(self, expenses: list[schemas.Expense], start_index: int):
+        self.expenses_table.setRowCount(len(expenses))
+        for i, exp in enumerate(expenses):
+            row_number = start_index + i + 1
+            num_item = create_centered_item(str(row_number))
+            num_item.setData(Qt.ItemDataRole.UserRole, exp)
+            self.expenses_table.setItem(i, 0, num_item)
+
+            date_str = exp.date.strftime("%Y-%m-%d") if exp.date else ""
+            self.expenses_table.setItem(i, 1, create_centered_item(date_str))
+            self.expenses_table.setItem(i, 2, create_centered_item(exp.category or ""))
+            self.expenses_table.setItem(i, 3, create_centered_item(exp.description or ""))
+            self.expenses_table.setItem(i, 4, create_centered_item(exp.project_id or "---"))
+
+            amount_item = create_centered_item(f"{exp.amount:,.2f}")
+            amount_item.setForeground(QColor("#ef4444"))
+            self.expenses_table.setItem(i, 5, amount_item)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self.expenses_list))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
+
+    def _get_cached_expenses(self) -> list[schemas.Expense] | None:
+        ts = self._expenses_cache_ts.get("all")
+        if ts is None:
+            return None
+        if (time.monotonic() - ts) > self._expenses_cache_ttl_s:
+            self._expenses_cache.pop("all", None)
+            self._expenses_cache_ts.pop("all", None)
+            return None
+        return self._expenses_cache.get("all")
+
+    def _set_cached_expenses(self, expenses: list[schemas.Expense]) -> None:
+        self._expenses_cache["all"] = expenses
+        self._expenses_cache_ts["all"] = time.monotonic()
+
     def _on_expenses_changed(self):
         """⚡ استجابة لإشارة تحديث المصروفات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ExpenseManager] ⚡ استلام إشارة تحديث المصروفات - جاري التحديث...")
+        self._expenses_cache.clear()
+        self._expenses_cache_ts.clear()
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
         if hasattr(self.expense_service, "invalidate_cache"):
             self.expense_service.invalidate_cache()

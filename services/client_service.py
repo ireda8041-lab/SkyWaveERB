@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 
 from core import schemas
 from core.logger import get_logger
-from core.repository import Repository
 from core.signals import app_signals
 
 if TYPE_CHECKING:
@@ -82,7 +81,7 @@ class ClientService:
 
             return clients
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب العملاء: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب العملاء: %s", e, exc_info=True)
             return []
 
     def invalidate_cache(self):
@@ -94,7 +93,7 @@ class ClientService:
         """
         ⚡ إضافة عميل جديد (مع إبطال الـ cache)
         """
-        logger.info(f"[ClientService] إضافة عميل: {client_data.name}")
+        logger.info("[ClientService] إضافة عميل: %s", client_data.name)
         try:
             created_client = self.repo.create_client(client_data)
             self.invalidate_cache()  # ⚡ إبطال الـ cache
@@ -113,10 +112,10 @@ class ClientService:
             else:
                 notify_operation("created", "client", created_client.name)
 
-            logger.info(f"[ClientService] ✅ تم إضافة العميل {created_client.name}")
+            logger.info("[ClientService] ✅ تم إضافة العميل %s", created_client.name)
             return created_client
         except Exception as e:
-            logger.error(f"[ClientService] فشل إضافة العميل: {e}", exc_info=True)
+            logger.error("[ClientService] فشل إضافة العميل: %s", e, exc_info=True)
             raise
 
     def update_client(self, client_id: str, new_data: dict) -> schemas.Client | None:
@@ -133,12 +132,12 @@ class ClientService:
         Raises:
             Exception: في حالة عدم وجود العميل أو فشل التحديث
         """
-        logger.info(f"[ClientService] تعديل العميل ID: {client_id}")
+        logger.info("[ClientService] تعديل العميل ID: %s", client_id)
 
         try:
             existing_client = self.repo.get_client_by_id(client_id)
             if not existing_client:
-                raise Exception("العميل غير موجود للتعديل")
+                raise LookupError("العميل غير موجود للتعديل")
 
             # ⚡ التعامل الذكي مع logo_data
             if "logo_data" in new_data:
@@ -150,21 +149,24 @@ class ClientService:
                 elif new_data["logo_data"]:
                     # صورة جديدة
                     logger.info(
-                        f"[ClientService] 📷 تحديث logo_data ({len(new_data['logo_data'])} حرف)"
+                        "[ClientService] 📷 تحديث logo_data (%s حرف)",
+                        len(new_data["logo_data"]),
                     )
                 else:
                     # logo_data فارغ - الاحتفاظ بالقديم
                     if existing_client.logo_data:
                         new_data["logo_data"] = existing_client.logo_data
                         logger.info(
-                            f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)"
+                            "[ClientService] 📷 الاحتفاظ بـ logo_data القديم (%s حرف)",
+                            len(existing_client.logo_data),
                         )
             else:
                 # logo_data غير موجود في new_data - الاحتفاظ بالقديم
                 if existing_client.logo_data:
                     new_data["logo_data"] = existing_client.logo_data
                     logger.info(
-                        f"[ClientService] 📷 الاحتفاظ بـ logo_data القديم ({len(existing_client.logo_data)} حرف)"
+                        "[ClientService] 📷 الاحتفاظ بـ logo_data القديم (%s حرف)",
+                        len(existing_client.logo_data),
                     )
 
             updated_client_schema = existing_client.model_copy(update=new_data)
@@ -202,11 +204,11 @@ class ClientService:
                 # تحديث عادي
                 notify_operation("updated", "client", updated_client_schema.name)
 
-            logger.info(f"[ClientService] ✅ تم تعديل العميل {updated_client_schema.name}")
+            logger.info("[ClientService] ✅ تم تعديل العميل %s", updated_client_schema.name)
             return saved_client
 
         except Exception as e:
-            logger.error(f"[ClientService] فشل تعديل العميل: {e}", exc_info=True)
+            logger.error("[ClientService] فشل تعديل العميل: %s", e, exc_info=True)
             raise
 
     def get_client_by_id(self, client_id: str) -> schemas.Client | None:
@@ -222,7 +224,7 @@ class ClientService:
         try:
             return self.repo.get_client_by_id(client_id)
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب العميل {client_id}: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب العميل %s: %s", client_id, e, exc_info=True)
             return None
 
     def get_client_by_name(self, name: str) -> schemas.Client | None:
@@ -238,7 +240,7 @@ class ClientService:
         try:
             return self.repo.get_client_by_name(name)
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب العميل بالاسم {name}: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب العميل بالاسم %s: %s", name, e, exc_info=True)
             return None
 
     def delete_client(self, client_id: str) -> bool:
@@ -254,7 +256,7 @@ class ClientService:
         Raises:
             Exception: في حالة فشل عملية الحذف
         """
-        logger.info(f"[ClientService] استلام طلب حذف العميل نهائياً ID: {client_id}")
+        logger.info("[ClientService] استلام طلب حذف العميل نهائياً ID: %s", client_id)
 
         try:
             success = self.repo.delete_client_permanently(client_id)
@@ -267,7 +269,7 @@ class ClientService:
                 logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:
-            logger.error(f"[ClientService] فشل حذف العميل: {e}", exc_info=True)
+            logger.error("[ClientService] فشل حذف العميل: %s", e, exc_info=True)
             raise
 
     def get_archived_clients(self) -> list[schemas.Client]:
@@ -280,7 +282,7 @@ class ClientService:
         try:
             return self.repo.get_archived_clients()
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب العملاء المؤرشفين: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب العملاء المؤرشفين: %s", e, exc_info=True)
             return []
 
     def search_clients(
@@ -317,11 +319,11 @@ class ClientService:
                 if len(results) >= limit:
                     break
 
-            logger.debug(f"[ClientService] تم العثور على {len(results)} عميل للبحث: {query}")
+            logger.debug("[ClientService] تم العثور على %s عميل للبحث: %s", len(results), query)
             return results
 
         except Exception as e:
-            logger.error(f"[ClientService] فشل البحث في العملاء: {e}", exc_info=True)
+            logger.error("[ClientService] فشل البحث في العملاء: %s", e, exc_info=True)
             return []
 
     def get_client_statistics(self) -> dict[str, Any]:
@@ -356,12 +358,14 @@ class ClientService:
             }
 
             logger.info(
-                f"[ClientService] إحصائيات العملاء: {stats['total_active']} نشط، {stats['total_archived']} مؤرشف"
+                "[ClientService] إحصائيات العملاء: %s نشط، %s مؤرشف",
+                stats["total_active"],
+                stats["total_archived"],
             )
             return stats
 
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب إحصائيات العملاء: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب إحصائيات العملاء: %s", e, exc_info=True)
             return {
                 "total_active": 0,
                 "total_archived": 0,
@@ -417,5 +421,5 @@ class ClientService:
                 cursor.close()
 
         except Exception as e:
-            logger.error(f"[ClientService] فشل جلب الإجماليات المالية: {e}", exc_info=True)
+            logger.error("[ClientService] فشل جلب الإجماليات المالية: %s", e, exc_info=True)
             return {}, {}

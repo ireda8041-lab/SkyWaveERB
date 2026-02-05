@@ -1,12 +1,16 @@
 # pylint: disable=too-many-lines,too-many-nested-blocks,too-many-positional-arguments,too-many-public-methods
 # الملف: services/accounting_service.py
 
+import threading
 import time
 import traceback
 from datetime import datetime, timedelta
 from typing import Any
 
+from PyQt6.QtCore import QTimer
+
 from core import schemas
+from core.cache_manager import get_cache, invalidate_cache
 from core.event_bus import EventBus
 from core.logger import get_logger
 from core.repository import Repository
@@ -81,6 +85,8 @@ class AccountingService:
         """
         self.repo = repository
         self.bus = event_bus
+        self._cash_recalc_in_flight = False
+        self._cash_recalc_lock = threading.Lock()
         logger.info("الروبوت المحاسبي (AccountingService) جاهز")
 
         # أهم خطوة: الروبوت بيشترك في الأحداث أول ما يشتغل
@@ -88,6 +94,15 @@ class AccountingService:
 
         # ⚡ التحقق من وجود الحسابات الأساسية
         self._ensure_default_accounts_exist()
+
+    def get_all_accounts_cached(self) -> list[schemas.Account]:
+        cache = get_cache("accounts")
+        cached = cache.get("all")
+        if cached is not None:
+            return cached
+        accounts = self.repo.get_all_accounts()
+        cache.set("all", accounts)
+        return accounts
 
     def _ensure_default_accounts_exist(self) -> None:
         """
@@ -115,7 +130,7 @@ class AccountingService:
                 },
             }
 
-            missing = [code for code in required_accounts.keys() if code not in existing_codes]
+            missing = [code for code in required_accounts if code not in existing_codes]
             if missing:
                 safe_print(f"WARNING: [AccountingService] ⚠️ حسابات مفقودة: {missing}")
                 for code in missing:
@@ -156,6 +171,31 @@ class AccountingService:
 
         except Exception as e:
             safe_print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
+
+    def _schedule_cash_recalc(self, emit_types: list[str] | None = None) -> bool:
+        with self._cash_recalc_lock:
+            if self._cash_recalc_in_flight:
+                return False
+            self._cash_recalc_in_flight = True
+
+        def worker():
+            try:
+                self._recalculate_cash_balances()
+            finally:
+
+                def finalize():
+                    self._cash_recalc_in_flight = False
+                    if emit_types:
+                        for data_type in emit_types:
+                            app_signals.emit_data_changed(data_type)
+
+                try:
+                    QTimer.singleShot(0, finalize)
+                except Exception:
+                    self._cash_recalc_in_flight = False
+
+        threading.Thread(target=worker, daemon=True).start()
+        return True
 
     def _recalculate_project_accounts(self) -> None:
         """
@@ -930,14 +970,7 @@ class AccountingService:
             AccountingService._hierarchy_cache_time = 0
 
             # ⚡ إعادة حساب جميع الحسابات النقدية (لأن الحساب القديم قد يكون مختلفاً)
-            self._recalculate_cash_balances()
-
-            # ⚡ إرسال إشارات التحديث
-            try:
-                app_signals.emit_data_changed("accounting")
-                app_signals.emit_data_changed("expenses")
-            except:
-                pass
+            self._schedule_cash_recalc(["accounting", "expenses"])
 
         except Exception:
             pass
@@ -951,12 +984,7 @@ class AccountingService:
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
 
-            self._recalculate_cash_balances()
-            try:
-                app_signals.emit_data_changed("accounting")
-                app_signals.emit_data_changed("expenses")
-            except:
-                pass
+            self._schedule_cash_recalc(["accounting", "expenses"])
         except Exception:
             pass
 
@@ -966,12 +994,7 @@ class AccountingService:
             # ⚡ إبطال الـ cache أولاً
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
-            self._recalculate_cash_balances()
-            try:
-                app_signals.emit_data_changed("accounting")
-                app_signals.emit_data_changed("payments")
-            except:
-                pass
+            self._schedule_cash_recalc(["accounting", "payments"])
         except Exception:
             pass
 
@@ -981,12 +1004,7 @@ class AccountingService:
             # ⚡ إبطال الـ cache أولاً
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
-            self._recalculate_cash_balances()
-            try:
-                app_signals.emit_data_changed("accounting")
-                app_signals.emit_data_changed("payments")
-            except:
-                pass
+            self._schedule_cash_recalc(["accounting", "payments"])
         except Exception:
             pass
 
@@ -996,12 +1014,7 @@ class AccountingService:
             # ⚡ إبطال الـ cache أولاً
             AccountingService._hierarchy_cache = None
             AccountingService._hierarchy_cache_time = 0
-            self._recalculate_cash_balances()
-            try:
-                app_signals.emit_data_changed("accounting")
-                app_signals.emit_data_changed("payments")
-            except:
-                pass
+            self._schedule_cash_recalc(["accounting", "payments"])
         except Exception:
             pass
 
@@ -1455,6 +1468,7 @@ class AccountingService:
 
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed("accounts")
+            invalidate_cache("accounts")
 
             # 🔔 إشعار
             notify_operation(
@@ -1531,6 +1545,7 @@ class AccountingService:
             if saved_account is not None:
                 # ⚡ إرسال إشارة التحديث الفوري
                 app_signals.emit_data_changed("accounts")
+                invalidate_cache("accounts")
                 # 🔔 إشعار
                 notify_operation(
                     "updated", "account", f"{saved_account.code} - {saved_account.name}"
@@ -1577,6 +1592,7 @@ class AccountingService:
             if result:
                 # ⚡ إرسال إشارة التحديث الفوري
                 app_signals.emit_data_changed("accounts")
+                invalidate_cache("accounts")
                 # 🔔 إشعار
                 notify_operation("deleted", "account", account_name)
             return result

@@ -7,6 +7,7 @@
 import base64
 import os
 import re
+import shutil
 import subprocess
 import sys
 import traceback
@@ -19,6 +20,7 @@ from PyQt6.QtWidgets import QApplication
 
 from core import schemas
 from core.base_service import BaseService
+from core.logo_utils import print_logo_png_data_url
 
 # ⚡ استيراد مكتبات PDF الاختيارية
 WEASYPRINT_AVAILABLE: bool | None = None
@@ -48,11 +50,11 @@ def _try_get_weasyprint():
             WEASYPRINT_IMPORT_ERROR = (combined.strip() or f"returncode={probe.returncode}")[:500]
             return None
 
-        from weasyprint import CSS as _CSS
-        from weasyprint import HTML as _HTML
+        from weasyprint import CSS as css_type
+        from weasyprint import HTML as html_type
 
-        CSS = _CSS
-        HTML = _HTML
+        CSS = css_type
+        HTML = html_type
         WEASYPRINT_AVAILABLE = True
         return CSS, HTML
     except Exception as e:
@@ -61,19 +63,19 @@ def _try_get_weasyprint():
         return None
 
 
-PDFKIT_AVAILABLE = False
+pdfkit_available = False
 try:
     import pdfkit
 
-    PDFKIT_AVAILABLE = True
+    pdfkit_available = True
 except Exception:
     pass
 
-QWEBENGINE_AVAILABLE = False
+qwebengine_available = False
 try:
     from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-    QWEBENGINE_AVAILABLE = True
+    qwebengine_available = True
 except Exception:
     pass
 
@@ -844,22 +846,91 @@ class TemplateService(BaseService):
                 except Exception as e:
                     safe_print(f"WARNING: [TemplateService] فشل تحميل العلامة المائية: {e}")
 
-            # ⚡ جلب ملاحظات المشروع
             project_notes = getattr(project, "project_notes", None) or (
                 project.get("project_notes", "") if isinstance(project, dict) else ""
             )
-            safe_print(f"INFO: [TemplateService] ملاحظات المشروع: '{project_notes}'")
-            safe_print(f"INFO: [TemplateService] discount_amount_raw: {discount_amount}")
 
             payment_methods = []
+            note_templates = []
             try:
                 if self.settings_service:
                     payment_methods = self.settings_service.get_setting("payment_methods") or []
+                    note_templates = (
+                        self.settings_service.get_setting("project_note_templates") or []
+                    )
             except Exception:
                 payment_methods = []
+                note_templates = []
+
+            if not project_notes:
+                for t in note_templates:
+                    if isinstance(t, dict):
+                        candidate = (t.get("content") or "").strip()
+                        if candidate:
+                            project_notes = candidate
+                            break
+
+            invoice_payment_methods = []
+            for method in payment_methods:
+                if not isinstance(method, dict):
+                    continue
+                if not method.get("active", True):
+                    continue
+                name = (method.get("name") or "").strip()
+                description = (method.get("description") or "").strip()
+                details = (method.get("details") or "").strip()
+                if not (name or description or details):
+                    continue
+                invoice_payment_methods.append(
+                    {
+                        "name": name,
+                        "description": description,
+                        "details": details,
+                    }
+                )
 
             # ⚡ نسبة الخصم (تم حسابها مسبقاً في project_discount_rate)
             discount_rate = project_discount_rate
+
+            client_logo_width_px = 120
+            client_logo_max_height_px = 40
+            client_logo_max_width_percent = 22
+            try:
+                if self.settings_service:
+                    client_logo_width_px = int(
+                        self.settings_service.get_setting("print_client_logo_width_px")
+                        or client_logo_width_px
+                    )
+                    client_logo_max_height_px = int(
+                        self.settings_service.get_setting("print_client_logo_max_height_px")
+                        or client_logo_max_height_px
+                    )
+                    client_logo_max_width_percent = int(
+                        self.settings_service.get_setting("print_client_logo_max_width_percent")
+                        or client_logo_max_width_percent
+                    )
+            except Exception:
+                pass
+
+            effective_max_w_px = max(1, int(client_logo_width_px))
+            try:
+                effective_max_w_px = min(
+                    effective_max_w_px,
+                    max(1, int(800 * (int(client_logo_max_width_percent) / 100.0))),
+                )
+            except Exception:
+                pass
+
+            client_logo_path = print_logo_png_data_url(
+                client_info.get("logo_data"),
+                client_info.get("logo_path"),
+                max_width_px=effective_max_w_px * 4,
+                max_height_px=int(client_logo_max_height_px) * 4,
+            )
+            circle_px = max(20, min(200, int(client_logo_max_height_px or 40)))
+            circle_px = int(round(circle_px / 4.0) * 4)
+            client_logo_circle_px = circle_px
+            client_logo_circle_class = f"client-logo-s{circle_px}"
 
             return {
                 # معلومات الفاتورة
@@ -877,6 +948,12 @@ class TemplateService(BaseService):
                 "client_phone": client_info.get("phone", "") or "",
                 "client_email": client_info.get("email", "") or "",
                 "client_address": client_info.get("address", "") or "",
+                "client_logo_path": client_logo_path,
+                "client_logo_width_px": client_logo_width_px,
+                "client_logo_max_height_px": client_logo_max_height_px,
+                "client_logo_max_width_percent": client_logo_max_width_percent,
+                "client_logo_circle_px": client_logo_circle_px,
+                "client_logo_circle_class": client_logo_circle_class,
                 # البنود
                 "items": items,
                 # الحسابات
@@ -900,7 +977,7 @@ class TemplateService(BaseService):
                 **project_data,
                 # ⚡ ملاحظات المشروع
                 "project_notes": project_notes,
-                "payment_methods": payment_methods,
+                "payment_methods": invoice_payment_methods,
                 # ⚡ العلامة المائية
                 "watermark_path": watermark_base64,
                 # متغيرات للتحقق
@@ -998,11 +1075,12 @@ class TemplateService(BaseService):
         # ⚡ محاولة 1: WeasyPrint (الأسرع)
         wp = _try_get_weasyprint()
         if wp:
-            _CSS, _HTML = wp
+            css_renderer, html_renderer = wp
             try:
                 safe_print("INFO: [TemplateService] ⚡ استخدام WeasyPrint...")
-                _HTML(string=html_content, base_url=self.templates_dir).write_pdf(
-                    pdf_path, stylesheets=[_CSS(string="@page { size: A4; margin: 0; }")]
+                html_renderer(string=html_content, base_url=self.templates_dir).write_pdf(
+                    pdf_path,
+                    stylesheets=[css_renderer(string="@page { size: A4; margin: 8.5mm 5mm; }")],
                 )
                 if os.path.exists(pdf_path):
                     safe_print("✅ [TemplateService] تم إنشاء PDF بـ WeasyPrint")
@@ -1016,30 +1094,70 @@ class TemplateService(BaseService):
                 )
 
         # ⚡ محاولة 2: pdfkit (wkhtmltopdf)
-        if PDFKIT_AVAILABLE:
-            try:
-                safe_print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
-                options = {
-                    "page-size": "A4",
-                    "margin-top": "0mm",
-                    "margin-right": "0mm",
-                    "margin-bottom": "0mm",
-                    "margin-left": "0mm",
-                    "encoding": "UTF-8",
-                    "no-outline": None,
-                    "quiet": "",
-                }
-                pdfkit.from_string(html_content, pdf_path, options=options)
-                if os.path.exists(pdf_path):
-                    safe_print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
-                    return pdf_path
-            except Exception as e:
-                safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
+        if pdfkit_available:
+            wkhtmltopdf_path = shutil.which("wkhtmltopdf")
+            if not wkhtmltopdf_path:
+                safe_print("INFO: [TemplateService] wkhtmltopdf غير متوفر - تخطي pdfkit")
+            else:
+                try:
+                    safe_print("INFO: [TemplateService] ⚡ استخدام pdfkit...")
+                    options = {
+                        "page-size": "A4",
+                        "margin-top": "8.5mm",
+                        "margin-right": "5mm",
+                        "margin-bottom": "8.5mm",
+                        "margin-left": "5mm",
+                        "encoding": "UTF-8",
+                        "no-outline": None,
+                        "quiet": "",
+                    }
+                    pdfkit.from_string(html_content, pdf_path, options=options)
+                    if os.path.exists(pdf_path):
+                        safe_print("✅ [TemplateService] تم إنشاء PDF بـ pdfkit")
+                        return pdf_path
+                except Exception as e:
+                    safe_print(f"WARNING: [TemplateService] فشل pdfkit: {e}")
         else:
             safe_print("INFO: [TemplateService] pdfkit غير متوفر")
 
-        # ⚡ محاولة 3: PyQt6 WebEngine (أبطأ لكن موجود)
-        if QWEBENGINE_AVAILABLE:
+        try:
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            ]
+            browser_path = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    browser_path = path
+                    break
+
+            if browser_path:
+                html_path = os.path.join(exports_dir, f"{filename}.html")
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(html_content)
+                abs_html_path = os.path.abspath(html_path)
+                abs_pdf_path = os.path.abspath(pdf_path)
+                cmd = [
+                    browser_path,
+                    "--headless",
+                    "--disable-gpu",
+                    "--print-to-pdf=" + abs_pdf_path,
+                    "file:///" + abs_html_path.replace("\\", "/"),
+                ]
+                subprocess.run(cmd, capture_output=True, timeout=30, check=False)
+                if os.path.exists(pdf_path):
+                    safe_print("✅ [TemplateService] تم إنشاء PDF بالمتصفح")
+                    try:
+                        os.remove(html_path)
+                    except Exception:
+                        pass
+                    return pdf_path
+        except Exception as e:
+            safe_print(f"WARNING: [TemplateService] فشل المتصفح: {e}")
+
+        if qwebengine_available:
             try:
                 return self._generate_pdf_with_qt(html_content, pdf_path)
             except Exception as e:
@@ -1062,11 +1180,12 @@ class TemplateService(BaseService):
         # محاولة 1: استخدام WeasyPrint
         wp = _try_get_weasyprint()
         if wp:
-            _CSS, _HTML = wp
+            css_renderer, html_renderer = wp
             try:
                 safe_print("INFO: [TemplateService] استخدام WeasyPrint لتوليد PDF...")
-                _HTML(string=html_content, base_url=self.templates_dir).write_pdf(
-                    pdf_path, stylesheets=[_CSS(string="@page { size: A4; margin: 0; }")]
+                html_renderer(string=html_content, base_url=self.templates_dir).write_pdf(
+                    pdf_path,
+                    stylesheets=[css_renderer(string="@page { size: A4; margin: 0; }")],
                 )
                 safe_print("✅ [TemplateService] تم إنشاء PDF باستخدام WeasyPrint")
                 return pdf_path
@@ -1121,7 +1240,8 @@ class TemplateService(BaseService):
                     loop.quit()
 
             web_view.loadFinished.connect(on_load_finished)
-            web_view.setHtml(html_content, QUrl.fromLocalFile(self.templates_dir + "/"))
+            base_dir = os.path.abspath(self.templates_dir)
+            web_view.setHtml(html_content, QUrl.fromLocalFile(base_dir + "/"))
 
             # ⚡ انتظار أقصى 5 ثواني (بدلاً من 3 ثواني ثابتة)
             QTimer.singleShot(5000, loop.quit)

@@ -32,9 +32,9 @@ class CursorContext:
             except Exception as e:
                 # تسجيل الخطأ لكن لا نرفع استثناء
                 try:
-                    from core.logger import logger
+                    from core.logger import get_logger
 
-                    logger.warning(f"فشل إغلاق cursor: {e}")
+                    get_logger(__name__).warning("فشل إغلاق cursor: %s", e)
                 except Exception:
                     pass  # تجاهل أخطاء الطباعة
 

@@ -157,13 +157,13 @@ class UnifiedSyncManagerV3(QObject):
                 # مزامنة جدول واحد
                 self._sync_single_table_to_cloud(table)
                 self._sync_single_table_from_cloud(table)
-                logger.debug(f"⚡ تم مزامنة {table} فوراً")
+                logger.debug("⚡ تم مزامنة %s فوراً", table)
             else:
                 # مزامنة كل الجداول
                 self._push_pending_changes()
                 logger.debug("⚡ تم رفع التغييرات المحلية فوراً")
         except Exception as e:
-            logger.debug(f"خطأ في المزامنة الفورية: {e}")
+            logger.debug("خطأ في المزامنة الفورية: %s", e)
 
     def _sync_single_table_from_cloud(self, table: str):
         """مزامنة جدول واحد من السحابة"""
@@ -176,7 +176,7 @@ class UnifiedSyncManagerV3(QObject):
         try:
             self._sync_table_from_cloud(table)
         except Exception as e:
-            logger.debug(f"خطأ في مزامنة {table} من السحابة: {e}")
+            logger.debug("خطأ في مزامنة %s من السحابة: %s", table, e)
 
     def _sync_single_table_to_cloud(self, table: str):
         """مزامنة جدول واحد فوراً"""
@@ -250,7 +250,7 @@ class UnifiedSyncManagerV3(QObject):
                 cursor.close()
 
         except Exception as e:
-            logger.debug(f"تجاهل خطأ مزامنة {table}: {e}")
+            logger.debug("تجاهل خطأ مزامنة %s: %s", table, e)
 
     # ==========================================
     # نظام المزامنة التلقائية الاحترافي
@@ -281,8 +281,8 @@ class UnifiedSyncManagerV3(QObject):
         # 4. مزامنة أولية بعد 5 ثواني
         QTimer.singleShot(5000, self._initial_sync)
 
-        logger.info(f"⏰ المزامنة التلقائية: كل {self._auto_sync_interval // 60000} دقيقة")
-        logger.info(f"⏰ رفع التغييرات: كل {self._quick_sync_interval // 60000} دقيقة")
+        logger.info("⏰ المزامنة التلقائية: كل %s دقيقة", self._auto_sync_interval // 60000)
+        logger.info("⏰ رفع التغييرات: كل %s دقيقة", self._quick_sync_interval // 60000)
 
     def stop_auto_sync(self):
         """⏹️ إيقاف نظام المزامنة التلقائية"""
@@ -379,11 +379,9 @@ class UnifiedSyncManagerV3(QObject):
                 self._push_pending_changes()
                 logger.info("✅ المزامنة الأولية: تم رفع التغييرات المحلية")
             except Exception as e:
-                logger.warning(f"⚠️ المزامنة الأولية: {e}")
+                logger.warning("⚠️ المزامنة الأولية: %s", e)
 
         # استخدام QTimer بدلاً من daemon thread
-        from PyQt6.QtCore import QTimer
-
         QTimer.singleShot(100, sync_thread)
 
     def _auto_full_sync(self):
@@ -399,11 +397,9 @@ class UnifiedSyncManagerV3(QObject):
                 self._push_pending_changes()
                 logger.debug("✅ مزامنة تلقائية: تم رفع التغييرات")
             except Exception as e:
-                logger.debug(f"مزامنة تلقائية: {e}")
+                logger.debug("مزامنة تلقائية: %s", e)
 
         # استخدام QTimer بدلاً من daemon thread
-        from PyQt6.QtCore import QTimer
-
         QTimer.singleShot(100, sync_thread)
 
     def _quick_push_changes(self):
@@ -445,22 +441,20 @@ class UnifiedSyncManagerV3(QObject):
                             self._push_pending_changes()
                         logger.debug("⚡ تم رفع التغييرات المحلية")
                     except Exception as e:
-                        logger.error(f"❌ فشل رفع التغييرات: {e}")
+                        logger.error("❌ فشل رفع التغييرات: %s", e)
 
                 # استخدام QTimer بدلاً من daemon thread
-                from PyQt6.QtCore import QTimer
-
                 QTimer.singleShot(100, push_thread)
 
         except Exception as e:
-            logger.debug(f"خطأ في فحص التغييرات: {e}")
+            logger.debug("خطأ في فحص التغييرات: %s", e)
 
     def set_auto_sync_interval(self, minutes: int):
         """⏰ تغيير فترة المزامنة التلقائية"""
         self._auto_sync_interval = minutes * 60 * 1000
         if self._auto_sync_timer:
             self._auto_sync_timer.setInterval(self._auto_sync_interval)
-        logger.info(f"⏰ تم تغيير فترة المزامنة إلى {minutes} دقيقة")
+        logger.info("⏰ تم تغيير فترة المزامنة إلى %s دقيقة", minutes)
 
     @property
     def is_online(self) -> bool:
@@ -537,10 +531,10 @@ class UnifiedSyncManagerV3(QObject):
                         results["total_synced"] += stats.get("synced", 0)
                         results["total_deleted"] += stats.get("deleted", 0)
                     except Exception as e:
-                        logger.error(f"❌ خطأ في مزامنة {table}: {e}")
+                        logger.error("❌ خطأ في مزامنة %s: %s", table, e)
                         results["tables"][table] = {"error": str(e)}
 
-            logger.info(f"✅ اكتملت المزامنة: {results['total_synced']} سجل")
+            logger.info("✅ اكتملت المزامنة: %s سجل", results["total_synced"])
             self.sync_completed.emit(results)
 
             # ⚡ إعادة حساب أرصدة الحسابات النقدية بعد المزامنة
@@ -552,7 +546,7 @@ class UnifiedSyncManagerV3(QObject):
                 AccountingService._hierarchy_cache_time = 0
                 logger.info("📊 تم إبطال cache الحسابات - سيتم إعادة الحساب عند فتح تاب المحاسبة")
             except Exception as e:
-                logger.warning(f"⚠️ فشل إبطال cache الحسابات: {e}")
+                logger.warning("⚠️ فشل إبطال cache الحسابات: %s", e)
 
             # ⚡ إرسال إشارات تحديث البيانات لتحديث الواجهة
             try:
@@ -565,10 +559,10 @@ class UnifiedSyncManagerV3(QObject):
                 app_signals.emit_data_changed("expenses")
                 logger.info("📢 تم إرسال إشارات تحديث الواجهة")
             except Exception as e:
-                logger.warning(f"⚠️ فشل إرسال إشارات التحديث: {e}")
+                logger.warning("⚠️ فشل إرسال إشارات التحديث: %s", e)
 
         except Exception as e:
-            logger.error(f"❌ خطأ في المزامنة الكاملة: {e}")
+            logger.error("❌ خطأ في المزامنة الكاملة: %s", e)
             results["success"] = False
             results["error"] = str(e)
             self.sync_error.emit(str(e))
@@ -601,7 +595,10 @@ class UnifiedSyncManagerV3(QObject):
                 # محاولة ping للتأكد من أن الاتصال فعال
                 self.repo.mongo_client.admin.command("ping")
             except Exception:
-                logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق أو غير متاح")
+                logger.debug(
+                    "تم تخطي مزامنة %s - MongoDB client مغلق أو غير متاح",
+                    table_name,
+                )
                 return stats
 
             # جلب البيانات من السحابة
@@ -613,12 +610,12 @@ class UnifiedSyncManagerV3(QObject):
                     "Cannot use MongoClient after close" in error_msg
                     or "InvalidOperation" in error_msg
                 ):
-                    logger.debug(f"تم تخطي مزامنة {table_name} - MongoDB client مغلق")
+                    logger.debug("تم تخطي مزامنة %s - MongoDB client مغلق", table_name)
                     return stats
                 raise
 
             if not cloud_data:
-                logger.info(f"لا توجد بيانات في {table_name}")
+                logger.info("لا توجد بيانات في %s", table_name)
                 return stats
 
             # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
@@ -662,13 +659,16 @@ class UnifiedSyncManagerV3(QObject):
                     ):
                         if "logo_data" in filtered:
                             logger.info(
-                                f"📷 [{unique_value}] logo_data سيتم حفظه ({len(filtered['logo_data'])} حرف)"
+                                "📷 [%s] logo_data سيتم حفظه (%s حرف)",
+                                unique_value,
+                                len(filtered["logo_data"]),
                             )
                         else:
                             logger.warning(
-                                f"⚠️ [{unique_value}] logo_data تم تجاهله! (غير موجود في أعمدة الجدول)"
+                                "⚠️ [%s] logo_data تم تجاهله! (غير موجود في أعمدة الجدول)",
+                                unique_value,
                             )
-                            logger.warning(f"   أعمدة الجدول: {table_columns}")
+                            logger.warning("   أعمدة الجدول: %s", table_columns)
 
                     if local_id:
                         # تحديث السجل الموجود
@@ -687,7 +687,11 @@ class UnifiedSyncManagerV3(QObject):
 
                 conn.commit()
                 logger.info(
-                    f"✅ {table_name}: +{stats['inserted']} ~{stats['updated']} -{stats['deleted']}"
+                    "✅ %s: +%s ~%s -%s",
+                    table_name,
+                    stats["inserted"],
+                    stats["updated"],
+                    stats["deleted"],
                 )
 
             finally:
@@ -698,7 +702,7 @@ class UnifiedSyncManagerV3(QObject):
                     pass
 
         except Exception as e:
-            logger.error(f"❌ خطأ في مزامنة {table_name}: {e}")
+            logger.error("❌ خطأ في مزامنة %s: %s", table_name, e)
             # ⚡ إغلاق الـ cursor في حالة الخطأ
             try:
                 cursor.close()
@@ -745,7 +749,7 @@ class UnifiedSyncManagerV3(QObject):
                         )
                     return local_id
         except Exception as e:
-            logger.debug(f"خطأ في البحث عن السجل: {e}")
+            logger.debug("خطأ في البحث عن السجل: %s", e)
 
         return None
 
@@ -769,7 +773,7 @@ class UnifiedSyncManagerV3(QObject):
             if local_mongo_id and local_mongo_id not in valid_mongo_ids:
                 cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (local_id,))
                 deleted += 1
-                logger.debug(f"حذف سجل يتيم: {table_name}/{local_id}")
+                logger.debug("حذف سجل يتيم: %s/%s", table_name, local_id)
 
         return deleted
 
@@ -784,7 +788,9 @@ class UnifiedSyncManagerV3(QObject):
             item["logo_data"] = data["logo_data"]
             client_name = data.get("name", "غير معروف")
             logger.info(
-                f"📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة"
+                "📷 [%s] جلب logo_data (%s حرف) من السحابة",
+                client_name,
+                len(data["logo_data"]),
             )
             safe_print(
                 f"INFO: 📷 [{client_name}] جلب logo_data ({len(data['logo_data'])} حرف) من السحابة"
@@ -811,7 +817,7 @@ class UnifiedSyncManagerV3(QObject):
         # تحويل القوائم والكائنات إلى JSON
         json_fields = ["items", "lines", "data", "milestones"]
         for field in json_fields:
-            if field in item and isinstance(item[field], (list, dict)):
+            if field in item and isinstance(item[field], list | dict):
                 item[field] = json.dumps(item[field], ensure_ascii=False)
 
         # التأكد من الحقول المطلوبة
@@ -855,7 +861,7 @@ class UnifiedSyncManagerV3(QObject):
                     if existing:
                         # تحديث بدلاً من إدراج
                         self._update_record(cursor, table_name, existing[0], data)
-                        logger.debug(f"تم تحديث دفعة موجودة: {project_id} - {amount}")
+                        logger.debug("تم تحديث دفعة موجودة: %s - %s", project_id, amount)
                         return
                 except Exception:
                     pass
@@ -884,7 +890,7 @@ class UnifiedSyncManagerV3(QObject):
                         row = cursor.fetchone()
                         if row:
                             self._update_record(cursor, table_name, row[0], data)
-                            logger.debug(f"تم تحديث السجل المكرر: {unique_value}")
+                            logger.debug("تم تحديث السجل المكرر: %s", unique_value)
                             return
                     except Exception:
                         pass
@@ -903,7 +909,7 @@ class UnifiedSyncManagerV3(QObject):
                         pass
 
                 # تجاهل الخطأ إذا فشل كل شيء
-                logger.debug(f"تجاهل سجل مكرر في {table_name}")
+                logger.debug("تجاهل سجل مكرر في %s", table_name)
             else:
                 raise
 
@@ -928,7 +934,7 @@ class UnifiedSyncManagerV3(QObject):
             try:
                 self._push_table_changes(table)
             except Exception as e:
-                logger.error(f"❌ خطأ في رفع {table}: {e}")
+                logger.error("❌ خطأ في رفع %s: %s", table, e)
 
     def _push_table_changes(self, table_name: str):
         """رفع تغييرات جدول واحد"""
@@ -940,14 +946,14 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         if self.repo.mongo_db is None or self.repo.mongo_client is None:
-            logger.debug(f"تم تخطي رفع {table_name} - MongoDB client غير متاح")
+            logger.debug("تم تخطي رفع %s - MongoDB client غير متاح", table_name)
             return
 
         # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
         try:
             cursor = self.repo.get_cursor()
         except Exception as e:
-            logger.debug(f"فشل إنشاء cursor: {e}")
+            logger.debug("فشل إنشاء cursor: %s", e)
             return
 
         conn = self.repo.sqlite_conn
@@ -963,7 +969,7 @@ class UnifiedSyncManagerV3(QObject):
             )
             unsynced = cursor.fetchall()
         except Exception as e:
-            logger.debug(f"فشل جلب السجلات غير المتزامنة: {e}")
+            logger.debug("فشل جلب السجلات غير المتزامنة: %s", e)
             cursor.close()
             return
 
@@ -975,7 +981,7 @@ class UnifiedSyncManagerV3(QObject):
             collection = self.repo.mongo_db[table_name]
         except Exception as e:
             if "Cannot use MongoClient after close" in str(e):
-                logger.warning(f"⚠️ MongoDB client مغلق - تخطي رفع {table_name}")
+                logger.warning("⚠️ MongoDB client مغلق - تخطي رفع %s", table_name)
             cursor.close()
             return
 
@@ -1038,14 +1044,14 @@ class UnifiedSyncManagerV3(QObject):
                 except Exception as e:
                     # ⚡ تجاهل أخطاء التكرار
                     if "duplicate key" in str(e).lower() or "E11000" in str(e):
-                        logger.debug(f"تجاهل سجل مكرر في {table_name}: {e}")
+                        logger.debug("تجاهل سجل مكرر في %s: %s", table_name, e)
                         # تحديث حالة المزامنة على أي حال
                         cursor.execute(
                             f"UPDATE {table_name} SET sync_status = 'synced' WHERE id = ?",
                             (local_id,),
                         )
                     else:
-                        logger.error(f"❌ فشل رفع {table_name}/{local_id}: {e}")
+                        logger.error("❌ فشل رفع %s/%s: %s", table_name, local_id, e)
 
             try:
                 conn.commit()
@@ -1053,7 +1059,7 @@ class UnifiedSyncManagerV3(QObject):
                 pass
 
             if pushed > 0:
-                logger.info(f"📤 {table_name}: رفع {pushed} سجل")
+                logger.info("📤 %s: رفع %s سجل", table_name, pushed)
 
         finally:
             # ⚡ إغلاق الـ cursor
@@ -1075,7 +1081,7 @@ class UnifiedSyncManagerV3(QObject):
         if "logo_data" in clean:
             if logo_data_value:
                 # صورة جديدة - رفعها للسحابة
-                logger.info(f"📷 رفع logo_data ({len(logo_data_value)} حرف) للسحابة")
+                logger.info("📷 رفع logo_data (%s حرف) للسحابة", len(logo_data_value))
             elif not logo_path_value:
                 # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
                 clean["logo_data"] = ""  # إرسال قيمة فارغة صريحة للحذف
@@ -1186,7 +1192,7 @@ class UnifiedSyncManagerV3(QObject):
 
                 if uploaded_count > 0:
                     conn.commit()
-                    logger.info(f"📤 تم رفع {uploaded_count} مستخدم للسحابة")
+                    logger.info("📤 تم رفع %s مستخدم للسحابة", uploaded_count)
 
                 # === 2. تنزيل المستخدمين من السحابة ===
                 logger.info("📥 جاري تنزيل المستخدمين من السحابة...")
@@ -1255,14 +1261,16 @@ class UnifiedSyncManagerV3(QObject):
 
                 conn.commit()
                 logger.info(
-                    f"✅ تم مزامنة المستخدمين (رفع: {uploaded_count}, تنزيل: {downloaded_count})"
+                    "✅ تم مزامنة المستخدمين (رفع: %s، تنزيل: %s)",
+                    uploaded_count,
+                    downloaded_count,
                 )
 
             finally:
                 cursor.close()
 
         except Exception as e:
-            logger.error(f"❌ خطأ في مزامنة المستخدمين: {e}")
+            logger.error("❌ خطأ في مزامنة المستخدمين: %s", e)
 
     # ==========================================
     # دوال التنظيف وإزالة التكرارات
@@ -1316,10 +1324,10 @@ class UnifiedSyncManagerV3(QObject):
                     results[table] = deleted
 
                     if deleted > 0:
-                        logger.info(f"🗑️ {table}: حذف {deleted} سجل مكرر")
+                        logger.info("🗑️ %s: حذف %s سجل مكرر", table, deleted)
 
                 except Exception as e:
-                    logger.error(f"❌ خطأ في إزالة تكرارات {table}: {e}")
+                    logger.error("❌ خطأ في إزالة تكرارات %s: %s", table, e)
                     results[table] = 0
         finally:
             cursor.close()
@@ -1346,9 +1354,9 @@ class UnifiedSyncManagerV3(QObject):
             for table in self.TABLES:
                 try:
                     cursor.execute(f"DELETE FROM {table}")
-                    logger.info(f"🗑️ تم مسح {table}")
+                    logger.info("🗑️ تم مسح %s", table)
                 except Exception as e:
-                    logger.error(f"❌ خطأ في مسح {table}: {e}")
+                    logger.error("❌ خطأ في مسح %s: %s", table, e)
 
             conn.commit()
         finally:
@@ -1405,9 +1413,9 @@ class UnifiedSyncManagerV3(QObject):
                 deleted = self._remove_cloud_table_duplicates(table)
                 results[table] = deleted
                 if deleted > 0:
-                    logger.info(f"🗑️ {table}: حذف {deleted} سجل مكرر من السحابة")
+                    logger.info("🗑️ %s: حذف %s سجل مكرر من السحابة", table, deleted)
             except Exception as e:
-                logger.error(f"❌ خطأ في تنظيف {table} من السحابة: {e}")
+                logger.error("❌ خطأ في تنظيف %s من السحابة: %s", table, e)
                 results[table] = 0
 
         return results

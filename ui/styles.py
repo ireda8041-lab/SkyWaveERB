@@ -939,9 +939,6 @@ QCheckBox::indicator:checked {{
 
 def apply_styles(app):
     """تطبيق الأنماط على التطبيق بالكامل مع خط Cairo فقط"""
-    import os
-    import sys
-
     from PyQt6.QtGui import QFont, QFontDatabase
 
     # تحديد المسار الصحيح للخط
@@ -1336,7 +1333,7 @@ def set_form_field_policies(form_layout):
         field_item = form_layout.itemAt(i, form_layout.ItemRole.FieldRole)
         if field_item and field_item.widget():
             widget = field_item.widget()
-            if isinstance(widget, (QLineEdit, QComboBox, QDateEdit, QSpinBox, QTextEdit)):
+            if isinstance(widget, QLineEdit | QComboBox | QDateEdit | QSpinBox | QTextEdit):
                 widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
 
@@ -1763,12 +1760,7 @@ def apply_responsive_styles_to_widget(widget):
     """
     تطبيق أنماط التجاوب على widget وكل أطفاله
     """
-    from PyQt6.QtWidgets import (
-        QDialog,
-        QGroupBox,
-        QTableWidget,
-        QTabWidget,
-    )
+    from PyQt6.QtWidgets import QDialog, QGroupBox, QTableWidget, QTabWidget
 
     # تطبيق على الـ widget نفسه
     if isinstance(widget, QDialog):
@@ -1964,13 +1956,7 @@ def apply_rtl_alignment_to_all_fields(widget):
         widget: الـ widget الأب الذي يحتوي على الحقول
     """
     from PyQt6.QtCore import Qt
-    from PyQt6.QtWidgets import (
-        QComboBox,
-        QDoubleSpinBox,
-        QLineEdit,
-        QSpinBox,
-        QTextEdit,
-    )
+    from PyQt6.QtWidgets import QComboBox, QDoubleSpinBox, QLineEdit, QSpinBox, QTextEdit
 
     # البحث عن كل حقول الإدخال
     for child in widget.findChildren(QLineEdit):

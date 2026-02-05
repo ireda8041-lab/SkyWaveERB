@@ -1,11 +1,16 @@
 """الملف: ui/service_manager.py"""
 
+import time
+
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QGroupBox,
+    QHBoxLayout,
     QHeaderView,
+    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -52,6 +57,12 @@ class ServiceManagerTab(QWidget):
         self.service_service = service_service
         self.services_list: list[schemas.Service] = []
         self.selected_service: schemas.Service | None = None
+        self._services_cache: dict[str, list[schemas.Service]] = {}
+        self._services_cache_ts: dict[str, float] = {}
+        self._services_cache_ttl_s = 20.0
+        self._current_page = 1
+        self._page_size = 100
+        self._current_page_services: list[schemas.Service] = []
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -153,6 +164,36 @@ class ServiceManagerTab(QWidget):
         table_layout.addWidget(self.services_table)
         main_layout.addWidget(table_groupbox, 1)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setStyleSheet("color: #94a3b8;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        main_layout.addLayout(pagination_layout)
+
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_services_data() - يتم استدعاؤها من MainWindow
         self.update_buttons_state(False)
@@ -187,8 +228,8 @@ class ServiceManagerTab(QWidget):
         selected_rows = self.services_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()
-            if 0 <= selected_index < len(self.services_list):
-                self.selected_service = self.services_list[selected_index]
+            if 0 <= selected_index < len(self._current_page_services):
+                self.selected_service = self._current_page_services[selected_index]
                 self.update_buttons_state(True)
                 return
         self.selected_service = None
@@ -201,6 +242,9 @@ class ServiceManagerTab(QWidget):
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
+        sorting_enabled = self.services_table.isSortingEnabled()
+        if sorting_enabled:
+            self.services_table.setSortingEnabled(False)
         self.services_table.setUpdatesEnabled(False)
         self.services_table.blockSignals(True)
         self.services_table.setRowCount(0)
@@ -221,58 +265,32 @@ class ServiceManagerTab(QWidget):
             try:
                 self.services_list = services
 
-                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
-                self.services_table.setRowCount(len(self.services_list))
-                for index, service in enumerate(self.services_list):
-                    self.services_table.setItem(index, 0, create_centered_item(service.name))
-
-                    # ⚡ الوصف (مختصر إذا كان طويل)
-                    description = service.description or ""
-                    description = description.strip()
-                    if description:
-                        display_desc = (
-                            description[:50] + "..." if len(description) > 50 else description
-                        )
-                        desc_item = create_centered_item(display_desc)
-                        desc_item.setToolTip(description)  # عرض الوصف الكامل عند التمرير
-                    else:
-                        desc_item = create_centered_item("-")
-                        desc_item.setForeground(QColor("#666666"))
-                    self.services_table.setItem(index, 1, desc_item)
-
-                    self.services_table.setItem(
-                        index, 2, create_centered_item(service.category or "")
-                    )
-                    self.services_table.setItem(
-                        index, 3, create_centered_item(f"{service.default_price:,.2f}")
-                    )
-
-                    # الحالة مع لون الخلفية
-                    bg_color = (
-                        QColor("#ef4444")
-                        if service.status == schemas.ServiceStatus.ARCHIVED
-                        else None
-                    )
-                    status_item = create_centered_item(service.status.value, bg_color)
-                    if service.status == schemas.ServiceStatus.ARCHIVED:
-                        status_item.setForeground(QColor("white"))
-                    self.services_table.setItem(index, 4, status_item)
-
-                    self.services_table.setRowHeight(index, 40)
-
+                self._render_current_page()
                 logger.info("[ServiceManager] ✅ تم تحميل %s خدمة", len(self.services_list))
                 self.update_buttons_state(False)
+                cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
+                self._set_cached_services(cache_key, services)
 
             except Exception as e:
                 logger.error("[ServiceManager] فشل تحديث الجدول: %s", e, exc_info=True)
             finally:
                 self.services_table.blockSignals(False)
                 self.services_table.setUpdatesEnabled(True)
+                if sorting_enabled:
+                    self.services_table.setSortingEnabled(True)
 
         def on_error(error_msg):
             logger.error("[ServiceManager] فشل تحميل الخدمات: %s", error_msg)
             self.services_table.blockSignals(False)
             self.services_table.setUpdatesEnabled(True)
+            if sorting_enabled:
+                self.services_table.setSortingEnabled(True)
+
+        cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
+        cached = self._get_cached_services(cache_key)
+        if cached is not None:
+            on_data_loaded(cached)
+            return
 
         # تحميل في الخلفية
         data_loader = get_data_loader()
@@ -284,13 +302,111 @@ class ServiceManagerTab(QWidget):
             use_thread_pool=True,
         )
 
+    def _get_total_pages(self) -> int:
+        total = len(self.services_list)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_services = self.services_list
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_services = self.services_list[start_index:end_index]
+
+        self._current_page_services = page_services
+        self._populate_services_table(page_services)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_services_table(self, services: list[schemas.Service]):
+        self.services_table.setRowCount(len(services))
+        for index, service in enumerate(services):
+            self.services_table.setItem(index, 0, create_centered_item(service.name))
+
+            description = service.description or ""
+            description = description.strip()
+            if description:
+                display_desc = description[:50] + "..." if len(description) > 50 else description
+                desc_item = create_centered_item(display_desc)
+                desc_item.setToolTip(description)
+            else:
+                desc_item = create_centered_item("-")
+                desc_item.setForeground(QColor("#666666"))
+            self.services_table.setItem(index, 1, desc_item)
+
+            self.services_table.setItem(index, 2, create_centered_item(service.category or ""))
+            self.services_table.setItem(
+                index, 3, create_centered_item(f"{service.default_price:,.2f}")
+            )
+
+            bg_color = (
+                QColor("#ef4444") if service.status == schemas.ServiceStatus.ARCHIVED else None
+            )
+            status_item = create_centered_item(service.status.value, bg_color)
+            if service.status == schemas.ServiceStatus.ARCHIVED:
+                status_item.setForeground(QColor("white"))
+            self.services_table.setItem(index, 4, status_item)
+            self.services_table.setRowHeight(index, 40)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self.services_list))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
+
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
+        self._services_cache.clear()
+        self._services_cache_ts.clear()
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
         if hasattr(self.service_service, "invalidate_cache"):
             self.service_service.invalidate_cache()
         self.load_services_data()
+
+    def _get_cached_services(self, key: str) -> list[schemas.Service] | None:
+        ts = self._services_cache_ts.get(key)
+        if ts is None:
+            return None
+        if (time.monotonic() - ts) > self._services_cache_ttl_s:
+            self._services_cache.pop(key, None)
+            self._services_cache_ts.pop(key, None)
+            return None
+        return self._services_cache.get(key)
+
+    def _set_cached_services(self, key: str, services: list[schemas.Service]) -> None:
+        self._services_cache[key] = services
+        self._services_cache_ts[key] = time.monotonic()
 
     def open_editor(self, service_to_edit: schemas.Service | None):
         dialog = ServiceEditorDialog(

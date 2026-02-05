@@ -19,9 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from core import schemas
-from core.event_bus import EventBus
 from core.logger import get_logger
-from core.repository import Repository
 from core.signals import app_signals
 
 if TYPE_CHECKING:
@@ -93,7 +91,7 @@ class ExpenseService:
 
             return expenses
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل جلب المصروفات: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل جلب المصروفات: %s", e, exc_info=True)
             return []
 
     def create_expense(self, expense_data: schemas.Expense) -> schemas.Expense:
@@ -115,7 +113,7 @@ class ExpenseService:
             ValueError: إذا لم يتم تحديد الحسابات المطلوبة
             Exception: في حالة فشل إضافة المصروف
         """
-        logger.info(f"[ExpenseService] استلام طلب إضافة مصروف: {expense_data.category}")
+        logger.info("[ExpenseService] استلام طلب إضافة مصروف: %s", expense_data.category)
 
         # التحقق من وجود الحسابات المطلوبة
         if not hasattr(expense_data, "account_id") or not expense_data.account_id:
@@ -146,7 +144,7 @@ class ExpenseService:
             return created_expense
 
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل إضافة المصروف: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل إضافة المصروف: %s", e, exc_info=True)
             raise
 
     def update_expense(self, expense_id: str, expense_data: schemas.Expense) -> bool:
@@ -163,7 +161,7 @@ class ExpenseService:
         Raises:
             Exception: في حالة فشل التحديث
         """
-        logger.info(f"[ExpenseService] استلام طلب تعديل مصروف: {expense_data.category}")
+        logger.info("[ExpenseService] استلام طلب تعديل مصروف: %s", expense_data.category)
         try:
             result = self.repo.update_expense(expense_id, expense_data)
             if result:
@@ -182,7 +180,7 @@ class ExpenseService:
                 logger.info("[ExpenseService] تم تعديل المصروف بنجاح")
             return result
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل تعديل المصروف: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل تعديل المصروف: %s", e, exc_info=True)
             raise
 
     def delete_expense(self, expense_id: str) -> bool:
@@ -198,7 +196,7 @@ class ExpenseService:
         Raises:
             Exception: في حالة فشل الحذف
         """
-        logger.info(f"[ExpenseService] استلام طلب حذف مصروف: {expense_id}")
+        logger.info("[ExpenseService] استلام طلب حذف مصروف: %s", expense_id)
         try:
             # ⚡ جلب بيانات المصروف قبل الحذف لمعرفة الحساب
             expense = self.repo.get_expense_by_id(expense_id)
@@ -216,7 +214,7 @@ class ExpenseService:
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل حذف المصروف: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل حذف المصروف: %s", e, exc_info=True)
             raise
 
     def get_expenses_by_category(self, category: str) -> list[schemas.Expense]:
@@ -233,7 +231,7 @@ class ExpenseService:
             all_expenses = self.repo.get_all_expenses()
             return [e for e in all_expenses if e.category == category]
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل جلب المصروفات بالفئة: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل جلب المصروفات بالفئة: %s", e, exc_info=True)
             return []
 
     def get_expenses_by_date_range(
@@ -253,7 +251,7 @@ class ExpenseService:
             all_expenses = self.repo.get_all_expenses()
             return [e for e in all_expenses if start_date <= e.date <= end_date]
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل جلب المصروفات بالفترة: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل جلب المصروفات بالفترة: %s", e, exc_info=True)
             return []
 
     def get_expense_statistics(
@@ -303,12 +301,14 @@ class ExpenseService:
             }
 
             logger.info(
-                f"[ExpenseService] إحصائيات المصروفات: {stats['count']} مصروف بإجمالي {stats['total_amount']}"
+                "[ExpenseService] إحصائيات المصروفات: %s مصروف بإجمالي %s",
+                stats["count"],
+                stats["total_amount"],
             )
             return stats
 
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل جلب إحصائيات المصروفات: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل جلب إحصائيات المصروفات: %s", e, exc_info=True)
             return {
                 "total_amount": 0,
                 "count": 0,
@@ -330,5 +330,5 @@ class ExpenseService:
             categories = {e.category for e in all_expenses if e.category}
             return sorted(categories)
         except Exception as e:
-            logger.error(f"[ExpenseService] فشل جلب فئات المصروفات: {e}", exc_info=True)
+            logger.error("[ExpenseService] فشل جلب فئات المصروفات: %s", e, exc_info=True)
             return []

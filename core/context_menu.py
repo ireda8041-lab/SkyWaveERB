@@ -228,5 +228,5 @@ class DoubleClickHandler:
             table: الجدول
             on_double_click: دالة تنفذ عند النقر المزدوج
         """
-        table.doubleClicked.connect(lambda: on_double_click())
+        table.doubleClicked.connect(on_double_click)
         logger.debug("تم إعداد معالج النقر المزدوج")

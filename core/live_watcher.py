@@ -404,16 +404,22 @@ class LiveUpdateRouter(QObject):
         safe_print("INFO: [LiveRouter] 🔄 تحديث جميع الواجهات")
 
         try:
-            # تحديث كل الواجهات
-            if hasattr(self.main_window, "clients_tab"):
-                QTimer.singleShot(100, self.main_window.clients_tab.load_clients)
-            if hasattr(self.main_window, "projects_tab"):
-                QTimer.singleShot(200, self.main_window.projects_tab.load_projects)
-            if hasattr(self.main_window, "services_tab"):
-                QTimer.singleShot(300, self.main_window.services_tab.load_services)
-            if hasattr(self.main_window, "accounting_tab"):
-                QTimer.singleShot(400, self.main_window.accounting_tab.load_accounts)
-            if hasattr(self.main_window, "dashboard_tab"):
-                QTimer.singleShot(500, self.main_window.dashboard_tab.refresh_data)
+            if hasattr(self.main_window, "refresh_table"):
+                tables = ["clients", "projects", "services", "accounts"]
+                for i, name in enumerate(tables):
+                    QTimer.singleShot(
+                        100 * (i + 1), lambda t=name: self.main_window.refresh_table(t)
+                    )
+            else:
+                if hasattr(self.main_window, "clients_tab"):
+                    QTimer.singleShot(100, self.main_window.clients_tab.load_clients)
+                if hasattr(self.main_window, "projects_tab"):
+                    QTimer.singleShot(200, self.main_window.projects_tab.load_projects)
+                if hasattr(self.main_window, "services_tab"):
+                    QTimer.singleShot(300, self.main_window.services_tab.load_services)
+                if hasattr(self.main_window, "accounting_tab"):
+                    QTimer.singleShot(400, self.main_window.accounting_tab.load_accounts)
+                if hasattr(self.main_window, "dashboard_tab"):
+                    QTimer.singleShot(500, self.main_window.dashboard_tab.refresh_data)
         except Exception as e:
             logger.debug("[LiveRouter] خطأ في تحديث الواجهات: %s", e)

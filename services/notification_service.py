@@ -111,7 +111,7 @@ class NotificationService:
                     },
                 )
 
-                logger.info(f"تم إنشاء إشعار: {title}")
+                logger.info("تم إنشاء إشعار: %s", title)
                 return saved_notification
 
             return None
@@ -170,14 +170,14 @@ class NotificationService:
                         )
                         self.repo.sqlite_conn.commit()
                     except Exception as e:
-                        logger.warning(f"فشل حفظ الإشعار في MongoDB: {e}")
+                        logger.warning("فشل حفظ الإشعار في MongoDB: %s", e)
             finally:
                 cursor.close()
 
             return notification
 
         except Exception as e:
-            logger.error(f"فشل حفظ الإشعار: {e}")
+            logger.error("فشل حفظ الإشعار: %s", e)
             return None
 
     def get_unread_notifications(self, limit: int = 50) -> list[Notification]:
@@ -218,7 +218,7 @@ class NotificationService:
             return notifications
 
         except Exception as e:
-            logger.error(f"فشل الحصول على الإشعارات غير المقروءة: {e}")
+            logger.error("فشل الحصول على الإشعارات غير المقروءة: %s", e)
             return []
 
     def get_all_notifications(self, limit: int = 100) -> list[Notification]:
@@ -257,7 +257,7 @@ class NotificationService:
             return notifications
 
         except Exception as e:
-            logger.error(f"فشل الحصول على الإشعارات: {e}")
+            logger.error("فشل الحصول على الإشعارات: %s", e)
             return []
 
     def get_recent_activities(self, limit: int = 10) -> list[Notification]:
@@ -292,11 +292,11 @@ class NotificationService:
                 if notification:
                     activities.append(notification)
 
-            logger.debug(f"تم جلب {len(activities)} نشاط حديث")
+            logger.debug("تم جلب %s نشاط حديث", len(activities))
             return activities
 
         except Exception as e:
-            logger.error(f"فشل الحصول على الأنشطة الحديثة: {e}")
+            logger.error("فشل الحصول على الأنشطة الحديثة: %s", e)
             return []
 
     def mark_as_read(self, notification_id: int) -> bool:
@@ -338,15 +338,15 @@ class NotificationService:
                                 {"_id": ObjectId(row["_mongo_id"])}, {"$set": {"is_read": True}}
                             )
                     except Exception as e:
-                        logger.warning(f"فشل تحديث الإشعار في MongoDB: {e}")
+                        logger.warning("فشل تحديث الإشعار في MongoDB: %s", e)
             finally:
                 cursor.close()
 
-            logger.debug(f"تم تحديد الإشعار {notification_id} كمقروء")
+            logger.debug("تم تحديد الإشعار %s كمقروء", notification_id)
             return True
 
         except Exception as e:
-            logger.error(f"فشل تحديد الإشعار كمقروء: {e}")
+            logger.error("فشل تحديد الإشعار كمقروء: %s", e)
             return False
 
     def mark_all_as_read(self) -> bool:
@@ -379,13 +379,13 @@ class NotificationService:
                         {"is_read": False}, {"$set": {"is_read": True}}
                     )
                 except Exception as e:
-                    logger.warning(f"فشل تحديث الإشعارات في MongoDB: {e}")
+                    logger.warning("فشل تحديث الإشعارات في MongoDB: %s", e)
 
             logger.info("تم تحديد جميع الإشعارات كمقروءة")
             return True
 
         except Exception as e:
-            logger.error(f"فشل تحديد جميع الإشعارات كمقروءة: {e}")
+            logger.error("فشل تحديد جميع الإشعارات كمقروءة: %s", e)
             return False
 
     def delete_notification(self, notification_id: int) -> bool:
@@ -420,13 +420,13 @@ class NotificationService:
 
                     self.repo.mongo_db.notifications.delete_one({"_id": ObjectId(row["_mongo_id"])})
                 except Exception as e:
-                    logger.warning(f"فشل حذف الإشعار من MongoDB: {e}")
+                    logger.warning("فشل حذف الإشعار من MongoDB: %s", e)
 
-            logger.debug(f"تم حذف الإشعار {notification_id}")
+            logger.debug("تم حذف الإشعار %s", notification_id)
             return True
 
         except Exception as e:
-            logger.error(f"فشل حذف الإشعار: {e}")
+            logger.error("فشل حذف الإشعار: %s", e)
             return False
 
     def delete_old_notifications(self, days: int = 30) -> int:
@@ -464,13 +464,13 @@ class NotificationService:
                         {"created_at": {"$lt": cutoff_date}, "is_read": True}
                     )
                 except Exception as e:
-                    logger.warning(f"فشل حذف الإشعارات القديمة من MongoDB: {e}")
+                    logger.warning("فشل حذف الإشعارات القديمة من MongoDB: %s", e)
 
-            logger.info(f"تم حذف {deleted_count} إشعار قديم")
+            logger.info("تم حذف %s إشعار قديم", deleted_count)
             return int(deleted_count)
 
         except Exception as e:
-            logger.error(f"فشل حذف الإشعارات القديمة: {e}")
+            logger.error("فشل حذف الإشعارات القديمة: %s", e)
             return 0
 
     def get_unread_count(self) -> int:
@@ -499,7 +499,7 @@ class NotificationService:
             return result[0] if result else 0
 
         except Exception as e:
-            logger.error(f"فشل الحصول على عدد الإشعارات غير المقروءة: {e}")
+            logger.error("فشل الحصول على عدد الإشعارات غير المقروءة: %s", e)
             return 0
 
     def _row_to_notification(self, row) -> Notification | None:
@@ -522,7 +522,7 @@ class NotificationService:
                 sync_status=row["sync_status"],
             )
         except Exception as e:
-            logger.error(f"فشل تحويل صف إلى Notification: {e}")
+            logger.error("فشل تحويل صف إلى Notification: %s", e)
             return None
 
     # --- معالجات الأحداث ---
@@ -542,7 +542,7 @@ class NotificationService:
                 related_entity_id=str(data.get("payment_id", "")),
             )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار الدفعة: {e}")
+            logger.error("فشل إنشاء إشعار الدفعة: %s", e)
 
     def _on_sync_failed(self, data: dict):
         """معالج حدث فشل المزامنة"""
@@ -558,7 +558,7 @@ class NotificationService:
                 related_entity_id=None,
             )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار فشل المزامنة: {e}")
+            logger.error("فشل إنشاء إشعار فشل المزامنة: %s", e)
 
     # ⚡ معالجات الأحداث الجديدة - آخر 10 أحداث
 
@@ -576,7 +576,7 @@ class NotificationService:
                     related_entity_id=str(client.id) if hasattr(client, "id") else None,
                 )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار العميل: {e}")
+            logger.error("فشل إنشاء إشعار العميل: %s", e)
 
     def _on_project_created(self, data: dict):
         """معالج حدث إنشاء مشروع جديد"""
@@ -592,7 +592,7 @@ class NotificationService:
                     related_entity_id=project.name,
                 )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار المشروع: {e}")
+            logger.error("فشل إنشاء إشعار المشروع: %s", e)
 
     def _on_invoice_created(self, data: dict):
         """معالج حدث إنشاء فاتورة جديدة"""
@@ -608,7 +608,7 @@ class NotificationService:
                     related_entity_id=invoice.invoice_number,
                 )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار الفاتورة: {e}")
+            logger.error("فشل إنشاء إشعار الفاتورة: %s", e)
 
     def _on_expense_created(self, data: dict):
         """معالج حدث إنشاء مصروف جديد"""
@@ -624,7 +624,7 @@ class NotificationService:
                     related_entity_id=str(expense.id) if hasattr(expense, "id") else None,
                 )
         except Exception as e:
-            logger.error(f"فشل إنشاء إشعار المصروف: {e}")
+            logger.error("فشل إنشاء إشعار المصروف: %s", e)
 
     def check_project_due_dates(self):
         """
@@ -690,4 +690,4 @@ class NotificationService:
             logger.debug("تم فحص مواعيد استحقاق المشاريع")
 
         except Exception as e:
-            logger.error(f"فشل فحص مواعيد استحقاق المشاريع: {e}")
+            logger.error("فشل فحص مواعيد استحقاق المشاريع: %s", e)

@@ -5,6 +5,7 @@
 يدعم النصوص العربية والتصميم الاحترافي
 """
 
+import base64
 import os
 import platform
 import subprocess
@@ -12,8 +13,10 @@ import sys
 import traceback
 import webbrowser
 from datetime import datetime
+from io import BytesIO
 from typing import Any
 
+from core.logo_utils import image_data_url_from_sources, rasterize_svg_to_png_bytes
 from core.repository import Repository
 
 # استيراد دالة الطباعة الآمنة أولاً
@@ -216,7 +219,7 @@ class PDFGenerator:
         story = []
 
         # --- HEADER SECTION ---
-        story.append(self._create_invoice_header(project))
+        story.append(self._create_invoice_header(project, client_info))
         story.append(Spacer(1, 0.5 * cm))
 
         # --- CLIENT INFO ---
@@ -293,11 +296,83 @@ class PDFGenerator:
         safe_print(f"INFO: [PDFGenerator] Ledger PDF created: {output_path}")
         return output_path
 
-    def _create_invoice_header(self, project: schemas.Project) -> Table:
+    def _data_url_to_reportlab_image(self, data_url: str, max_w_cm: float, max_h_cm: float):
+        try:
+            if not data_url or not data_url.startswith("data:"):
+                return ""
+            parts = data_url.split(",", 1)
+            if len(parts) != 2:
+                return ""
+            meta, payload = parts
+            mime = meta[5:].split(";", 1)[0].strip().lower()
+            raw = base64.b64decode(payload, validate=False)
+            if mime == "image/svg+xml":
+                png = rasterize_svg_to_png_bytes(raw, 600, 600)
+                if not png:
+                    return ""
+                raw = png
+                mime = "image/png"
+
+            try:
+                from PIL import Image as PILImage
+                from PIL import ImageDraw
+            except Exception:
+                return ""
+
+            im = PILImage.open(BytesIO(raw)).convert("RGBA")
+            w_px, h_px = im.size
+            size = int(min(w_px, h_px))
+            if size <= 0:
+                return ""
+
+            left = (w_px - size) // 2
+            top = (h_px - size) // 2
+            im = im.crop((left, top, left + size, top + size))
+
+            mask = PILImage.new("L", (size, size), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.ellipse((0, 0, size - 1, size - 1), fill=255)
+
+            out = PILImage.new("RGBA", (size, size), (0, 0, 0, 0))
+            out.paste(im, (0, 0), mask)
+            buf = BytesIO()
+            out.save(buf, format="PNG", optimize=True)
+            raw = buf.getvalue()
+
+            w_px, h_px = size, size
+            if w_px <= 0 or h_px <= 0:
+                return ""
+
+            max_w = max_w_cm * cm
+            max_h = max_h_cm * cm
+            scale = min(max_w / float(w_px), max_h / float(h_px))
+            out_w = max(1.0, float(w_px) * scale)
+            out_h = max(1.0, float(h_px) * scale)
+
+            return Image(BytesIO(raw), width=out_w, height=out_h)
+        except Exception:
+            return ""
+
+    def _create_invoice_header(
+        self, project: schemas.Project, client_info: dict[str, str]
+    ) -> Table:
         """إنشاء رأس الفاتورة"""
+        logo_cell = ""
+        try:
+            data_url = image_data_url_from_sources(
+                client_info.get("logo_data"), client_info.get("logo_path")
+            )
+            logo_cell = self._data_url_to_reportlab_image(data_url, max_w_cm=2.0, max_h_cm=2.0)
+        except Exception:
+            logo_cell = ""
+
         # بيانات الرأس
         header_data = [
-            [self.fix_arabic_text(self.company_info["name"]), "", f"Invoice #{project.name}"],
+            [
+                self.fix_arabic_text(self.company_info["name"]),
+                logo_cell,
+                f"Invoice #{project.name}",
+            ],
             [
                 self.fix_arabic_text(self.company_info["tagline"]),
                 "",
@@ -994,7 +1069,6 @@ class PrintingService:
                         "--headless",
                         "--disable-gpu",
                         "--print-to-pdf=" + abs_pdf_path,
-                        "--no-margins",
                         "file:///" + abs_html_path.replace("\\", "/"),
                     ]
 

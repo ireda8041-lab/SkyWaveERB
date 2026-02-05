@@ -5,6 +5,7 @@
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -22,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from services.template_service import TemplateService
-from ui.styles import TABLE_STYLE_DARK, create_centered_item, get_cairo_font
+from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 
 class TemplateEditorDialog(QDialog):
@@ -320,6 +321,9 @@ class TemplateManager(QWidget):
     def __init__(self, template_service: TemplateService, parent=None):
         super().__init__(parent)
         self.template_service = template_service
+        self._current_page = 1
+        self._page_size = 50
+        self._templates: list[dict] = []
 
         # 📱 تصميم متجاوب
         from PyQt6.QtWidgets import QSizePolicy
@@ -397,6 +401,36 @@ class TemplateManager(QWidget):
 
         layout.addWidget(self.templates_table)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["25", "50", "100", "كل"])
+        self.page_size_combo.setCurrentText("50")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        layout.addLayout(pagination_layout)
+
         # تطبيق الأنماط
         self.templates_table.setStyleSheet(TABLE_STYLE_DARK)
         # إصلاح مشكلة انعكاس الأعمدة في RTL
@@ -407,42 +441,90 @@ class TemplateManager(QWidget):
     def load_templates(self):
         """تحميل قائمة القوالب"""
         try:
-            templates = self.template_service.get_all_templates()
-
-            self.templates_table.setRowCount(len(templates))
-
-            for row, template in enumerate(templates):
-                # الاسم
-                name_item = create_centered_item(template["name"])
-                name_item.setData(Qt.ItemDataRole.UserRole, template["id"])
-                self.templates_table.setItem(row, 0, name_item)
-
-                # الوصف
-                self.templates_table.setItem(
-                    row, 1, create_centered_item(template["description"] or "")
-                )
-
-                # ملف القالب
-                self.templates_table.setItem(
-                    row, 2, create_centered_item(template["template_file"])
-                )
-
-                # افتراضي
-                self.templates_table.setItem(
-                    row, 3, create_centered_item("✓" if template["is_default"] else "")
-                )
-
-                # تاريخ الإنشاء
-                self.templates_table.setItem(
-                    row,
-                    4,
-                    create_centered_item(
-                        template["created_at"][:10] if template["created_at"] else ""
-                    ),
-                )
+            self._templates = self.template_service.get_all_templates()
+            self._render_current_page()
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"فشل في تحميل القوالب: {e}")
+
+    def _get_total_pages(self) -> int:
+        total = len(self._templates)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if not self._templates:
+            self.templates_table.setRowCount(0)
+            self._update_pagination_controls(total_pages)
+            return
+
+        if self._page_size <= 0:
+            page_items = self._templates
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_items = self._templates[start_index:end_index]
+
+        self._populate_templates_table(page_items)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_templates_table(self, templates: list[dict]):
+        self.templates_table.setRowCount(len(templates))
+        for row, template in enumerate(templates):
+            name_item = create_centered_item(template["name"])
+            name_item.setData(Qt.ItemDataRole.UserRole, template["id"])
+            self.templates_table.setItem(row, 0, name_item)
+
+            self.templates_table.setItem(
+                row, 1, create_centered_item(template["description"] or "")
+            )
+
+            self.templates_table.setItem(row, 2, create_centered_item(template["template_file"]))
+
+            self.templates_table.setItem(
+                row, 3, create_centered_item("✓" if template["is_default"] else "")
+            )
+
+            self.templates_table.setItem(
+                row,
+                4,
+                create_centered_item(template["created_at"][:10] if template["created_at"] else ""),
+            )
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self._templates))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 50
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
 
     def on_selection_changed(self):
         """عند تغيير التحديد"""

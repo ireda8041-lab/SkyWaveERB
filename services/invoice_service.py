@@ -46,7 +46,7 @@ class InvoiceService:
         try:
             return self.repo.get_all_invoices()
         except Exception as e:
-            logger.error(f"[InvoiceService] فشل جلب الفواتير: {e}", exc_info=True)
+            logger.error("[InvoiceService] فشل جلب الفواتير: %s", e, exc_info=True)
             return []
 
     def create_invoice(self, invoice_data: schemas.Invoice) -> schemas.Invoice:
@@ -62,7 +62,7 @@ class InvoiceService:
         Raises:
             Exception: في حالة فشل إنشاء الفاتورة
         """
-        logger.info(f"[InvoiceService] استلام طلب إنشاء فاتورة: {invoice_data.invoice_number}")
+        logger.info("[InvoiceService] استلام طلب إنشاء فاتورة: %s", invoice_data.invoice_number)
         try:
             created_invoice = self.repo.create_invoice(invoice_data)
             # إرسال الحدث للروبوت المحاسبي
@@ -71,10 +71,10 @@ class InvoiceService:
             app_signals.emit_data_changed("invoices")
             # 🔔 إشعار
             notify_operation("created", "invoice", created_invoice.invoice_number)
-            logger.info(f"[InvoiceService] تم إنشاء الفاتورة {created_invoice.invoice_number}")
+            logger.info("[InvoiceService] تم إنشاء الفاتورة %s", created_invoice.invoice_number)
             return created_invoice
         except Exception as e:
-            logger.error(f"[InvoiceService] فشل إنشاء الفاتورة: {e}", exc_info=True)
+            logger.error("[InvoiceService] فشل إنشاء الفاتورة: %s", e, exc_info=True)
             raise
 
     def update_invoice(
@@ -93,7 +93,7 @@ class InvoiceService:
         Raises:
             Exception: في حالة فشل التحديث
         """
-        logger.info(f"[InvoiceService] استلام طلب تعديل فاتورة: {invoice_data.invoice_number}")
+        logger.info("[InvoiceService] استلام طلب تعديل فاتورة: %s", invoice_data.invoice_number)
         try:
             updated_invoice = self.repo.update_invoice(invoice_id, invoice_data)
             if updated_invoice:
@@ -103,10 +103,10 @@ class InvoiceService:
                 app_signals.emit_data_changed("invoices")
                 # 🔔 إشعار
                 notify_operation("updated", "invoice", updated_invoice.invoice_number)
-                logger.info(f"[InvoiceService] تم تعديل الفاتورة {updated_invoice.invoice_number}")
+                logger.info("[InvoiceService] تم تعديل الفاتورة %s", updated_invoice.invoice_number)
             return updated_invoice
         except Exception as e:
-            logger.error(f"[InvoiceService] فشل تعديل الفاتورة: {e}", exc_info=True)
+            logger.error("[InvoiceService] فشل تعديل الفاتورة: %s", e, exc_info=True)
             raise
 
     def void_invoice(self, invoice_id: str) -> bool:
@@ -122,11 +122,11 @@ class InvoiceService:
         Raises:
             Exception: في حالة فشل الإلغاء
         """
-        logger.info(f"[InvoiceService] استلام طلب إلغاء فاتورة: {invoice_id}")
+        logger.info("[InvoiceService] استلام طلب إلغاء فاتورة: %s", invoice_id)
         try:
             invoice = self.repo.get_invoice_by_id(invoice_id)
             if not invoice:
-                raise Exception("الفاتورة غير موجودة")
+                raise ValueError("الفاتورة غير موجودة")
 
             # تحديث حالة الفاتورة لملغاة
             invoice.status = schemas.InvoiceStatus.VOID
@@ -139,11 +139,11 @@ class InvoiceService:
                 app_signals.emit_data_changed("invoices")
                 # 🔔 إشعار
                 notify_operation("voided", "invoice", updated_invoice.invoice_number)
-                logger.info(f"[InvoiceService] تم إلغاء الفاتورة {updated_invoice.invoice_number}")
+                logger.info("[InvoiceService] تم إلغاء الفاتورة %s", updated_invoice.invoice_number)
                 return True
             return False
         except Exception as e:
-            logger.error(f"[InvoiceService] فشل إلغاء الفاتورة: {e}", exc_info=True)
+            logger.error("[InvoiceService] فشل إلغاء الفاتورة: %s", e, exc_info=True)
             raise
 
     def get_invoice_by_id(self, invoice_id: str) -> schemas.Invoice | None:
@@ -159,5 +159,5 @@ class InvoiceService:
         try:
             return self.repo.get_invoice_by_id(invoice_id)
         except Exception as e:
-            logger.error(f"[InvoiceService] فشل جلب الفاتورة: {e}", exc_info=True)
+            logger.error("[InvoiceService] فشل جلب الفاتورة: %s", e, exc_info=True)
             return None

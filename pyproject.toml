@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skywave-erp"
-version = "2.1.0"
+version = "2.1.1"
 description = "نظام إدارة موارد المؤسسات - Sky Wave ERP"
 readme = "README.md"
 license = "MIT"
@@ -238,8 +238,25 @@ disable = [
     "R1710",  # inconsistent-return-statements
     "R1720",  # no-else-raise
     "R0911",  # too-many-return-statements
+    "C0327",  # mixed-line-endings
 ]
 
 [tool.pylint.format]
 max-line-length = 100
+
+[tool.pylint.design]
+max-module-lines = 5000
+max-public-methods = 40
+max-positional-arguments = 15
+
+[tool.pylint.refactoring]
+max-nested-blocks = 10
+
+[tool.pylint.basic]
+argument-rgx = "^(__[a-zA-Z0-9_]+__|_?[a-z][a-zA-Z0-9_]*)$"
+attr-rgx = "^(__[a-zA-Z0-9_]+__|_?[a-z][a-zA-Z0-9_]*)$"
+function-rgx = "^(__[a-zA-Z0-9_]+__|_?[a-z][a-zA-Z0-9_]*)$"
+method-rgx = "^(__[a-zA-Z0-9_]+__|_?[a-z][a-zA-Z0-9_]*)$"
+variable-rgx = "^(__[a-zA-Z0-9_]+__|_?[a-z][a-zA-Z0-9_]*)$"
+const-rgx = "^(__[a-zA-Z0-9_]+__|_?[A-Z][A-Z0-9_]*|_?[a-z][a-zA-Z0-9_]*)$"
 

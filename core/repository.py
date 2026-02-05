@@ -211,6 +211,7 @@ class Repository:
         self.mongo_db = None
         self._lock = threading.RLock()
         self._mongo_connecting = False
+        self._mongo_retry_thread_started = False
 
         # ⚡ Cache للبيانات المتكررة - TTL محسّن للسرعة
         if CACHE_ENABLED:
@@ -240,6 +241,7 @@ class Repository:
 
         # ⚡ 3. الاتصال بـ MongoDB في Background Thread (لا يعطل البرنامج)
         self._start_mongo_connection()
+        self._start_mongo_retry_loop()
 
     def get_cursor(self):
         """
@@ -310,6 +312,10 @@ class Repository:
 
     def _start_mongo_connection(self):
         """⚡ الاتصال بـ MongoDB في Background Thread - محسّن ومحاول"""
+        if os.environ.get("SKYWAVE_DISABLE_MONGO") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
+            safe_print("INFO: MongoDB معطل في بيئة الاختبار")
+            self.online = False
+            return
         # ⚡ فحص توفر pymongo أولاً
         if not PYMONGO_AVAILABLE or pymongo is None:
             safe_print("INFO: pymongo غير متاح - العمل بالبيانات المحلية فقط")
@@ -361,6 +367,26 @@ class Repository:
 
         # تشغيل الاتصال في thread منفصل
         thread = threading.Thread(target=connect_mongo, daemon=True)
+        thread.start()
+
+    def _start_mongo_retry_loop(self):
+        if self._mongo_retry_thread_started:
+            return
+        self._mongo_retry_thread_started = True
+
+        def retry_loop():
+            while True:
+                time.sleep(30)
+                if self.online:
+                    continue
+                if self._mongo_connecting:
+                    continue
+                try:
+                    self._start_mongo_connection()
+                except Exception:
+                    pass
+
+        thread = threading.Thread(target=retry_loop, daemon=True)
         thread.start()
 
     def _init_local_db(self):
@@ -2793,15 +2819,19 @@ class Repository:
         now_iso = datetime.now().isoformat()
 
         try:
-            # تحديث محلي
-            self.sqlite_cursor.execute(
-                """
-                UPDATE accounts SET balance = ?, last_modified = ?, sync_status = 'modified_offline'
-                WHERE code = ?
-            """,
-                (new_balance, now_iso, account_code),
-            )
-            self.sqlite_conn.commit()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        """
+                        UPDATE accounts SET balance = ?, last_modified = ?, sync_status = 'modified_offline'
+                        WHERE code = ?
+                    """,
+                        (new_balance, now_iso, account_code),
+                    )
+                    self.sqlite_conn.commit()
+                finally:
+                    cursor.close()
 
             # مزامنة مع MongoDB
             if self.online and self.mongo_db is not None:
@@ -2810,10 +2840,16 @@ class Repository:
                         {"code": account_code},
                         {"$set": {"balance": new_balance, "last_modified": datetime.now()}},
                     )
-                    self.sqlite_cursor.execute(
-                        "UPDATE accounts SET sync_status = 'synced' WHERE code = ?", (account_code,)
-                    )
-                    self.sqlite_conn.commit()
+                    with self._lock:
+                        cursor = self.sqlite_conn.cursor()
+                        try:
+                            cursor.execute(
+                                "UPDATE accounts SET sync_status = 'synced' WHERE code = ?",
+                                (account_code,),
+                            )
+                            self.sqlite_conn.commit()
+                        finally:
+                            cursor.close()
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل مزامنة الرصيد مع MongoDB: {e}")
 
@@ -4774,8 +4810,13 @@ class Repository:
                 safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (Mongo): {e}")
 
         try:
-            self.sqlite_cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
-            row = self.sqlite_cursor.fetchone()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
             if row:
                 row_dict = dict(row)
                 items_value = row_dict.get("items")
@@ -5792,30 +5833,34 @@ class Repository:
         if related_client == "":
             related_client = None
 
-        self.sqlite_cursor.execute(
-            sql,
-            (
-                "new_offline",
-                now_iso,
-                now_iso,
-                task_data.get("title", ""),
-                task_data.get("description") or None,
-                task_data.get("priority", "MEDIUM"),
-                task_data.get("status", "TODO"),
-                task_data.get("category", "GENERAL"),
-                task_data.get("due_date"),
-                task_data.get("due_time"),
-                task_data.get("completed_at"),
-                related_project,
-                related_client,
-                tags_json,
-                1 if task_data.get("reminder", False) else 0,
-                task_data.get("reminder_minutes", 30),
-            ),
-        )
-        self.sqlite_conn.commit()
-
-        local_id = self.sqlite_cursor.lastrowid
+        with self._lock:
+            cursor = self.sqlite_conn.cursor()
+            try:
+                cursor.execute(
+                    sql,
+                    (
+                        "new_offline",
+                        now_iso,
+                        now_iso,
+                        task_data.get("title", ""),
+                        task_data.get("description") or None,
+                        task_data.get("priority", "MEDIUM"),
+                        task_data.get("status", "TODO"),
+                        task_data.get("category", "GENERAL"),
+                        task_data.get("due_date"),
+                        task_data.get("due_time"),
+                        task_data.get("completed_at"),
+                        related_project,
+                        related_client,
+                        tags_json,
+                        1 if task_data.get("reminder", False) else 0,
+                        task_data.get("reminder_minutes", 30),
+                    ),
+                )
+                self.sqlite_conn.commit()
+                local_id = cursor.lastrowid
+            finally:
+                cursor.close()
         task_data["id"] = str(local_id)
         task_data["created_at"] = now_iso
         task_data["last_modified"] = now_iso
@@ -5882,29 +5927,34 @@ class Repository:
             WHERE id = ? OR _mongo_id = ?
         """
 
-        self.sqlite_cursor.execute(
-            sql,
-            (
-                task_data.get("title", ""),
-                task_data.get("description") or None,
-                task_data.get("priority", "MEDIUM"),
-                task_data.get("status", "TODO"),
-                task_data.get("category", "GENERAL"),
-                task_data.get("due_date"),
-                task_data.get("due_time"),
-                task_data.get("completed_at"),
-                related_project,
-                related_client,
-                tags_json,
-                1 if task_data.get("reminder", False) else 0,
-                task_data.get("reminder_minutes", 30),
-                1 if task_data.get("is_archived", False) else 0,
-                now_iso,
-                task_id,
-                task_id,
-            ),
-        )
-        self.sqlite_conn.commit()
+        with self._lock:
+            cursor = self.sqlite_conn.cursor()
+            try:
+                cursor.execute(
+                    sql,
+                    (
+                        task_data.get("title", ""),
+                        task_data.get("description") or None,
+                        task_data.get("priority", "MEDIUM"),
+                        task_data.get("status", "TODO"),
+                        task_data.get("category", "GENERAL"),
+                        task_data.get("due_date"),
+                        task_data.get("due_time"),
+                        task_data.get("completed_at"),
+                        related_project,
+                        related_client,
+                        tags_json,
+                        1 if task_data.get("reminder", False) else 0,
+                        task_data.get("reminder_minutes", 30),
+                        1 if task_data.get("is_archived", False) else 0,
+                        now_iso,
+                        task_id,
+                        task_id,
+                    ),
+                )
+                self.sqlite_conn.commit()
+            finally:
+                cursor.close()
 
         safe_print(f"INFO: [Repo] تم تحديث مهمة: {task_data.get('title')}")
 
@@ -5925,11 +5975,16 @@ class Repository:
                     {"$set": update_data},
                 )
 
-                self.sqlite_cursor.execute(
-                    "UPDATE tasks SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
-                    (task_id, task_id),
-                )
-                self.sqlite_conn.commit()
+                with self._lock:
+                    cursor = self.sqlite_conn.cursor()
+                    try:
+                        cursor.execute(
+                            "UPDATE tasks SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                            (task_id, task_id),
+                        )
+                        self.sqlite_conn.commit()
+                    finally:
+                        cursor.close()
             except Exception as e:
                 safe_print(f"WARNING: [Repo] فشل مزامنة تحديث المهمة: {e}")
 
@@ -5941,10 +5996,15 @@ class Repository:
         """
         try:
             # حذف من SQLite
-            self.sqlite_cursor.execute(
-                "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
-            )
-            self.sqlite_conn.commit()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
+                    )
+                    self.sqlite_conn.commit()
+                finally:
+                    cursor.close()
 
             safe_print(f"INFO: [Repo] تم حذف مهمة (ID: {task_id})")
 
@@ -5967,10 +6027,15 @@ class Repository:
         جلب مهمة بالـ ID
         """
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
-            )
-            row = self.sqlite_cursor.fetchone()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT * FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
+                    )
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
 
             if row:
                 return dict(self._row_to_task_dict(row))
@@ -5984,8 +6049,13 @@ class Repository:
         جلب جميع المهام
         """
         try:
-            self.sqlite_cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
 
             tasks = [self._row_to_task_dict(row) for row in rows]
             safe_print(f"INFO: [Repo] تم جلب {len(tasks)} مهمة")
@@ -5999,10 +6069,16 @@ class Repository:
         جلب المهام حسب الحالة
         """
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC", (status,)
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC",
+                        (status,),
+                    )
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب المهام بالحالة: {e}")
@@ -6013,11 +6089,36 @@ class Repository:
         جلب المهام المرتبطة بمشروع
         """
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM tasks WHERE related_project_id = ? ORDER BY created_at DESC",
-                (project_id,),
-            )
-            rows = self.sqlite_cursor.fetchall()
+            project_name = None
+            try:
+                if str(project_id).isdigit():
+                    with self._lock:
+                        cursor = self.sqlite_conn.cursor()
+                        try:
+                            cursor.execute("SELECT name FROM projects WHERE id = ?", (project_id,))
+                            row = cursor.fetchone()
+                            project_name = row[0] if row else None
+                        finally:
+                            cursor.close()
+            except Exception:
+                project_name = None
+
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    if project_name and project_name != project_id:
+                        cursor.execute(
+                            "SELECT * FROM tasks WHERE related_project_id = ? OR related_project_id = ? ORDER BY created_at DESC",
+                            (project_id, project_name),
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM tasks WHERE related_project_id = ? ORDER BY created_at DESC",
+                            (project_id,),
+                        )
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مهام المشروع: {e}")
@@ -6028,11 +6129,16 @@ class Repository:
         جلب المهام المرتبطة بعميل
         """
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM tasks WHERE related_client_id = ? ORDER BY created_at DESC",
-                (client_id,),
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT * FROM tasks WHERE related_client_id = ? ORDER BY created_at DESC",
+                        (client_id,),
+                    )
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مهام العميل: {e}")
@@ -6044,13 +6150,18 @@ class Repository:
         """
         try:
             now_iso = datetime.now().isoformat()
-            self.sqlite_cursor.execute(
-                """SELECT * FROM tasks
-                   WHERE due_date < ? AND status NOT IN ('COMPLETED', 'CANCELLED')
-                   ORDER BY due_date ASC""",
-                (now_iso,),
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        """SELECT * FROM tasks
+                           WHERE due_date < ? AND status NOT IN ('COMPLETED', 'CANCELLED')
+                           ORDER BY due_date ASC""",
+                        (now_iso,),
+                    )
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب المهام المتأخرة: {e}")
@@ -6062,13 +6173,18 @@ class Repository:
         """
         try:
             today = datetime.now().date().isoformat()
-            self.sqlite_cursor.execute(
-                """SELECT * FROM tasks
-                   WHERE date(due_date) = date(?)
-                   ORDER BY due_time ASC""",
-                (today,),
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        """SELECT * FROM tasks
+                           WHERE date(due_date) = date(?)
+                           ORDER BY due_time ASC""",
+                        (today,),
+                    )
+                    rows = cursor.fetchall()
+                finally:
+                    cursor.close()
             return [self._row_to_task_dict(row) for row in rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مهام اليوم: {e}")

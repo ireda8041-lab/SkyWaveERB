@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.1.0"
+#define MyAppVersion "2.1.1"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -79,8 +79,8 @@ Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 ; نسخ قاعدة البيانات الأولية من المجلد الجذري كاحتياطي (لو مش موجودة في _internal)
 Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
 
-; ✅ نسخ ملف الإعدادات البيئية (مهم للاتصال بـ MongoDB)
-Source: ".env"; DestDir: "{app}"; Flags: ignoreversion
+; ✅ نسخ ملف الإعدادات البيئية (اختياري للاتصال بـ MongoDB)
+Source: ".env"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; نسخ الأيقونة
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion

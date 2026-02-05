@@ -6,8 +6,9 @@
 """
 
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
+from PyQt6.QtWidgets import QApplication
 
 from core.logger import get_logger
 
@@ -49,6 +50,7 @@ class KeyboardShortcutManager(QObject):
         super().__init__()
         self.main_window = main_window
         self.shortcuts: dict[str, QShortcut] = {}
+        self._sequence_map: dict[str, QKeySequence] = {}
 
         # تعريف الاختصارات
         self.shortcut_definitions = {
@@ -99,22 +101,22 @@ class KeyboardShortcutManager(QObject):
             "tab_clients": {
                 "key": "Ctrl+4",
                 "description": "الانتقال إلى العملاء",
-                "action": lambda: self._switch_tab(3),
+                "action": lambda: self._switch_tab(4),
             },
             "tab_services": {
                 "key": "Ctrl+5",
                 "description": "الانتقال إلى الخدمات",
-                "action": lambda: self._switch_tab(4),
+                "action": lambda: self._switch_tab(5),
             },
             "tab_accounting": {
                 "key": "Ctrl+6",
                 "description": "الانتقال إلى المحاسبة",
-                "action": lambda: self._switch_tab(5),
+                "action": lambda: self._switch_tab(6),
             },
             "tab_settings": {
                 "key": "Ctrl+7",
                 "description": "الانتقال إلى الإعدادات",
-                "action": lambda: self._switch_tab(6),
+                "action": lambda: self._switch_tab(8),
             },
             # اختصارات إضافية
             "new_payment": {
@@ -157,7 +159,11 @@ class KeyboardShortcutManager(QObject):
         for name, definition in self.shortcut_definitions.items():
             self._create_shortcut(name, definition)
 
-        logger.info(f"تم إعداد {len(self.shortcuts)} اختصار")
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+        logger.info("تم إعداد %s اختصار", len(self.shortcuts))
 
     def _create_shortcut(self, name: str, definition: dict):
         """
@@ -169,9 +175,11 @@ class KeyboardShortcutManager(QObject):
         """
         try:
             shortcut = QShortcut(QKeySequence(definition["key"]), self.main_window)
+            self._sequence_map[name] = QKeySequence(definition["key"])
 
             # ⚡ تفعيل الاختصار دائماً
             shortcut.setEnabled(True)
+            shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
             shortcut.setAutoRepeat(False)  # منع التكرار التلقائي
 
             # ربط الاختصار بالإجراء أو الإشارة
@@ -181,10 +189,10 @@ class KeyboardShortcutManager(QObject):
                 shortcut.activated.connect(definition["action"])
 
             self.shortcuts[name] = shortcut
-            logger.debug(f"تم إنشاء اختصار: {name} ({definition['key']})")
+            logger.debug("تم إنشاء اختصار: %s (%s)", name, definition["key"])
 
         except Exception as e:
-            logger.error(f"فشل إنشاء اختصار {name}: {e}")
+            logger.error("فشل إنشاء اختصار %s: %s", name, e)
 
     def _switch_tab(self, index: int):
         """
@@ -197,9 +205,9 @@ class KeyboardShortcutManager(QObject):
             if hasattr(self.main_window, "tabs"):
                 if index < self.main_window.tabs.count():
                     self.main_window.tabs.setCurrentIndex(index)
-                    logger.debug(f"تم التبديل إلى التاب {index}")
+                    logger.debug("تم التبديل إلى التاب %s", index)
         except Exception as e:
-            logger.error(f"فشل التبديل إلى التاب {index}: {e}")
+            logger.error("فشل التبديل إلى التاب %s: %s", index, e)
 
     def get_all_shortcuts(self) -> dict[str, dict]:
         """
@@ -232,7 +240,7 @@ class KeyboardShortcutManager(QObject):
         shortcut = self.shortcuts.get(name)
         if shortcut:
             shortcut.setEnabled(True)
-            logger.debug(f"تم تفعيل الاختصار: {name}")
+            logger.debug("تم تفعيل الاختصار: %s", name)
 
     def disable_shortcut(self, name: str):
         """
@@ -244,7 +252,7 @@ class KeyboardShortcutManager(QObject):
         shortcut = self.shortcuts.get(name)
         if shortcut:
             shortcut.setEnabled(False)
-            logger.debug(f"تم تعطيل الاختصار: {name}")
+            logger.debug("تم تعطيل الاختصار: %s", name)
 
     def enable_all(self):
         """تفعيل جميع الاختصارات"""
@@ -257,6 +265,73 @@ class KeyboardShortcutManager(QObject):
         for shortcut in self.shortcuts.values():
             shortcut.setEnabled(False)
         logger.info("تم تعطيل جميع الاختصارات")
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.ShortcutOverride:
+            if self._match_sequence(event):
+                event.accept()
+                return True
+            return False
+
+        if event.type() != QEvent.Type.KeyPress:
+            return False
+
+        if event.isAutoRepeat():
+            return False
+
+        return self._trigger_sequence(event)
+
+    def _match_sequence(self, event) -> bool:
+        key = event.key()
+        if key == Qt.Key.Key_unknown:
+            return False
+
+        modifiers = event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.ShiftModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        )
+        sequence = QKeySequence(int(modifiers.value) | key)
+        sequence_text = sequence.toString(QKeySequence.SequenceFormat.PortableText)
+        for name in self.shortcut_definitions:
+            expected = self._sequence_map.get(name)
+            if not expected:
+                continue
+            expected_text = expected.toString(QKeySequence.SequenceFormat.PortableText)
+            if expected_text == sequence_text:
+                return True
+        return False
+
+    def _trigger_sequence(self, event) -> bool:
+
+        key = event.key()
+        if key == Qt.Key.Key_unknown:
+            return False
+
+        modifiers = event.modifiers() & (
+            Qt.KeyboardModifier.ControlModifier
+            | Qt.KeyboardModifier.ShiftModifier
+            | Qt.KeyboardModifier.AltModifier
+            | Qt.KeyboardModifier.MetaModifier
+        )
+        sequence = QKeySequence(int(modifiers.value) | key)
+        sequence_text = sequence.toString(QKeySequence.SequenceFormat.PortableText)
+        for name, definition in self.shortcut_definitions.items():
+            expected = self._sequence_map.get(name)
+            if not expected:
+                continue
+
+            expected_text = expected.toString(QKeySequence.SequenceFormat.PortableText)
+            if expected_text == sequence_text:
+                if "signal" in definition:
+                    QTimer.singleShot(0, definition["signal"].emit)
+                    return True
+                if "action" in definition:
+                    QTimer.singleShot(0, definition["action"])
+                    return True
+
+        return False
 
     def get_shortcuts_by_category(self) -> dict[str, list]:
         """

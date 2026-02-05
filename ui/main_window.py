@@ -331,7 +331,7 @@ class MainWindow(QMainWindow):
         # استخدام app_signals مباشرة لأن Repository ليس QObject
         # ⚡ ملاحظة: الإشارات المحددة (clients_changed, etc.) مربوطة أعلاه
         # لذلك نربط data_changed فقط للجداول غير المغطاة
-        app_signals.data_changed.connect(self.handle_data_change)
+        app_signals.safe_connect(app_signals.data_changed, self.handle_data_change)
         safe_print("✅ تم ربط app_signals.data_changed مباشرة بالواجهة!")
 
         # ربط زر تسجيل الخروج
@@ -449,7 +449,7 @@ class MainWindow(QMainWindow):
 
         TaskService._repository = self.accounting_service.repo
         TaskService._instance = None
-        TaskService(repository=self.accounting_service.repo)
+        TaskService(repository=self.accounting_service.repo, load_now=False)
         self.todo_tab = TodoManagerWidget(
             project_service=self.project_service, client_service=self.client_service
         )
@@ -665,15 +665,22 @@ class MainWindow(QMainWindow):
     def _check_project_due_dates_background(self):
         """⚡ فحص مواعيد المشاريع في الخلفية (لتجنب التجميد)"""
 
-        def check_in_background():
-            try:
-                if self.notification_service:
-                    self.notification_service.check_project_due_dates()
-            except Exception as e:
-                safe_print(f"WARNING: فشل فحص مواعيد المشاريع: {e}")
+        def fetch_due_dates():
+            if self.notification_service:
+                self.notification_service.check_project_due_dates()
+            return True
 
-        # استخدام QTimer بدلاً من daemon thread
-        QTimer.singleShot(1000, check_in_background)  # تأخير ثانية واحدة
+        def on_error(error_msg):
+            safe_print(f"WARNING: فشل فحص مواعيد المشاريع: {error_msg}")
+
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="project_due_dates",
+            load_function=fetch_due_dates,
+            on_success=lambda _result: None,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
     def _load_initial_data(self):
         """تحميل البيانات الأولية بدون تجميد - deprecated"""
@@ -752,19 +759,27 @@ class MainWindow(QMainWindow):
             safe_print(f"INFO: [MainWindow] 🔄 تحديث جدول: {table_name}")
 
             if table_name == "clients":
+                if not self._can_refresh("clients", min_interval=1.0):
+                    return
                 if hasattr(self, "clients_tab") and hasattr(self.clients_tab, "load_clients"):
                     QTimer.singleShot(100, self.clients_tab.load_clients)
 
             elif table_name == "projects":
+                if not self._can_refresh("projects", min_interval=1.0):
+                    return
                 if hasattr(self, "projects_tab") and hasattr(self.projects_tab, "load_projects"):
                     QTimer.singleShot(100, self.projects_tab.load_projects)
                 # ⚡ ملاحظة: المحاسبة تُحدث تلقائياً عبر signals.py
 
             elif table_name == "services":
+                if not self._can_refresh("services", min_interval=1.0):
+                    return
                 if hasattr(self, "services_tab") and hasattr(self.services_tab, "load_services"):
                     QTimer.singleShot(100, self.services_tab.load_services)
 
             elif table_name == "payments":
+                if not self._can_refresh("payments", min_interval=1.0):
+                    return
                 if hasattr(self, "payments_tab") and hasattr(self.payments_tab, "load_payments"):
                     QTimer.singleShot(100, self.payments_tab.load_payments)
                 # ⚡ تحديث الحسابات أيضاً (الأرصدة تتغير)
@@ -774,6 +789,8 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(300, self.accounting_tab.load_accounts_data)
 
             elif table_name == "expenses":
+                if not self._can_refresh("expenses", min_interval=1.0):
+                    return
                 if hasattr(self, "expense_tab") and hasattr(self.expense_tab, "load_expenses"):
                     QTimer.singleShot(100, self.expense_tab.load_expenses)
                 # ⚡ تحديث الحسابات أيضاً (الأرصدة تتغير)
@@ -783,17 +800,24 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(300, self.accounting_tab.load_accounts_data)
 
             elif table_name == "accounts":
+                if not self._can_refresh("accounts", min_interval=1.0):
+                    return
                 if hasattr(self, "accounting_tab") and hasattr(
                     self.accounting_tab, "load_accounts_data"
                 ):
                     QTimer.singleShot(100, self.accounting_tab.load_accounts_data)
 
             elif table_name == "tasks":
+                if not self._can_refresh("tasks", min_interval=1.0):
+                    return
                 if hasattr(self, "todo_tab") and hasattr(self.todo_tab, "load_tasks"):
                     QTimer.singleShot(100, self.todo_tab.load_tasks)
 
-            # تحديث Dashboard دائماً
-            if hasattr(self, "dashboard_tab") and hasattr(self.dashboard_tab, "refresh_data"):
+            if (
+                hasattr(self, "dashboard_tab")
+                and hasattr(self.dashboard_tab, "refresh_data")
+                and self._can_refresh("dashboard", min_interval=2.0)
+            ):
                 QTimer.singleShot(500, self.dashboard_tab.refresh_data)
 
         except Exception as e:
@@ -969,12 +993,10 @@ class MainWindow(QMainWindow):
                 # ⚡ إعادة حساب أرصدة الحسابات النقدية
                 try:
                     if hasattr(self, "accounting_service") and self.accounting_service:
-                        self.accounting_service._recalculate_cash_balances()
-                        safe_print(
-                            "INFO: [MainWindow] ✅ تم إعادة حساب أرصدة الحسابات بعد المزامنة"
-                        )
+                        self.accounting_service._schedule_cash_recalc(["accounting"])
+                        safe_print("INFO: [MainWindow] ✅ تم جدولة إعادة حساب الأرصدة بعد المزامنة")
                 except Exception as e:
-                    safe_print(f"WARNING: [MainWindow] فشل إعادة حساب الأرصدة: {e}")
+                    safe_print(f"WARNING: [MainWindow] فشل جدولة إعادة حساب الأرصدة: {e}")
 
                 # تحديث الواجهة
                 self.on_sync_completed()
@@ -1009,16 +1031,14 @@ class MainWindow(QMainWindow):
     def _update_initial_connection_status(self):
         """⚡ تحديث حالة الاتصال الأولية"""
         try:
-            is_online = self._check_mongodb_connection()
+            is_online = False
+            if self.sync_manager and hasattr(self.sync_manager, "repo") and self.sync_manager.repo:
+                is_online = bool(getattr(self.sync_manager.repo, "online", False))
+            elif hasattr(self, "repository") and self.repository:
+                is_online = bool(getattr(self.repository, "online", False))
 
-            # تحديث شريط الحالة
-            if hasattr(self, "status_bar"):
-                if is_online:
-                    self.status_bar.update_sync_status("synced")
-                    safe_print("INFO: [MainWindow] ✅ حالة الاتصال: متصل")
-                else:
-                    self.status_bar.update_sync_status("offline")
-                    safe_print("INFO: [MainWindow] ❌ حالة الاتصال: غير متصل")
+            self._apply_connection_status(is_online)
+            self._trigger_async_mongo_ping()
 
             # ⚡ بدء مؤقت فحص الاتصال الدوري (كل 30 ثانية)
             if not hasattr(self, "_connection_check_timer") or self._connection_check_timer is None:
@@ -1030,57 +1050,64 @@ class MainWindow(QMainWindow):
         except Exception as e:
             safe_print(f"ERROR: [MainWindow] فشل تحديث حالة الاتصال: {e}")
 
-    def _check_mongodb_connection(self) -> bool:
-        """⚡ فحص حالة اتصال MongoDB"""
+    def _apply_connection_status(self, is_online: bool):
         try:
-            is_online = False
-
-            # فحص حالة الاتصال من sync_manager
-            if self.sync_manager and hasattr(self.sync_manager, "repo"):
-                repo = self.sync_manager.repo
-                if repo:
-                    is_online = repo.online
-
-                    # فحص إضافي للتأكد من أن MongoDB متصل فعلاً
-                    if repo.mongo_client:
-                        try:
-                            repo.mongo_client.admin.command("ping")
-                            is_online = True
-                            repo.online = True  # تحديث الحالة في الـ repo
-                        except Exception:
-                            is_online = False
-                            repo.online = False
-
-            # فحص بديل من repository مباشرة
-            if not is_online and hasattr(self, "repository") and self.repository:
-                if self.repository.mongo_client:
-                    try:
-                        self.repository.mongo_client.admin.command("ping")
-                        is_online = True
-                        self.repository.online = True
-                    except Exception:
-                        is_online = False
-
-            return is_online
+            if hasattr(self, "status_bar"):
+                if is_online:
+                    self.status_bar.update_sync_status("synced")
+                else:
+                    self.status_bar.update_sync_status("offline")
+            self._last_connection_status = bool(is_online)
         except Exception:
-            return False
+            pass
+
+    def _trigger_async_mongo_ping(self):
+        try:
+            if getattr(self, "_mongo_ping_in_flight", False):
+                return
+
+            repo = None
+            if self.sync_manager and hasattr(self.sync_manager, "repo") and self.sync_manager.repo:
+                repo = self.sync_manager.repo
+            elif hasattr(self, "repository") and self.repository:
+                repo = self.repository
+
+            client = getattr(repo, "mongo_client", None) if repo else None
+            if not client:
+                return
+
+            self._mongo_ping_in_flight = True
+
+            def worker():
+                ok = False
+                try:
+                    client.admin.command("ping", maxTimeMS=1000)
+                    ok = True
+                except Exception:
+                    ok = False
+
+                def apply():
+                    try:
+                        self._mongo_ping_in_flight = False
+                        if repo:
+                            repo.online = ok
+                        self._apply_connection_status(ok)
+                    except Exception:
+                        self._mongo_ping_in_flight = False
+
+                QTimer.singleShot(0, apply)
+
+            threading.Thread(target=worker, daemon=True).start()
+        except Exception:
+            try:
+                self._mongo_ping_in_flight = False
+            except Exception:
+                pass
 
     def _periodic_connection_check(self):
         """⚡ فحص دوري لحالة الاتصال"""
         try:
-            is_online = self._check_mongodb_connection()
-
-            # تحديث شريط الحالة فقط إذا تغيرت الحالة
-            if hasattr(self, "status_bar"):
-                current_status = getattr(self, "_last_connection_status", None)
-                if current_status != is_online:
-                    self._last_connection_status = is_online
-                    if is_online:
-                        self.status_bar.update_sync_status("synced")
-                        safe_print("INFO: [MainWindow] 🟢 تم استعادة الاتصال")
-                    else:
-                        self.status_bar.update_sync_status("offline")
-                        safe_print("INFO: [MainWindow] 🔴 انقطع الاتصال")
+            self._trigger_async_mongo_ping()
         except Exception as e:
             safe_print(f"ERROR: [MainWindow] فشل فحص الاتصال الدوري: {e}")
 
@@ -1144,7 +1171,7 @@ class MainWindow(QMainWindow):
     def _on_new_client(self):
         """معالج اختصار عميل جديد"""
         # التبديل إلى تاب العملاء
-        self.tabs.setCurrentIndex(5)
+        self.tabs.setCurrentIndex(4)
         # فتح نافذة عميل جديد بعد تأخير بسيط
 
         QTimer.singleShot(100, self.clients_tab.open_editor)
@@ -1152,7 +1179,7 @@ class MainWindow(QMainWindow):
     def _on_new_expense(self):
         """معالج اختصار مصروف جديد"""
         # التبديل إلى تاب المصروفات
-        self.tabs.setCurrentIndex(3)
+        self.tabs.setCurrentIndex(2)
         # فتح نافذة مصروف جديد بعد تأخير بسيط
 
         QTimer.singleShot(100, self.expense_tab.open_add_dialog)
@@ -1182,9 +1209,24 @@ class MainWindow(QMainWindow):
 
     def _on_refresh_data(self):
         """معالج اختصار تحديث البيانات"""
-        # تحديث التاب الحالي
         current_index = self.tabs.currentIndex()
-        self.on_tab_changed(current_index)
+        tab_name = self.tabs.tabText(current_index)
+
+        refresh_map = {
+            "🚀 المشاريع": self._refresh_projects_tab,
+            "👤 العملاء": self._refresh_clients_tab,
+            "💳 المصروفات": self._refresh_expenses_tab,
+            "💰 الدفعات": self._refresh_payments_tab,
+            "🛠️ الخدمات والباقات": self._refresh_services_tab,
+            "📊 المحاسبة": self._refresh_accounting_tab,
+            "📋 المهام": self._refresh_tasks_tab,
+        }
+        refresh_action = refresh_map.get(tab_name)
+        if refresh_action:
+            refresh_action()
+            return
+
+        self._load_tab_data_safely(tab_name, force_reload=True)
 
     def _on_show_help(self):
         """معالج اختصار عرض المساعدة"""
@@ -1193,7 +1235,7 @@ class MainWindow(QMainWindow):
 
     def _on_new_payment(self):
         """معالج اختصار دفعة جديدة"""
-        self.tabs.setCurrentIndex(4)
+        self.tabs.setCurrentIndex(3)
 
         QTimer.singleShot(100, self.payments_tab.open_add_dialog)
 
@@ -1247,22 +1289,50 @@ class MainWindow(QMainWindow):
 
     def _on_print_current(self):
         """معالج اختصار الطباعة"""
+        active_modal = QApplication.activeModalWidget()
+        if active_modal:
+            for method_name in ["print_ledger", "print_invoice", "print_data", "on_print"]:
+                if hasattr(active_modal, method_name):
+                    getattr(active_modal, method_name)()
+                    return
+
         current_tab = self.tabs.currentWidget()
-        if hasattr(current_tab, "print_data"):
-            current_tab.print_data()
-        elif hasattr(current_tab, "on_print"):
-            current_tab.on_print()
+        for method_name in ["print_invoice", "print_data", "on_print"]:
+            if hasattr(current_tab, method_name):
+                getattr(current_tab, method_name)()
+                return
 
     def _on_save_data(self):
         """معالج اختصار الحفظ"""
+        active_modal = QApplication.activeModalWidget()
+        if active_modal:
+            save_methods = [
+                "save_project",
+                "save_project_and_new",
+                "save_task",
+                "save_expense",
+                "save_payment",
+                "save_client",
+                "save_user",
+                "save_service",
+                "save_account",
+                "save_currency",
+                "save_template",
+                "save_permissions",
+                "save_settings",
+            ]
+            for method_name in save_methods:
+                if hasattr(active_modal, method_name):
+                    getattr(active_modal, method_name)()
+                    return
+
         current_tab = self.tabs.currentWidget()
-        if hasattr(current_tab, "save_data"):
-            current_tab.save_data()
-        elif hasattr(current_tab, "on_save"):
-            current_tab.on_save()
-        else:
-            # مزامنة البيانات كبديل
-            self._on_full_sync_clicked()
+        for method_name in ["save_data", "on_save", "save_settings"]:
+            if hasattr(current_tab, method_name):
+                getattr(current_tab, method_name)()
+                return
+
+        self._on_full_sync_clicked()
 
     def apply_permissions(self):
         """تطبيق الصلاحيات حسب دور المستخدم"""
@@ -1407,6 +1477,17 @@ class MainWindow(QMainWindow):
         يتم استدعاؤه فوراً عند أي حفظ/تعديل/حذف
         """
         safe_print(f"🔥 [MainWindow] استقبال إشارة: {table_name}")
+
+        if table_name in {
+            "clients",
+            "projects",
+            "expenses",
+            "payments",
+            "services",
+            "accounts",
+            "tasks",
+        }:
+            return
 
         try:
             # استخدام QTimer لضمان التنفيذ في الـ main thread
@@ -1621,8 +1702,6 @@ class MainWindow(QMainWindow):
                             if hasattr(self.accounting_service, "_hierarchy_cache"):
                                 self.accounting_service._hierarchy_cache = None
                                 self.accounting_service._hierarchy_cache_time = 0
-                            # ⚡ إعادة حساب الأرصدة
-                            self.accounting_service._recalculate_cash_balances()
 
                         # ⚡ تحميل البيانات الجديدة
                         if hasattr(self.accounting_tab, "load_accounts_data"):

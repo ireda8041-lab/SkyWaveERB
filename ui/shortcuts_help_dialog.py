@@ -52,7 +52,7 @@ class ShortcutsHelpDialog(QDialog):
         self.setStyleSheet(
             """
             QDialog {
-                background-color: #001A3A;
+                background-color: #0B1D33;
             }
         """
         )
@@ -73,12 +73,12 @@ class ShortcutsHelpDialog(QDialog):
     def _create_header(self) -> QWidget:
         """إنشاء الهيدر"""
         header = QFrame()
-        header.setFixedHeight(90)
+        header.setFixedHeight(92)
         header.setStyleSheet(
             """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0A6CF1, stop:1 #0550B8);
+                    stop:0 #0A5ED7, stop:1 #063066);
             }
         """
         )
@@ -87,37 +87,50 @@ class ShortcutsHelpDialog(QDialog):
         layout.setContentsMargins(20, 15, 20, 15)
         layout.setSpacing(15)
 
-        # أيقونة
         icon = QLabel("⌨️")
         icon.setStyleSheet(
             """
-            font-size: 36px;
-            background: rgba(255,255,255,0.15);
-            border-radius: 25px;
+            font-size: 30px;
+            background: rgba(255,255,255,0.16);
+            border-radius: 22px;
             padding: 8px;
         """
         )
-        icon.setFixedSize(55, 55)
+        icon.setFixedSize(48, 48)
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
 
-        # النصوص
         text_box = QVBoxLayout()
         text_box.setSpacing(4)
 
         title = QLabel("اختصارات لوحة المفاتيح")
         title.setStyleSheet(
-            "color: white; font-size: 20px; font-weight: bold; background: transparent;"
+            "color: white; font-size: 18px; font-weight: 700; background: transparent;"
         )
         text_box.addWidget(title)
 
-        subtitle = QLabel("استخدم هذه الاختصارات لتسريع عملك ⚡")
+        subtitle = QLabel("اختصارات واضحة وسريعة للتنقل والتنفيذ")
         subtitle.setStyleSheet(
-            "color: rgba(255,255,255,0.85); font-size: 12px; background: transparent;"
+            "color: rgba(255,255,255,0.88); font-size: 12px; background: transparent;"
         )
         text_box.addWidget(subtitle)
 
         layout.addLayout(text_box, 1)
+
+        total = len(self.shortcuts_manager.get_all_shortcuts())
+        badge = QLabel(f"{total} اختصار")
+        badge.setStyleSheet(
+            """
+            background: rgba(255,255,255,0.14);
+            color: white;
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            """
+        )
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(badge)
         return header
 
     def _create_content(self) -> QWidget:
@@ -132,12 +145,12 @@ class ShortcutsHelpDialog(QDialog):
                 background: transparent;
             }
             QScrollBar:vertical {
-                background: #0A2A55;
+                background: #0A254B;
                 width: 8px;
                 border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #0A6CF1;
+                background: #1D4ED8;
                 border-radius: 4px;
                 min-height: 30px;
             }
@@ -150,8 +163,8 @@ class ShortcutsHelpDialog(QDialog):
         content = QWidget()
         content.setStyleSheet("background: transparent;")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(15, 15, 15, 15)
-        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(12)
 
         # الحصول على الاختصارات
         categories = self.shortcuts_manager.get_shortcuts_by_category()
@@ -180,8 +193,8 @@ class ShortcutsHelpDialog(QDialog):
         section.setStyleSheet(
             """
             QFrame {
-                background: rgba(10, 42, 85, 0.5);
-                border: 1px solid rgba(10, 108, 241, 0.3);
+                background: rgba(7, 26, 48, 0.7);
+                border: 1px solid rgba(29, 78, 216, 0.28);
                 border-radius: 10px;
                 padding: 10px;
             }
@@ -192,15 +205,14 @@ class ShortcutsHelpDialog(QDialog):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        # عنوان الفئة
         header = QLabel(f"{icon} {title}")
         header.setStyleSheet(
             """
-            color: #0A6CF1;
-            font-size: 14px;
-            font-weight: bold;
+            color: #9CC6FF;
+            font-size: 13px;
+            font-weight: 700;
             padding-bottom: 5px;
-            border-bottom: 1px solid rgba(10, 108, 241, 0.3);
+            border-bottom: 1px solid rgba(156, 198, 255, 0.2);
             background: transparent;
         """
         )
@@ -219,47 +231,45 @@ class ShortcutsHelpDialog(QDialog):
         row.setStyleSheet(
             """
             QFrame {
-                background: rgba(5, 32, 69, 0.6);
-                border-radius: 6px;
-                padding: 4px;
+                background: rgba(5, 28, 54, 0.6);
+                border-radius: 8px;
+                padding: 6px;
             }
             QFrame:hover {
-                background: rgba(10, 108, 241, 0.15);
+                background: rgba(29, 78, 216, 0.16);
             }
         """
         )
-        row.setFixedHeight(40)
 
         layout = QHBoxLayout(row)
-        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setContentsMargins(10, 6, 10, 6)
         layout.setSpacing(12)
 
-        # المفتاح
         key_label = QLabel(key)
         key_label.setStyleSheet(
             """
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #0A6CF1, stop:1 #0550B8);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 #1D4ED8, stop:1 #0B3B8A);
             color: white;
             font-size: 11px;
-            font-weight: bold;
+            font-weight: 700;
             padding: 5px 12px;
-            border-radius: 5px;
-            min-width: 70px;
-        """
+            border-radius: 6px;
+            min-width: 90px;
+            """
         )
         key_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(key_label)
 
-        # الوصف
         desc_label = QLabel(description)
         desc_label.setStyleSheet(
             """
-            color: #EAF3FF;
+            color: #E2E8F0;
             font-size: 12px;
             background: transparent;
         """
         )
+        desc_label.setWordWrap(True)
         layout.addWidget(desc_label, 1)
 
         return row
@@ -271,8 +281,8 @@ class ShortcutsHelpDialog(QDialog):
         footer.setStyleSheet(
             """
             QFrame {
-                background: #0A2A55;
-                border-top: 1px solid #1E3A5F;
+                background: #0A2145;
+                border-top: 1px solid #16345E;
             }
         """
         )

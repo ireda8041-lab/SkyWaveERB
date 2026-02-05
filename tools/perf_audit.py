@@ -3,9 +3,11 @@ import os
 import sys
 import time
 import tracemalloc
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 _ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT_DIR not in sys.path:
@@ -17,14 +19,16 @@ class Sample:
     name: str
     ms: float
     peak_kb: int
-    extra: dict
+    extra: dict[str, Any]
 
 
 def _now_tag() -> str:
+    """Return a timestamp tag used for report filenames."""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def _measure(name: str, fn, extra: dict | None = None) -> Sample:
+def _measure(name: str, fn: Callable[[], Any], extra: dict[str, Any] | None = None) -> Sample:
+    """Measure execution time and peak memory usage for a callable."""
     extra = extra or {}
     tracemalloc.start()
     start = time.perf_counter()
@@ -34,14 +38,15 @@ def _measure(name: str, fn, extra: dict | None = None) -> Sample:
     tracemalloc.stop()
     peak_kb = int(peak / 1024)
     if value is not None and "result" not in extra:
-        if isinstance(value, (int, float, str, bool)):
+        if isinstance(value, int | float | str | bool):
             extra["result"] = value
-        elif isinstance(value, (list, tuple, dict, set)):
+        elif isinstance(value, list | tuple | dict | set):
             extra["result_size"] = len(value)
     return Sample(name=name, ms=elapsed_ms, peak_kb=peak_kb, extra=extra)
 
 
 def _write_report(samples: list[Sample], out_path: Path) -> Path:
+    """Write a JSON report containing the provided samples."""
     payload = {
         "generated_at": datetime.now().isoformat(),
         "samples": [
@@ -53,7 +58,9 @@ def _write_report(samples: list[Sample], out_path: Path) -> Path:
     return out_path
 
 
-def main():
+def main() -> None:
+    import functools
+
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     from core.event_bus import EventBus
@@ -62,7 +69,7 @@ def main():
 
     samples: list[Sample] = []
 
-    repo = _measure("Repository()", lambda: Repository(), extra={"runs": 1})
+    repo = _measure("Repository()", Repository, extra={"runs": 1})
     samples.append(repo)
 
     repository = Repository()
@@ -75,7 +82,9 @@ def main():
     samples.append(_measure("repo.get_all_journal_entries()", repository.get_all_journal_entries))
 
     samples.append(_measure("svc.get_dashboard_stats()", svc.get_dashboard_stats))
-    samples.append(_measure("svc.get_recent_activity(8)", lambda: svc.get_recent_activity(8)))
+    samples.append(
+        _measure("svc.get_recent_activity(8)", functools.partial(svc.get_recent_activity, 8))
+    )
 
     accounts = repository.get_all_accounts()
     account_code = None
@@ -93,7 +102,7 @@ def main():
         samples.append(
             _measure(
                 "svc.get_account_ledger_report(60d)",
-                lambda: svc.get_account_ledger_report(account_code, start, end),
+                functools.partial(svc.get_account_ledger_report, account_code, start, end),
                 extra={"account_code": account_code},
             )
         )

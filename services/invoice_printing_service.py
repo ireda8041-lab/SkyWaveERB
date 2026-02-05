@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from core.logo_utils import print_logo_png_data_url
+
 # ⚡ استيراد آمن لـ jinja2
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -253,6 +255,61 @@ class InvoicePrintingService:
         context.setdefault("project_notes", invoice_data.get("project_notes", ""))
         context.setdefault("payment_methods", invoice_data.get("payment_methods", []))
 
+        client_info = invoice_data.get("client_info")
+        if not isinstance(client_info, dict):
+            client_info = {}
+        client_logo_data = (
+            invoice_data.get("client_logo_data")
+            or invoice_data.get("logo_data")
+            or client_info.get("logo_data")
+        )
+        client_logo_file = (
+            invoice_data.get("client_logo_path")
+            or client_info.get("logo_path")
+            or invoice_data.get("logo_path_client")
+        )
+        client_logo_width_px = 120
+        client_logo_max_height_px = 40
+        client_logo_max_width_percent = 22
+        try:
+            if self.settings_service:
+                settings = self.settings_service.get_settings()
+                client_logo_width_px = int(
+                    settings.get("print_client_logo_width_px", client_logo_width_px)
+                )
+                client_logo_max_height_px = int(
+                    settings.get("print_client_logo_max_height_px", client_logo_max_height_px)
+                )
+                client_logo_max_width_percent = int(
+                    settings.get(
+                        "print_client_logo_max_width_percent", client_logo_max_width_percent
+                    )
+                )
+        except Exception:
+            pass
+
+        effective_max_w_px = max(1, int(client_logo_width_px))
+        try:
+            effective_max_w_px = min(
+                effective_max_w_px, max(1, int(800 * (int(client_logo_max_width_percent) / 100.0)))
+            )
+        except Exception:
+            pass
+
+        context["client_logo_path"] = print_logo_png_data_url(
+            client_logo_data,
+            client_logo_file,
+            max_width_px=effective_max_w_px * 4,
+            max_height_px=int(client_logo_max_height_px) * 4,
+        )
+        context.setdefault("client_logo_width_px", client_logo_width_px)
+        context.setdefault("client_logo_max_height_px", client_logo_max_height_px)
+        context.setdefault("client_logo_max_width_percent", client_logo_max_width_percent)
+        circle_px = max(20, min(200, int(client_logo_max_height_px or 40)))
+        circle_px = int(round(circle_px / 4.0) * 4)
+        context.setdefault("client_logo_circle_px", circle_px)
+        context.setdefault("client_logo_circle_class", f"client-logo-s{circle_px}")
+
         # تحويل اللوجو إلى base64 للاستخدام في HTML
         logo_base64 = ""
 
@@ -345,7 +402,7 @@ class InvoicePrintingService:
 
             safe_print("INFO: [InvoicePrintingService] استخدام WeasyPrint لتوليد PDF...")
             HTML(string=html_content, base_url=str(self.templates_dir)).write_pdf(
-                pdf_path, stylesheets=[CSS(string="@page { size: A4; margin: 0; }")]
+                pdf_path, stylesheets=[CSS(string="@page { size: A4; margin: 8.5mm 5mm; }")]
             )
 
             safe_print("✅ [InvoicePrintingService] تم إنشاء PDF باستخدام WeasyPrint")

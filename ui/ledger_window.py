@@ -8,6 +8,7 @@ from datetime import datetime
 from PyQt6.QtCore import QDate
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDateEdit,
     QDialog,
     QGroupBox,
@@ -46,6 +47,9 @@ class LedgerWindow(QDialog):
 
         self.account = account
         self.accounting_service = accounting_service
+        self._current_page = 1
+        self._page_size = 100
+        self._movements: list = []
 
         self.setWindowTitle(f"كشف حساب: {account.name} ({account.code})")
 
@@ -266,6 +270,36 @@ class LedgerWindow(QDialog):
         movements_group.setLayout(movements_layout)
         layout.addWidget(movements_group)
 
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        layout.addLayout(pagination_layout)
+
         # === 4. الملخص ===
         summary_layout = QHBoxLayout()
 
@@ -373,70 +407,13 @@ class LedgerWindow(QDialog):
 
                 movements = data["movements"]
                 opening_balance = float(data.get("opening_balance", 0.0) or 0.0)
-
-                # عرض الحركات في الجدول
-                self.movements_table.setRowCount(0)
+                self._movements = movements
 
                 total_debit = float(data.get("total_debit", 0.0) or 0.0)
                 total_credit = float(data.get("total_credit", 0.0) or 0.0)
                 net_movement = float(data.get("net_movement", 0.0) or 0.0)
 
-                for i, movement in enumerate(movements):
-                    self.movements_table.insertRow(i)
-
-                    # التاريخ
-                    date_val = movement.get("date") if isinstance(movement, dict) else None
-                    date_str = (
-                        date_val.strftime("%Y-%m-%d")
-                        if hasattr(date_val, "strftime")
-                        else str(date_val or "")[:10]
-                    )
-                    self.movements_table.setItem(i, 0, create_centered_item(date_str))
-
-                    # الوصف
-                    desc_text = (
-                        str(movement.get("description") or "") if isinstance(movement, dict) else ""
-                    )
-                    self.movements_table.setItem(i, 1, create_centered_item(desc_text))
-
-                    # المرجع
-                    ref_raw = (
-                        str(movement.get("reference") or "") if isinstance(movement, dict) else ""
-                    )
-                    ref_text = ref_raw[:20] if len(ref_raw) > 20 else ref_raw
-                    self.movements_table.setItem(i, 2, create_centered_item(ref_text))
-
-                    # مدين
-                    debit_val = (
-                        float(movement.get("debit") or 0) if isinstance(movement, dict) else 0.0
-                    )
-                    debit_text = f"{debit_val:,.2f}" if debit_val > 0 else "-"
-                    debit_item = create_centered_item(debit_text)
-                    if debit_val > 0:
-                        debit_item.setForeground(QColor(COLORS["success"]))
-                    self.movements_table.setItem(i, 3, debit_item)
-
-                    # دائن
-                    credit_val = (
-                        float(movement.get("credit") or 0) if isinstance(movement, dict) else 0.0
-                    )
-                    credit_text = f"{credit_val:,.2f}" if credit_val > 0 else "-"
-                    credit_item = create_centered_item(credit_text)
-                    if credit_val > 0:
-                        credit_item.setForeground(QColor(COLORS["danger"]))
-                    self.movements_table.setItem(i, 4, credit_item)
-
-                    # الرصيد
-                    balance_val = (
-                        float(movement.get("balance") or 0) if isinstance(movement, dict) else 0.0
-                    )
-                    balance_item = create_centered_item(f"{balance_val:,.2f}")
-                    balance_item.setFont(get_cairo_font(10, bold=True))
-                    if balance_val > 0:
-                        balance_item.setForeground(QColor(COLORS["success"]))
-                    elif balance_val < 0:
-                        balance_item.setForeground(QColor(COLORS["danger"]))
-                    self.movements_table.setItem(i, 5, balance_item)
+                self._render_current_page()
 
                 # تحديث الملخص
                 self.total_debit_label.setText(f"إجمالي المدين: {total_debit:,.2f} جنيه")
@@ -466,6 +443,98 @@ class LedgerWindow(QDialog):
             use_thread_pool=True,
         )
 
+    def _get_total_pages(self) -> int:
+        total = len(self._movements)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_items = self._movements
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_items = self._movements[start_index:end_index]
+
+        self._populate_movements_table(page_items)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_movements_table(self, movements: list):
+        self.movements_table.setRowCount(len(movements))
+        for i, movement in enumerate(movements):
+            date_val = movement.get("date") if isinstance(movement, dict) else None
+            date_str = (
+                date_val.strftime("%Y-%m-%d")
+                if hasattr(date_val, "strftime")
+                else str(date_val or "")[:10]
+            )
+            self.movements_table.setItem(i, 0, create_centered_item(date_str))
+
+            desc_text = str(movement.get("description") or "") if isinstance(movement, dict) else ""
+            self.movements_table.setItem(i, 1, create_centered_item(desc_text))
+
+            ref_raw = str(movement.get("reference") or "") if isinstance(movement, dict) else ""
+            ref_text = ref_raw[:20] if len(ref_raw) > 20 else ref_raw
+            self.movements_table.setItem(i, 2, create_centered_item(ref_text))
+
+            debit_val = float(movement.get("debit") or 0) if isinstance(movement, dict) else 0.0
+            debit_text = f"{debit_val:,.2f}" if debit_val > 0 else "-"
+            debit_item = create_centered_item(debit_text)
+            if debit_val > 0:
+                debit_item.setForeground(QColor(COLORS["success"]))
+            self.movements_table.setItem(i, 3, debit_item)
+
+            credit_val = float(movement.get("credit") or 0) if isinstance(movement, dict) else 0.0
+            credit_text = f"{credit_val:,.2f}" if credit_val > 0 else "-"
+            credit_item = create_centered_item(credit_text)
+            if credit_val > 0:
+                credit_item.setForeground(QColor(COLORS["danger"]))
+            self.movements_table.setItem(i, 4, credit_item)
+
+            balance_val = float(movement.get("balance") or 0) if isinstance(movement, dict) else 0.0
+            balance_item = create_centered_item(f"{balance_val:,.2f}")
+            balance_item.setFont(get_cairo_font(10, bold=True))
+            if balance_val > 0:
+                balance_item.setForeground(QColor(COLORS["success"]))
+            elif balance_val < 0:
+                balance_item.setForeground(QColor(COLORS["danger"]))
+            self.movements_table.setItem(i, 5, balance_item)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self._movements))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
+
     def reset_filter(self):
         """إعادة تعيين الفلتر"""
         self.start_date.setDate(QDate.currentDate().addMonths(-1))
@@ -476,7 +545,6 @@ class LedgerWindow(QDialog):
         """تصدير كشف الحساب إلى CSV"""
         try:
             import csv
-            from datetime import datetime
 
             from PyQt6.QtWidgets import QFileDialog
 

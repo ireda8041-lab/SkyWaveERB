@@ -1,11 +1,15 @@
 # الملف: ui/client_manager.py
 
+import hashlib
 import os
+import time
+from pathlib import Path
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPixmap
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QGroupBox,
     QHBoxLayout,
@@ -47,6 +51,16 @@ class ClientManagerTab(QWidget):
         self.client_service = client_service
         self.clients_list: list[schemas.Client] = []
         self.selected_client: schemas.Client | None = None
+        self._logo_icon_cache: dict[object, QIcon | None] = {}
+        self._logo_pixmap_cache: dict[object, QPixmap | None] = {}
+        self._clients_cache: dict[str, dict] = {}
+        self._clients_cache_ts: dict[str, float] = {}
+        self._clients_cache_ttl_s = 20.0
+        self._current_page = 1
+        self._page_size = 100
+        self._current_page_clients: list[schemas.Client] = []
+        self._last_invoices_total: dict[str, float] = {}
+        self._last_payments_total: dict[str, float] = {}
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -59,7 +73,10 @@ class ClientManagerTab(QWidget):
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
         from core.signals import app_signals
 
-        app_signals.clients_changed.connect(self._on_clients_changed)
+        app_signals.safe_connect(app_signals.clients_changed, self._on_clients_changed)
+        app_signals.safe_connect(app_signals.payments_changed, self._invalidate_clients_cache)
+        app_signals.safe_connect(app_signals.projects_changed, self._invalidate_clients_cache)
+        app_signals.safe_connect(app_signals.invoices_changed, self._invalidate_clients_cache)
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
@@ -152,13 +169,15 @@ class ClientManagerTab(QWidget):
         from ui.styles import fix_table_rtl
 
         fix_table_rtl(self.clients_table)
+        self.clients_table.setIconSize(QSize(40, 40))
         self.clients_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.clients_table.setAlternatingRowColors(True)
+        self.clients_table.cellClicked.connect(self._on_client_cell_clicked)
         v_header = self.clients_table.verticalHeader()
         if v_header is not None:
-            v_header.setDefaultSectionSize(50)
+            v_header.setDefaultSectionSize(54)
             v_header.setVisible(False)
         h_header = self.clients_table.horizontalHeader()
         if h_header is not None:
@@ -186,6 +205,37 @@ class ClientManagerTab(QWidget):
 
         table_layout.addWidget(self.clients_table)
         main_layout.addWidget(table_groupbox, 1)
+
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setFont(get_cairo_font(11, bold=True))
+        self.page_info_label.setStyleSheet("color: #94a3b8;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        main_layout.addLayout(pagination_layout)
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_clients_data() - يتم استدعاؤها من MainWindow
@@ -334,8 +384,8 @@ class ClientManagerTab(QWidget):
         selected_rows = self.clients_table.selectedIndexes()
         if selected_rows:
             selected_index = selected_rows[0].row()
-            if 0 <= selected_index < len(self.clients_list):
-                self.selected_client = self.clients_list[selected_index]
+            if 0 <= selected_index < len(self._current_page_clients):
+                self.selected_client = self._current_page_clients[selected_index]
                 self.update_buttons_state(True)
                 return
         self.selected_client = None
@@ -348,7 +398,9 @@ class ClientManagerTab(QWidget):
         from core.data_loader import get_data_loader
 
         # تحضير الجدول
-        self.clients_table.setSortingEnabled(False)
+        sorting_enabled = self.clients_table.isSortingEnabled()
+        if sorting_enabled:
+            self.clients_table.setSortingEnabled(False)
         self.clients_table.setUpdatesEnabled(False)
         self.clients_table.blockSignals(True)
         self.clients_table.setRowCount(0)
@@ -392,7 +444,11 @@ class ClientManagerTab(QWidget):
                 client_invoices_total = data["invoices_total"]
                 client_payments_total = data["payments_total"]
 
-                self._populate_clients_table(client_invoices_total, client_payments_total)
+                self._last_invoices_total = client_invoices_total
+                self._last_payments_total = client_payments_total
+                self._render_current_page(client_invoices_total, client_payments_total)
+                cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
+                self._set_cached_clients_data(cache_key, data)
 
             except Exception as e:
                 safe_print(f"ERROR: [ClientManager] فشل تحديث الجدول: {e}")
@@ -402,13 +458,21 @@ class ClientManagerTab(QWidget):
             finally:
                 self.clients_table.blockSignals(False)
                 self.clients_table.setUpdatesEnabled(True)
-                self.clients_table.setSortingEnabled(True)
+                if sorting_enabled:
+                    self.clients_table.setSortingEnabled(True)
 
         def on_error(error_msg):
             safe_print(f"ERROR: [ClientManager] فشل تحميل العملاء: {error_msg}")
             self.clients_table.blockSignals(False)
             self.clients_table.setUpdatesEnabled(True)
-            self.clients_table.setSortingEnabled(True)
+            if sorting_enabled:
+                self.clients_table.setSortingEnabled(True)
+
+        cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
+        cached = self._get_cached_clients_data(cache_key)
+        if cached is not None:
+            on_data_loaded(cached)
+            return
 
         # تحميل البيانات في الخلفية
         data_loader = get_data_loader()
@@ -420,266 +484,362 @@ class ClientManagerTab(QWidget):
             use_thread_pool=True,
         )
 
-    def _populate_clients_table(self, client_invoices_total, client_payments_total):
-        """ملء جدول العملاء بالبيانات - محسّن للسرعة مع تمييز VIP"""
+    def _get_cached_clients_data(self, key: str) -> dict | None:
+        ts = self._clients_cache_ts.get(key)
+        if ts is None:
+            return None
+        if (time.monotonic() - ts) > self._clients_cache_ttl_s:
+            self._clients_cache.pop(key, None)
+            self._clients_cache_ts.pop(key, None)
+            return None
+        return self._clients_cache.get(key)
 
-        # ⚡ تحميل البيانات على دفعات أكبر للسرعة
-        total_clients = len(self.clients_list)
+    def _set_cached_clients_data(self, key: str, data: dict) -> None:
+        self._clients_cache[key] = data
+        self._clients_cache_ts[key] = time.monotonic()
 
-        # ⚡ تعيين عدد الصفوف مرة واحدة (أسرع من insertRow)
-        self.clients_table.setRowCount(total_clients)
+    def _invalidate_clients_cache(self):
+        self._clients_cache.clear()
+        self._clients_cache_ts.clear()
 
-        # ⚡ ألوان VIP الذهبية
-        VIP_BG_COLOR = QColor("#2d2a1a")  # خلفية ذهبية داكنة
-        VIP_TEXT_COLOR = QColor("#fbbf24")  # نص ذهبي
-        VIP_BORDER_COLOR = QColor("#f59e0b")  # حدود ذهبية
+    def _get_logo_cache_dir(self) -> Path:
+        cache_dir = Path("exports") / "cache" / "client_logos"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
 
-        for index, client in enumerate(self.clients_list):
-            # ⚡ التحقق من حالة VIP
-            is_vip = getattr(client, "is_vip", False)
+    def _get_logo_cache_path(self, logo_data: str | None, logo_path: str | None) -> Path | None:
+        if logo_data:
+            digest = hashlib.sha256(logo_data.encode("utf-8")).hexdigest()
+            return self._get_logo_cache_dir() / f"data_{digest}.png"
+        if logo_path:
+            try:
+                stat = os.stat(logo_path)
+                payload = f"{logo_path}:{stat.st_mtime}:{stat.st_size}"
+            except Exception:
+                payload = logo_path
+            digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+            return self._get_logo_cache_dir() / f"path_{digest}.png"
+        return None
 
-            # ⚡ عرض لوجو العميل بشكل دائري احترافي - بدون مربع
-            logo_container = QWidget()
-            logo_container.setStyleSheet(
-                """
-                QWidget {
-                    background: transparent;
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                }
-            """
-            )
-            logo_layout = QHBoxLayout(logo_container)
-            logo_layout.setContentsMargins(0, 0, 0, 0)
-            logo_layout.setSpacing(0)
-            logo_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    def _get_client_logo_icon(self, client: schemas.Client) -> QIcon | None:
+        key = (
+            getattr(client, "_mongo_id", None)
+            or getattr(client, "id", None)
+            or (getattr(client, "name", None) or "").strip()
+        )
+        if key in self._logo_icon_cache:
+            return self._logo_icon_cache[key]
 
-            # إنشاء الـ label - في المنتصف تماماً
-            logo_label = QLabel()
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            logo_label.setFixedSize(40, 40)
-            logo_label.setStyleSheet(
-                """
-                QLabel {
-                    background: transparent;
-                    border: none;
-                    margin: 0;
-                    padding: 0;
-                }
-            """
-            )
+        pixmap = self._get_client_logo_pixmap(client)
+        if pixmap is None or pixmap.isNull():
+            self._logo_icon_cache[key] = None
+            return None
 
+        is_vip = bool(getattr(client, "is_vip", False))
+        border_color = QColor("#fbbf24") if is_vip else None
+        border_width = 2 if is_vip else 0
+        circle = self._to_circle_pixmap(pixmap, 40, border_color, border_width)
+        icon = QIcon(circle)
+        self._logo_icon_cache[key] = icon
+        return icon
+
+    def _get_client_logo_pixmap(self, client: schemas.Client) -> QPixmap | None:
+        key = (
+            getattr(client, "_mongo_id", None)
+            or getattr(client, "id", None)
+            or (getattr(client, "name", None) or "").strip()
+        )
+        if key in self._logo_pixmap_cache:
+            return self._logo_pixmap_cache[key]
+
+        pixmap = None
+        logo_data = getattr(client, "logo_data", None)
+        logo_path = getattr(client, "logo_path", None)
+        cache_path = self._get_logo_cache_path(str(logo_data) if logo_data else None, logo_path)
+        if cache_path and cache_path.exists():
+            pm = QPixmap(str(cache_path))
+            if not pm.isNull():
+                self._logo_pixmap_cache[key] = pm
+                return pm
+
+        try:
+            if logo_data and str(logo_data).strip():
+                import base64
+
+                raw = str(logo_data).strip()
+                if raw.startswith("data:image"):
+                    raw = raw.split(",")[1]
+                img_bytes = base64.b64decode(raw)
+                pm = QPixmap()
+                if pm.loadFromData(img_bytes) and not pm.isNull():
+                    pixmap = pm
+        except Exception:
             pixmap = None
-            has_logo = False
 
-            # محاولة تحميل الصورة من base64
-            if hasattr(client, "logo_data") and client.logo_data and client.logo_data.strip():
-                try:
-                    import base64
+        if pixmap is None:
+            try:
+                if logo_path and os.path.exists(logo_path):
+                    pm = QPixmap(logo_path)
+                    if not pm.isNull():
+                        pixmap = pm
+            except Exception:
+                pixmap = None
 
-                    logo_data = client.logo_data.strip()
-                    if logo_data.startswith("data:image"):
-                        logo_data = logo_data.split(",")[1]
-                    img_bytes = base64.b64decode(logo_data)
-                    pixmap = QPixmap()
-                    if pixmap.loadFromData(img_bytes):
-                        has_logo = True
-                except Exception:
-                    # فشل تحميل الصورة من البيانات
-                    pixmap = None
+        if pixmap is None or pixmap.isNull():
+            self._logo_pixmap_cache[key] = None
+            return None
 
-            # محاولة تحميل من المسار المحلي
-            if (
-                not has_logo
-                and hasattr(client, "logo_path")
-                and client.logo_path
-                and os.path.exists(client.logo_path)
-            ):
-                try:
-                    pixmap = QPixmap(client.logo_path)
-                    if not pixmap.isNull():
-                        has_logo = True
-                except Exception:
-                    # فشل تحميل الصورة من الملف
-                    pixmap = None
+        pixmap = pixmap.scaled(
+            128,
+            128,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        if cache_path:
+            try:
+                pixmap.save(str(cache_path), "PNG")
+            except Exception:
+                pass
 
-            # عرض الصورة الدائرية
-            if has_logo and pixmap and not pixmap.isNull():
-                from PyQt6.QtCore import QRectF
-                from PyQt6.QtGui import QPainter, QPainterPath
+        self._logo_pixmap_cache[key] = pixmap
+        return pixmap
 
-                # تصغير الصورة
-                size = 40
-                scaled = pixmap.scaled(
-                    size,
-                    size,
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+    def _to_circle_pixmap(
+        self,
+        pixmap: QPixmap,
+        size: int,
+        border_color: QColor | None = None,
+        border_width: int = 0,
+    ) -> QPixmap:
+        if pixmap.isNull():
+            return pixmap
+        canvas = QPixmap(size, size)
+        canvas.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        path = QPainterPath()
+        path.addEllipse(0, 0, size, size)
+        painter.setClipPath(path)
+        scaled = pixmap.scaled(
+            size,
+            size,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        painter.drawPixmap(0, 0, scaled)
+        if border_color and border_width > 0:
+            painter.setClipping(False)
+            pen = painter.pen()
+            pen.setColor(border_color)
+            pen.setWidth(border_width)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            inset = border_width // 2
+            painter.drawEllipse(inset, inset, size - border_width, size - border_width)
+        painter.end()
+        return canvas
 
-                # قص لتكون مربعة
-                if scaled.width() > size:
-                    x = (scaled.width() - size) // 2
-                    scaled = scaled.copy(x, 0, size, size)
-                if scaled.height() > size:
-                    y = (scaled.height() - size) // 2
-                    scaled = scaled.copy(0, y, size, size)
+    def _on_client_cell_clicked(self, row: int, column: int):
+        if column != 0:
+            return
+        if row < 0 or row >= len(self.clients_list):
+            return
+        client = self.clients_list[row]
+        pixmap = self._get_client_logo_pixmap(client)
+        if pixmap is None or pixmap.isNull():
+            return
 
-                # إنشاء صورة دائرية
-                circular = QPixmap(size, size)
-                circular.fill(Qt.GlobalColor.transparent)
+        is_vip = bool(getattr(client, "is_vip", False))
+        border_color = QColor("#fbbf24") if is_vip else None
+        border_width = 3 if is_vip else 0
 
-                painter = QPainter(circular)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("شعار العميل")
+        dialog.setModal(True)
+        dialog.setStyleSheet("QDialog { background: #0b1d33; }")
 
-                path = QPainterPath()
-                path.addEllipse(QRectF(0, 0, size, size))
-                painter.setClipPath(path)
-                painter.drawPixmap(0, 0, scaled)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
 
-                # ⚡ إضافة حدود ذهبية لـ VIP
+        title = QLabel(client.name or "عميل")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #E2E8F0; font-size: 14px; font-weight: bold;")
+
+        logo_view = QLabel()
+        logo_view.setFixedSize(96, 96)
+        logo_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_view.setStyleSheet(
+            """
+            QLabel {
+                background: rgba(15, 41, 66, 0.55);
+                border: 1px solid rgba(90, 150, 230, 0.35);
+                border-radius: 48px;
+            }
+        """
+        )
+        logo_view.setPixmap(self._to_circle_pixmap(pixmap, 96, border_color, border_width))
+
+        layout.addWidget(title)
+        layout.addWidget(logo_view, alignment=Qt.AlignmentFlag.AlignCenter)
+        dialog.exec()
+
+    def _get_total_pages(self) -> int:
+        total = len(self.clients_list)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self, client_invoices_total, client_payments_total):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_clients = self.clients_list
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_clients = self.clients_list[start_index:end_index]
+
+        self._current_page_clients = page_clients
+        self._populate_clients_table(page_clients, client_invoices_total, client_payments_total)
+        self._update_pagination_controls(total_pages)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self.clients_list))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page(self._last_invoices_total, self._last_payments_total)
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page(self._last_invoices_total, self._last_payments_total)
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page(self._last_invoices_total, self._last_payments_total)
+
+    def _populate_clients_table(self, clients, client_invoices_total, client_payments_total):
+        """ملء جدول العملاء بالبيانات - محسّن للسرعة مع تمييز VIP"""
+        prev_sorting = self.clients_table.isSortingEnabled()
+        prev_block = self.clients_table.blockSignals(True)
+        self.clients_table.setSortingEnabled(False)
+        self.clients_table.setUpdatesEnabled(False)
+        try:
+            total_clients = len(clients)
+            self.clients_table.setRowCount(total_clients)
+
+            vip_bg_color = QColor("#2d2a1a")
+            vip_text_color = QColor("#fbbf24")
+
+            for index, client in enumerate(clients):
+                is_vip = getattr(client, "is_vip", False)
+                logo_item = QTableWidgetItem()
+                logo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if is_vip:
-                    from PyQt6.QtGui import QPen
-
-                    painter.setClipping(False)
-                    pen = QPen(VIP_BORDER_COLOR, 3)
-                    painter.setPen(pen)
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.drawEllipse(1, 1, size - 2, size - 2)
-
-                painter.end()
-
-                logo_label.setPixmap(circular)
-            else:
-                # أيقونة افتراضية - دائرة ملونة مع الحرف الأول
-                first_char = client.name[0] if client.name else "?"
-
-                # ⚡ لون ذهبي لـ VIP
-                if is_vip:
-                    bg = "#f59e0b"  # ذهبي
+                    logo_item.setBackground(vip_bg_color)
                 else:
-                    colors = [
-                        "#3B82F6",
-                        "#10B981",
-                        "#8B5CF6",
-                        "#F59E0B",
-                        "#EF4444",
-                        "#EC4899",
-                        "#06B6D4",
-                    ]
-                    color_idx = sum(ord(c) for c in (client.name or "A")) % len(colors)
-                    bg = colors[color_idx]
+                    logo_item.setBackground(QColor("transparent"))
+                icon = self._get_client_logo_icon(client)
+                if icon:
+                    logo_item.setIcon(icon)
+                    logo_item.setToolTip(
+                        "⭐ VIP • اضغط لعرض الشعار" if is_vip else "اضغط لعرض الشعار"
+                    )
+                else:
+                    logo_item.setText((client.name or "?")[:1])
+                    logo_item.setForeground(QColor("#9CA3AF"))
+                self.clients_table.setItem(index, 0, logo_item)
 
-                # رسم الدائرة مع الحرف
-                from PyQt6.QtCore import QRectF
-                from PyQt6.QtGui import QFont, QPainter, QPen
+                name_text = f"⭐ {client.name}" if is_vip else (client.name or "")
+                name_item = create_centered_item(name_text)
+                if is_vip:
+                    name_item.setForeground(vip_text_color)
+                    name_item.setFont(get_cairo_font(11, bold=True))
+                    name_item.setBackground(vip_bg_color)
+                self.clients_table.setItem(index, 1, name_item)
 
-                size = 40
-                avatar = QPixmap(size, size)
-                avatar.fill(Qt.GlobalColor.transparent)
+                company_item = create_centered_item(client.company_name or "")
+                phone_item = create_centered_item(client.phone or "")
+                email_item = create_centered_item(client.email or "")
 
-                painter = QPainter(avatar)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                if is_vip:
+                    company_item.setBackground(vip_bg_color)
+                    phone_item.setBackground(vip_bg_color)
+                    email_item.setBackground(vip_bg_color)
 
-                # رسم الدائرة الملونة
-                painter.setBrush(QColor(bg))
-                painter.setPen(QPen(Qt.GlobalColor.transparent))
-                painter.drawEllipse(0, 0, size, size)
+                self.clients_table.setItem(index, 2, company_item)
+                self.clients_table.setItem(index, 3, phone_item)
+                self.clients_table.setItem(index, 4, email_item)
 
-                # رسم الحرف
-                painter.setPen(QPen(QColor("white")))
-                font = QFont("Cairo", 16, QFont.Weight.Bold)
-                painter.setFont(font)
-                painter.drawText(QRectF(0, 0, size, size), Qt.AlignmentFlag.AlignCenter, first_char)
-                painter.end()
+                client_name = client.name
+                total_invoices = client_invoices_total.get(client_name, 0.0)
+                total_payments = client_payments_total.get(client_name, 0.0)
 
-                logo_label.setPixmap(avatar)
+                total_item = create_centered_item(f"{total_invoices:,.0f} ج.م")
+                total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
+                total_item.setForeground(QColor("#2454a5"))
+                total_item.setFont(get_cairo_font(10, bold=True))
+                if is_vip:
+                    total_item.setBackground(vip_bg_color)
+                self.clients_table.setItem(index, 5, total_item)
 
-            logo_layout.addWidget(logo_label)
+                payment_item = create_centered_item(f"{total_payments:,.0f} ج.م")
+                payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)
+                payment_item.setForeground(QColor("#00a876"))
+                payment_item.setFont(get_cairo_font(10, bold=True))
+                if is_vip:
+                    payment_item.setBackground(vip_bg_color)
+                self.clients_table.setItem(index, 6, payment_item)
 
-            # ⚡ إضافة item فارغ للتحكم في الـ background
-            empty_item = QTableWidgetItem()
-            if is_vip:
-                empty_item.setBackground(VIP_BG_COLOR)
-            else:
-                empty_item.setBackground(QColor("transparent"))
-            self.clients_table.setItem(index, 0, empty_item)
-            self.clients_table.setCellWidget(index, 0, logo_container)
+                if is_vip:
+                    status_item = create_centered_item("⭐ VIP")
+                    status_item.setBackground(QColor("#f59e0b"))
+                    status_item.setForeground(QColor("white"))
+                    status_item.setFont(get_cairo_font(10, bold=True))
+                else:
+                    bg_color = (
+                        QColor("#ef4444")
+                        if client.status == schemas.ClientStatus.ARCHIVED
+                        else QColor("#0A6CF1")
+                    )
+                    status_item = create_centered_item(client.status.value, bg_color)
+                    status_item.setForeground(QColor("white"))
+                self.clients_table.setItem(index, 7, status_item)
 
-            # ⚡ الاسم مع علامة VIP
-            name_text = f"⭐ {client.name}" if is_vip else (client.name or "")
-            name_item = create_centered_item(name_text)
-            if is_vip:
-                name_item.setForeground(VIP_TEXT_COLOR)
-                name_item.setFont(get_cairo_font(11, bold=True))
-                name_item.setBackground(VIP_BG_COLOR)
-            self.clients_table.setItem(index, 1, name_item)
+            safe_print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
 
-            # ⚡ باقي الأعمدة مع تلوين VIP
-            company_item = create_centered_item(client.company_name or "")
-            phone_item = create_centered_item(client.phone or "")
-            email_item = create_centered_item(client.email or "")
-
-            if is_vip:
-                company_item.setBackground(VIP_BG_COLOR)
-                phone_item.setBackground(VIP_BG_COLOR)
-                email_item.setBackground(VIP_BG_COLOR)
-
-            self.clients_table.setItem(index, 2, company_item)
-            self.clients_table.setItem(index, 3, phone_item)
-            self.clients_table.setItem(index, 4, email_item)
-
-            # جلب إجماليات العميل
-            client_name = client.name
-            total_invoices = client_invoices_total.get(client_name, 0.0)
-            total_payments = client_payments_total.get(client_name, 0.0)
-
-            # عرض إجمالي الفواتير
-            total_item = create_centered_item(f"{total_invoices:,.0f} ج.م")
-            total_item.setData(Qt.ItemDataRole.UserRole, total_invoices)
-            total_item.setForeground(QColor("#2454a5"))
-            total_item.setFont(get_cairo_font(10, bold=True))
-            if is_vip:
-                total_item.setBackground(VIP_BG_COLOR)
-            self.clients_table.setItem(index, 5, total_item)
-
-            # عرض إجمالي المدفوعات
-            payment_item = create_centered_item(f"{total_payments:,.0f} ج.م")
-            payment_item.setData(Qt.ItemDataRole.UserRole, total_payments)
-            payment_item.setForeground(QColor("#00a876"))
-            payment_item.setFont(get_cairo_font(10, bold=True))
-            if is_vip:
-                payment_item.setBackground(VIP_BG_COLOR)
-            self.clients_table.setItem(index, 6, payment_item)
-
-            # الحالة مع لون الخلفية
-            if is_vip:
-                # ⚡ VIP يظهر بلون ذهبي
-                status_item = create_centered_item("⭐ VIP")
-                status_item.setBackground(QColor("#f59e0b"))
-                status_item.setForeground(QColor("white"))
-                status_item.setFont(get_cairo_font(10, bold=True))
-            else:
-                bg_color = (
-                    QColor("#ef4444")
-                    if client.status == schemas.ClientStatus.ARCHIVED
-                    else QColor("#0A6CF1")
-                )
-                status_item = create_centered_item(client.status.value, bg_color)
-                status_item.setForeground(QColor("white"))
-            self.clients_table.setItem(index, 7, status_item)
-
-        safe_print(f"INFO: [ClientManager] ✅ تم تحميل {len(self.clients_list)} عميل.")
-
-        self.selected_client = None
-        self.update_buttons_state(False)
+            self.selected_client = None
+            self.update_buttons_state(False)
+        finally:
+            self.clients_table.blockSignals(prev_block)
+            self.clients_table.setUpdatesEnabled(True)
+            self.clients_table.setSortingEnabled(prev_sorting)
 
     def _on_clients_changed(self):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
+        self._invalidate_clients_cache()
         # ⚡ إبطال الـ cache لضمان جلب البيانات الجديدة (بما فيها الصور)
-        self.client_service.invalidate_cache()
+        if hasattr(self.client_service, "invalidate_cache"):
+            self.client_service.invalidate_cache()
         self.load_clients_data()
 
     def open_editor(self, client_to_edit: schemas.Client | None):

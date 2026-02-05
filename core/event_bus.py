@@ -103,9 +103,9 @@ class EventBus:
         with self._lock:
             if listener_func not in self._handlers[event_name]:
                 self._handlers[event_name].append(listener_func)
-                logger.debug(f"تم اشتراك مستمع جديد في حدث: {event_name}")
+                logger.debug("تم اشتراك مستمع جديد في حدث: %s", event_name)
             else:
-                logger.warning(f"المستمع مشترك بالفعل في حدث: {event_name}")
+                logger.warning("المستمع مشترك بالفعل في حدث: %s", event_name)
 
     def unsubscribe(self, event_name: str, listener_func: Callable[[Any], None]) -> bool:
         """
@@ -122,10 +122,10 @@ class EventBus:
             if event_name in self._handlers:
                 try:
                     self._handlers[event_name].remove(listener_func)
-                    logger.debug(f"تم إلغاء اشتراك مستمع من حدث: {event_name}")
+                    logger.debug("تم إلغاء اشتراك مستمع من حدث: %s", event_name)
                     return True
                 except ValueError:
-                    logger.warning(f"المستمع غير مشترك في حدث: {event_name}")
+                    logger.warning("المستمع غير مشترك في حدث: %s", event_name)
                     return False
             return False
 
@@ -146,7 +146,7 @@ class EventBus:
         if not handlers:
             return 0
 
-        logger.info(f"جاري نشر حدث: {event_name} ({len(handlers)} مستمع)")
+        logger.info("جاري نشر حدث: %s (%s مستمع)", event_name, len(handlers))
 
         success_count = 0
         for listener_func in handlers:
@@ -195,7 +195,7 @@ class EventBus:
         with self._lock:
             if event_name in self._handlers:
                 del self._handlers[event_name]
-                logger.info(f"تم مسح جميع المشتركين لحدث: {event_name}")
+                logger.info("تم مسح جميع المشتركين لحدث: %s", event_name)
 
     def clear_all(self) -> None:
         """مسح جميع المشتركين لجميع الأحداث"""

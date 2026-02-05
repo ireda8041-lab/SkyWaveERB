@@ -105,7 +105,9 @@ class LoggerSetup:
 
         # تسجيل رسالة البداية
         logger.info("=" * 80)
-        logger.info(f"Sky Wave ERP - بدء التشغيل في {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(
+            "Sky Wave ERP - بدء التشغيل في %s", datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
         logger.info("=" * 80)
 
         LoggerSetup._logger_initialized = True
@@ -143,15 +145,18 @@ class LoggerSetup:
         def wrapper(*args, **kwargs):
             logger = LoggerSetup.get_logger(func.__module__)
             logger.debug(
-                f"استدعاء دالة: {func.__name__} مع المعاملات: args={args}, kwargs={kwargs}"
+                "استدعاء دالة: %s مع المعاملات: args=%s, kwargs=%s",
+                func.__name__,
+                args,
+                kwargs,
             )
 
             try:
                 result = func(*args, **kwargs)
-                logger.debug(f"انتهت دالة: {func.__name__} بنجاح")
+                logger.debug("انتهت دالة: %s بنجاح", func.__name__)
                 return result
             except Exception as e:
-                logger.error(f"فشلت دالة: {func.__name__} بخطأ: {e}")
+                logger.error("فشلت دالة: %s بخطأ: %s", func.__name__, e)
                 raise
 
         return wrapper
@@ -176,7 +181,7 @@ class LoggerSetup:
         session_handler.setFormatter(formatter)
 
         logger.addHandler(session_handler)
-        logger.info(f"تم إنشاء ملف log للجلسة: {session_log_file}")
+        logger.info("تم إنشاء ملف log للجلسة: %s", session_log_file)
 
         return session_log_file
 
@@ -210,12 +215,12 @@ class LoggerSetup:
                 try:
                     os.remove(file_path)
                     deleted_count += 1
-                    logger.info(f"تم حذف ملف log قديم: {filename} (العمر: {age_days} يوم)")
+                    logger.info("تم حذف ملف log قديم: %s (العمر: %s يوم)", filename, age_days)
                 except Exception as e:
-                    logger.error(f"فشل حذف ملف log: {filename} - {e}")
+                    logger.error("فشل حذف ملف log: %s - %s", filename, e)
 
         if deleted_count > 0:
-            logger.info(f"تم حذف {deleted_count} ملف log قديم")
+            logger.info("تم حذف %s ملف log قديم", deleted_count)
 
 
 # --- دوال مساعدة سريعة ---
@@ -251,41 +256,39 @@ def critical(message: str, context: str | None = None):
     logger.critical(message)
 
 
-# --- اختبار ---
-if __name__ == "__main__":
+def _demo():
+    """تشغيل سيناريو تجريبي سريع لاختبار إعدادات التسجيل محلياً."""
     safe_print("--- اختبار نظام التسجيل ---\n")
 
-    # إعداد Logger
     logger = LoggerSetup.setup_logger()
 
-    # اختبار مستويات مختلفة
     logger.debug("هذه رسالة DEBUG")
     logger.info("هذه رسالة INFO")
     logger.warning("هذه رسالة WARNING")
     logger.error("هذه رسالة ERROR")
     logger.critical("هذه رسالة CRITICAL")
 
-    # اختبار الدوال المساعدة
     info("اختبار الدالة المساعدة info()")
     warning("اختبار الدالة المساعدة warning()")
 
-    # اختبار Decorator
     @LoggerSetup.log_function_call
     def test_function(x, y):
         return x + y
 
-    result = test_function(5, 3)
-    safe_print(f"\nنتيجة الدالة: {result}")
+    result_value = test_function(5, 3)
+    safe_print(f"\nنتيجة الدالة: {result_value}")
 
-    # اختبار إنشاء session log
     session_file = LoggerSetup.create_session_log()
     safe_print(f"\nتم إنشاء ملف الجلسة: {session_file}")
 
-    # اختبار تنظيف الملفات القديمة
     LoggerSetup.cleanup_old_logs(days=30)
 
     safe_print("\n--- انتهى الاختبار ---")
     safe_print(f"تحقق من مجلد '{LoggerSetup.LOG_DIR}' لرؤية ملفات الـ log")
+
+
+if __name__ == "__main__":
+    _demo()
 
 
 # دالة مساعدة للحصول على Logger بسهولة

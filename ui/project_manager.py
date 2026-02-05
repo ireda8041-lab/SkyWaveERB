@@ -3,7 +3,7 @@ import os
 import traceback
 from datetime import datetime
 
-from PyQt6.QtCore import QDate, Qt
+from PyQt6.QtCore import QDate, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -26,16 +27,18 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from core import schemas
-from core.cache_manager import CacheManager
+from core.color_utils import clamp01, color_for_ratio
 from core.context_menu import RightClickBlocker, is_right_click_active
 from core.data_loader import get_data_loader
 from core.signals import app_signals
+from core.text_utils import normalize_user_text
 from services.accounting_service import AccountingService
 from services.client_service import ClientService
 from services.expense_service import ExpenseService
@@ -1712,6 +1715,9 @@ class ProjectManagerTab(QWidget):
         self.template_service = template_service
         self.projects_list: list[schemas.Project] = []
         self.selected_project: schemas.Project | None = None
+        self._current_page = 1
+        self._page_size = 100
+        self._current_page_projects: list[schemas.Project] = []
 
         # === استخدام Splitter للتجاوب التلقائي ===
 
@@ -1738,8 +1744,8 @@ class ProjectManagerTab(QWidget):
 
         # ⚡ الاستماع لإشارات تحديث البيانات (لتحديث الجدول أوتوماتيك)
 
-        app_signals.projects_changed.connect(self._on_projects_changed)
-        app_signals.payments_changed.connect(self._on_projects_changed)
+        app_signals.safe_connect(app_signals.projects_changed, self._on_projects_changed)
+        app_signals.safe_connect(app_signals.payments_changed, self._on_projects_changed)
 
         # --- 1. الجزء الأيسر (الجدول والأزرار) ---
         left_widget = QWidget()
@@ -1856,7 +1862,10 @@ class ProjectManagerTab(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # تاريخ البدء
         self.projects_table.verticalHeader().setDefaultSectionSize(32)
         self.projects_table.verticalHeader().setVisible(False)
-        self.projects_table.itemSelectionChanged.connect(self.on_project_selection_changed)
+        self._preview_debounce_timer = None
+        self.projects_table.itemSelectionChanged.connect(
+            self.on_project_selection_changed_debounced
+        )
         self.projects_table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # إضافة دبل كليك للتعديل
@@ -1866,6 +1875,36 @@ class ProjectManagerTab(QWidget):
         self._setup_context_menu()
 
         table_layout.addWidget(self.projects_table)
+
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 6, 0, 0)
+        pagination_layout.setSpacing(8)
+
+        self.prev_page_button = QPushButton("◀ السابق")
+        self.prev_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.prev_page_button.setFixedHeight(26)
+        self.prev_page_button.clicked.connect(self._go_prev_page)
+
+        self.next_page_button = QPushButton("التالي ▶")
+        self.next_page_button.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.next_page_button.setFixedHeight(26)
+        self.next_page_button.clicked.connect(self._go_next_page)
+
+        self.page_info_label = QLabel("صفحة 1 / 1")
+        self.page_info_label.setStyleSheet("color: #94a3b8;")
+
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.addItems(["50", "100", "200", "كل"])
+        self.page_size_combo.setCurrentText("100")
+        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+
+        pagination_layout.addWidget(self.prev_page_button)
+        pagination_layout.addWidget(self.next_page_button)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
+        pagination_layout.addWidget(self.page_size_combo)
+        pagination_layout.addWidget(self.page_info_label)
+        table_layout.addLayout(pagination_layout)
 
         # === إضافة شريط ملخص الفواتير ===
         summary_frame = QFrame()
@@ -1914,15 +1953,15 @@ class ProjectManagerTab(QWidget):
         preview_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         self.preview_groupbox = QGroupBox()
-        self.preview_groupbox.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.preview_groupbox.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.preview_groupbox.setStyleSheet(
             """
             QGroupBox {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(10, 42, 85, 0.95),
-                    stop:1 rgba(5, 32, 69, 0.98));
-                border: 1px solid rgba(10, 108, 241, 0.3);
-                border-radius: 10px;
+                    stop:0 rgba(6, 28, 58, 0.96),
+                    stop:1 rgba(6, 33, 72, 0.98));
+                border: 1px solid rgba(10, 108, 241, 0.22);
+                border-radius: 14px;
                 margin: 0px;
                 padding: 0px;
             }
@@ -1930,29 +1969,132 @@ class ProjectManagerTab(QWidget):
         )
         preview_layout = QVBoxLayout()
         preview_layout.setSpacing(6)
-        preview_layout.setContentsMargins(10, 10, 10, 10)
+        preview_layout.setContentsMargins(6, 6, 6, 6)
         self.preview_groupbox.setLayout(preview_layout)
 
-        # === عنوان اللوحة (بسيط) ===
-        header_title = QLabel("📊 معاينة ربحية المشروع")
-        header_title.setStyleSheet(
-            "color: #93C5FD; font-size: 12px; font-weight: bold; background: transparent; padding: 2px 0;"
+        header_frame = QFrame()
+        header_frame.setObjectName("preview_header_frame")
+        header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        header_frame.setMaximumHeight(64)
+        header_frame.setStyleSheet(
+            """
+            QFrame#preview_header_frame {
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.07);
+                border-radius: 12px;
+            }
+            QLabel {
+                border: none;
+                background: transparent;
+            }
+        """
         )
-        header_title.setAlignment(Qt.AlignmentFlag.AlignRight)
-        preview_layout.addWidget(header_title)
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(6, 5, 6, 5)
+        header_layout.setSpacing(8)
 
-        # === كروت KPI ===
-        kpi_layout = QHBoxLayout()
-        kpi_layout.setSpacing(6)
-        self.revenue_card = self.create_kpi_card("💰 إجمالي العقد", "0.00", "#0A6CF1")
-        self.paid_card = self.create_kpi_card("✅ المدفوع", "0.00", "#10b981")
-        self.due_card = self.create_kpi_card("⏳ المتبقي", "0.00", "#ef4444")
-        kpi_layout.addWidget(self.revenue_card)
-        kpi_layout.addWidget(self.paid_card)
-        kpi_layout.addWidget(self.due_card)
-        preview_layout.addLayout(kpi_layout)
+        header_left = QVBoxLayout()
+        header_left.setSpacing(2)
+        self.preview_project_title_label = QLabel("📊 لوحة ربحية المشروع")
+        self.preview_project_title_label.setStyleSheet(
+            "color: #E5E7EB; font-size: 12px; font-weight: bold; background: transparent; border: none;"
+        )
+        self.preview_project_meta_label = QLabel("—")
+        self.preview_project_meta_label.setStyleSheet(
+            "color: rgba(255,255,255,0.70); font-size: 9px; background: transparent; border: none;"
+        )
+        header_left.addWidget(self.preview_project_title_label)
+        header_left.addWidget(self.preview_project_meta_label)
 
-        # === قسم الدفعات المسجلة ===
+        header_layout.addLayout(header_left, 1)
+
+        self.preview_project_status_chip = QLabel("جاهز")
+        self.preview_project_status_chip.setStyleSheet(
+            """
+            QLabel {
+                padding: 4px 10px;
+                border-radius: 10px;
+                background: rgba(16, 185, 129, 0.16);
+                border: 1px solid rgba(16, 185, 129, 0.35);
+                color: #D1FAE5;
+                font-size: 10px;
+                font-weight: bold;
+            }
+        """
+        )
+        self.preview_project_status_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_layout.addWidget(self.preview_project_status_chip, 0, Qt.AlignmentFlag.AlignRight)
+
+        preview_layout.addWidget(header_frame)
+
+        kpi_container = QWidget()
+        kpi_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        kpi_container.setMaximumHeight(145)
+        kpi_grid = QGridLayout(kpi_container)
+        kpi_grid.setHorizontalSpacing(8)
+        kpi_grid.setVerticalSpacing(6)
+        kpi_grid.setContentsMargins(0, 0, 0, 0)
+
+        self.revenue_card = self.create_kpi_card(
+            "إجمالي العقد", "0.00", "#0A6CF1", "💰", variant="revenue"
+        )
+        self.paid_card = self.create_kpi_card("المدفوع", "0.00", "#10b981", "✅", variant="paid")
+        self.expenses_card = self.create_kpi_card(
+            "إجمالي المصروفات", "0.00", "#ef4444", "💸", variant="expenses"
+        )
+        self.due_card = self.create_kpi_card("المتبقي", "0.00", "#ef4444", "⏳", variant="due")
+        self.net_profit_card = self.create_kpi_card(
+            "صافي الربح", "0.00", "#8B2CF5", "📈", variant="net"
+        )
+        self.collection_card = self.create_kpi_card(
+            "نسبة التحصيل", "0", "#F59E0B", "🎯", value_is_percent=True, variant="collection"
+        )
+
+        kpi_grid.addWidget(self.revenue_card, 0, 0)
+        kpi_grid.addWidget(self.paid_card, 0, 1)
+        kpi_grid.addWidget(self.due_card, 0, 2)
+        kpi_grid.addWidget(self.expenses_card, 1, 0)
+        kpi_grid.addWidget(self.net_profit_card, 1, 1)
+        kpi_grid.addWidget(self.collection_card, 1, 2)
+
+        kpi_grid.setColumnStretch(0, 1)
+        kpi_grid.setColumnStretch(1, 1)
+        kpi_grid.setColumnStretch(2, 1)
+        preview_layout.addWidget(kpi_container)
+
+        self.preview_tabs = QTabWidget()
+        self.preview_tabs.setStyleSheet(
+            """
+            QTabWidget::pane {
+                border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 12px;
+                top: -1px;
+                background: rgba(255,255,255,0.02);
+            }
+            QTabBar::tab {
+                padding: 6px 10px;
+                margin: 0 2px;
+                border: 1px solid rgba(255,255,255,0.08);
+                border-bottom: none;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+                background: rgba(0,0,0,0.16);
+                color: rgba(255,255,255,0.78);
+                font-size: 10pt;
+                font-weight: bold;
+            }
+            QTabBar::tab:selected {
+                background: rgba(10, 108, 241, 0.22);
+                border-color: rgba(10, 108, 241, 0.35);
+                color: white;
+            }
+            """
+        )
+
+        payments_tab = QWidget()
+        payments_layout = QVBoxLayout(payments_tab)
+        payments_layout.setContentsMargins(8, 8, 8, 8)
+        payments_layout.setSpacing(8)
         payments_section = self._create_preview_section(
             "💳 الدفعات المسجلة",
             ["الحساب", "المبلغ", "التاريخ"],
@@ -1963,9 +2105,14 @@ class ProjectManagerTab(QWidget):
             ],
         )
         self.preview_payments_table = payments_section["table"]
-        preview_layout.addWidget(payments_section["frame"])
+        self.preview_payments_meta = payments_section["meta"]
+        payments_layout.addWidget(payments_section["frame"], 1)
+        self.preview_tabs.addTab(payments_tab, "💳 الدفعات")
 
-        # === قسم المصروفات المرتبطة ===
+        expenses_tab = QWidget()
+        expenses_layout = QVBoxLayout(expenses_tab)
+        expenses_layout.setContentsMargins(8, 8, 8, 8)
+        expenses_layout.setSpacing(8)
         expenses_section = self._create_preview_section(
             "💸 المصروفات المرتبطة",
             ["المبلغ", "الوصف", "التاريخ"],
@@ -1976,9 +2123,14 @@ class ProjectManagerTab(QWidget):
             ],
         )
         self.preview_expenses_table = expenses_section["table"]
-        preview_layout.addWidget(expenses_section["frame"])
+        self.preview_expenses_meta = expenses_section["meta"]
+        expenses_layout.addWidget(expenses_section["frame"], 1)
+        self.preview_tabs.addTab(expenses_tab, "💸 المصروفات")
 
-        # === قسم المهام المرتبطة ===
+        tasks_tab = QWidget()
+        tasks_layout = QVBoxLayout(tasks_tab)
+        tasks_layout.setContentsMargins(8, 8, 8, 8)
+        tasks_layout.setSpacing(8)
         tasks_section = self._create_preview_section(
             "📋 المهام المرتبطة",
             ["المهمة", "الأولوية", "الحالة", "الاستحقاق"],
@@ -1991,24 +2143,31 @@ class ProjectManagerTab(QWidget):
             show_add_btn=True,
         )
         self.preview_tasks_table = tasks_section["table"]
+        self.preview_tasks_meta = tasks_section["meta"]
         self.add_task_btn = tasks_section.get("add_btn")
         if self.add_task_btn:
             self.add_task_btn.clicked.connect(self._on_add_task_for_project)
-        preview_layout.addWidget(tasks_section["frame"])
+        tasks_layout.addWidget(tasks_section["frame"], 1)
+        self.preview_tabs.addTab(tasks_tab, "📋 المهام")
 
-        # إضافة مساحة مرنة في النهاية
-        preview_layout.addStretch()
+        self.preview_tabs.setDocumentMode(True)
+        self.preview_tabs.setUsesScrollButtons(True)
+        self.preview_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.preview_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.preview_tabs.setMinimumHeight(260)
+        preview_layout.addWidget(self.preview_tabs, 1)
 
         preview_scroll.setWidget(self.preview_groupbox)
         self.main_splitter.addWidget(preview_scroll)
+        self._preview_scroll = preview_scroll
 
         # تعيين النسب الافتراضية للـ splitter (70% للجدول، 30% للمعاينة)
-        self.main_splitter.setStretchFactor(0, 7)
-        self.main_splitter.setStretchFactor(1, 3)
+        self.main_splitter.setStretchFactor(0, 8)
+        self.main_splitter.setStretchFactor(1, 2)
 
         # تعيين الحد الأدنى للعرض - زيادة عرض المعاينة
         preview_scroll.setMinimumWidth(280)
-        preview_scroll.setMaximumWidth(450)
+        self._apply_preview_splitter_sizes()
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_projects_data() - يتم استدعاؤها من MainWindow
@@ -2026,140 +2185,275 @@ class ProjectManagerTab(QWidget):
         else:
             if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
                 self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
+            self._apply_preview_splitter_sizes()
 
-    def create_kpi_card(self, title: str, value: str, color: str) -> QFrame:
+    def _apply_preview_splitter_sizes(self):
+        if not hasattr(self, "main_splitter") or not self.main_splitter:
+            return
+        if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
+            return
+        total = self.width()
+        if total <= 0:
+            return
+        preview_w = int(total * 0.26)
+        preview_w = max(280, min(preview_w, total - 520))
+        left_w = max(320, total - preview_w)
+        try:
+            self.main_splitter.setSizes([left_w, preview_w])
+        except Exception:
+            pass
+
+    def create_kpi_card(
+        self,
+        title: str,
+        value: str,
+        accent: str,
+        icon: str,
+        variant: str = "",
+        value_is_percent: bool = False,
+    ) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(f"QFrame {{ background-color: {color}; border-radius: 6px; }}")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(8, 6, 8, 6)
-        card_layout.setSpacing(2)
-        title_label = QLabel(title)
+        card.setObjectName(f"kpi_card_{variant}")
+        card.setProperty("value_label_name", "value_label")
+        card.setProperty("base_accent", accent)
+        card.setProperty("variant", variant)
+        card.setProperty("value_is_percent", bool(value_is_percent))
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setMinimumHeight(51)
+        card.setMaximumHeight(66)
+
+        # ⚡ استخدام سلكتور محدد لمنع ظهور المربعات حول الـ Labels
+        card.setStyleSheet(
+            f"""
+            QFrame#kpi_card_{variant} {{
+                background: rgba(255, 255, 255, 0.035);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 12px;
+            }}
+            QLabel {{
+                border: none;
+                background: transparent;
+            }}
+            """
+        )
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(2)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(6)
+
+        title_label = QLabel(f"{icon} {title}")
         title_label.setStyleSheet(
-            "color: rgba(255,255,255,0.85); font-size: 9px; background: transparent;"
+            "color: rgba(255,255,255,0.78); font-size: 9pt; font-weight: bold; border: none; background: transparent;"
         )
+        title_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top_row.addWidget(title_label, 1)
+
+        layout.addLayout(top_row)
+
         value_label = QLabel(value)
+        value_label.setObjectName("value_label")
         value_label.setStyleSheet(
-            "color: white; font-weight: bold; font-size: 13px; background: transparent;"
+            "color: white; font-weight: 800; font-size: 11pt; border: none; background: transparent;"
         )
-        obj_name = f"val_{title}"
-        value_label.setObjectName(obj_name)
-        card.setProperty("value_label_name", obj_name)
-        card_layout.addWidget(title_label)
-        card_layout.addWidget(value_label)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(value_label)
+
         return card
 
     def update_card_value(self, card: QFrame, value: float):
         try:
-            obj_name = card.property("value_label_name")
+            obj_name = card.property("value_label_name") or "value_label"
             value_label = card.findChild(QLabel, obj_name)
             if value_label:
-                value_label.setText(f"{value:,.2f} EGP")
-                if "المتبقي" in obj_name and value > 0:
-                    card.setStyleSheet("QFrame { background-color: #ef4444; border-radius: 6px; }")
-                elif "المتبقي" in obj_name:
-                    card.setStyleSheet("QFrame { background-color: #10b981; border-radius: 6px; }")
+                variant = (card.property("variant") or "").strip().lower()
+                value_is_percent = bool(card.property("value_is_percent"))
+
+                if value_is_percent:
+                    value_label.setText(f"{value:.0f}%")
+                else:
+                    value_label.setText(f"{value:,.2f} EGP")
+
+                if variant == "collection":
+                    ratio = clamp01((float(value) if value is not None else 0.0) / 100.0)
+                    self._apply_kpi_ratio_style(card, ratio)
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل تحديث الكارت: {e}")
+
+    def _apply_kpi_ratio_style(self, card: QFrame, ratio: float):
+        r = clamp01(ratio)
+        accent = color_for_ratio(r)
+        variant = (card.property("variant") or "").strip()
+        obj_name = card.objectName() or f"kpi_card_{variant}"
+
+        card.setStyleSheet(
+            f"""
+            QFrame#{obj_name} {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {accent}33,
+                    stop:1 rgba(255, 255, 255, 0.04));
+                border: 1px solid {accent}44;
+                border-radius: 12px;
+            }}
+            QLabel {{
+                border: none;
+                background: transparent;
+            }}
+            """
+        )
+
+    def _apply_profit_kpi_ratios(self, profit_data: dict):
+        try:
+            revenue = float(profit_data.get("total_revenue", 0) or 0.0)
+            paid = float(profit_data.get("total_paid", 0) or 0.0)
+            expenses = float(profit_data.get("total_expenses", 0) or 0.0)
+            net = float(profit_data.get("net_profit", 0) or 0.0)
+            due = float(profit_data.get("balance_due", 0) or 0.0)
+
+            paid_ratio = (paid / revenue) if revenue > 0 else 0.0
+            due_ratio_good = 1.0 - (due / revenue) if revenue > 0 else 0.0
+            expenses_ratio_good = 1.0 - (expenses / revenue) if revenue > 0 else 0.0
+            net_ratio = ((net / revenue) + 1.0) / 2.0 if revenue > 0 else 0.5
+
+            if hasattr(self, "revenue_card"):
+                self._apply_kpi_ratio_style(self.revenue_card, 0.5)
+            if hasattr(self, "paid_card"):
+                self._apply_kpi_ratio_style(self.paid_card, paid_ratio)
+            if hasattr(self, "due_card"):
+                self._apply_kpi_ratio_style(self.due_card, due_ratio_good)
+            if hasattr(self, "expenses_card"):
+                self._apply_kpi_ratio_style(self.expenses_card, expenses_ratio_good)
+            if hasattr(self, "net_profit_card"):
+                self._apply_kpi_ratio_style(self.net_profit_card, net_ratio)
+            if hasattr(self, "collection_card"):
+                self._apply_kpi_ratio_style(self.collection_card, paid_ratio)
+        except Exception:
+            pass
 
     def _create_preview_section(
         self, title: str, headers: list, resize_modes: list, show_add_btn: bool = False
     ) -> dict:
-        """إنشاء قسم معاينة بسيط مع جدول"""
-        # Container بدون فريم
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
+        frame = QFrame()
+        frame.setObjectName("preview_section_frame")
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        frame.setStyleSheet(
+            """
+            QFrame#preview_section_frame {
+                background: rgba(255,255,255,0.03);
+                border: 1px solid rgba(255,255,255,0.06);
+                border-radius: 12px;
+            }
+            QLabel {
+                border: none;
+                background: transparent;
+            }
+            """
+        )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(7, 5, 7, 6)
+        layout.setSpacing(5)
 
-        # شريط العنوان بسيط
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(6)
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
 
-        # زر الإضافة (إذا مطلوب)
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            "color: #93C5FD; font-size: 10pt; font-weight: bold; background: transparent;"
+        )
+        title_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(title_label, 1)
+
+        meta_label = QLabel("—")
+        meta_label.setStyleSheet(
+            "color: rgba(255,255,255,0.70); font-size: 9pt; background: transparent;"
+        )
+        meta_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        header_row.addWidget(meta_label)
+
         add_btn = None
         if show_add_btn:
-            add_btn = QPushButton("+ مهمة")
-            add_btn.setFixedSize(70, 22)
+            add_btn = QPushButton("➕ مهمة")
+            add_btn.setMinimumSize(80, 26)
             add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             add_btn.setStyleSheet(
                 """
                 QPushButton {
-                    background: #8B2CF5;
+                    background: rgba(139, 44, 245, 0.90);
                     color: white;
-                    border: none;
-                    border-radius: 4px;
-                    font-size: 10px;
+                    border: 1px solid rgba(255,255,255,0.12);
+                    border-radius: 10px;
+                    font-size: 9pt;
                     font-weight: bold;
-                    min-width: 70px;
-                    max-width: 70px;
-                    min-height: 22px;
-                    max-height: 22px;
+                    padding: 4px 10px;
                 }
-                QPushButton:hover { background: #9333ea; }
-                QPushButton:pressed { background: #7c3aed; }
+                QPushButton:hover { background: rgba(147, 51, 234, 0.95); }
+                QPushButton:pressed { background: rgba(124, 58, 237, 0.95); }
             """
             )
-            header_layout.addWidget(add_btn)
+            header_row.addWidget(add_btn)
 
-        header_layout.addStretch()
+        layout.addLayout(header_row)
 
-        # عنوان بسيط بدون فريم
-        title_label = QLabel(title)
-        title_label.setStyleSheet(
-            "color: #93C5FD; font-size: 11px; font-weight: bold; background: transparent;"
-        )
-        header_layout.addWidget(title_label)
-        layout.addLayout(header_layout)
-
-        # الجدول
         table = QTableWidget()
         table.setColumnCount(len(headers))
         table.setHorizontalHeaderLabels(headers)
+        table.setAlternatingRowColors(True)
+        table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        table.setShowGrid(False)
         table.setStyleSheet(
-            f"""
-            QTableWidget {{
-                background-color: {COLORS["bg_dark"]};
-                border: 1px solid {COLORS["border"]};
-                border-radius: 4px;
-                gridline-color: {COLORS["border"]};
-                font-size: 11px;
-            }}
-            QTableWidget::item {{
+            """
+            QTableWidget {
+                background-color: rgba(0, 0, 0, 0.18);
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 10px;
+                gridline-color: rgba(255,255,255,0.06);
+                font-size: 9pt;
+                alternate-background-color: rgba(255,255,255,0.03);
+            }
+            QTableWidget::item {
                 padding: 3px 5px;
-                border-bottom: 1px solid rgba(30, 58, 95, 0.3);
-            }}
-            QTableWidget::item:selected {{
-                background-color: {COLORS["primary"]};
-            }}
-            QHeaderView::section {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["header_bg"]}, stop:1 #1d4ed8);
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+            }
+            QTableWidget::item:selected {
+                background-color: rgba(10, 108, 241, 0.45);
+            }
+            QHeaderView::section {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(10, 108, 241, 0.85),
+                    stop:1 rgba(29, 78, 216, 0.85));
                 color: white;
-                padding: 5px;
+                padding: 4px;
                 border: none;
-                border-right: 1px solid rgba(255,255,255,0.15);
-                font-size: 10px;
+                border-right: 1px solid rgba(255,255,255,0.14);
+                font-size: 8pt;
                 font-weight: bold;
-            }}
+            }
         """
         )
 
         fix_table_rtl(table)
 
-        # تطبيق أوضاع تغيير حجم الأعمدة
         header = table.horizontalHeader()
         for i, mode in enumerate(resize_modes):
             header.setSectionResizeMode(i, mode)
+        header.setStretchLastSection(True)
+        header.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setFixedHeight(30)
 
-        table.verticalHeader().setDefaultSectionSize(30)
+        table.verticalHeader().setDefaultSectionSize(26)
         table.verticalHeader().setVisible(False)
-        table.setMinimumHeight(120)
-        table.setMaximumHeight(180)
+        table.setWordWrap(False)
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        table.setMinimumHeight(200)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        layout.addWidget(table)
+        layout.addWidget(table, 1)
 
-        result = {"frame": container, "table": table}
+        result = {"frame": frame, "table": table, "meta": meta_label}
         if add_btn:
             result["add_btn"] = add_btn
         return result
@@ -2344,13 +2638,41 @@ class ProjectManagerTab(QWidget):
                 return
 
             project_name = project_name_item.text()
+            try:
+                if hasattr(self, "preview_project_title_label"):
+                    self.preview_project_title_label.setText(
+                        f"📊 لوحة ربحية المشروع: {project_name}"
+                    )
+                if hasattr(self, "preview_project_meta_label"):
+                    self.preview_project_meta_label.setText("جاري تحميل البيانات…")
+                if hasattr(self, "preview_project_status_chip"):
+                    self.preview_project_status_chip.setText("⏳ تحميل")
+                    self.preview_project_status_chip.setStyleSheet(
+                        """
+                        QLabel {
+                            padding: 4px 10px;
+                            border-radius: 10px;
+                            background: rgba(245, 158, 11, 0.16);
+                            border: 1px solid rgba(245, 158, 11, 0.35);
+                            color: #FDE68A;
+                            font-size: 10px;
+                            font-weight: bold;
+                        }
+                        """
+                    )
+            except Exception:
+                pass
 
-            # البحث عن المشروع في القائمة بالاسم
             self.selected_project = None
-            for proj in self.projects_list:
+            for proj in self._current_page_projects:
                 if proj.name == project_name:
                     self.selected_project = proj
                     break
+            if not self.selected_project:
+                for proj in self.projects_list:
+                    if proj.name == project_name:
+                        self.selected_project = proj
+                        break
 
             if not self.selected_project:
                 return
@@ -2382,73 +2704,333 @@ class ProjectManagerTab(QWidget):
         self.preview_template_button.setEnabled(False)  # ✅ تعطيل زرار المعاينة
         self.preview_groupbox.setVisible(False)
 
+    def _get_total_pages(self) -> int:
+        total = len(self.projects_list)
+        if total == 0:
+            return 1
+        if self._page_size <= 0:
+            return 1
+        return (total + self._page_size - 1) // self._page_size
+
+    def _render_current_page(self):
+        total_pages = self._get_total_pages()
+        if self._current_page > total_pages:
+            self._current_page = total_pages
+        if self._current_page < 1:
+            self._current_page = 1
+
+        if self._page_size <= 0:
+            page_projects = self.projects_list
+        else:
+            start_index = (self._current_page - 1) * self._page_size
+            end_index = start_index + self._page_size
+            page_projects = self.projects_list[start_index:end_index]
+
+        self._current_page_projects = page_projects
+        self._populate_projects_table(page_projects)
+        self._update_pagination_controls(total_pages)
+
+    def _populate_projects_table(self, projects: list[schemas.Project]):
+        def create_centered_item(text):
+            item = QTableWidgetItem(str(text) if text else "")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            return item
+
+        self.projects_table.setRowCount(len(projects))
+        for row, project in enumerate(projects):
+            invoice_number = getattr(project, "invoice_number", None) or ""
+            self.projects_table.setItem(row, 0, create_centered_item(invoice_number))
+            self.projects_table.setItem(row, 1, create_centered_item(project.name))
+            self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
+            self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
+            self.projects_table.setItem(
+                row, 4, create_centered_item(self._format_date(project.start_date))
+            )
+
+        self.projects_table.blockSignals(False)
+        self.projects_table.setUpdatesEnabled(True)
+        self.projects_table.setSortingEnabled(True)
+
+    def _update_pagination_controls(self, total_pages: int):
+        self.page_info_label.setText(f"صفحة {self._current_page} / {total_pages}")
+        self.prev_page_button.setEnabled(self._current_page > 1)
+        self.next_page_button.setEnabled(self._current_page < total_pages)
+
+    def _on_page_size_changed(self, value: str):
+        if value == "كل":
+            self._page_size = max(1, len(self.projects_list))
+        else:
+            try:
+                self._page_size = int(value)
+            except Exception:
+                self._page_size = 100
+        self._current_page = 1
+        self._render_current_page()
+
+    def _go_prev_page(self):
+        if self._current_page > 1:
+            self._current_page -= 1
+            self._render_current_page()
+
+    def _go_next_page(self):
+        if self._current_page < self._get_total_pages():
+            self._current_page += 1
+            self._render_current_page()
+
+    def on_project_selection_changed_debounced(self):
+        if is_right_click_active():
+            return
+        if not hasattr(self, "_preview_debounce_timer") or self._preview_debounce_timer is None:
+            self._preview_debounce_timer = QTimer(self)
+            self._preview_debounce_timer.setSingleShot(True)
+            self._preview_debounce_timer.timeout.connect(self.on_project_selection_changed)
+        self._preview_debounce_timer.start(120)
+
     def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
         """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى مع بيانات حديثة"""
+
+        # ⚡ مسح محتويات الجداول فوراً عند بدء التحميل لمنع ظهور بيانات المشروع السابق
+        self._populate_payments_table_fast([])
+        self._populate_expenses_table_fast([])
+        self._populate_tasks_table_fast([])
+
+        if not hasattr(self, "_preview_cache"):
+            self._preview_cache = {}
+            self._preview_cache_ttl_s = 20.0
+
+        if not hasattr(self, "_preview_cache_connected"):
+
+            def _invalidate(_data_type: str):
+                if hasattr(self, "_preview_cache"):
+                    self._preview_cache.clear()
+
+            app_signals.data_changed.connect(_invalidate)
+            self._preview_cache_connected = True
+
+        cache_entry = self._preview_cache.get(project_name)
+        if cache_entry:
+            import time
+
+            if (time.monotonic() - cache_entry["ts"]) <= self._preview_cache_ttl_s:
+                data = cache_entry["data"]
+                profit_data = data.get("profit", {})
+                self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
+                self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
+                self.update_card_value(self.expenses_card, profit_data.get("total_expenses", 0))
+                self.update_card_value(self.net_profit_card, profit_data.get("net_profit", 0))
+                self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
+                revenue = float(profit_data.get("total_revenue", 0) or 0.0)
+                paid = float(profit_data.get("total_paid", 0) or 0.0)
+                ratio = (paid / revenue * 100.0) if revenue > 0 else 0.0
+                self.update_card_value(self.collection_card, ratio)
+                self._apply_profit_kpi_ratios(profit_data)
+                try:
+                    if hasattr(self, "preview_project_meta_label"):
+                        self.preview_project_meta_label.setText("تم التحديث من الذاكرة المؤقتة")
+                    if hasattr(self, "preview_project_status_chip"):
+                        self.preview_project_status_chip.setText("✅ جاهز")
+                        self.preview_project_status_chip.setStyleSheet(
+                            """
+                            QLabel {
+                                padding: 4px 10px;
+                                border-radius: 10px;
+                                background: rgba(16, 185, 129, 0.16);
+                                border: 1px solid rgba(16, 185, 129, 0.35);
+                                color: #D1FAE5;
+                                font-size: 10px;
+                                font-weight: bold;
+                            }
+                            """
+                        )
+                except Exception:
+                    pass
+
+                # ⚡ تحديث الجداول بسرعة مع ضمان عدم تكرار البيانات (من الذاكرة المؤقتة)
+                payments = data.get("payments", [])
+                expenses = data.get("expenses", [])
+                tasks = data.get("tasks", [])
+
+                unique_payments = list(
+                    {
+                        (getattr(p, "_mongo_id", None) or getattr(p, "id", None) or id(p)): p
+                        for p in payments
+                    }.values()
+                )
+                unique_expenses = list(
+                    {
+                        (getattr(e, "_mongo_id", None) or getattr(e, "id", None) or id(e)): e
+                        for e in expenses
+                    }.values()
+                )
+                unique_tasks = list({(getattr(t, "id", None) or id(t)): t for t in tasks}.values())
+
+                self._populate_payments_table_fast(unique_payments)
+                self._populate_expenses_table_fast(unique_expenses)
+                self._populate_tasks_table_fast(unique_tasks)
+                return
 
         data_loader = get_data_loader()
 
         # ⚡ تحميل كل البيانات في طلب واحد (أسرع) - مع تجاوز الـ cache
         def fetch_all_data():
-            # ⚡ إبطال الـ cache للمشروع الحالي لضمان بيانات حديثة
             try:
+                payments = self.project_service.get_payments_for_project(project_name) or []
+                expenses = self.project_service.get_expenses_for_project(project_name) or []
+                project = self.project_service.repo.get_project_by_number(project_name)
 
-                cache = CacheManager.get_instance()
-                cache.invalidate(f"project_{project_name}")
-                cache.invalidate(f"payments_{project_name}")
-                cache.invalidate(f"expenses_{project_name}")
-            except Exception:
-                pass  # تجاهل إذا لم يكن الـ cache متاحاً
+                total_revenue = float(project.total_amount or 0.0) if project else 0.0
+                total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
+                total_expenses = sum(float(getattr(e, "amount", 0.0) or 0.0) for e in expenses)
+                net_profit = total_revenue - total_expenses
+                balance_due = max(0.0, total_revenue - total_paid)
 
-            # ⚡ جلب البيانات مباشرة من قاعدة البيانات (bypass cache)
-            profit_data = self.project_service.get_project_profitability(project_name)
-            payments = self.project_service.get_payments_for_project(project_name)
-            expenses = self.project_service.get_expenses_for_project(project_name)
+                profit_data = {
+                    "total_revenue": total_revenue,
+                    "total_expenses": total_expenses,
+                    "net_profit": net_profit,
+                    "total_paid": total_paid,
+                    "balance_due": balance_due,
+                }
 
-            # جلب المهام
-            tasks = []
-            try:
+                # جلب المهام
+                tasks = []
+                try:
+                    ts = TaskService()
+                    tasks = ts.get_tasks_by_project(str(project_id_for_tasks)) or []
+                except Exception as e:
+                    safe_print(f"DEBUG: [ProjectManager] فشل جلب المهام في الخلفية: {e}")
+                    pass
 
-                task_service = TaskService()
-                # ⚡ تحديث المهام من قاعدة البيانات
-                task_service.refresh()
-                tasks = task_service.get_tasks_by_project(str(project_id_for_tasks))
-            except Exception:
-                pass
-
-            return {
-                "profit": profit_data,
-                "payments": payments,
-                "expenses": expenses,
-                "tasks": tasks,
-            }
+                return {
+                    "profit": profit_data,
+                    "payments": payments,
+                    "expenses": expenses,
+                    "tasks": tasks,
+                }
+            except Exception as e:
+                safe_print(f"CRITICAL ERROR in fetch_all_data: {e}")
+                raise e
 
         def on_all_data_loaded(data):
             # التحقق أن المشروع لا يزال محدداً
             if not self.selected_project or self.selected_project.name != project_name:
                 return
 
+            import time
+
+            self._preview_cache[project_name] = {"ts": time.monotonic(), "data": data}
+
             # ⚡ تحديث الكروت فوراً
             profit_data = data.get("profit", {})
             self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
             self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
+            self.update_card_value(self.expenses_card, profit_data.get("total_expenses", 0))
+            self.update_card_value(self.net_profit_card, profit_data.get("net_profit", 0))
             self.update_card_value(self.due_card, profit_data.get("balance_due", 0))
+            revenue = float(profit_data.get("total_revenue", 0) or 0.0)
+            paid = float(profit_data.get("total_paid", 0) or 0.0)
+            ratio = (paid / revenue * 100.0) if revenue > 0 else 0.0
+            self.update_card_value(self.collection_card, ratio)
+            self._apply_profit_kpi_ratios(profit_data)
+            try:
+                if hasattr(self, "preview_project_meta_label"):
+                    self.preview_project_meta_label.setText(
+                        f"آخر تحديث: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                    )
+                if hasattr(self, "preview_project_status_chip"):
+                    self.preview_project_status_chip.setText("✅ جاهز")
+                    self.preview_project_status_chip.setStyleSheet(
+                        """
+                        QLabel {
+                            padding: 4px 10px;
+                            border-radius: 10px;
+                            background: rgba(16, 185, 129, 0.16);
+                            border: 1px solid rgba(16, 185, 129, 0.35);
+                            color: #D1FAE5;
+                            font-size: 10px;
+                            font-weight: bold;
+                        }
+                        """
+                    )
+            except Exception:
+                pass
 
-            # ⚡ تحديث الجداول بسرعة
-            self._populate_payments_table_fast(data.get("payments", []))
-            self._populate_expenses_table_fast(data.get("expenses", []))
-            self._populate_tasks_table_fast(data.get("tasks", []))
+            # ⚡ تحديث الجداول بسرعة مع ضمان عدم تكرار البيانات
+            payments = data.get("payments", [])
+            expenses = data.get("expenses", [])
+            tasks = data.get("tasks", [])
+
+            # فلترة التكرار بناءً على الـ ID (Mongo ID أو SQLite ID)
+            unique_payments = list(
+                {
+                    (getattr(p, "_mongo_id", None) or getattr(p, "id", None) or id(p)): p
+                    for p in payments
+                }.values()
+            )
+            unique_expenses = list(
+                {
+                    (getattr(e, "_mongo_id", None) or getattr(e, "id", None) or id(e)): e
+                    for e in expenses
+                }.values()
+            )
+            unique_tasks = list({(getattr(t, "id", None) or id(t)): t for t in tasks}.values())
+
+            self._populate_payments_table_fast(unique_payments)
+            self._populate_expenses_table_fast(unique_expenses)
+            self._populate_tasks_table_fast(unique_tasks)
+
+        def on_error(error_msg: str):
+            if not self.selected_project or self.selected_project.name != project_name:
+                return
+            safe_print(f"ERROR: فشل تحميل معاينة المشروع '{project_name}': {error_msg}")
+            self.update_card_value(self.revenue_card, 0)
+            self.update_card_value(self.paid_card, 0)
+            self.update_card_value(self.expenses_card, 0)
+            self.update_card_value(self.net_profit_card, 0)
+            self.update_card_value(self.due_card, 0)
+            self.update_card_value(self.collection_card, 0)
+            try:
+                if hasattr(self, "preview_project_meta_label"):
+                    self.preview_project_meta_label.setText(f"تعذر تحميل البيانات: {error_msg}")
+                if hasattr(self, "preview_project_status_chip"):
+                    self.preview_project_status_chip.setText("❌ خطأ")
+                    self.preview_project_status_chip.setStyleSheet(
+                        """
+                        QLabel {
+                            padding: 4px 10px;
+                            border-radius: 10px;
+                            background: rgba(239, 68, 68, 0.16);
+                            border: 1px solid rgba(239, 68, 68, 0.35);
+                            color: #FECACA;
+                            font-size: 10px;
+                            font-weight: bold;
+                        }
+                        """
+                    )
+            except Exception:
+                pass
+            self._populate_payments_table_fast([])
+            self._populate_expenses_table_fast([])
+            self._populate_tasks_table_fast([])
 
         data_loader.load_async(
-            operation_name=f"preview_{project_name}",
+            operation_name="project_preview",
             load_function=fetch_all_data,
             on_success=on_all_data_loaded,
+            on_error=on_error,
             use_thread_pool=True,
         )
 
     def _populate_payments_table_fast(self, payments):
         """⚡⚡ ملء جدول الدفعات - نسخة فائقة السرعة"""
+        table = None
+        prev_block = False
+        prev_sorting = False
         try:
             table = self.preview_payments_table
+            prev_block = table.blockSignals(True)
+            prev_sorting = table.isSortingEnabled()
+            table.setSortingEnabled(False)
             table.setUpdatesEnabled(False)
             table.clearContents()
             table.setRowCount(0)
@@ -2458,6 +3040,7 @@ class ProjectManagerTab(QWidget):
 
                 # ⚡ تخزين الحسابات مؤقتاً
                 accounts_cache = {}
+                total_amount = 0.0
 
                 for i, pay in enumerate(payments):
                     # معالجة التاريخ
@@ -2484,14 +3067,20 @@ class ProjectManagerTab(QWidget):
                                 accounts_cache[pay.account_id] = account_name
                             except:
                                 account_name = str(pay.account_id)
+                    account_name = normalize_user_text(account_name) or "—"
 
                     # إنشاء العناصر
                     account_item = QTableWidgetItem(account_name)
                     account_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    account_item.setToolTip(account_name)
 
                     amount_item = QTableWidgetItem(f"{pay.amount:,.2f} ج.م")
                     amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     amount_item.setForeground(QColor("#10b981"))
+                    try:
+                        total_amount += float(getattr(pay, "amount", 0.0) or 0.0)
+                    except Exception:
+                        pass
 
                     date_item = QTableWidgetItem(date_str)
                     date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2499,6 +3088,17 @@ class ProjectManagerTab(QWidget):
                     table.setItem(i, 0, account_item)
                     table.setItem(i, 1, amount_item)
                     table.setItem(i, 2, date_item)
+                    try:
+                        table.setRowHeight(i, 20)
+                    except Exception:
+                        pass
+                try:
+                    if hasattr(self, "preview_payments_meta") and self.preview_payments_meta:
+                        self.preview_payments_meta.setText(
+                            f"{len(payments)} دفعة • الإجمالي {total_amount:,.2f} ج.م"
+                        )
+                except Exception:
+                    pass
             else:
                 table.setRowCount(1)
                 no_data = QTableWidgetItem("لا توجد دفعات مسجلة")
@@ -2506,21 +3106,40 @@ class ProjectManagerTab(QWidget):
                 no_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 table.setItem(0, 0, no_data)
                 table.setSpan(0, 0, 1, 3)
+                try:
+                    table.setRowHeight(0, 20)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "preview_payments_meta") and self.preview_payments_meta:
+                        self.preview_payments_meta.setText("0 دفعة")
+                except Exception:
+                    pass
         except Exception as e:
             safe_print(f"ERROR: فشل ملء جدول الدفعات: {e}")
         finally:
-            table.setUpdatesEnabled(True)
+            if table is not None:
+                table.setUpdatesEnabled(True)
+                table.setSortingEnabled(prev_sorting)
+                table.blockSignals(prev_block)
 
     def _populate_expenses_table_fast(self, expenses):
         """⚡⚡ ملء جدول المصروفات - نسخة فائقة السرعة"""
+        table = None
+        prev_block = False
+        prev_sorting = False
         try:
             table = self.preview_expenses_table
+            prev_block = table.blockSignals(True)
+            prev_sorting = table.isSortingEnabled()
+            table.setSortingEnabled(False)
             table.setUpdatesEnabled(False)
             table.clearContents()
             table.setRowCount(0)
 
             if expenses and len(expenses) > 0:
                 table.setRowCount(len(expenses))
+                total_amount = 0.0
 
                 for i, exp in enumerate(expenses):
                     try:
@@ -2532,12 +3151,19 @@ class ProjectManagerTab(QWidget):
                     except:
                         date_str = "N/A"
 
-                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f}")
+                    amount_item = QTableWidgetItem(f"{exp.amount:,.2f} ج.م")
                     amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     amount_item.setForeground(QColor("#ef4444"))
+                    try:
+                        total_amount += float(getattr(exp, "amount", 0.0) or 0.0)
+                    except Exception:
+                        pass
 
-                    desc_item = QTableWidgetItem(exp.description or exp.category or "-")
+                    raw_desc = exp.description or exp.category or "—"
+                    desc_text = normalize_user_text(raw_desc) or "—"
+                    desc_item = QTableWidgetItem(desc_text)
                     desc_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    desc_item.setToolTip(desc_text)
 
                     date_item = QTableWidgetItem(date_str)
                     date_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2545,6 +3171,17 @@ class ProjectManagerTab(QWidget):
                     table.setItem(i, 0, amount_item)
                     table.setItem(i, 1, desc_item)
                     table.setItem(i, 2, date_item)
+                    try:
+                        table.setRowHeight(i, 20)
+                    except Exception:
+                        pass
+                try:
+                    if hasattr(self, "preview_expenses_meta") and self.preview_expenses_meta:
+                        self.preview_expenses_meta.setText(
+                            f"{len(expenses)} مصروف • الإجمالي {total_amount:,.2f} ج.م"
+                        )
+                except Exception:
+                    pass
             else:
                 table.setRowCount(1)
                 no_data = QTableWidgetItem("لا توجد مصروفات مسجلة")
@@ -2552,15 +3189,33 @@ class ProjectManagerTab(QWidget):
                 no_data.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 table.setItem(0, 0, no_data)
                 table.setSpan(0, 0, 1, 3)
+                try:
+                    table.setRowHeight(0, 20)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "preview_expenses_meta") and self.preview_expenses_meta:
+                        self.preview_expenses_meta.setText("0 مصروف")
+                except Exception:
+                    pass
         except Exception as e:
             safe_print(f"ERROR: فشل ملء جدول المصروفات: {e}")
         finally:
-            table.setUpdatesEnabled(True)
+            if table is not None:
+                table.setUpdatesEnabled(True)
+                table.setSortingEnabled(prev_sorting)
+                table.blockSignals(prev_block)
 
     def _populate_tasks_table_fast(self, tasks):
         """⚡⚡ ملء جدول المهام - نسخة فائقة السرعة"""
+        table = None
+        prev_block = False
+        prev_sorting = False
         try:
             table = self.preview_tasks_table
+            prev_block = table.blockSignals(True)
+            prev_sorting = table.isSortingEnabled()
+            table.setSortingEnabled(False)
             table.setUpdatesEnabled(False)
             table.clearContents()
             table.setRowCount(0)
@@ -2582,30 +3237,70 @@ class ProjectManagerTab(QWidget):
                 }
 
                 for i, task in enumerate(tasks):
-                    table.setItem(i, 0, QTableWidgetItem(task.title))
+                    title_text = normalize_user_text(getattr(task, "title", "")) or "—"
+                    title_item = QTableWidgetItem(title_text)
+                    title_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    title_item.setToolTip(title_text)
+                    table.setItem(i, 0, title_item)
 
                     priority_item = QTableWidgetItem(task.priority.value)
+                    priority_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     priority_item.setForeground(
                         QColor(priority_colors.get(task.priority.value, "white"))
                     )
                     table.setItem(i, 1, priority_item)
 
                     status_item = QTableWidgetItem(task.status.value)
+                    status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     status_item.setForeground(QColor(status_colors.get(task.status.value, "white")))
                     table.setItem(i, 2, status_item)
 
                     due_str = task.due_date.strftime("%Y-%m-%d") if task.due_date else "-"
-                    table.setItem(i, 3, QTableWidgetItem(due_str))
+                    if getattr(task, "due_time", None) and task.due_date:
+                        due_str = f"{due_str} {task.due_time}"
+                    due_item = QTableWidgetItem(due_str)
+                    due_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    try:
+                        if (
+                            hasattr(task, "is_overdue")
+                            and callable(task.is_overdue)
+                            and task.is_overdue()
+                        ):
+                            due_item.setForeground(QColor("#ef4444"))
+                    except Exception:
+                        pass
+                    table.setItem(i, 3, due_item)
+                    try:
+                        table.setRowHeight(i, 20)
+                    except Exception:
+                        pass
+                try:
+                    if hasattr(self, "preview_tasks_meta") and self.preview_tasks_meta:
+                        self.preview_tasks_meta.setText(f"{len(tasks)} مهمة")
+                except Exception:
+                    pass
             else:
                 table.setRowCount(1)
                 no_data = QTableWidgetItem("لا توجد مهام مرتبطة")
                 no_data.setForeground(QColor("gray"))
                 table.setItem(0, 0, no_data)
                 table.setSpan(0, 0, 1, 4)
+                try:
+                    table.setRowHeight(0, 20)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "preview_tasks_meta") and self.preview_tasks_meta:
+                        self.preview_tasks_meta.setText("0 مهمة")
+                except Exception:
+                    pass
         except Exception as e:
             safe_print(f"ERROR: فشل ملء جدول المهام: {e}")
         finally:
-            table.setUpdatesEnabled(True)
+            if table is not None:
+                table.setUpdatesEnabled(True)
+                table.setSortingEnabled(prev_sorting)
+                table.blockSignals(prev_block)
 
     def _populate_payments_table(self, payments):
         """⚡ ملء جدول الدفعات - محسّن مع عرض اسم الحساب"""
@@ -2956,34 +3651,7 @@ class ProjectManagerTab(QWidget):
             try:
                 self.projects_list = projects
 
-                # ⚡ مسح الجدول قبل إضافة البيانات الجديدة (لمنع التكرار)
-                self.projects_table.setRowCount(0)
-
-                # إنشاء العناصر مع محاذاة للوسط
-                def create_centered_item(text):
-                    item = QTableWidgetItem(str(text) if text else "")
-                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                    return item
-
-                # ⚡ تحميل كل البيانات دفعة واحدة (أسرع)
-                self.projects_table.setRowCount(len(self.projects_list))
-                for row, project in enumerate(self.projects_list):
-                    # ⚡ جلب رقم الفاتورة مباشرة من المشروع
-                    invoice_number = getattr(project, "invoice_number", None) or ""
-
-                    self.projects_table.setItem(row, 0, create_centered_item(invoice_number))
-                    self.projects_table.setItem(row, 1, create_centered_item(project.name))
-                    self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
-                    self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
-                    self.projects_table.setItem(
-                        row, 4, create_centered_item(self._format_date(project.start_date))
-                    )
-
-                # إعادة تفعيل الجدول
-                self.projects_table.blockSignals(False)
-                self.projects_table.setUpdatesEnabled(True)
-                self.projects_table.setSortingEnabled(True)
-
+                self._render_current_page()
                 self.on_project_selection_changed()
 
                 # ⚡ تحديث ملخص الفواتير
@@ -3285,6 +3953,8 @@ class ProjectManagerTab(QWidget):
                 "phone": client.phone or "---",
                 "email": client.email or "",
                 "address": client.address or "---",
+                "logo_path": getattr(client, "logo_path", "") or "",
+                "logo_data": getattr(client, "logo_data", "") or "",
             }
 
             # ⚡ استخدام template_service
@@ -3357,6 +4027,9 @@ class ProjectManagerTab(QWidget):
                 "remaining": float(profit_data.get("balance_due", 0)),
                 "total_amount": float(project.total_amount),
                 "payments": payments_list,
+                "client_info": client_info,
+                "client_logo_path": client_info.get("logo_path", ""),
+                "client_logo_data": client_info.get("logo_data", ""),
             }
 
             if settings_service:
@@ -3480,6 +4153,8 @@ class ProjectManagerTab(QWidget):
                 "phone": client.phone or "---",
                 "email": client.email or "",
                 "address": client.address or "---",
+                "logo_path": getattr(client, "logo_path", "") or "",
+                "logo_data": getattr(client, "logo_data", "") or "",
             }
 
             # استخدام template_service للمعاينة
