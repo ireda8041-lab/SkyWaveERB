@@ -424,8 +424,10 @@ class InvoicePrintingService:
             except Exception:
                 return None
 
-        # محاولة 2: استخدام PyQt6 لتحويل HTML إلى PDF
+        # محاولة 2: استخدام PyQt6 لتحويل HTML إلى PDF (تعطيل داخل EXE لتجنب إعادة التشغيل)
         try:
+            if getattr(sys, "frozen", False):
+                raise ImportError("QtWebEngine معطل داخل EXE - استخدام HTML كبديل")
             safe_print("INFO: [InvoicePrintingService] استخدام PyQt6 لتوليد PDF...")
             return self._generate_pdf_with_qt(html_content, pdf_path)
         except Exception as e:
