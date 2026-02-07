@@ -752,8 +752,6 @@ class SkyWaveERPApp:
     def _sync_settings_safe(self):
         """مزامنة الإعدادات بشكل آمن"""
         try:
-            import threading
-
             if not getattr(self, "repository", None) or not getattr(self, "settings_service", None):
                 return
 

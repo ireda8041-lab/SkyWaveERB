@@ -1,13 +1,13 @@
 {
-  "version": "2.1.2",
-  "version_name": "Sky Wave ERP v2.1.2",
-  "release_date": "2026-02-06",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.1.2/SkyWaveERP-Setup-2.1.2.exe",
+  "version": "2.1.3",
+  "version_name": "Sky Wave ERP v2.1.3",
+  "release_date": "2026-02-07",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.1.3/SkyWaveERP-Setup-2.1.3.exe",
   "changelog": [
+    "🛠️ إصلاح خطأ Setup file not found أثناء التحديث",
     "⚡ تسريع المزامنة بين الأجهزة وتقليل التأخير",
     "🔄 تحسين استمرارية الاتصال مع MongoDB",
-    "�️ استقرار معاينة/طباعة الفواتير داخل EXE",
-    "⚙️ إعداد تلقائي بعد التثبيت بدون تدخل يدوي"
+    "🖨️ استقرار معاينة/طباعة الفواتير داخل EXE"
   ],
   "min_version": "1.0.0",
   "mandatory": false,

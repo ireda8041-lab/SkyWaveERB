@@ -237,15 +237,45 @@ class UpdateService:
             updater_exe = os.path.join(current_dir, "updater.exe")
             updater_py = os.path.join(current_dir, "updater.py")
 
-            # اختيار المحدث المناسب
+            # قراءة عنوان التحميل من الإصدار إذا لم يكن ملف الإعداد متاحاً
+            download_url: str | None = None
+            if not setup_path or not os.path.exists(setup_path):
+                try:
+                    version_json = os.path.join(current_dir, "version.json")
+                    if os.path.exists(version_json):
+                        with open(version_json, encoding="utf-8") as f:
+                            data = json.load(f)
+                            url = str(data.get("url") or "").strip()
+                            if url:
+                                download_url = url
+                                safe_print(f"INFO: استخدام رابط التحديث من version.json: {url}")
+                except Exception as e:
+                    safe_print(f"WARNING: فشل قراءة version.json: {e}")
+
+            # اختيار المحدث المناسب مع تمرير إما setup_path أو download_url
             if os.path.exists(updater_exe):
                 updater_path = updater_exe
-                command = [updater_path, current_dir, setup_path]
+                if download_url and (not setup_path or not os.path.exists(setup_path)):
+                    command = [updater_path, download_url]
+                else:
+                    command = [updater_path, current_dir, setup_path]
             elif os.path.exists(updater_py):
                 updater_path = updater_py
-                command = [sys.executable, updater_path, current_dir, setup_path]
+                if download_url and (not setup_path or not os.path.exists(setup_path)):
+                    command = [sys.executable, updater_path, download_url]
+                else:
+                    command = [sys.executable, updater_path, current_dir, setup_path]
             else:
-                # updater.exe غير موجود - شغّل ملف Setup مباشرة
+                # updater.exe غير موجود - شغّل ملف Setup مباشرة أو حمّل من الرابط
+                if download_url and (not setup_path or not os.path.exists(setup_path)):
+                    # تشغيل المُحدّث النصي لتنزيل الملف وتثبيته
+                    safe_print("INFO: تشغيل المُحدّث النصي مع رابط التنزيل...")
+                    os.spawnv(
+                        os.P_NOWAIT,
+                        sys.executable,
+                        [sys.executable, os.path.join(current_dir, "updater.py"), download_url],
+                    )
+                    return True
                 safe_print("updater.exe غير موجود - تشغيل Setup مباشرة...")
                 os.spawnv(os.P_NOWAIT, setup_path, [setup_path])
                 return True
