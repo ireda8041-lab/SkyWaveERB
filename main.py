@@ -110,6 +110,7 @@ class SkyWaveERPApp:
 
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
+        self.settings_service.set_repository(self.repository)
 
         # 🔄 نظام المزامنة الموحد - MongoDB First (النظام الرئيسي الوحيد)
         self.unified_sync = UnifiedSyncManagerV3(self.repository)

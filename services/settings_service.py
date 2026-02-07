@@ -47,9 +47,13 @@ class SettingsService:
     }
 
     def __init__(self):
+        self.repo = None
         self.settings = self.load_settings()
         self._merge_local_settings()
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
+
+    def set_repository(self, repository) -> None:
+        self.repo = repository
 
     def _merge_local_settings(self):
         """⚡ دمج الإعدادات من الملف المحلي (يحدث القيم الموجودة)"""
@@ -116,6 +120,16 @@ class SettingsService:
         """تحديث إعداد معين وحفظه"""
         self.settings[key] = value
         self.save_settings(self.settings)
+        try:
+            repo = getattr(self, "repo", None)
+            if (
+                repo
+                and getattr(repo, "online", False)
+                and getattr(repo, "mongo_db", None) is not None
+            ):
+                self.sync_settings_to_cloud(repo)
+        except Exception:
+            pass
 
     def update_settings(self, new_settings: dict[str, Any]):
         if not isinstance(new_settings, dict):
@@ -123,6 +137,16 @@ class SettingsService:
         for k, v in new_settings.items():
             self.settings[k] = v
         self.save_settings(self.settings)
+        try:
+            repo = getattr(self, "repo", None)
+            if (
+                repo
+                and getattr(repo, "online", False)
+                and getattr(repo, "mongo_db", None) is not None
+            ):
+                self.sync_settings_to_cloud(repo)
+        except Exception:
+            pass
 
     # ==========================================
     # ⚡ دوال اللوجو - للمزامنة بين الأجهزة

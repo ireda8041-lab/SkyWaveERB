@@ -579,7 +579,9 @@ if HAS_GUI:
                 self.signals.progress.emit(20)
 
                 # Download if needed
-                if self.download_url and not self.setup_path:
+                if self.download_url and (
+                    not self.setup_path or not os.path.exists(self.setup_path)
+                ):
                     temp_dir = tempfile.gettempdir()
                     self.setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
                     if not self.update_manager.download_file(
@@ -684,7 +686,7 @@ def run_console_updater(setup_path=None, app_folder=None, download_url=None):
         if backup:
             print(f"Backup created: {backup}")
 
-    if download_url and not setup_path:
+    if download_url and (not setup_path or not os.path.exists(setup_path)):
         print("\nDownloading update...")
         temp_dir = tempfile.gettempdir()
         setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
