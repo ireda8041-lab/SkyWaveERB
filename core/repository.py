@@ -6945,7 +6945,8 @@ class Repository:
             """,
                 (f"QT-{year}-%",),
             )
-            count = self.sqlite_cursor.fetchone()[0]
+            row = self.sqlite_cursor.fetchone()
+            count = row[0] if row and row[0] is not None else 0
             return f"QT-{year}-{count + 1:04d}"
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل توليد رقم العرض: {e}")
