@@ -53,8 +53,9 @@ class ClientManagerTab(QWidget):
         self.client_service = client_service
         self.clients_list: list[schemas.Client] = []
         self.selected_client: schemas.Client | None = None
-        self._logo_icon_cache: dict[object, QIcon | None] = {}
-        self._logo_pixmap_cache: dict[object, QPixmap | None] = {}
+        self._logo_icon_cache: dict[str, QIcon | None] = {}
+        self._logo_pixmap_cache: dict[str, QPixmap | None] = {}
+        self._logo_state_cache: dict[str, str] = {}
         self._clients_cache: dict[str, dict] = {}
         self._clients_cache_ts: dict[str, float] = {}
         self._clients_cache_ttl_s = 20.0
@@ -87,7 +88,11 @@ class ClientManagerTab(QWidget):
         app_signals.safe_connect(app_signals.payments_changed, self._invalidate_clients_cache)
         app_signals.safe_connect(app_signals.projects_changed, self._invalidate_clients_cache)
         app_signals.safe_connect(app_signals.invoices_changed, self._invalidate_clients_cache)
-        app_signals.safe_connect(app_signals.client_logo_loaded, self._on_client_logo_loaded)
+        app_signals.safe_connect(
+            app_signals.client_logo_loaded,
+            self._on_client_logo_loaded,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
@@ -530,7 +535,12 @@ class ClientManagerTab(QWidget):
 
     @staticmethod
     def _client_identity(client: schemas.Client) -> str:
-        return str(getattr(client, "_mongo_id", None) or getattr(client, "id", "") or "")
+        return str(
+            getattr(client, "_mongo_id", None)
+            or getattr(client, "id", "")
+            or (getattr(client, "name", None) or "").strip()
+            or ""
+        )
 
     def _queue_logo_fetch(self, client: schemas.Client):
         if not self._lazy_logo_enabled:
@@ -567,25 +577,21 @@ class ClientManagerTab(QWidget):
             ).start()
 
     def _fetch_logo_worker(self, client_identity: str):
-        success = False
         try:
-            success = bool(self.client_service.fetch_client_logo_on_demand(client_identity))
+            self.client_service.fetch_client_logo_on_demand(client_identity)
         except Exception:
-            success = False
-
-        def finalize():
+            pass
+        finally:
             self._logo_fetch_inflight.discard(client_identity)
-            if success:
-                self._on_client_logo_loaded(client_identity)
-
-        QTimer.singleShot(0, finalize)
 
     def _on_client_logo_loaded(self, client_identity: str):
-        if not client_identity:
+        identity = str(client_identity or "").strip()
+        if not identity:
             return
-        self._logo_icon_cache.pop(client_identity, None)
-        self._logo_pixmap_cache.pop(client_identity, None)
-        self._refresh_client_logo_cell(client_identity)
+        self._logo_icon_cache.pop(identity, None)
+        self._logo_pixmap_cache.pop(identity, None)
+        self._logo_state_cache.pop(identity, None)
+        self._refresh_client_logo_cell(identity)
 
     def _refresh_client_logo_cell(self, client_identity: str):
         if not client_identity:
@@ -595,9 +601,7 @@ class ClientManagerTab(QWidget):
         for row_idx, client in enumerate(self._current_page_clients):
             if self._client_identity(client) != str(client_identity):
                 continue
-            refreshed = self.client_service.get_client_by_id(
-                str(client_identity), ensure_logo=False
-            )
+            refreshed = self.client_service.get_client_by_id(str(client_identity), ensure_logo=True)
             if refreshed:
                 self._current_page_clients[row_idx] = refreshed
                 client = refreshed
@@ -637,11 +641,16 @@ class ClientManagerTab(QWidget):
         return None
 
     def _get_client_logo_icon(self, client: schemas.Client) -> QIcon | None:
-        key = (
-            getattr(client, "_mongo_id", None)
-            or getattr(client, "id", None)
-            or (getattr(client, "name", None) or "").strip()
-        )
+        key = self._client_identity(client)
+        self._ensure_logo_cache_fresh(client)
+
+        has_logo = bool(getattr(client, "has_logo", False))
+        logo_data = getattr(client, "logo_data", None)
+        if not has_logo and not logo_data:
+            self._logo_icon_cache[key] = None
+            self._logo_pixmap_cache[key] = None
+            return None
+
         if key in self._logo_icon_cache:
             return self._logo_icon_cache[key]
 
@@ -659,17 +668,15 @@ class ClientManagerTab(QWidget):
         return icon
 
     def _get_client_logo_pixmap(self, client: schemas.Client) -> QPixmap | None:
-        key = (
-            getattr(client, "_mongo_id", None)
-            or getattr(client, "id", None)
-            or (getattr(client, "name", None) or "").strip()
-        )
+        key = self._client_identity(client)
+        self._ensure_logo_cache_fresh(client)
         if key in self._logo_pixmap_cache:
             return self._logo_pixmap_cache[key]
 
         pixmap = None
         logo_data = getattr(client, "logo_data", None)
-        logo_path = getattr(client, "logo_path", None)
+        has_logo = bool(getattr(client, "has_logo", False))
+        logo_path = getattr(client, "logo_path", None) if has_logo else None
         cache_path = self._get_logo_cache_path(str(logo_data) if logo_data else None, logo_path)
         if cache_path and cache_path.exists():
             pm = QPixmap(str(cache_path))
@@ -718,6 +725,31 @@ class ClientManagerTab(QWidget):
 
         self._logo_pixmap_cache[key] = pixmap
         return pixmap
+
+    def _logo_state_signature(self, client: schemas.Client) -> str:
+        logo_data = getattr(client, "logo_data", None) or ""
+        logo_last_synced = getattr(client, "logo_last_synced", None) or ""
+        logo_path = (getattr(client, "logo_path", None) or "").strip()
+        has_logo = bool(getattr(client, "has_logo", False))
+        return (
+            f"has={1 if has_logo else 0}"
+            f"|data={1 if bool(logo_data) else 0}"
+            f"|len={len(str(logo_data)) if logo_data else 0}"
+            f"|path={logo_path}"
+            f"|synced={logo_last_synced}"
+        )
+
+    def _ensure_logo_cache_fresh(self, client: schemas.Client):
+        key = self._client_identity(client)
+        if not key:
+            return
+        signature = self._logo_state_signature(client)
+        previous = self._logo_state_cache.get(key)
+        if previous == signature:
+            return
+        self._logo_state_cache[key] = signature
+        self._logo_icon_cache.pop(key, None)
+        self._logo_pixmap_cache.pop(key, None)
 
     def _to_circle_pixmap(
         self,
@@ -957,6 +989,11 @@ class ClientManagerTab(QWidget):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
         safe_print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
         self._invalidate_clients_cache()
+        self._logo_icon_cache.clear()
+        self._logo_pixmap_cache.clear()
+        self._logo_state_cache.clear()
+        self._logo_fetch_queue.clear()
+        self._logo_fetch_inflight.clear()
         # ⚡ إبطال الـ cache لضمان جلب البيانات الجديدة (بما فيها الصور)
         if hasattr(self.client_service, "invalidate_cache"):
             self.client_service.invalidate_cache()

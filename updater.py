@@ -49,10 +49,115 @@ except ImportError:
 APP_NAME = "Sky Wave ERP"
 ALLOWED_UPDATE_HOSTS = {
     "github.com",
+    "github-releases.githubusercontent.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "raw.githubusercontent.com",
 }
 MAX_UPDATE_SIZE_BYTES = 500 * 1024 * 1024
+UPDATE_SETUP_FILENAMES = (
+    "SkyWaveERP_Update.exe",
+    "SkyWave-Setup-Update.exe",
+)
+
+
+def _normalize_setup_path(path: str | None, app_folder: str | None = None) -> str | None:
+    if not isinstance(path, str):
+        return None
+    cleaned = path.strip()
+    if not cleaned:
+        return None
+    if os.path.isabs(cleaned):
+        return os.path.normpath(cleaned)
+    base = app_folder or os.getcwd()
+    return os.path.normpath(os.path.abspath(os.path.join(base, cleaned)))
+
+
+def _candidate_setup_paths(setup_path: str | None, app_folder: str | None = None) -> list[str]:
+    normalized_setup = _normalize_setup_path(setup_path, app_folder)
+    app_data_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    candidate_dirs = [
+        os.path.dirname(normalized_setup) if normalized_setup else None,
+        os.path.join(app_data_base, "SkyWaveERP"),
+        tempfile.gettempdir(),
+        app_folder,
+        os.getcwd(),
+    ]
+
+    candidates: list[str] = []
+    if normalized_setup:
+        candidates.append(normalized_setup)
+    for base_dir in candidate_dirs:
+        if not base_dir:
+            continue
+        for name in UPDATE_SETUP_FILENAMES:
+            candidates.append(os.path.normpath(os.path.join(base_dir, name)))
+
+    unique_candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    return unique_candidates
+
+
+def _resolve_setup_path(
+    setup_path: str | None, app_folder: str | None = None
+) -> tuple[str | None, list[str]]:
+    candidates = _candidate_setup_paths(setup_path, app_folder)
+    for candidate in candidates:
+        if os.path.exists(candidate) and os.path.isfile(candidate):
+            return candidate, candidates
+    return None, candidates
+
+
+def _preferred_download_targets(app_folder: str | None = None) -> list[str]:
+    app_data_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    raw_targets = [
+        os.path.join(app_data_base, "SkyWaveERP", name) for name in UPDATE_SETUP_FILENAMES
+    ] + [os.path.join(tempfile.gettempdir(), name) for name in UPDATE_SETUP_FILENAMES]
+    if app_folder:
+        raw_targets.extend([os.path.join(app_folder, name) for name in UPDATE_SETUP_FILENAMES])
+
+    unique_targets: list[str] = []
+    seen: set[str] = set()
+    for target in raw_targets:
+        normalized = os.path.normpath(target)
+        if normalized not in seen:
+            seen.add(normalized)
+            unique_targets.append(normalized)
+    return unique_targets
+
+
+def _download_setup_with_fallback(
+    manager,
+    download_url: str,
+    *,
+    expected_sha256: str | None = None,
+    app_folder: str | None = None,
+    detail_emitter=None,
+) -> str | None:
+    for target_path in _preferred_download_targets(app_folder):
+        target_dir = os.path.dirname(target_path)
+        try:
+            if target_dir:
+                os.makedirs(target_dir, exist_ok=True)
+        except OSError:
+            continue
+
+        if callable(detail_emitter):
+            detail_emitter(f"Trying update download target: {target_path}")
+
+        if manager.download_file(download_url, target_path, expected_sha256=expected_sha256):
+            return target_path
+        try:
+            if os.path.exists(target_path):
+                os.remove(target_path)
+        except OSError:
+            pass
+
+    return None
 
 
 def _spawn_detached(args: list[str]) -> int:
@@ -584,24 +689,10 @@ if HAS_GUI:
                     self.signals.detail.emit(f"Backup: {backup}")
                 self.signals.progress.emit(20)
 
-                if self.setup_path and not os.path.isabs(self.setup_path):
-                    self.setup_path = os.path.abspath(
-                        os.path.join(self.app_folder or os.getcwd(), self.setup_path)
-                    )
-
-                if not self.setup_path or not os.path.exists(self.setup_path):
-                    app_data_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
-                    candidates = [
-                        self.setup_path,
-                        os.path.join(app_data_base, "SkyWaveERP", "SkyWave-Setup-Update.exe"),
-                        os.path.join(tempfile.gettempdir(), "SkyWaveERP_Update.exe"),
-                        os.path.join(self.app_folder, "SkyWaveERP_Update.exe"),
-                        os.path.join(self.app_folder, "SkyWave-Setup-Update.exe"),
-                    ]
-                    for candidate in candidates:
-                        if candidate and os.path.exists(candidate):
-                            self.setup_path = candidate
-                            break
+                self.setup_path = _normalize_setup_path(self.setup_path, self.app_folder)
+                self.setup_path, searched_paths = _resolve_setup_path(
+                    self.setup_path, self.app_folder
+                )
 
                 if not self.download_url:
                     for base_dir in [self.app_folder, os.getcwd()]:
@@ -619,14 +710,17 @@ if HAS_GUI:
                             except Exception:
                                 continue
 
-                if self.download_url and (
-                    not self.setup_path or not os.path.exists(self.setup_path)
-                ):
-                    temp_dir = tempfile.gettempdir()
-                    self.setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
-                    if not self.update_manager.download_file(
-                        self.download_url, self.setup_path, expected_sha256=self.expected_sha256
-                    ):
+                if self.download_url and not self.setup_path:
+                    downloaded_path = _download_setup_with_fallback(
+                        self.update_manager,
+                        self.download_url,
+                        expected_sha256=self.expected_sha256,
+                        app_folder=self.app_folder,
+                        detail_emitter=self.signals.detail.emit,
+                    )
+                    if downloaded_path:
+                        self.setup_path = downloaded_path
+                    else:
                         if self.update_manager.cancelled:
                             return
                         self.signals.finished.emit(False, "Download failed")
@@ -634,7 +728,16 @@ if HAS_GUI:
 
                 self.signals.progress.emit(80)
 
-                if not self.setup_path or not os.path.exists(self.setup_path):
+                self.setup_path, searched_paths = _resolve_setup_path(
+                    self.setup_path, self.app_folder
+                )
+                if not self.setup_path:
+                    for candidate in searched_paths[:6]:
+                        self.signals.detail.emit(f"Path checked: {candidate}")
+                    if len(searched_paths) > 6:
+                        self.signals.detail.emit(
+                            f"...and {len(searched_paths) - 6} additional paths checked"
+                        )
                     self.signals.finished.emit(False, "Setup file not found")
                     return
 
@@ -725,10 +828,10 @@ def run_console_updater(setup_path=None, app_folder=None, download_url=None):
         if backup:
             print(f"Backup created: {backup}")
 
-    if download_url and (not setup_path or not os.path.exists(setup_path)):
+    setup_path, searched_paths = _resolve_setup_path(setup_path, app_folder)
+
+    if download_url and not setup_path:
         print("\nDownloading update...")
-        temp_dir = tempfile.gettempdir()
-        setup_path = os.path.join(temp_dir, "SkyWaveERP_Update.exe")
         version_info = {}
         try:
             vf = os.path.join(app_folder or os.getcwd(), "version.json")
@@ -740,13 +843,25 @@ def run_console_updater(setup_path=None, app_folder=None, download_url=None):
         expected_sha256 = _normalize_sha256(version_info.get("sha256")) or _normalize_sha256(
             version_info.get("expected_sha256")
         )
-        if not manager.download_file(download_url, setup_path, expected_sha256=expected_sha256):
+        setup_path = _download_setup_with_fallback(
+            manager,
+            download_url,
+            expected_sha256=expected_sha256,
+            app_folder=app_folder,
+            detail_emitter=print,
+        )
+        if not setup_path:
             print("Download failed!")
             time.sleep(3)
             return
 
-    if not setup_path or not os.path.exists(setup_path):
+    setup_path, searched_paths = _resolve_setup_path(setup_path, app_folder)
+    if not setup_path:
         print("Setup file not found!")
+        for candidate in searched_paths[:6]:
+            print(f" - checked: {candidate}")
+        if len(searched_paths) > 6:
+            print(f" - and {len(searched_paths) - 6} additional paths")
         time.sleep(3)
         return
 

@@ -7,6 +7,7 @@ from PyQt6.QtCore import QDate, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor
 from PyQt6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDateEdit,
@@ -227,18 +228,22 @@ class ProjectEditorDialog(QDialog):
 
         # الحصول على حجم الشاشة وفتح النافذة بحجم كبير
 
-        screen = QApplication.primaryScreen()
+        screen = self.screen() or QApplication.primaryScreen()
         if screen:
             screen_geo = screen.availableGeometry()
-            # ⚡ فتح بنسبة 95% من حجم الشاشة لإظهار كل المحتوى بدون scroll
-            width = int(screen_geo.width() * 0.95)
-            height = int(screen_geo.height() * 0.95)
-            x = (screen_geo.width() - width) // 2
-            y = (screen_geo.height() - height) // 2
+            width = max(920, int(screen_geo.width() * 0.92))
+            height = max(620, int(screen_geo.height() * 0.92))
+            width = min(width, screen_geo.width())
+            height = min(height, screen_geo.height())
+            min_width = min(980, max(760, screen_geo.width() - 60))
+            min_height = min(700, max(520, screen_geo.height() - 80))
+            self.setMinimumSize(min_width, min_height)
+            x = screen_geo.x() + max(0, (screen_geo.width() - width) // 2)
+            y = screen_geo.y() + max(0, (screen_geo.height() - height) // 2)
             self.setGeometry(x, y, width, height)
-
-        self.setMinimumWidth(1100)  # ⚡ زيادة العرض الأدنى
-        self.setMinimumHeight(750)  # ⚡ زيادة الارتفاع الأدنى
+        else:
+            self.resize(1100, 750)
+            self.setMinimumSize(760, 520)
 
         # 📱 سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -336,8 +341,9 @@ class ProjectEditorDialog(QDialog):
         main_layout.setContentsMargins(10, 10, 10, 10)  # ⚡ زيادة الهوامش
 
         # === التخطيط الأفقي الرئيسي: اليسار واليمين ===
-        main_horizontal_layout = QHBoxLayout()
+        main_horizontal_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         main_horizontal_layout.setSpacing(8)
+        self._main_horizontal_layout = main_horizontal_layout
 
         # === الجانب الأيسر: البيانات الأساسية + بنود المشروع + الإجماليات ===
         left_side = QVBoxLayout()
@@ -480,7 +486,7 @@ class ProjectEditorDialog(QDialog):
         # ستايل الجدول
         self.items_table.setStyleSheet(TABLE_STYLE_DARK)
 
-        self.items_table.setMinimumHeight(180)  # ⚡ زيادة ارتفاع الجدول
+        self.items_table.setMinimumHeight(140)
         self.items_table.verticalHeader().setDefaultSectionSize(30)  # ⚡ ارتفاع الصفوف أكبر قليلاً
         self.items_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.items_table.verticalHeader().setVisible(True)
@@ -501,7 +507,7 @@ class ProjectEditorDialog(QDialog):
         self.discount_type_combo = QComboBox()
         self.discount_type_combo.addItem("نسبة %", "percent")
         self.discount_type_combo.addItem("مبلغ", "amount")
-        self.discount_type_combo.setFixedWidth(70)
+        self.discount_type_combo.setMinimumWidth(70)
         self.discount_type_combo.currentIndexChanged.connect(self._on_discount_type_changed)
 
         self.discount_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
@@ -656,7 +662,7 @@ class ProjectEditorDialog(QDialog):
             }
         """
         )
-        self.notes_input.setMinimumHeight(180)  # ⚡ زيادة ارتفاع حقل الملاحظات
+        self.notes_input.setMinimumHeight(130)
 
         # تعيين القالب الافتراضي للمشاريع الجديدة
         if not self.is_editing:
@@ -695,7 +701,7 @@ class ProjectEditorDialog(QDialog):
 
         self.payment_methods_preview = QTextEdit()
         self.payment_methods_preview.setReadOnly(True)
-        self.payment_methods_preview.setMinimumHeight(80)
+        self.payment_methods_preview.setMinimumHeight(64)
         self.payment_methods_preview.setStyleSheet(
             """
             QTextEdit {
@@ -742,7 +748,7 @@ class ProjectEditorDialog(QDialog):
         # المبلغ
         amount_row = QHBoxLayout()
         amount_label = QLabel("💰 المبلغ:")
-        amount_label.setFixedWidth(70)
+        amount_label.setMinimumWidth(62)
         self.payment_amount_input = CustomSpinBox(decimals=2, minimum=0, maximum=9999999)
         self.payment_amount_input.setValue(0.0)
         self.payment_amount_input.setSuffix(" ج.م")
@@ -753,7 +759,7 @@ class ProjectEditorDialog(QDialog):
         # التاريخ
         date_row = QHBoxLayout()
         date_label = QLabel("📅 التاريخ:")
-        date_label.setFixedWidth(70)
+        date_label.setMinimumWidth(62)
         self.payment_date_input = QDateEdit(QDate.currentDate())
         self.payment_date_input.setCalendarPopup(True)
         date_row.addWidget(date_label)
@@ -763,7 +769,7 @@ class ProjectEditorDialog(QDialog):
         # الحساب
         account_row = QHBoxLayout()
         account_label = QLabel("🏦 الحساب:")
-        account_label.setFixedWidth(70)
+        account_label.setMinimumWidth(62)
         # SmartFilterComboBox للحساب مع فلترة
         self.payment_account_combo = SmartFilterComboBox()
         self.payment_account_combo.addItem("اختر الحساب...", userData=None)
@@ -777,7 +783,7 @@ class ProjectEditorDialog(QDialog):
 
         method_row = QHBoxLayout()
         method_label = QLabel("💳 الطريقة:")
-        method_label.setFixedWidth(70)
+        method_label.setMinimumWidth(62)
         self.payment_method_combo = SmartFilterComboBox()
         self.payment_method_combo.addItem("تلقائي حسب الحساب", userData=None)
         self._load_payment_methods_for_combo()
@@ -823,6 +829,7 @@ class ProjectEditorDialog(QDialog):
 
         # جعل التاب متجاوب مع حجم الشاشة
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._apply_responsive_editor_layout()
 
         self.on_service_selected(0)
 
@@ -834,6 +841,26 @@ class ProjectEditorDialog(QDialog):
             self.load_project_data()
             payment_group.setVisible(False)
         self._refresh_payment_methods_preview()
+
+    def resizeEvent(self, event):  # pylint: disable=invalid-name
+        super().resizeEvent(event)
+        self._apply_responsive_editor_layout()
+
+    def _apply_responsive_editor_layout(self):
+        if not hasattr(self, "_main_horizontal_layout"):
+            return
+        compact = self.width() < 1280 or self.height() < 760
+        direction = (
+            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
+        )
+        if self._main_horizontal_layout.direction() != direction:
+            self._main_horizontal_layout.setDirection(direction)
+        if compact:
+            self._main_horizontal_layout.setStretch(0, 0)
+            self._main_horizontal_layout.setStretch(1, 0)
+        else:
+            self._main_horizontal_layout.setStretch(0, 3)
+            self._main_horizontal_layout.setStretch(1, 2)
 
     def _load_payment_methods_for_combo(self):
         try:
@@ -2188,7 +2215,7 @@ class ProjectManagerTab(QWidget):
         self.preview_tabs.setUsesScrollButtons(True)
         self.preview_tabs.setTabPosition(QTabWidget.TabPosition.North)
         self.preview_tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.preview_tabs.setMinimumHeight(260)
+        self.preview_tabs.setMinimumHeight(220)
         preview_layout.addWidget(self.preview_tabs, 1)
 
         preview_scroll.setWidget(self.preview_groupbox)
@@ -2200,7 +2227,7 @@ class ProjectManagerTab(QWidget):
         self.main_splitter.setStretchFactor(1, 2)
 
         # تعيين الحد الأدنى للعرض - زيادة عرض المعاينة
-        preview_scroll.setMinimumWidth(280)
+        preview_scroll.setMinimumWidth(220)
         self._apply_preview_splitter_sizes()
 
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
@@ -2212,10 +2239,14 @@ class ProjectManagerTab(QWidget):
         super().resizeEvent(event)
         width = self.width()
 
-        # إذا كان العرض صغير، نحول لعمودي
-        if width < 900:
+        # إذا كان العرض/الارتفاع محدودين، نحول لعمودي
+        compact = width < 1180 or self.height() < 760
+        if compact:
             if self.main_splitter.orientation() != Qt.Orientation.Vertical:
                 self.main_splitter.setOrientation(Qt.Orientation.Vertical)
+            total_h = self.height()
+            if total_h > 0:
+                self.main_splitter.setSizes([int(total_h * 0.58), int(total_h * 0.42)])
         else:
             if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
                 self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -2229,9 +2260,10 @@ class ProjectManagerTab(QWidget):
         total = self.width()
         if total <= 0:
             return
-        preview_w = int(total * 0.26)
-        preview_w = max(280, min(preview_w, total - 520))
-        left_w = max(320, total - preview_w)
+        preview_min = 220
+        preview_w = int(total * (0.30 if total < 1200 else 0.26))
+        preview_w = max(preview_min, min(preview_w, max(preview_min, total - 360)))
+        left_w = max(300, total - preview_w)
         try:
             self.main_splitter.setSizes([left_w, preview_w])
         except Exception:
@@ -2253,7 +2285,7 @@ class ProjectManagerTab(QWidget):
         card.setProperty("variant", variant)
         card.setProperty("value_is_percent", bool(value_is_percent))
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card.setMinimumHeight(51)
+        card.setMinimumHeight(48)
         card.setMaximumHeight(66)
 
         # ⚡ استخدام سلكتور محدد لمنع ظهور المربعات حول الـ Labels
@@ -2482,7 +2514,7 @@ class ProjectManagerTab(QWidget):
         table.verticalHeader().setVisible(False)
         table.setWordWrap(False)
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        table.setMinimumHeight(200)
+        table.setMinimumHeight(140)
         table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(table, 1)

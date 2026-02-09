@@ -94,8 +94,19 @@ class AppSignals(QObject):
 
         # ⚡ إرسال الإشارة العامة فقط
         self.data_changed.emit(data_type)
+        self._emit_table_specific_signals(data_type)
 
-        # ⚡ إرسال الإشارة المحددة (بدون تكرار accounting_changed)
+        if self._sync_manager:
+            try:
+                if hasattr(self._sync_manager, "schedule_instant_sync"):
+                    self._sync_manager.schedule_instant_sync(data_type)
+                elif hasattr(self._sync_manager, "instant_sync"):
+                    QTimer.singleShot(0, lambda: self._sync_manager.instant_sync(data_type))
+            except Exception:
+                pass
+
+    def _emit_table_specific_signals(self, data_type: str):
+        """Emit table-specific UI signals without triggering sync side effects."""
         if data_type == "clients":
             self.clients_changed.emit()
         elif data_type == "projects":
@@ -112,17 +123,22 @@ class AppSignals(QObject):
             self.tasks_changed.emit()
         elif data_type == "invoices":
             self.invoices_changed.emit()
+        elif data_type == "notifications":
+            self.notifications_changed.emit()
 
-        # ⚡ تحديث المحاسبة للعمليات المالية فقط (مرة واحدة)
         if data_type in ("projects", "expenses", "payments", "invoices", "accounts", "accounting"):
             if self._should_emit("accounting"):
                 self.accounting_changed.emit()
 
-        if self._sync_manager and hasattr(self._sync_manager, "instant_sync"):
-            try:
-                QTimer.singleShot(0, lambda: self._sync_manager.instant_sync(data_type))
-            except Exception:
-                pass
+    def emit_ui_data_changed(self, data_type: str):
+        """
+        Emit data-changed signals for UI refresh only.
+        Used by pull-from-cloud paths to avoid triggering another instant sync cycle.
+        """
+        if not self._should_emit(f"ui_data_{data_type}"):
+            return
+        self.data_changed.emit(data_type)
+        self._emit_table_specific_signals(data_type)
 
     def emit_journal_entry_created(self, entry_id: str):
         """إرسال إشارة إنشاء قيد محاسبي"""

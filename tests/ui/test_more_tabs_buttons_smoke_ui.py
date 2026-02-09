@@ -97,6 +97,29 @@ def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
     QTest.mouseClick(tab.refresh_button, Qt.MouseButton.LeftButton)
 
 
+def test_projects_tab_splitter_orientation_is_responsive(qapp):
+    from ui import project_manager
+
+    tab = project_manager.ProjectManagerTab(
+        project_service=_NoopService(),
+        client_service=_NoopService(),
+        service_service=_NoopService(),
+        accounting_service=_NoopService(),
+        expense_service=_NoopService(),
+        printing_service=None,
+        template_service=None,
+    )
+    tab.show()
+
+    tab.resize(960, 700)
+    qapp.processEvents()
+    assert tab.main_splitter.orientation() == Qt.Orientation.Vertical
+
+    tab.resize(1400, 900)
+    qapp.processEvents()
+    assert tab.main_splitter.orientation() == Qt.Orientation.Horizontal
+
+
 def test_payments_tab_buttons_click_without_crash(monkeypatch, qapp):
     from ui import payments_manager
 

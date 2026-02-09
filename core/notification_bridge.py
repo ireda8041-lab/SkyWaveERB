@@ -124,9 +124,9 @@ class NotificationBridge(QObject):
 
             # إرسال الإشعار
             if action == "deleted":
-                notify_warning(message, title)
+                notify_warning(message, title, entity_type=entity_type, action=action)
             else:
-                notify_success(message, title)
+                notify_success(message, title, entity_type=entity_type, action=action)
 
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")

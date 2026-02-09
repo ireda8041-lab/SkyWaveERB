@@ -285,6 +285,7 @@ class MainWindow(QMainWindow):
         self._tab_data_loaded: dict[str, bool] = {}
         # ⚡ Lazy Refresh: تتبع التابات التي تحتاج تحديث
         self.pending_refreshes: dict[str, bool] = {}
+        self._deferred_refresh_timers: dict[str, QTimer] = {}
 
         # ⚡ إنشاء كل التابات فوراً (بدون تحميل بيانات)
         self._create_all_tabs()
@@ -322,21 +323,53 @@ class MainWindow(QMainWindow):
         # ⚡ تحديث حالة الاتصال الأولية بعد 5 ثواني (لإعطاء MongoDB وقت للاتصال)
         QTimer.singleShot(5000, self._update_initial_connection_status)
 
-        app_signals.realtime_sync_status.connect(self._on_realtime_sync_status_changed)
+        app_signals.safe_connect(
+            app_signals.realtime_sync_status,
+            self._on_realtime_sync_status_changed,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # 🔥 ربط إشارات تحديث الواجهة الفورية (INSTANT UI REFRESH)
-        app_signals.clients_changed.connect(self._refresh_clients_tab)
-        app_signals.projects_changed.connect(self._refresh_projects_tab)
-        app_signals.expenses_changed.connect(self._refresh_expenses_tab)
-        app_signals.payments_changed.connect(self._refresh_payments_tab)
-        app_signals.services_changed.connect(self._refresh_services_tab)
-        app_signals.accounting_changed.connect(self._refresh_accounting_tab)
+        app_signals.safe_connect(
+            app_signals.clients_changed,
+            self._refresh_clients_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.projects_changed,
+            self._refresh_projects_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.expenses_changed,
+            self._refresh_expenses_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.payments_changed,
+            self._refresh_payments_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.services_changed,
+            self._refresh_services_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.accounting_changed,
+            self._refresh_accounting_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # 🔥🔥🔥 الاتصال المباشر بـ app_signals (CRITICAL FIX!)
         # استخدام app_signals مباشرة لأن Repository ليس QObject
         # ⚡ ملاحظة: الإشارات المحددة (clients_changed, etc.) مربوطة أعلاه
         # لذلك نربط data_changed فقط للجداول غير المغطاة
-        app_signals.safe_connect(app_signals.data_changed, self.handle_data_change)
+        app_signals.safe_connect(
+            app_signals.data_changed,
+            self.handle_data_change,
+            Qt.ConnectionType.QueuedConnection,
+        )
         safe_print("✅ تم ربط app_signals.data_changed مباشرة بالواجهة!")
 
         # ربط زر تسجيل الخروج
@@ -560,12 +593,18 @@ class MainWindow(QMainWindow):
                 safe_print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
             except Exception as e:
                 safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
+            finally:
+                self._refresh_in_progress[f"tab_{tab_name}"] = False
+                if self.pending_refreshes.pop(tab_name, False):
+                    QTimer.singleShot(0, lambda t=tab_name: self._do_load_tab_data_safe(t))
 
         def on_error(error_msg):
             """معالج الخطأ"""
             safe_print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {error_msg}")
+            self._refresh_in_progress[f"tab_{tab_name}"] = False
 
         # تحميل البيانات في الخلفية
+        self._refresh_in_progress[f"tab_{tab_name}"] = True
         data_loader.load_async(
             operation_name=f"load_{tab_name}",
             load_function=load_func,
@@ -750,8 +789,10 @@ class MainWindow(QMainWindow):
             safe_print("INFO: بدء المزامنة التلقائية في الخلفية...")
 
             # تشغيل المزامنة باستخدام API الحديثة فقط
-            if hasattr(self.sync_manager, "instant_sync"):
-                self.sync_manager.instant_sync()
+            if hasattr(self.sync_manager, "schedule_instant_sync"):
+                self.sync_manager.schedule_instant_sync()
+            elif hasattr(self.sync_manager, "instant_sync"):
+                threading.Thread(target=self.sync_manager.instant_sync, daemon=True).start()
             else:
                 safe_print("WARNING: مدير المزامنة غير متوافق: instant_sync غير متاحة")
 
@@ -857,7 +898,10 @@ class MainWindow(QMainWindow):
                         safe_print(f"INFO: [MainWindow] ⚡ تحديث فوري للتاب الظاهر: {tab_name}")
                         # ⚡ إبطال cache وتحديث
                         self._invalidate_tab_cache(tab_name)
-                        QTimer.singleShot(0, lambda t=tab_name: self._do_load_tab_data_safe(t))
+                        self._do_load_tab_data_safe(tab_name)
+                    else:
+                        # لا تُسقط التحديثات السريعة: أجّلها قليلًا بدل تجاهلها.
+                        self._schedule_deferred_refresh(table_name, tab_name)
                 else:
                     # 💤 إذا كان مخفيًا: تعليم للتحديث لاحقًا
                     safe_print(f"INFO: [MainWindow] 💤 جدولة تحديث لاحق للتاب: {tab_name}")
@@ -882,8 +926,12 @@ class MainWindow(QMainWindow):
                 try:
                     # استخدام sync_manager (UnifiedSyncManager)
                     if self.sync_manager:
-                        if hasattr(self.sync_manager, "instant_sync"):
-                            self.sync_manager.instant_sync()
+                        if hasattr(self.sync_manager, "schedule_instant_sync"):
+                            self.sync_manager.schedule_instant_sync()
+                        elif hasattr(self.sync_manager, "instant_sync"):
+                            threading.Thread(
+                                target=self.sync_manager.instant_sync, daemon=True
+                            ).start()
                         else:
                             safe_print("WARNING: مدير المزامنة غير متوافق: instant_sync غير متاحة")
                             QTimer.singleShot(
@@ -1582,6 +1630,7 @@ class MainWindow(QMainWindow):
     # ⚡ حماية من التحديث المتكرر - تقليل الفترة لـ 0.5 ثانية
     _last_refresh_times = {}
     _refresh_in_progress = {}  # ⚡ حماية إضافية من التحديث المتزامن
+    _deferred_refresh_timers = {}
 
     def _can_refresh(self, tab_name: str, min_interval: float = 0.5) -> bool:
         """⚡ فحص إذا كان يمكن تحديث التاب (حماية من التكرار)"""
@@ -1598,6 +1647,40 @@ class MainWindow(QMainWindow):
             return False
         self._last_refresh_times[tab_name] = current_time
         return True
+
+    def _schedule_deferred_refresh(self, table_name: str, tab_name: str, delay_ms: int = 900):
+        """جدولة تحديث مؤجل للتاب بدل إسقاط التحديثات السريعة."""
+        self.pending_refreshes[tab_name] = True
+        if self._deferred_refresh_timers.get(tab_name):
+            return
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(
+            lambda tn=table_name, tab=tab_name: self._run_deferred_refresh(tn, tab)
+        )
+        self._deferred_refresh_timers[tab_name] = timer
+        timer.start(max(150, int(delay_ms)))
+
+    def _run_deferred_refresh(self, table_name: str, tab_name: str):
+        timer = self._deferred_refresh_timers.pop(tab_name, None)
+        if timer:
+            try:
+                timer.deleteLater()
+            except Exception:
+                pass
+
+        if self.tabs.tabText(self.tabs.currentIndex()) != tab_name:
+            self.pending_refreshes[tab_name] = True
+            return
+
+        if not self._can_refresh(f"tab_{tab_name}", min_interval=0.2):
+            self._schedule_deferred_refresh(table_name, tab_name, delay_ms=350)
+            return
+
+        self._invalidate_tab_cache(tab_name)
+        self.pending_refreshes.pop(tab_name, None)
+        self._do_load_tab_data_safe(tab_name)
 
     def _refresh_clients_tab(self):
         """تحديث تاب العملاء (موجه لنظام Lazy Refresh)"""
@@ -1642,6 +1725,16 @@ class MainWindow(QMainWindow):
                     safe_print("✅ تم إيقاف مؤقت فحص المشاريع")
                 except RuntimeError:
                     pass  # Timer تم حذفه بالفعل
+
+            # 1.1 إيقاف أي تحديثات مؤجلة للشاشات
+            try:
+                for _tab_name, timer in list(self._deferred_refresh_timers.items()):
+                    if timer:
+                        timer.stop()
+                        timer.deleteLater()
+                self._deferred_refresh_timers.clear()
+            except Exception:
+                pass
 
             # 2. إيقاف خدمة التحديث التلقائي
             try:

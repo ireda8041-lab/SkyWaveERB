@@ -4383,6 +4383,7 @@ class SettingsTab(QWidget):
         self.update_download_url = None
         self.update_version = None
         self.update_service = None
+        self.downloaded_update_path = None
 
     def setup_db_connection_tab(self):
         layout = QVBoxLayout(self.db_connection_tab)
@@ -4516,6 +4517,7 @@ class SettingsTab(QWidget):
         """عند توفر تحديث جديد"""
         self.update_version = version
         self.update_download_url = url
+        self.downloaded_update_path = None
 
         self.update_status_label.setText(
             f"🎉 يتوفر إصدار جديد!\n\nالإصدار الجديد: {version}\nاضغط على 'تنزيل التحديث' للبدء"
@@ -4653,6 +4655,7 @@ class SettingsTab(QWidget):
 
     def on_download_completed(self, file_path):
         """عند اكتمال التنزيل"""
+        self.downloaded_update_path = file_path
         self.update_progress_bar.setValue(100)
 
         self.update_status_label.setText(
@@ -4727,9 +4730,8 @@ class SettingsTab(QWidget):
 
         try:
             # تطبيق التحديث
-            success = self.update_service.apply_update(
-                self.update_service.temp_update_path, self.update_download_url
-            )
+            setup_path = self.downloaded_update_path or self.update_service.temp_update_path
+            success = self.update_service.apply_update(setup_path, self.update_download_url)
 
             if success:
                 # إغلاق البرنامج

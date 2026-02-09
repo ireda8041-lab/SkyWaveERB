@@ -393,8 +393,11 @@ class LiveUpdateRouter(QObject):
                 if hasattr(self.main_window.sync_manager, "repo"):
                     repo = self.main_window.sync_manager.repo
                     if repo and hasattr(repo, "unified_sync") and repo.unified_sync:
-                        # مزامنة فورية للجدول
-                        repo.unified_sync.instant_sync(table_name)
+                        # مزامنة فورية دون تجميد الواجهة
+                        if hasattr(repo.unified_sync, "schedule_instant_sync"):
+                            repo.unified_sync.schedule_instant_sync(table_name)
+                        else:
+                            repo.unified_sync.instant_sync(table_name)
         except Exception as e:
             logger.debug("[LiveRouter] خطأ في طلب المزامنة: %s", e)
 
@@ -436,7 +439,9 @@ class LiveUpdateRouter(QObject):
                     self.main_window._invalidate_tab_cache(current_tab_name)
 
                 if hasattr(self.main_window, "_do_load_tab_data_safe"):
-                    QTimer.singleShot(0, lambda: self.main_window._do_load_tab_data_safe(current_tab_name))
+                    QTimer.singleShot(
+                        0, lambda: self.main_window._do_load_tab_data_safe(current_tab_name)
+                    )
 
             # 💤 تعليم باقي التابات للتحديث لاحقاً
             if hasattr(self.main_window, "pending_refreshes"):

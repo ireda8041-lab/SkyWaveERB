@@ -42,6 +42,23 @@ if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
 if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
 Write-Host "OK: Cleaned dist/build" -ForegroundColor Green
 
+Write-Step "Building updater"
+if (-not (Test-Path "updater.spec")) {
+    throw "updater.spec not found"
+}
+python -m PyInstaller updater.spec --clean --noconfirm
+if ($LASTEXITCODE -ne 0) {
+    throw "Updater build failed"
+}
+
+$builtUpdaterPath = "dist\updater.exe"
+if (-not (Test-Path $builtUpdaterPath)) {
+    throw "Updater executable not found at $builtUpdaterPath"
+}
+Copy-Item -Force $builtUpdaterPath "updater.exe"
+$updaterSizeMb = [math]::Round(((Get-Item "updater.exe").Length / 1MB), 2)
+Write-Host "OK: Built updater.exe ($updaterSizeMb MB)" -ForegroundColor Green
+
 Write-Step "Building executable"
 if (-not (Test-Path "SkyWaveERP.spec")) {
     throw "SkyWaveERP.spec not found"
@@ -57,6 +74,9 @@ if (-not (Test-Path $exePath)) {
 }
 $exeSizeMb = [math]::Round(((Get-Item $exePath).Length / 1MB), 2)
 Write-Host "OK: Built $exePath ($exeSizeMb MB)" -ForegroundColor Green
+
+Copy-Item -Force "updater.exe" "dist\SkyWaveERP\updater.exe"
+Write-Host "OK: Synced updater.exe into dist\\SkyWaveERP" -ForegroundColor Green
 
 Write-Step "Building installer (Inno Setup)"
 $installerBuilt = $false

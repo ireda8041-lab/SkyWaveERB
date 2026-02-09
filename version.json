@@ -1,17 +1,16 @@
 {
-  "version": "2.2.2",
-  "version_name": "Sky Wave ERP v2.2.2",
+  "version": "2.2.3",
+  "version_name": "Sky Wave ERP v2.2.3",
   "release_date": "2026-02-09",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.2/SkyWaveERP-Setup-2.2.2.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.3/SkyWaveERP-Setup-2.2.3.exe",
   "changelog": [
-    "Stabilized hybrid sync scheduling to reduce redundant full sync cycles.",
-    "Improved shutdown safety to avoid SQLite closed-database race conditions.",
-    "Reduced realtime fallback noise when Change Streams are unavailable.",
-    "Moved notification bridge initialization after QApplication creation.",
-    "Improved release/build scripts to read version dynamically."
+    "Soft-delete propagation now reaches all devices via delta sync.",
+    "Near-instant sync without replica set (1s delta + notification triggers).",
+    "Fixed notification polling query and added entity metadata for fast refresh.",
+    "Non-blocking live sync triggers to avoid UI freezes."
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "تحديث استقرار: تحسين المزامنة، تقليل الضوضاء في السجل، وإغلاق آمن بدون أخطاء قاعدة البيانات.",
-  "notes_en": "Stability update: improved sync scheduling, cleaner logs, and safer shutdown handling."
+  "notes_ar": "تحديث فورية المزامنة: حذف أسرع بين الأجهزة، إشعارات فورية، وتجنب تجميد الواجهة.",
+  "notes_en": "Realtime sync update: faster cross-device deletes, instant notifications, and no UI freezes."
 }

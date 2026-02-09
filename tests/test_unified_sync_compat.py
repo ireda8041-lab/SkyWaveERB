@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from datetime import datetime
 
 from core.realtime_sync import RealtimeSyncManager
@@ -181,6 +182,39 @@ def test_pull_remote_changes_handles_datetime_last_modified_and_persists_waterma
     assert (tmp_path / "sync_watermarks.json").exists()
 
 
+def test_pull_remote_changes_emits_ui_table_signal_for_changed_tables(tmp_path, monkeypatch):
+    ts = datetime(2026, 2, 9, 12, 45, 0)
+    repo = _FakeRepoWithSqlite(
+        db_path=tmp_path / "sync_signal_test.db",
+        remote_clients=[
+            {
+                "_id": "mongo-client-2",
+                "name": "Signal Co",
+                "created_at": ts,
+                "last_modified": ts,
+                "is_deleted": False,
+            }
+        ],
+    )
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    from core.signals import app_signals
+
+    seen = []
+    monkeypatch.setattr(
+        app_signals,
+        "emit_ui_data_changed",
+        lambda table: seen.append(table),
+        raising=True,
+    )
+
+    result = manager.pull_remote_changes()
+
+    assert result["success"] is True
+    assert "clients" in seen
+
+
 def test_push_local_changes_includes_modified_offline_without_dirty_flag(tmp_path):
     repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_push_modified.db", remote_clients=[])
     manager = UnifiedSyncManagerV3(repo)
@@ -250,7 +284,7 @@ def test_push_local_changes_handles_deleted_status_without_dirty_flag(tmp_path):
     assert result["success"] is True
     assert result["deleted"] == 1
     assert result["errors"] == 0
-    assert len(repo.mongo_db["clients"].deleted) == 1
+    assert len(repo.mongo_db["clients"].updated) >= 1
 
     local = repo.sqlite_conn.cursor()
     local.execute("SELECT COUNT(*) FROM clients WHERE name = ?", ("To Delete",))
@@ -301,3 +335,26 @@ def test_realtime_manager_fallback_when_change_stream_not_supported(monkeypatch)
 
     assert started is False
     assert manager.is_running is False
+
+
+def test_schedule_instant_sync_batches_rapid_requests(monkeypatch):
+    manager = UnifiedSyncManagerV3(_FakeRepo(online=True))
+    calls = []
+
+    def _fake_delta_cycle():
+        calls.append("delta")
+        return {"success": True}
+
+    monkeypatch.setattr(manager, "_run_delta_cycle", _fake_delta_cycle)
+
+    first = manager.schedule_instant_sync("clients")
+    second = manager.schedule_instant_sync("clients")
+
+    assert first is True
+    assert second is False  # deduped burst
+
+    deadline = time.monotonic() + 1.5
+    while manager._instant_sync_worker_running and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert calls == ["delta"]

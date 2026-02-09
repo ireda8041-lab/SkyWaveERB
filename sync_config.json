@@ -2,7 +2,7 @@
   "enabled": true,
   "auto_sync_interval": 300,
   "quick_sync_interval": 5,
-  "delta_sync_interval": 2,
+  "delta_sync_interval": 1,
   "connection_check_interval": 5,
   "realtime_enabled": true,
   "realtime_auto_detect": true,

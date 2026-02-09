@@ -20,6 +20,12 @@ except ImportError:
             pass
 
 
+UPDATE_SETUP_FILENAMES = (
+    "SkyWaveERP_Update.exe",
+    "SkyWave-Setup-Update.exe",
+)
+
+
 class UpdateChecker(QThread):
     """
     Thread للتحقق من وجود تحديثات جديدة
@@ -196,11 +202,81 @@ class UpdateService:
         self.current_version = current_version
         self.check_url = check_url
         # استخدام مجلد AppData لتجنب مشاكل الصلاحيات في Program Files
-        app_data_dir = os.path.join(
+        self.update_staging_dir = os.path.join(
             os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "SkyWaveERP"
         )
-        os.makedirs(app_data_dir, exist_ok=True)
-        self.temp_update_path = os.path.join(app_data_dir, "SkyWave-Setup-Update.exe")
+        os.makedirs(self.update_staging_dir, exist_ok=True)
+        self.temp_update_path = os.path.join(self.update_staging_dir, UPDATE_SETUP_FILENAMES[0])
+        self.legacy_temp_update_path = os.path.join(
+            self.update_staging_dir, UPDATE_SETUP_FILENAMES[1]
+        )
+
+    def _normalize_setup_path(self, setup_path: str | None) -> str | None:
+        if not isinstance(setup_path, str):
+            return None
+        cleaned = setup_path.strip()
+        if not cleaned:
+            return None
+        if os.path.isabs(cleaned):
+            return os.path.normpath(cleaned)
+        return os.path.normpath(os.path.abspath(cleaned))
+
+    def _candidate_setup_paths(self, setup_path: str | None) -> list[str]:
+        normalized = self._normalize_setup_path(setup_path)
+        candidates = [
+            normalized,
+            self.temp_update_path,
+            self.legacy_temp_update_path,
+            os.path.join(os.path.dirname(self.temp_update_path), "SkyWaveERP_Update.exe"),
+            os.path.join(os.path.dirname(self.temp_update_path), "SkyWave-Setup-Update.exe"),
+        ]
+        unique: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            path = os.path.normpath(candidate)
+            if path in seen:
+                continue
+            seen.add(path)
+            unique.append(path)
+        return unique
+
+    def _resolve_setup_path(self, setup_path: str | None) -> str | None:
+        for candidate in self._candidate_setup_paths(setup_path):
+            if os.path.exists(candidate) and os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def _download_setup_file(self, download_url: str, target_path: str) -> bool:
+        if not download_url:
+            return False
+        if not os.path.isabs(target_path):
+            target_path = os.path.abspath(target_path)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        response = requests.get(download_url, stream=True, timeout=60)
+        response.raise_for_status()
+        with open(target_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+        return os.path.exists(target_path) and os.path.getsize(target_path) > 0
+
+    def _download_setup_with_fallback(self, download_url: str) -> str | None:
+        targets = [self.temp_update_path, self.legacy_temp_update_path]
+        for target in targets:
+            try:
+                if self._download_setup_file(download_url, target):
+                    return target
+            except Exception as e:
+                safe_print(f"WARNING: فشل تنزيل التحديث إلى {target}: {e}")
+            try:
+                if os.path.exists(target):
+                    os.remove(target)
+            except OSError:
+                pass
+        return None
 
     def check_for_updates(self) -> UpdateChecker:
         """
@@ -250,8 +326,10 @@ class UpdateService:
             updater_exe = os.path.join(current_dir, "updater.exe")
             updater_py = os.path.join(current_dir, "updater.py")
 
+            setup_path = self._resolve_setup_path(setup_path)
+
             # قراءة عنوان التحميل من الإصدار إذا لم يكن ملف الإعداد متاحاً
-            if not setup_path or not os.path.exists(setup_path):
+            if not setup_path:
                 try:
                     version_json = os.path.join(current_dir, "version.json")
                     if os.path.exists(version_json):
@@ -264,24 +342,20 @@ class UpdateService:
                 except Exception as e:
                     safe_print(f"WARNING: فشل قراءة version.json: {e}")
 
-            if download_url and (not setup_path or not os.path.exists(setup_path)):
-                if not setup_path:
-                    setup_path = self.temp_update_path
-                if not os.path.isabs(setup_path):
-                    setup_path = os.path.abspath(setup_path)
+            if download_url and not setup_path:
                 try:
-                    os.makedirs(os.path.dirname(setup_path), exist_ok=True)
-                    response = requests.get(download_url, stream=True, timeout=60)
-                    response.raise_for_status()
-                    with open(setup_path, "wb") as f:
-                        for chunk in response.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                f.write(chunk)
+                    setup_path = self._download_setup_with_fallback(download_url)
+                    if setup_path:
+                        safe_print(f"INFO: مسار ملف التحديث: {setup_path}")
+                    else:
+                        safe_print("ERROR: فشل تنزيل التحديث لكل مسارات staging المتاحة")
+                        return False
                 except Exception as e:
                     safe_print(f"ERROR: فشل تنزيل التحديث: {e}")
                     return False
 
-            setup_exists = bool(setup_path and os.path.exists(setup_path))
+            setup_path = self._resolve_setup_path(setup_path)
+            setup_exists = bool(setup_path)
             prefer_py = not getattr(sys, "frozen", False) and os.path.exists(updater_py)
 
             # اختيار المحدث المناسب مع تمرير إما setup_path أو download_url
@@ -312,6 +386,9 @@ class UpdateService:
                         [sys.executable, os.path.join(current_dir, "updater.py"), download_url],
                     )
                     return True
+                if not setup_exists or not setup_path:
+                    safe_print("ERROR: لا يوجد ملف setup صالح لتشغيل التحديث")
+                    return False
                 safe_print("updater.exe غير موجود - تشغيل Setup مباشرة...")
                 os.spawnv(os.P_NOWAIT, setup_path, [setup_path])
                 return True
@@ -328,7 +405,8 @@ class UpdateService:
     def cleanup_temp_files(self):
         """حذف الملفات المؤقتة"""
         try:
-            if os.path.exists(self.temp_update_path):
-                os.remove(self.temp_update_path)
+            for path in (self.temp_update_path, self.legacy_temp_update_path):
+                if path and os.path.exists(path):
+                    os.remove(path)
         except Exception as e:
             safe_print(f"تحذير: فشل حذف الملفات المؤقتة: {e}")

@@ -123,6 +123,11 @@ class UnifiedSyncManagerV3(QObject):
         self._realtime_pull_dedupe_ms = 400
         self._last_realtime_pull_ms: dict[str, int] = {}
         self._queued_realtime_tables: set[str] = set()
+        self._instant_sync_schedule_lock = threading.Lock()
+        self._instant_sync_pending_tables: set[str] = set()
+        self._instant_sync_worker_running = False
+        self._instant_sync_dedupe_ms = 250
+        self._last_instant_sync_request_ms: dict[str, int] = {}
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -361,6 +366,80 @@ class UnifiedSyncManagerV3(QObject):
         self._queued_realtime_tables.clear()
         logger.debug("⚡ معالجة queued realtime events: %s", queued)
         self.force_pull(None)
+
+    def _normalize_table_key(self, table: str | None) -> str:
+        if isinstance(table, str) and table in self.TABLES:
+            return table
+        return "__all__"
+
+    def schedule_instant_sync(self, table: str | None = None) -> bool:
+        """
+        Schedule a non-blocking instant sync cycle.
+        Uses lightweight delta cycle (push+pull) with burst dedupe to avoid UI freezes.
+        """
+        if self._shutdown:
+            return False
+
+        table_key = self._normalize_table_key(table)
+        now_ms = int(time.monotonic() * 1000)
+
+        with self._instant_sync_schedule_lock:
+            last_ms = self._last_instant_sync_request_ms.get(table_key, 0)
+            if (now_ms - last_ms) < self._instant_sync_dedupe_ms:
+                return False
+            self._last_instant_sync_request_ms[table_key] = now_ms
+            self._instant_sync_pending_tables.add(table_key)
+
+            if self._instant_sync_worker_running:
+                return True
+            self._instant_sync_worker_running = True
+
+        threading.Thread(
+            target=self._instant_sync_worker_loop,
+            daemon=True,
+            name="unified-instant-sync",
+        ).start()
+        return True
+
+    def _instant_sync_worker_loop(self):
+        """Drain scheduled instant-sync requests in background without blocking UI thread."""
+        try:
+            # Short batching window to collapse rapid CRUD bursts into one cycle.
+            time.sleep(0.06)
+            while not self._shutdown:
+                with self._instant_sync_schedule_lock:
+                    pending = set(self._instant_sync_pending_tables)
+                    self._instant_sync_pending_tables.clear()
+
+                if not pending:
+                    break
+
+                if not self.is_online:
+                    # Offline mode: skip immediate cycle; periodic sync will recover on reconnect.
+                    continue
+
+                result = self._run_delta_cycle()
+                if result.get("reason") in {"delta_busy", "full_sync_in_progress"}:
+                    with self._instant_sync_schedule_lock:
+                        self._instant_sync_pending_tables.update(pending)
+                    time.sleep(0.15)
+                    continue
+
+                # Keep loop cooperative and allow new pending requests to be batched.
+                time.sleep(0.02)
+        finally:
+            restart_worker = False
+            with self._instant_sync_schedule_lock:
+                self._instant_sync_worker_running = False
+                if self._instant_sync_pending_tables and not self._shutdown:
+                    self._instant_sync_worker_running = True
+                    restart_worker = True
+            if restart_worker:
+                threading.Thread(
+                    target=self._instant_sync_worker_loop,
+                    daemon=True,
+                    name="unified-instant-sync",
+                ).start()
 
     # ==========================================
     # 🚀 المزامنة الفورية - Real-time Sync
@@ -2084,25 +2163,72 @@ class UnifiedSyncManagerV3(QObject):
                             unique_value = record.get(unique_field)
 
                             if is_deleted or sync_status == "deleted":
-                                # حذف السجل من السحابة ثم حذفه محلياً
+                                # حذف منطقي في السحابة لضمان مزامنة الحذف عبر Delta Sync
+                                now_dt = datetime.now()
+                                remote_error = False
+                                remote_matched = False
+
                                 if mongo_id:
                                     try:
-                                        # حاول أولاً باستخدام ObjectId ثم fallback على النص الخام.
                                         try:
                                             from bson import ObjectId
 
-                                            collection.delete_one({"_id": ObjectId(mongo_id)})
+                                            result = collection.update_one(
+                                                {"_id": ObjectId(mongo_id)},
+                                                {
+                                                    "$set": {
+                                                        "is_deleted": True,
+                                                        "sync_status": "deleted",
+                                                        "last_modified": now_dt,
+                                                    }
+                                                },
+                                            )
                                         except Exception:
-                                            collection.delete_one({"_id": mongo_id})
+                                            result = collection.update_one(
+                                                {"_id": mongo_id},
+                                                {
+                                                    "$set": {
+                                                        "is_deleted": True,
+                                                        "sync_status": "deleted",
+                                                        "last_modified": now_dt,
+                                                    }
+                                                },
+                                            )
+                                        remote_matched = bool(
+                                            getattr(result, "matched_count", 0)
+                                            or getattr(result, "modified_count", 0)
+                                        )
                                     except Exception as del_err:
-                                        logger.debug("تجاهل خطأ حذف من MongoDB: %s", del_err)
-                                elif unique_value:
-                                    try:
-                                        collection.delete_one({unique_field: unique_value})
-                                    except Exception as del_err:
-                                        logger.debug("تجاهل خطأ حذف بالـ unique field: %s", del_err)
+                                        remote_error = True
+                                        logger.debug("تعذر تعليم الحذف في MongoDB: %s", del_err)
 
-                                # حذف محلياً (Hard Delete بعد المزامنة)
+                                if not remote_matched and unique_value:
+                                    try:
+                                        result = collection.update_one(
+                                            {unique_field: unique_value},
+                                            {
+                                                "$set": {
+                                                    "is_deleted": True,
+                                                    "sync_status": "deleted",
+                                                    "last_modified": now_dt,
+                                                }
+                                            },
+                                        )
+                                        remote_matched = bool(
+                                            getattr(result, "matched_count", 0)
+                                            or getattr(result, "modified_count", 0)
+                                        )
+                                    except Exception as del_err:
+                                        remote_error = True
+                                        logger.debug(
+                                            "تعذر تعليم الحذف بالـ unique field: %s", del_err
+                                        )
+
+                                if remote_error:
+                                    results["errors"] += 1
+                                    continue
+
+                                # حذف محلياً بعد نجاح التعليم أو عدم وجود سجل في السحابة
                                 cursor.execute(f"DELETE FROM {table} WHERE id = ?", (local_id,))
                                 results["deleted"] += 1
                             else:
@@ -2188,12 +2314,16 @@ class UnifiedSyncManagerV3(QObject):
             return {"success": False, "reason": "already_syncing"}
 
         results = {"success": True, "pulled": 0, "deleted": 0, "errors": 0}
+        changed_tables: set[str] = set()
 
         try:
             cursor = self.repo.get_cursor()
 
             for table in self.TABLES:
                 try:
+                    before_pulled = results["pulled"]
+                    before_deleted = results["deleted"]
+
                     # الحصول على Watermark لهذا الجدول
                     watermark = self._watermarks.get(table, "1970-01-01T00:00:00")
 
@@ -2315,6 +2445,8 @@ class UnifiedSyncManagerV3(QObject):
                             "📷 clients delta: %s عميل لديه شعار (metadata only - lazy mode)",
                             logo_clients,
                         )
+                    if results["pulled"] > before_pulled or results["deleted"] > before_deleted:
+                        changed_tables.add(table)
 
                 except Exception as e:
                     logger.debug("خطأ في سحب جدول %s: %s", table, e)
@@ -2326,6 +2458,14 @@ class UnifiedSyncManagerV3(QObject):
 
             if results["pulled"] > 0 or results["deleted"] > 0:
                 logger.info("⬇️ Delta سحب: %s، حذف: %s", results["pulled"], results["deleted"])
+                if changed_tables:
+                    try:
+                        from core.signals import app_signals
+
+                        for table_name in sorted(changed_tables):
+                            app_signals.emit_ui_data_changed(table_name)
+                    except Exception as signal_err:
+                        logger.debug("تعذر بث إشارات UI بعد delta pull: %s", signal_err)
                 # إرسال إشارة لتحديث الواجهة
                 try:
                     self.data_synced.emit()

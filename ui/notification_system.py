@@ -286,14 +286,38 @@ class NotificationSyncWorker(QThread):
     """عامل مزامنة الإشعارات من MongoDB - محسّن للاستقرار"""
 
     new_notification = pyqtSignal(dict)
+    _ENTITY_TABLE_MAP = {
+        "client": "clients",
+        "clients": "clients",
+        "project": "projects",
+        "projects": "projects",
+        "service": "services",
+        "services": "services",
+        "payment": "payments",
+        "payments": "payments",
+        "expense": "expenses",
+        "expenses": "expenses",
+        "account": "accounts",
+        "accounts": "accounts",
+        "invoice": "invoices",
+        "invoices": "invoices",
+        "task": "tasks",
+        "tasks": "tasks",
+        "notification": "notifications",
+        "notifications": "notifications",
+    }
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
-        self._check_interval = 180000  # ⚡ 3 دقائق بدلاً من دقيقتين
+        # Poll every 1s for near-instant cross-device notifications when Change Streams are unavailable.
+        self._check_interval = 1000
+        self._poll_lookback_seconds = 120
         self._last_cleanup = 0.0
+        self._last_sync_trigger = 0.0
+        self._sync_trigger_cooldown = 0.4
 
     def set_repository(self, repo):
         self.repo = repo
@@ -314,7 +338,7 @@ class NotificationSyncWorker(QThread):
             except Exception as e:
                 safe_print(f"WARNING: [NotificationSync] {e}")
 
-            self.msleep(self._check_interval)  # ⚡ 30 ثانية
+            self.msleep(self._check_interval)
 
     def _check_new_notifications(self):
         try:
@@ -323,19 +347,60 @@ class NotificationSyncWorker(QThread):
 
             collection = self.repo.mongo_db.notifications
 
-            check_time = (datetime.now() - timedelta(seconds=30)).isoformat()
+            check_dt = datetime.now() - timedelta(seconds=self._poll_lookback_seconds)
+            check_iso = check_dt.isoformat()
 
             try:
-                notifications = list(
-                    collection.find(
-                        {"created_at": {"$gt": check_time}, "device_id": {"$ne": DEVICE_ID}}
-                    )
-                    .sort("created_at", -1)
-                    .limit(10)
-                )
+                query = {
+                    "$and": [
+                        {
+                            "$or": [
+                                {"created_at": {"$gt": check_iso}},
+                                {"created_at": {"$gt": check_dt}},
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"device_id": {"$exists": False}},
+                                {"device_id": {"$ne": DEVICE_ID}},
+                            ]
+                        },
+                    ]
+                }
+                notifications = list(collection.find(query).sort("created_at", -1).limit(30))
             except Exception as e:
-                safe_print(f"ERROR: [NotificationSync] MongoDB query failed: {e}")
-                return
+                try:
+                    # Fallback: ignore device filter if server rejects complex query.
+                    notifications = list(
+                        collection.find(
+                            {
+                                "$or": [
+                                    {"created_at": {"$gt": check_iso}},
+                                    {"created_at": {"$gt": check_dt}},
+                                ]
+                            }
+                        )
+                        .sort("created_at", -1)
+                        .limit(30)
+                    )
+                except Exception as fallback_error:
+                    safe_print(
+                        f"ERROR: [NotificationSync] MongoDB query failed: {e} | {fallback_error}"
+                    )
+                    return
+
+            # Main query path with explicit device filter (split to keep Mongo query syntax valid).
+            try:
+                notifications = [
+                    n
+                    for n in notifications
+                    if n.get("device_id") is None or n.get("device_id") != DEVICE_ID
+                ]
+            except Exception:
+                pass
+
+            trigger_tables: set[str] = set()
+            saw_new = False
 
             for notif in notifications:
                 try:
@@ -344,6 +409,7 @@ class NotificationSyncWorker(QThread):
                         continue
 
                     self._seen_ids.add(notif_id)
+                    saw_new = True
                     if len(self._seen_ids) > 100:
                         self._seen_ids = set(list(self._seen_ids)[-50:])
 
@@ -357,18 +423,36 @@ class NotificationSyncWorker(QThread):
                             "type": notif.get("type", "info"),
                             "title": notif.get("title"),
                             "device_id": notif.get("device_id"),
+                            "entity_type": notif.get("entity_type"),
+                            "action": notif.get("action"),
                         }
                     )
+
+                    entity_type = notif.get("entity_type")
+                    table_name = self._map_entity_to_table(entity_type)
+                    if table_name:
+                        trigger_tables.add(table_name)
                 except Exception as e:
                     safe_print(f"ERROR: [NotificationSync] فشل معالجة إشعار واحد: {e}")
                     continue  # تجاهل الإشعار المعطوب والمتابعة
+
+            if saw_new:
+                self._trigger_instant_sync(trigger_tables)
 
             # تنظيف الإشعارات القديمة (مع معالجة الأخطاء)
 
             if not hasattr(self, "_last_cleanup") or time.time() - self._last_cleanup > 60:
                 try:
-                    old_time = (datetime.now() - timedelta(hours=1)).isoformat()
-                    result = collection.delete_many({"created_at": {"$lt": old_time}})
+                    old_dt = datetime.now() - timedelta(hours=1)
+                    old_time = old_dt.isoformat()
+                    result = collection.delete_many(
+                        {
+                            "$or": [
+                                {"created_at": {"$lt": old_time}},
+                                {"created_at": {"$lt": old_dt}},
+                            ]
+                        }
+                    )
                     if result.deleted_count > 0:
                         safe_print(
                             f"INFO: [NotificationSync] تم حذف {result.deleted_count} إشعار قديم"
@@ -391,6 +475,32 @@ class NotificationSyncWorker(QThread):
         except RuntimeError:
             # Qt object already deleted
             pass
+
+    @classmethod
+    def _map_entity_to_table(cls, entity_type: str | None) -> str | None:
+        if not entity_type:
+            return None
+        return cls._ENTITY_TABLE_MAP.get(str(entity_type).strip().lower())
+
+    def _trigger_instant_sync(self, tables: set[str]):
+        repo = self.repo
+        if repo is None or not hasattr(repo, "unified_sync"):
+            return
+        syncer = getattr(repo, "unified_sync", None)
+        if syncer is None:
+            return
+        now = time.time()
+        if (now - self._last_sync_trigger) < self._sync_trigger_cooldown:
+            return
+        self._last_sync_trigger = now
+
+        table = None
+        if len(tables) == 1:
+            table = next(iter(tables))
+        if hasattr(syncer, "schedule_instant_sync"):
+            syncer.schedule_instant_sync(table)
+        else:
+            syncer.instant_sync(table)
 
 
 class NotificationManager(QObject):
@@ -466,6 +576,8 @@ class NotificationManager(QObject):
         title: str = None,
         duration: int = 4000,
         sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
     ):
         manager = cls()
 
@@ -496,26 +608,60 @@ class NotificationManager(QObject):
                         "title": title,
                         "device_id": DEVICE_ID,
                         "created_at": datetime.now().isoformat(),
+                        "entity_type": entity_type,
+                        "action": action,
                     }
                 )
             except Exception as e:
                 safe_print(f"ERROR: [NotificationManager] Sync failed: {e}")
 
     @classmethod
-    def success(cls, message: str, title: str = None, duration: int = 4000, sync: bool = True):
-        cls.show(message, NotificationType.SUCCESS, title, duration, sync)
+    def success(
+        cls,
+        message: str,
+        title: str = None,
+        duration: int = 4000,
+        sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
+    ):
+        cls.show(message, NotificationType.SUCCESS, title, duration, sync, entity_type, action)
 
     @classmethod
-    def error(cls, message: str, title: str = None, duration: int = 5000, sync: bool = True):
-        cls.show(message, NotificationType.ERROR, title, duration, sync)
+    def error(
+        cls,
+        message: str,
+        title: str = None,
+        duration: int = 5000,
+        sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
+    ):
+        cls.show(message, NotificationType.ERROR, title, duration, sync, entity_type, action)
 
     @classmethod
-    def warning(cls, message: str, title: str = None, duration: int = 4500, sync: bool = True):
-        cls.show(message, NotificationType.WARNING, title, duration, sync)
+    def warning(
+        cls,
+        message: str,
+        title: str = None,
+        duration: int = 4500,
+        sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
+    ):
+        cls.show(message, NotificationType.WARNING, title, duration, sync, entity_type, action)
 
     @classmethod
-    def info(cls, message: str, title: str = None, duration: int = 4000, sync: bool = True):
-        cls.show(message, NotificationType.INFO, title, duration, sync)
+    def info(
+        cls,
+        message: str,
+        title: str = None,
+        duration: int = 4000,
+        sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
+    ):
+        cls.show(message, NotificationType.INFO, title, duration, sync, entity_type, action)
 
     def _on_notification_closed(self, notification):
         if notification in self._notifications:
@@ -547,17 +693,41 @@ class NotificationManager(QObject):
             manager._sync_worker.stop()
 
 
-def notify_success(message: str, title: str = None, sync: bool = True):
-    NotificationManager.success(message, title, sync=sync)
+def notify_success(
+    message: str,
+    title: str = None,
+    sync: bool = True,
+    entity_type: str | None = None,
+    action: str | None = None,
+):
+    NotificationManager.success(message, title, sync=sync, entity_type=entity_type, action=action)
 
 
-def notify_error(message: str, title: str = None, sync: bool = True):
-    NotificationManager.error(message, title, sync=sync)
+def notify_error(
+    message: str,
+    title: str = None,
+    sync: bool = True,
+    entity_type: str | None = None,
+    action: str | None = None,
+):
+    NotificationManager.error(message, title, sync=sync, entity_type=entity_type, action=action)
 
 
-def notify_warning(message: str, title: str = None, sync: bool = True):
-    NotificationManager.warning(message, title, sync=sync)
+def notify_warning(
+    message: str,
+    title: str = None,
+    sync: bool = True,
+    entity_type: str | None = None,
+    action: str | None = None,
+):
+    NotificationManager.warning(message, title, sync=sync, entity_type=entity_type, action=action)
 
 
-def notify_info(message: str, title: str = None, sync: bool = True):
-    NotificationManager.info(message, title, sync=sync)
+def notify_info(
+    message: str,
+    title: str = None,
+    sync: bool = True,
+    entity_type: str | None = None,
+    action: str | None = None,
+):
+    NotificationManager.info(message, title, sync=sync, entity_type=entity_type, action=action)

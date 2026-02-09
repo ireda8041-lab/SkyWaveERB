@@ -4,6 +4,19 @@
 
 ---
 
+## [2.2.3] - 2026-02-09
+
+### Fixed
+- Soft-delete propagation now reaches all devices via delta sync.
+- Notification polling query corrected for reliable cross-device alerts.
+- Live sync triggers are non-blocking to avoid UI freezes.
+
+### Changed
+- Delta sync interval set to 1s for near-instant updates without replica set.
+- Notifications now include entity metadata and trigger fast refresh.
+
+---
+
 ## [2.2.2] - 2026-02-09
 
 ### Fixed

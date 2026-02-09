@@ -1,15 +1,12 @@
-﻿## Release Notes - v2.2.2 (2026-02-09)
+## Release Notes - v2.2.3 (2026-02-09)
 
-### Stability
-- Hybrid sync scheduling was stabilized to avoid redundant full-sync loops.
-- Shutdown flow was hardened to prevent SQLite closed-database race conditions.
-- Realtime fallback logging is now quieter and more actionable.
+### Realtime Sync (No Replica Set)
+- Delta sync tightened to 1s for near-instant propagation.
+- Notification poller now triggers instant sync on new events.
+- Live sync triggers are non-blocking to avoid UI freezes.
 
-### Sync & Realtime
-- Delta sync remains active as reliable fallback when Change Streams are not available.
-- Startup no longer performs avoidable extra full sync on initial online detection.
+### Data Integrity
+- Soft-delete propagation ensures deletions appear across devices.
 
-### Packaging
-- Version metadata updated to `2.2.2`.
-- Installer version updated to `2.2.2`.
-- Release build script now reads version dynamically from `version.json`.
+### Notifications
+- Entity metadata is included to refresh only the affected tables.

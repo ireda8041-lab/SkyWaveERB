@@ -2223,17 +2223,30 @@ class Repository:
             mongo_id = client_id
             local_id = client_id_num
 
+        now_dt = datetime.now()
+        now_iso = now_dt.isoformat()
+
         if self.online:
             try:
-                result = self.mongo_db.clients.delete_one(
+                result = self.mongo_db.clients.update_one(
                     {
                         "$or": [
                             {"_id": self._to_objectid(mongo_id)},
                             {"_id": self._to_objectid(client_id)},
+                            {"_mongo_id": mongo_id},
+                            {"_mongo_id": client_id},
+                            {"id": local_id},
                         ]
-                    }
+                    },
+                    {
+                        "$set": {
+                            "is_deleted": True,
+                            "sync_status": "deleted",
+                            "last_modified": now_dt,
+                        }
+                    },
                 )
-                if result.deleted_count > 0:
+                if getattr(result, "matched_count", 0) > 0:
                     self.sqlite_cursor.execute(
                         "DELETE FROM clients WHERE id = ? OR _mongo_id = ?",
                         (local_id, client_id),
@@ -2241,15 +2254,18 @@ class Repository:
                     deleted_rows = self.sqlite_cursor.rowcount
                     self.sqlite_conn.commit()
                     if deleted_rows > 0:
-                        safe_print("INFO: [Repo] ✅ تم حذف العميل محلياً بعد الحذف من MongoDB")
+                        safe_print("INFO: [Repo] ✅ تم تعليم حذف العميل ثم حذفه محلياً")
                     return deleted_rows > 0
                 safe_print("WARNING: [Repo] العميل غير موجود في MongoDB")
             except Exception as e:
-                safe_print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
+                safe_print(f"WARNING: [Repo] فشل تعليم حذف العميل في MongoDB: {e}")
 
-        now_iso = datetime.now().isoformat()
         self.sqlite_cursor.execute(
-            "UPDATE clients SET sync_status = 'deleted', last_modified = ? WHERE id = ? OR _mongo_id = ?",
+            """
+            UPDATE clients
+            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+            WHERE id = ? OR _mongo_id = ?
+            """,
             (now_iso, local_id, client_id),
         )
         self.sqlite_conn.commit()
@@ -3168,27 +3184,49 @@ class Repository:
             except (ValueError, TypeError):
                 account_id_num = -1
 
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online:
                 try:
                     try:
-                        self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
+                        result = self.mongo_db.accounts.update_one(
+                            {"_id": ObjectId(account_id)},
+                            {
+                                "$set": {
+                                    "is_deleted": True,
+                                    "sync_status": "deleted",
+                                    "last_modified": now_dt,
+                                }
+                            },
+                        )
                     except Exception:
-                        self.mongo_db.accounts.delete_one({"code": account_id})
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM accounts WHERE id = ? OR _mongo_id = ? OR code = ?",
-                        (account_id_num, account_id, account_id),
-                    )
-                    self.sqlite_conn.commit()
-                    safe_print("INFO: [Repo] ✅ تم حذف الحساب من المحلي بعد الحذف من MongoDB")
-                    return True
-                except Exception as e:
-                    safe_print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+                        result = self.mongo_db.accounts.update_one(
+                            {"code": account_id},
+                            {
+                                "$set": {
+                                    "is_deleted": True,
+                                    "sync_status": "deleted",
+                                    "last_modified": now_dt,
+                                }
+                            },
+                        )
 
-            now_iso = datetime.now().isoformat()
+                    if getattr(result, "matched_count", 0) > 0:
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM accounts WHERE id = ? OR _mongo_id = ? OR code = ?",
+                            (account_id_num, account_id, account_id),
+                        )
+                        self.sqlite_conn.commit()
+                        safe_print("INFO: [Repo] ✅ تم تعليم حذف الحساب ثم حذفه محلياً")
+                        return True
+                except Exception as e:
+                    safe_print(f"WARNING: [Repo] فشل تعليم حذف الحساب في MongoDB: {e}")
+
             self.sqlite_cursor.execute(
                 """
                 UPDATE accounts
-                SET sync_status = 'deleted', last_modified = ?
+                SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                 WHERE id = ? OR _mongo_id = ? OR code = ?
                 """,
                 (now_iso, account_id_num, account_id, account_id),
@@ -3947,18 +3985,40 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             mongo_id = row["_mongo_id"] if row else None
 
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online and mongo_id:
                 try:
-                    self.mongo_db.payments.delete_one({"_id": ObjectId(mongo_id)})
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM payments WHERE id = ? OR _mongo_id = ?",
-                        (payment_id, str(payment_id)),
+                    result = self.mongo_db.payments.update_one(
+                        {"_id": ObjectId(mongo_id)},
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    self.sqlite_conn.commit()
-                    safe_print("INFO: [Repo] تم حذف الدفعة محلياً بعد الحذف من MongoDB.")
+                    if getattr(result, "matched_count", 0) > 0:
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM payments WHERE id = ? OR _mongo_id = ?",
+                            (payment_id, str(payment_id)),
+                        )
+                        self.sqlite_conn.commit()
+                        safe_print("INFO: [Repo] تم تعليم حذف الدفعة ثم حذفها محلياً.")
+                    else:
+                        self.sqlite_cursor.execute(
+                            """
+                            UPDATE payments
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                            WHERE id = ? OR _mongo_id = ?
+                            """,
+                            (now_iso, payment_id, str(payment_id)),
+                        )
+                        self.sqlite_conn.commit()
                 except Exception as e:
-                    safe_print(f"ERROR: [Repo] فشل حذف الدفعة من MongoDB: {e}")
-                    now_iso = datetime.now().isoformat()
+                    safe_print(f"ERROR: [Repo] فشل تعليم حذف الدفعة في MongoDB: {e}")
                     self.sqlite_cursor.execute(
                         """
                         UPDATE payments
@@ -3969,7 +4029,6 @@ class Repository:
                     )
                     self.sqlite_conn.commit()
             else:
-                now_iso = datetime.now().isoformat()
                 self.sqlite_cursor.execute(
                     """
                     UPDATE payments
@@ -4444,33 +4503,45 @@ class Repository:
         row = self.sqlite_cursor.fetchone()
         mongo_id = row[0] if row else service_id
 
+        now_dt = datetime.now()
+        now_iso = now_dt.isoformat()
+
         if self.online:
             try:
-                result = self.mongo_db.services.delete_one(
+                result = self.mongo_db.services.update_one(
                     {
                         "$or": [
                             {"_id": self._to_objectid(mongo_id)},
                             {"_id": self._to_objectid(service_id)},
+                            {"_mongo_id": mongo_id},
+                            {"_mongo_id": service_id},
+                            {"id": service_id_num},
                         ]
-                    }
+                    },
+                    {
+                        "$set": {
+                            "is_deleted": True,
+                            "sync_status": "deleted",
+                            "last_modified": now_dt,
+                        }
+                    },
                 )
-                if result.deleted_count > 0:
+                if getattr(result, "matched_count", 0) > 0:
                     self.sqlite_cursor.execute(
                         "DELETE FROM services WHERE id = ? OR _mongo_id = ?",
                         (service_id_num, service_id),
                     )
                     self.sqlite_conn.commit()
-                    safe_print("INFO: [Repo] ✅ تم حذف الخدمة محلياً بعد الحذف من MongoDB")
+                    safe_print("INFO: [Repo] ✅ تم تعليم حذف الخدمة ثم حذفها محلياً")
                     return True
                 safe_print("WARNING: [Repo] الخدمة غير موجودة في MongoDB")
             except Exception as e:
-                safe_print(f"WARNING: [Repo] فشل حذف الخدمة من MongoDB: {e}")
+                safe_print(f"WARNING: [Repo] فشل تعليم حذف الخدمة في MongoDB: {e}")
 
-        now_iso = datetime.now().isoformat()
         self.sqlite_cursor.execute(
             """
             UPDATE services
-            SET sync_status = 'deleted', last_modified = ?
+            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
             WHERE id = ? OR _mongo_id = ?
             """,
             (now_iso, service_id_num, service_id),
@@ -4826,33 +4897,54 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             mongo_id = row["_mongo_id"] if row else None
 
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online and mongo_id:
                 try:
-                    self.mongo_db.expenses.delete_one({"_id": ObjectId(mongo_id)})
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM expenses WHERE id = ? OR _mongo_id = ?",
-                        (expense_id, str(expense_id)),
+                    result = self.mongo_db.expenses.update_one(
+                        {"_id": ObjectId(mongo_id)},
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    self.sqlite_conn.commit()
-                    safe_print("INFO: تم حذف المصروف محلياً بعد الحذف من الأونلاين.")
+                    if getattr(result, "matched_count", 0) > 0:
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM expenses WHERE id = ? OR _mongo_id = ?",
+                            (expense_id, str(expense_id)),
+                        )
+                        self.sqlite_conn.commit()
+                        safe_print("INFO: تم تعليم حذف المصروف ثم حذفه محلياً.")
+                    else:
+                        self.sqlite_cursor.execute(
+                            """
+                            UPDATE expenses
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                            WHERE id = ? OR _mongo_id = ?
+                            """,
+                            (now_iso, expense_id, str(expense_id)),
+                        )
+                        self.sqlite_conn.commit()
                 except Exception as e:
-                    safe_print(f"ERROR: فشل حذف المصروف من Mongo: {e}")
-                    now_iso = datetime.now().isoformat()
+                    safe_print(f"ERROR: فشل تعليم حذف المصروف في Mongo: {e}")
                     self.sqlite_cursor.execute(
                         """
                         UPDATE expenses
-                        SET sync_status = 'deleted', last_modified = ?
+                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                         WHERE id = ? OR _mongo_id = ?
                         """,
                         (now_iso, expense_id, str(expense_id)),
                     )
                     self.sqlite_conn.commit()
             else:
-                now_iso = datetime.now().isoformat()
                 self.sqlite_cursor.execute(
                     """
                     UPDATE expenses
-                    SET sync_status = 'deleted', last_modified = ?
+                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                     WHERE id = ? OR _mongo_id = ?
                     """,
                     (now_iso, expense_id, str(expense_id)),
@@ -5349,26 +5441,71 @@ class Repository:
                 f"INFO: [Repo] وجدنا المشروع: {project_name}, mongo_id={mongo_id}, local_id={local_id}"
             )
 
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online and mongo_id and self.mongo_db is not None:
                 try:
-                    self.mongo_db.projects.delete_one({"_id": ObjectId(mongo_id)})
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM projects WHERE name = ?", (project_name,)
+                    result = self.mongo_db.projects.update_one(
+                        {
+                            "$or": [
+                                {"_id": ObjectId(mongo_id)},
+                                {"_mongo_id": mongo_id},
+                                {"name": project_name},
+                            ]
+                        },
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM payments WHERE project_id = ?", (project_name,)
+                    self.mongo_db.payments.update_many(
+                        {"project_id": project_name},
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    self.sqlite_conn.commit()
-                    safe_print(
-                        "INFO: [Repo] تم حذف المشروع والدفعات المرتبطة محلياً بعد الحذف من MongoDB"
-                    )
+
+                    if getattr(result, "matched_count", 0) > 0:
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM projects WHERE name = ?", (project_name,)
+                        )
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM payments WHERE project_id = ?", (project_name,)
+                        )
+                        self.sqlite_conn.commit()
+                        safe_print("INFO: [Repo] تم تعليم حذف المشروع والدفعات ثم حذفها محلياً")
+                    else:
+                        self.sqlite_cursor.execute(
+                            """
+                            UPDATE projects
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                            WHERE name = ?
+                            """,
+                            (now_iso, project_name),
+                        )
+                        self.sqlite_cursor.execute(
+                            """
+                            UPDATE payments
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                            WHERE project_id = ?
+                            """,
+                            (now_iso, project_name),
+                        )
+                        self.sqlite_conn.commit()
                 except Exception as e:
-                    safe_print(f"WARNING: [Repo] تخطي حذف MongoDB: {e}")
-                    now_iso = datetime.now().isoformat()
+                    safe_print(f"WARNING: [Repo] تخطي تعليم حذف MongoDB: {e}")
                     self.sqlite_cursor.execute(
                         """
                         UPDATE projects
-                        SET sync_status = 'deleted', last_modified = ?
+                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                         WHERE name = ?
                         """,
                         (now_iso, project_name),
@@ -5376,18 +5513,17 @@ class Repository:
                     self.sqlite_cursor.execute(
                         """
                         UPDATE payments
-                        SET sync_status = 'deleted', last_modified = ?
+                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                         WHERE project_id = ?
                         """,
                         (now_iso, project_name),
                     )
                     self.sqlite_conn.commit()
             else:
-                now_iso = datetime.now().isoformat()
                 self.sqlite_cursor.execute(
                     """
                     UPDATE projects
-                    SET sync_status = 'deleted', last_modified = ?
+                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                     WHERE name = ?
                     """,
                     (now_iso, project_name),
@@ -5395,7 +5531,7 @@ class Repository:
                 self.sqlite_cursor.execute(
                     """
                     UPDATE payments
-                    SET sync_status = 'deleted', last_modified = ?
+                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                     WHERE project_id = ?
                     """,
                     (now_iso, project_name),
@@ -5765,32 +5901,53 @@ class Repository:
                 safe_print("WARNING: [Repo] لا يمكن حذف العملة الأساسية")
                 return False
 
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online:
                 try:
-                    self.mongo_db.currencies.delete_one({"code": code.upper()})
-                    self.sqlite_cursor.execute(
-                        "DELETE FROM currencies WHERE code = ?", (code.upper(),)
+                    result = self.mongo_db.currencies.update_one(
+                        {"code": code.upper()},
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    self.sqlite_conn.commit()
-                    safe_print(f"INFO: [Repo] تم حذف العملة {code} من الأونلاين")
+                    if getattr(result, "matched_count", 0) > 0:
+                        self.sqlite_cursor.execute(
+                            "DELETE FROM currencies WHERE code = ?", (code.upper(),)
+                        )
+                        self.sqlite_conn.commit()
+                        safe_print(f"INFO: [Repo] تم تعليم حذف العملة {code} ثم حذفها محلياً")
+                    else:
+                        self.sqlite_cursor.execute(
+                            """
+                            UPDATE currencies
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                            WHERE code = ?
+                            """,
+                            (now_iso, code.upper()),
+                        )
+                        self.sqlite_conn.commit()
                 except Exception as e:
-                    safe_print(f"WARNING: [Repo] فشل حذف العملة من MongoDB: {e}")
-                    now_iso = datetime.now().isoformat()
+                    safe_print(f"WARNING: [Repo] فشل تعليم حذف العملة في MongoDB: {e}")
                     self.sqlite_cursor.execute(
                         """
                         UPDATE currencies
-                        SET sync_status = 'deleted', last_modified = ?
+                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                         WHERE code = ?
                         """,
                         (now_iso, code.upper()),
                     )
                     self.sqlite_conn.commit()
             else:
-                now_iso = datetime.now().isoformat()
                 self.sqlite_cursor.execute(
                     """
                     UPDATE currencies
-                    SET sync_status = 'deleted', last_modified = ?
+                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                     WHERE code = ?
                     """,
                     (now_iso, code.upper()),
@@ -6464,34 +6621,59 @@ class Repository:
         حذف مهمة
         """
         try:
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
+
             if self.online:
                 try:
-                    self.mongo_db.tasks.delete_one(
-                        {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]}
+                    result = self.mongo_db.tasks.update_one(
+                        {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]},
+                        {
+                            "$set": {
+                                "is_deleted": True,
+                                "sync_status": "deleted",
+                                "last_modified": now_dt,
+                            }
+                        },
                     )
-                    with self._lock:
-                        cursor = self.sqlite_conn.cursor()
-                        try:
-                            cursor.execute(
-                                "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?",
-                                (task_id, task_id),
-                            )
-                            self.sqlite_conn.commit()
-                        finally:
-                            cursor.close()
-                    safe_print(
-                        f"INFO: [Repo] تم حذف مهمة محلياً بعد الحذف من MongoDB (ID: {task_id})"
-                    )
+                    if getattr(result, "matched_count", 0) > 0:
+                        with self._lock:
+                            cursor = self.sqlite_conn.cursor()
+                            try:
+                                cursor.execute(
+                                    "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?",
+                                    (task_id, task_id),
+                                )
+                                self.sqlite_conn.commit()
+                            finally:
+                                cursor.close()
+                        safe_print(
+                            f"INFO: [Repo] تم تعليم حذف المهمة ثم حذفها محلياً (ID: {task_id})"
+                        )
+                    else:
+                        with self._lock:
+                            cursor = self.sqlite_conn.cursor()
+                            try:
+                                cursor.execute(
+                                    """
+                                    UPDATE tasks
+                                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                                    WHERE id = ? OR _mongo_id = ?
+                                    """,
+                                    (now_iso, task_id, task_id),
+                                )
+                                self.sqlite_conn.commit()
+                            finally:
+                                cursor.close()
                 except Exception as e:
-                    safe_print(f"WARNING: [Repo] فشل حذف المهمة من MongoDB: {e}")
-                    now_iso = datetime.now().isoformat()
+                    safe_print(f"WARNING: [Repo] فشل تعليم حذف المهمة في MongoDB: {e}")
                     with self._lock:
                         cursor = self.sqlite_conn.cursor()
                         try:
                             cursor.execute(
                                 """
                                 UPDATE tasks
-                                SET sync_status = 'deleted', last_modified = ?
+                                SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                                 WHERE id = ? OR _mongo_id = ?
                                 """,
                                 (now_iso, task_id, task_id),
@@ -6500,14 +6682,13 @@ class Repository:
                         finally:
                             cursor.close()
             else:
-                now_iso = datetime.now().isoformat()
                 with self._lock:
                     cursor = self.sqlite_conn.cursor()
                     try:
                         cursor.execute(
                             """
                             UPDATE tasks
-                            SET sync_status = 'deleted', last_modified = ?
+                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
                             WHERE id = ? OR _mongo_id = ?
                             """,
                             (now_iso, task_id, task_id),
