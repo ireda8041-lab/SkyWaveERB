@@ -1,108 +1,99 @@
-# Build Sky Wave ERP v2.1.8 Release
-# Script to build and prepare release
+﻿# Sky Wave ERP Release Builder
+# Builds executable + installer using the version declared in version.json
+
+$ErrorActionPreference = 'Stop'
+
+function Write-Step([string]$msg) {
+    Write-Host "`n=== $msg ===" -ForegroundColor Yellow
+}
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Building Sky Wave ERP v2.1.8" -ForegroundColor Green
+Write-Host "Sky Wave ERP - Release Build" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
 
-# Step 1: Check Python
-Write-Host "Step 1: Checking Python..." -ForegroundColor Yellow
+Write-Step "Loading version metadata"
+if (-not (Test-Path "version.json")) {
+    throw "version.json not found"
+}
+$versionMeta = Get-Content "version.json" -Raw | ConvertFrom-Json
+$version = [string]$versionMeta.version
+if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "version.json does not contain a valid 'version'"
+}
+Write-Host "Version: v$version" -ForegroundColor Cyan
+
+Write-Step "Checking Python"
 $pythonVersion = python --version 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK: $pythonVersion" -ForegroundColor Green
+if ($LASTEXITCODE -ne 0) {
+    throw "Python is not available"
 }
-else {
-    Write-Host "ERROR: Python not installed" -ForegroundColor Red
-    exit 1
-}
+Write-Host "OK: $pythonVersion" -ForegroundColor Green
 
-# Step 2: Check PyInstaller
-Write-Host ""
-Write-Host "Step 2: Checking PyInstaller..." -ForegroundColor Yellow
-$pyinstallerCheck = pip show pyinstaller 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK: PyInstaller installed" -ForegroundColor Green
-}
-else {
+Write-Step "Checking PyInstaller"
+python -m pip show pyinstaller *> $null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing PyInstaller..." -ForegroundColor Yellow
-    pip install pyinstaller
+    python -m pip install pyinstaller
 }
+Write-Host "OK: PyInstaller is available" -ForegroundColor Green
 
-# Step 3: Clean old builds
-Write-Host ""
-Write-Host "Step 3: Cleaning old builds..." -ForegroundColor Yellow
-if (Test-Path "dist") {
-    Remove-Item -Recurse -Force "dist"
-    Write-Host "OK: Removed dist folder" -ForegroundColor Green
+Write-Step "Cleaning previous build artifacts"
+if (Test-Path "dist") { Remove-Item -Recurse -Force "dist" }
+if (Test-Path "build") { Remove-Item -Recurse -Force "build" }
+Write-Host "OK: Cleaned dist/build" -ForegroundColor Green
+
+Write-Step "Building executable"
+if (-not (Test-Path "SkyWaveERP.spec")) {
+    throw "SkyWaveERP.spec not found"
 }
-if (Test-Path "build") {
-    Remove-Item -Recurse -Force "build"
-    Write-Host "OK: Removed build folder" -ForegroundColor Green
-}
-
-# Step 4: Build executable
-Write-Host ""
-Write-Host "Step 4: Building executable..." -ForegroundColor Yellow
-Write-Host "This may take several minutes..." -ForegroundColor Cyan
-
 python -m PyInstaller SkyWaveERP.spec --clean --noconfirm
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK: Executable built successfully" -ForegroundColor Green
-}
-else {
-    Write-Host "ERROR: Build failed" -ForegroundColor Red
-    exit 1
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller build failed"
 }
 
-# Step 5: Verify executable
-Write-Host ""
-Write-Host "Step 5: Verifying executable..." -ForegroundColor Yellow
 $exePath = "dist\SkyWaveERP\SkyWaveERP.exe"
-if (Test-Path $exePath) {
-    $fileSize = (Get-Item $exePath).Length / 1MB
-    $fileSizeRounded = [math]::Round($fileSize, 2)
-    Write-Host "OK: File exists: $exePath" -ForegroundColor Green
-    Write-Host "Size: $fileSizeRounded MB" -ForegroundColor Cyan
+if (-not (Test-Path $exePath)) {
+    throw "Executable not found at $exePath"
 }
-else {
-    Write-Host "ERROR: Executable not found" -ForegroundColor Red
-    exit 1
-}
+$exeSizeMb = [math]::Round(((Get-Item $exePath).Length / 1MB), 2)
+Write-Host "OK: Built $exePath ($exeSizeMb MB)" -ForegroundColor Green
 
-# Step 6: Create installer (if Inno Setup is available)
-Write-Host ""
-Write-Host "Step 6: Creating installer..." -ForegroundColor Yellow
-$innoSetup = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-if (Test-Path $innoSetup) {
-    & $innoSetup "SkyWaveERP_Setup.iss"
+Write-Step "Building installer (Inno Setup)"
+$installerBuilt = $false
+$isccPaths = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe"
+)
+$iscc = $isccPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($null -ne $iscc) {
+    if (-not (Test-Path "SkyWaveERP_Setup.iss")) {
+        throw "SkyWaveERP_Setup.iss not found"
+    }
+    & $iscc "SkyWaveERP_Setup.iss"
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "OK: Installer created" -ForegroundColor Green
+        $installerBuilt = $true
+        Write-Host "OK: Installer compiled successfully" -ForegroundColor Green
     }
     else {
-        Write-Host "WARNING: Installer creation failed" -ForegroundColor Yellow
+        Write-Host "WARNING: Installer compilation failed" -ForegroundColor Yellow
     }
 }
 else {
-    Write-Host "WARNING: Inno Setup not installed - skipping" -ForegroundColor Yellow
+    Write-Host "WARNING: Inno Setup not found. Skipping installer build." -ForegroundColor Yellow
 }
 
-# Summary
-Write-Host ""
+$installerPath = "installer_output\SkyWaveERP-Setup-$version.exe"
+
+Write-Host "`n============================================================" -ForegroundColor Cyan
+Write-Host "Build finished" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Build completed successfully!" -ForegroundColor Green
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Files:" -ForegroundColor Yellow
-Write-Host "  - Executable: dist\SkyWaveERP\SkyWaveERP.exe" -ForegroundColor Cyan
-if (Test-Path "installer_output\SkyWaveERP-Setup-2.1.6.exe") {
-    Write-Host "  - Installer: installer_output\SkyWaveERP-Setup-2.1.6.exe" -ForegroundColor Cyan
+Write-Host "Executable: $exePath" -ForegroundColor Cyan
+if ($installerBuilt -and (Test-Path $installerPath)) {
+    Write-Host "Installer:  $installerPath" -ForegroundColor Cyan
 }
-Write-Host ""
-Write-Host "Version: v2.1.6" -ForegroundColor Yellow
-$currentDate = Get-Date -Format "yyyy-MM-dd"
-Write-Host "Date: $currentDate" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "Ready for release!" -ForegroundColor Green
-Write-Host ""
+elseif ($installerBuilt) {
+    Write-Host "Installer compiled but expected path not found: $installerPath" -ForegroundColor Yellow
+}
+Write-Host "Version:    v$version" -ForegroundColor Cyan
+Write-Host "Date:       $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan

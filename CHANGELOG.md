@@ -4,6 +4,20 @@
 
 ---
 
+## [2.2.2] - 2026-02-09
+
+### Fixed
+- Stabilized hybrid sync scheduling to prevent redundant full-sync cycles when delta sync is active.
+- Added safer shutdown handling to avoid late-thread SQLite closed-database errors.
+- Reduced noisy realtime fallback warnings when MongoDB Change Streams are unavailable.
+- Moved NotificationBridge initialization to run after `QApplication` creation.
+
+### Changed
+- Default full sync interval tuned for production stability (`300s`).
+- Release metadata and installer/version tooling updated for `v2.2.2`.
+
+---
+
 ## [2.1.0] - 2026-01-31
 
 ### ✨ Added

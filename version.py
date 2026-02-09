@@ -2,8 +2,8 @@
 معلومات الإصدار - Sky Wave ERP
 """
 
-__version__ = "2.2.1"
-__version_name__ = "Sky Wave ERP v2.2.1"
+__version__ = "2.2.2"
+__version_name__ = "Sky Wave ERP v2.2.2"
 __release_date__ = "2026-02-09"
 __author__ = "Sky Wave Team"
 __email__ = "dev@skywave.agency"

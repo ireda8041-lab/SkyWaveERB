@@ -1,16 +1,15 @@
-## التحسينات الجديدة في v2.1.0
+﻿## Release Notes - v2.2.2 (2026-02-09)
 
-✨ **إضافة تاب طرق الدفع في الإعدادات**
-✨ **إضافة تاب ملاحظات المشاريع في الإعدادات**
-✨ **إضافة خيار إضافة مصروف من قائمة المشاريع**
-🔧 **جعل نافذة إنشاء المشاريع غير مشروطة** - يمكن تصغيرها
-⚡ **تحسين سرعة تحميل البيانات في شاشة المعاينة**
-🔧 **إصلاح مشكلة البيانات القديمة في شاشة المعاينة**
-🔧 **تحسين استجابة شاشة تسجيل الدخول**
-⚡ **تحسينات عامة في الأداء والسرعة**
+### Stability
+- Hybrid sync scheduling was stabilized to avoid redundant full-sync loops.
+- Shutdown flow was hardened to prevent SQLite closed-database race conditions.
+- Realtime fallback logging is now quieter and more actionable.
 
-### التحسينات السابقة (v2.0.7):
-🔧 إصلاح مشكلة التحديث التلقائي
-⚡ تحسين عملية التثبيت
-🔄 تحسين إعادة تشغيل البرنامج
-⏱️ زيادة وقت الانتظار للتثبيت
+### Sync & Realtime
+- Delta sync remains active as reliable fallback when Change Streams are not available.
+- Startup no longer performs avoidable extra full sync on initial online detection.
+
+### Packaging
+- Version metadata updated to `2.2.2`.
+- Installer version updated to `2.2.2`.
+- Release build script now reads version dynamically from `version.json`.
