@@ -1,8 +1,8 @@
-# Build Sky Wave ERP v2.1.7 Release
+# Build Sky Wave ERP v2.1.8 Release
 # Script to build and prepare release
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Building Sky Wave ERP v2.1.7" -ForegroundColor Green
+Write-Host "Building Sky Wave ERP v2.1.8" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 

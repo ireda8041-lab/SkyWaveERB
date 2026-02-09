@@ -763,6 +763,10 @@ class UnifiedSyncManagerV3(QObject):
     ) -> int | None:
         """
         البحث عن السجل المحلي بعدة طرق لمنع التكرارات
+
+        ⚡ NEW: Force Overwrite Logic for Projects
+        - If local record exists with same ID but different _mongo_id → DELETE local, INSERT remote
+        - Server data is the Single Source of Truth
         """
         try:
             # 1. البحث بـ _mongo_id أولاً
@@ -782,7 +786,35 @@ class UnifiedSyncManagerV3(QObject):
                     local_id = row[0]
                     existing_mongo_id = row[1]
 
-                    # ⚡ إصلاح: تحديث الـ mongo_id إذا كان مختلف
+                    # ⚡ FORCE OVERWRITE LOGIC (Projects only)
+                    if (
+                        table_name == "projects"
+                        and existing_mongo_id
+                        and existing_mongo_id != mongo_id
+                    ):
+                        # ID collision detected: local record has different _mongo_id
+                        # This means it's a different record, just unlucky collision
+                        # DELETE local record to allow remote data to be inserted
+                        logger.warning(
+                            "🔥 [FORCE OVERWRITE] Project ID collision detected: "
+                            "local_id=%s, local_mongo_id=%s, remote_mongo_id=%s. "
+                            "Deleting local record to prioritize server data.",
+                            local_id,
+                            existing_mongo_id,
+                            mongo_id,
+                        )
+                        safe_print(
+                            f"⚠️ [FORCE OVERWRITE] حذف مشروع محلي (ID={local_id}) "
+                            f"لإفساح المجال لبيانات السيرفر (mongo_id={mongo_id})"
+                        )
+
+                        # Delete the local record
+                        cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (local_id,))
+
+                        # Return None to signal that a new record should be inserted
+                        return None
+
+                    # ⚡ إصلاح: تحديث الـ mongo_id إذا كان مختلف (للجداول الأخرى)
                     if existing_mongo_id != mongo_id:
                         cursor.execute(
                             f"UPDATE {table_name} SET _mongo_id = ? WHERE id = ?",
