@@ -269,18 +269,26 @@ class Repository:
                     self.sqlite_cursor.close()
             except Exception:
                 pass
+            finally:
+                self.sqlite_cursor = None
 
             try:
                 if self.sqlite_conn is not None:
                     self.sqlite_conn.close()
             except Exception:
                 pass
+            finally:
+                self.sqlite_conn = None
 
             try:
                 if self.mongo_client is not None:
                     self.mongo_client.close()
             except Exception:
                 pass
+            finally:
+                self.mongo_client = None
+                self.mongo_db = None
+                self.online = False
             safe_print("INFO: [Repository] تم إغلاق اتصالات قاعدة البيانات")
         except Exception as e:
             safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
@@ -611,6 +619,8 @@ class Repository:
             work_field TEXT,
             logo_path TEXT,
             logo_data TEXT,
+            has_logo INTEGER NOT NULL DEFAULT 0,
+            logo_last_synced TEXT,
             client_notes TEXT,
             is_vip INTEGER DEFAULT 0
         )"""
@@ -621,6 +631,23 @@ class Repository:
             self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN logo_data TEXT")
             self.sqlite_conn.commit()
             safe_print("INFO: [Repository] تم إضافة عمود logo_data لجدول العملاء")
+        except Exception:
+            pass  # العمود موجود بالفعل
+
+        # ⚡ إضافة أعمدة metadata للشعار (دعم Lazy Logo Sync)
+        try:
+            self.sqlite_cursor.execute(
+                "ALTER TABLE clients ADD COLUMN has_logo INTEGER NOT NULL DEFAULT 0"
+            )
+            self.sqlite_conn.commit()
+            safe_print("INFO: [Repository] تم إضافة عمود has_logo لجدول العملاء")
+        except Exception:
+            pass  # العمود موجود بالفعل
+
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE clients ADD COLUMN logo_last_synced TEXT")
+            self.sqlite_conn.commit()
+            safe_print("INFO: [Repository] تم إضافة عمود logo_last_synced لجدول العملاء")
         except Exception:
             pass  # العمود موجود بالفعل
 
@@ -1457,19 +1484,24 @@ class Repository:
         client_data.last_modified = now
         client_data.sync_status = "new_offline"
         client_data.status = schemas.ClientStatus.ACTIVE
+        has_logo = bool(getattr(client_data, "has_logo", False) or client_data.logo_data)
+        client_data.has_logo = has_logo
+        if has_logo and not getattr(client_data, "logo_last_synced", None):
+            client_data.logo_last_synced = now.isoformat()
 
         # 1. الحفظ في SQLite (الأوفلاين أولاً)
         sql = """
             INSERT INTO clients (
                 sync_status, created_at, last_modified, name, company_name, email,
                 phone, address, country, vat_number, status,
-                client_type, work_field, logo_path, logo_data, client_notes, is_vip,
-                dirty_flag, is_deleted
+                client_type, work_field, logo_path, logo_data, has_logo, logo_last_synced,
+                client_notes, is_vip, dirty_flag, is_deleted
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
         """
         # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
         is_vip_value = 1 if getattr(client_data, "is_vip", False) else 0
+        has_logo_value = 1 if has_logo else 0
         self.sqlite_cursor.execute(
             sql,
             (
@@ -1488,6 +1520,8 @@ class Repository:
                 client_data.work_field,
                 client_data.logo_path,
                 client_data.logo_data,
+                has_logo_value,
+                client_data.logo_last_synced,
                 client_data.client_notes,
                 is_vip_value,
             ),
@@ -1548,12 +1582,15 @@ class Repository:
                     name = ?, company_name = ?, email = ?, phone = ?,
                     address = ?, country = ?, vat_number = ?, status = ?,
                     client_type = ?, work_field = ?, logo_path = ?, logo_data = ?, client_notes = ?,
-                    is_vip = ?, last_modified = ?, sync_status = 'modified_offline',
+                    has_logo = ?, logo_last_synced = ?, is_vip = ?, last_modified = ?, sync_status = 'modified_offline',
                     dirty_flag = 1
                 WHERE id = ? OR _mongo_id = ?
             """
             # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
             is_vip_value = 1 if getattr(client_data, "is_vip", False) else 0
+            has_logo_value = (
+                1 if bool(getattr(client_data, "has_logo", False) or client_data.logo_data) else 0
+            )
             params = (
                 client_data.name,
                 client_data.company_name,
@@ -1568,6 +1605,8 @@ class Repository:
                 client_data.logo_path,
                 client_data.logo_data,
                 client_data.client_notes,
+                has_logo_value,
+                client_data.logo_last_synced,
                 is_vip_value,
                 now_iso,
                 client_id,
@@ -1599,6 +1638,8 @@ class Repository:
                 if logo_data_value:
                     # صورة جديدة - رفعها للسحابة
                     update_dict["logo_data"] = logo_data_value
+                    update_dict["has_logo"] = True
+                    update_dict["logo_last_synced"] = now_iso
                     safe_print(
                         f"INFO: [Repo] � حفظ logo_data ({len(logo_data_value)} حرف) في MongoDB"
                     )
@@ -1606,6 +1647,8 @@ class Repository:
                     # logo_data فارغ و logo_path فارغ = حذف صريح للصورة
                     update_dict["logo_data"] = ""
                     update_dict["logo_path"] = ""
+                    update_dict["has_logo"] = False
+                    update_dict["logo_last_synced"] = now_iso
                     safe_print("INFO: [Repo] 🗑️ حذف logo_data من MongoDB (حذف صريح)")
                 else:
                     # logo_data فارغ لكن logo_path موجود = الاحتفاظ بالقديم
@@ -1621,7 +1664,10 @@ class Repository:
                         )
                         if existing and existing.get("logo_data"):
                             del update_dict["logo_data"]
+                            update_dict["has_logo"] = True
                             safe_print("INFO: [Repo] 📷 الاحتفاظ بـ logo_data الموجود في MongoDB")
+                        else:
+                            update_dict["has_logo"] = bool(client_data.has_logo)
                     except Exception:
                         pass
 
@@ -1678,8 +1724,10 @@ class Repository:
             if CACHE_ENABLED and hasattr(self, "_clients_cache"):
                 self._clients_cache.set("all_clients", clients_list)
 
-            # ⚡ تسجيل عدد العملاء اللي عندهم صور
-            clients_with_logo = sum(1 for c in clients_list if c.logo_data)
+            # ⚡ تسجيل عدد العملاء اللي عندهم شعارات (metadata + data)
+            clients_with_logo = sum(
+                1 for c in clients_list if bool(getattr(c, "has_logo", False) or c.logo_data)
+            )
             safe_print(
                 f"INFO: تم جلب {len(clients_list)} عميل نشط من المحلي ({clients_with_logo} عميل لديه صورة)"
             )
@@ -1696,6 +1744,8 @@ class Repository:
                 for c in clients_data:
                     try:
                         mongo_id = str(c.pop("_id"))
+                        if "has_logo" not in c:
+                            c["has_logo"] = bool(c.get("logo_data"))
                         c.pop("_mongo_id", None)
                         c.pop("mongo_id", None)
                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
@@ -1722,6 +1772,8 @@ class Repository:
                 clients_list = []
                 for c in clients_data:
                     mongo_id = str(c.pop("_id"))
+                    if "has_logo" not in c:
+                        c["has_logo"] = bool(c.get("logo_data"))
                     c.pop("_mongo_id", None)
                     c.pop("mongo_id", None)
                     clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))
@@ -1748,6 +1800,8 @@ class Repository:
                 client_data = self.mongo_db.clients.find_one({"_id": lookup_id})
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
+                    if "has_logo" not in client_data:
+                        client_data["has_logo"] = bool(client_data.get("logo_data"))
                     client_data.pop("_mongo_id", None)
                     client_data.pop("mongo_id", None)
                     client = schemas.Client(**client_data, _mongo_id=mongo_id)
@@ -1772,6 +1826,108 @@ class Repository:
             safe_print(f"ERROR: فشل جلب العميل (ID: {client_id}) من المحلي: {e}.")
 
         return None
+
+    def fetch_client_logo_on_demand(self, client_id_or_mongo_id: str) -> bool:
+        """
+        جلب شعار عميل واحد من MongoDB عند الطلب وتخزينه محلياً.
+        يعيد True إذا تم جلب شعار فعلياً، False إذا لا يوجد شعار أو فشل العملية.
+        """
+        if not client_id_or_mongo_id:
+            return False
+
+        if not self.online or self.mongo_db is None or self.mongo_client is None:
+            return False
+
+        local_id = None
+        mongo_id = None
+
+        try:
+            with self._lock:
+                cursor = self.get_cursor()
+                try:
+                    cursor.execute(
+                        "SELECT id, _mongo_id FROM clients WHERE id = ? OR _mongo_id = ?",
+                        (client_id_or_mongo_id, client_id_or_mongo_id),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        row_dict = dict(row)
+                        local_id = row_dict.get("id")
+                        mongo_id = row_dict.get("_mongo_id")
+                finally:
+                    cursor.close()
+        except Exception:
+            return False
+
+        target_id = mongo_id or client_id_or_mongo_id
+        selectors = []
+        if target_id:
+            selectors.append({"_id": self._to_objectid(target_id)})
+            selectors.append({"_mongo_id": target_id})
+
+        if not selectors:
+            return False
+
+        try:
+            remote = self.mongo_db.clients.find_one(
+                {"$or": selectors},
+                {"logo_data": 1, "has_logo": 1, "logo_last_synced": 1, "last_modified": 1},
+            )
+            if not remote:
+                return False
+
+            logo_data = remote.get("logo_data") or ""
+            has_logo = bool(remote.get("has_logo", False) or logo_data)
+            logo_last_synced = remote.get("logo_last_synced") or remote.get("last_modified")
+            if hasattr(logo_last_synced, "isoformat"):
+                logo_last_synced = logo_last_synced.isoformat()
+            elif logo_last_synced is not None:
+                logo_last_synced = str(logo_last_synced)
+            else:
+                logo_last_synced = datetime.now().isoformat()
+
+            # توحيد metadata في السحابة إذا كان السجل قديماً
+            if has_logo and "has_logo" not in remote:
+                try:
+                    self.mongo_db.clients.update_one(
+                        {"_id": remote.get("_id")},
+                        {"$set": {"has_logo": True, "logo_last_synced": logo_last_synced}},
+                    )
+                except Exception:
+                    pass
+
+            if local_id is None:
+                # لا يوجد صف محلي لتحديثه
+                return bool(logo_data)
+
+            with self._lock:
+                cursor = self.get_cursor()
+                try:
+                    cursor.execute(
+                        """
+                        UPDATE clients
+                        SET logo_data = ?, has_logo = ?, logo_last_synced = ?, sync_status = 'synced', dirty_flag = 0
+                        WHERE id = ?
+                        """,
+                        (
+                            logo_data if logo_data else None,
+                            1 if has_logo else 0,
+                            logo_last_synced,
+                            local_id,
+                        ),
+                    )
+                    self.sqlite_conn.commit()
+                finally:
+                    cursor.close()
+
+            if CACHE_ENABLED and hasattr(self, "_clients_cache"):
+                self._clients_cache.invalidate()
+
+            return bool(logo_data)
+
+        except Exception as e:
+            safe_print(f"WARNING: [Repository] فشل جلب شعار العميل عند الطلب: {e}")
+            return False
 
     def _to_objectid(self, item_id: str):
         """محاولة تحويل النص إلى ObjectId صالح لتجنب أخطاء InvalidId."""
@@ -1801,6 +1957,8 @@ class Repository:
                 )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
+                    if "has_logo" not in client_data:
+                        client_data["has_logo"] = bool(client_data.get("logo_data"))
                     client_data.pop("_mongo_id", None)
                     client_data.pop("mongo_id", None)
                     return schemas.Client(**client_data, _mongo_id=mongo_id)
@@ -1970,6 +2128,8 @@ class Repository:
                 )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
+                    if "has_logo" not in client_data:
+                        client_data["has_logo"] = bool(client_data.get("logo_data"))
                     client_data.pop("_mongo_id", None)
                     client_data.pop("mongo_id", None)
                     return schemas.Client(**client_data, _mongo_id=mongo_id)
@@ -2149,6 +2309,8 @@ class Repository:
                 client_data = self.mongo_db.clients.find_one({"name": name})
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
+                    if "has_logo" not in client_data:
+                        client_data["has_logo"] = bool(client_data.get("logo_data"))
                     client_data.pop("_mongo_id", None)
                     client_data.pop("mongo_id", None)
                     client = schemas.Client(**client_data, _mongo_id=mongo_id)

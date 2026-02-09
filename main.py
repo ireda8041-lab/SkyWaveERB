@@ -7,6 +7,7 @@
 
 import os
 import sys
+import uuid
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
 MAINTENANCE_INTERVAL_MS = 60 * 60 * 1000  # ⚡ ساعة - صيانة دورية (زيادة للأداء)
@@ -86,8 +87,9 @@ class SkyWaveERPApp:
     """
 
     def __init__(self):
+        self.startup_id = uuid.uuid4().hex[:8]
         logger.info("=" * 80)
-        logger.info("بدء تشغيل تطبيق Sky Wave ERP")
+        logger.info("بدء تشغيل تطبيق Sky Wave ERP | startup_id=%s", self.startup_id)
         logger.info("=" * 80)
         logger.info("[MainApp] بدء تشغيل تطبيق Sky Wave ERP...")
 
@@ -117,6 +119,7 @@ class SkyWaveERPApp:
         self.unified_sync = UnifiedSyncManagerV3(self.repository)
         # ⚡ ربط مدير المزامنة بالـ repository لتتمكن واجهة الإعدادات من الوصول إليه
         self.repository.unified_sync = self.unified_sync
+        self.realtime_manager = None
 
         # ⚡ ربط إشارة تغيير البيانات بنظام الإشارات المركزي (للمزامنة الفورية)
         from core.signals import app_signals
@@ -141,10 +144,8 @@ class SkyWaveERPApp:
 
         NotificationManager.set_repository(self.repository)
 
-        # إعداد جسر الإشعارات (يربط الإشارات بالإشعارات)
-        from core.notification_bridge import setup_notification_bridge
-
-        setup_notification_bridge()
+        # يتم تفعيل NotificationBridge بعد إنشاء QApplication داخل run()
+        self._notification_bridge_pending = True
 
         # --- 2. تجهيز "الأقسام" (حقن الاعتمادية) ---
         self.accounting_service = AccountingService(
@@ -205,26 +206,32 @@ class SkyWaveERPApp:
 
     def _init_background_timers(self):
         """تهيئة الـ timers في الخلفية - يجب استدعاؤها بعد بدء event loop"""
-        # مؤقت الصيانة
-        if self.maintenance_timer is None:
-            self.maintenance_timer = QTimer()
-            self.maintenance_timer.setSingleShot(False)
-            self.maintenance_timer.timeout.connect(self._run_maintenance_safe)
-            self.maintenance_timer.start(MAINTENANCE_INTERVAL_MS)
+        try:
+            # مؤقت الصيانة - معطّل للاستقرار
+            # if self.maintenance_timer is None:
+            #     self.maintenance_timer = QTimer()
+            #     self.maintenance_timer.setSingleShot(False)
+            #     self.maintenance_timer.timeout.connect(self._run_maintenance_safe)
+            #     self.maintenance_timer.start(MAINTENANCE_INTERVAL_MS)
+            logger.info("[MainApp] مؤقت الصيانة معطّل للاستقرار")
 
-        # مؤقت مزامنة الإعدادات
-        if self.settings_timer is None:
-            self.settings_timer = QTimer()
-            self.settings_timer.setSingleShot(False)
-            self.settings_timer.timeout.connect(self._sync_settings_safe)
-            self.settings_timer.start(SETTINGS_SYNC_INTERVAL_MS)
+            # مؤقت مزامنة الإعدادات - معطّل للاستقرار
+            # if self.settings_timer is None:
+            #     self.settings_timer = QTimer()
+            #     self.settings_timer.setSingleShot(False)
+            #     self.settings_timer.timeout.connect(self._sync_settings_safe)
+            #     self.settings_timer.start(SETTINGS_SYNC_INTERVAL_MS)
+            logger.info("[MainApp] مؤقت مزامنة الإعدادات معطّل للاستقرار")
 
-        # مؤقت التحقق من التحديثات
-        if self.update_timer is None:
-            self.update_timer = QTimer()
-            self.update_timer.setSingleShot(False)
-            self.update_timer.timeout.connect(self._check_updates_safe)
-            self.update_timer.start(UPDATE_CHECK_INTERVAL_MS)
+            # مؤقت التحقق من التحديثات - معطّل للاستقرار
+            # if self.update_timer is None:
+            #     self.update_timer = QTimer()
+            #     self.update_timer.setSingleShot(False)
+            #     self.update_timer.timeout.connect(self._check_updates_safe)
+            #     self.update_timer.start(UPDATE_CHECK_INTERVAL_MS)
+            logger.info("[MainApp] مؤقت التحديثات معطّل للاستقرار")
+        except Exception as e:
+            logger.error("[MainApp] خطأ في تهيئة الـ timers: %s", e)
 
     def run(self):
         """
@@ -235,6 +242,14 @@ class SkyWaveERPApp:
             os.environ["QT_QPA_PLATFORM"] = "windows:darkmode=2"
 
         app = QApplication(sys.argv)
+        if getattr(self, "_notification_bridge_pending", False):
+            try:
+                from core.notification_bridge import setup_notification_bridge
+
+                setup_notification_bridge()
+                self._notification_bridge_pending = False
+            except Exception as e:
+                logger.debug("[MainApp] تعذر تفعيل NotificationBridge: %s", e)
 
         # === معالجة أخطاء Qt ===
         def qt_message_handler(mode, context, message):
@@ -447,6 +462,7 @@ class SkyWaveERPApp:
             project_service=self.project_service,
             notification_service=self.notification_service,
             printing_service=self.printing_service,
+            template_service=self.template_service,
             export_service=self.export_service,
             sync_manager=self.sync_manager,  # 🔥 نظام المزامنة الموحد
         )
@@ -501,78 +517,40 @@ class SkyWaveERPApp:
                     lambda: QTimer.singleShot(100, main_window.on_sync_completed)
                 )
                 logger.info("[MainApp] ✅ تم ربط إشارة data_synced بتحديث الواجهة")
+
+                # Hybrid Realtime: Change Streams عند التوفر + Delta Sync fallback دائم
+                realtime_enabled = bool(getattr(self.unified_sync, "_realtime_enabled", True))
+                if realtime_enabled:
+                    try:
+                        from core.realtime_sync import setup_realtime_sync
+
+                        self.realtime_manager = setup_realtime_sync(self.repository)
+                        if self.realtime_manager:
+                            self.realtime_manager.data_updated.connect(
+                                self._on_realtime_data_updated
+                            )
+                            logger.info("[MainApp] ✅ تم تفعيل المزامنة الفورية (Hybrid)")
+                        else:
+                            logger.info(
+                                "[MainApp] ℹ️ Change Streams غير متاحة - النظام يعمل على Delta Sync فقط"
+                            )
+                    except Exception as realtime_error:
+                        logger.warning(
+                            "[MainApp] ⚠️ فشل تفعيل realtime - fallback إلى Delta فقط: %s",
+                            realtime_error,
+                        )
+                else:
+                    logger.info("[MainApp] ℹ️ المزامنة الفورية معطلة من الإعدادات")
             except Exception as e:
                 logger.error("[MainApp] فشل بدء المزامنة: %s", e)
 
-        # 🔄 تفعيل نظام المزامنة الفورية (Real-time Sync)
-        def start_realtime_sync():
-            """بدء نظام المزامنة الفورية"""
-            try:
-                logger.info("[MainApp] 🔄 بدء نظام المزامنة الفورية...")
-
-                # إعداد نظام المزامنة الفورية
-                from core.realtime_sync import setup_realtime_sync
-
-                realtime_manager = setup_realtime_sync(self.repository)
-
-                if realtime_manager:
-                    logger.info("[MainApp] ✅ تم تفعيل نظام المزامنة الفورية بنجاح")
-                    # حفظ المرجع لإغلاقه لاحقاً
-                    self.realtime_manager = realtime_manager
-
-                    # ربط إشارات المزامنة الفورية بتحديث الواجهة
-                    realtime_manager.data_updated.connect(
-                        lambda table, data: (
-                            main_window.refresh_table(table)
-                            if hasattr(main_window, "refresh_table")
-                            else None
-                        )
-                    )
-                    realtime_manager.sync_completed.connect(
-                        lambda table: logger.info("[RealtimeSync] ✅ تم مزامنة %s", table)
-                    )
-
-                    logger.info("[MainApp] 🔗 تم ربط إشارات المزامنة الفورية بالواجهة")
-
-            except Exception as e:
-                logger.warning("[MainApp] ⚠️ خطأ في بدء المزامنة الفورية: %s", e)
-
-        # ⚡ تهيئة الـ timers بعد بدء event loop
+        # ⚡ تهيئة الـ timers بعد بدء event loop (معطّلة للاستقرار)
         QTimer.singleShot(100, self._init_background_timers)
 
-        QTimer.singleShot(2000, start_auto_sync_system)
-        QTimer.singleShot(2000, start_realtime_sync)
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد ثانيتين")
-        logger.info("[MainApp] 🔄 نظام المزامنة الفورية سيبدأ بعد ثانيتين")
-
-        # 🔴 تفعيل نظام التحديثات الحية (Live Updates)
-        def start_live_updates():
-            """بدء نظام التحديثات الحية"""
-            try:
-                logger.info("[MainApp] 🔴 بدء نظام التحديثات الحية...")
-
-                # تهيئة الموجّه
-                from core.live_watcher import LiveUpdateRouter
-
-                self.live_router = LiveUpdateRouter(main_window)
-
-                # ربط الإشارات
-                self.live_watcher.data_changed.connect(self.live_router.handle_data_change)
-                self.live_watcher.refresh_all.connect(self.live_router.refresh_all)
-
-                # ربط إشارة sync_needed إذا كانت موجودة
-                if hasattr(self.live_watcher, "sync_needed"):
-                    self.live_watcher.sync_needed.connect(self.live_router.handle_sync_needed)
-
-                # بدء المراقبة
-                self.live_watcher.start()
-
-                logger.info("[MainApp] ✅ نظام التحديثات الحية يعمل الآن")
-            except Exception as e:
-                logger.warning("[MainApp] ⚠️ خطأ في بدء التحديثات الحية: %s", e)
-
-        QTimer.singleShot(2000, start_live_updates)
-        logger.info("[MainApp] 🔴 نظام التحديثات الحية سيبدأ بعد ثانيتين")
+        # 🚀 تفعيل نظام المزامنة الموحد فقط (تعطيل الأنظمة الأخرى للاستقرار)
+        QTimer.singleShot(5000, start_auto_sync_system)
+        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 5 ثوانٍ")
+        logger.info("[MainApp] 🔄 وضع المزامنة: Hybrid (Realtime + Delta fallback)")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
         self._setup_auto_update(main_window)
@@ -596,24 +574,39 @@ class SkyWaveERPApp:
 
         sys.exit(exit_code)
 
-    def _setup_auto_update(self, main_window):
-        """تفعيل نظام التحديث التلقائي"""
+    def _on_realtime_data_updated(self, table_name: str, _payload: dict):
+        """معالجة event فوري من Change Streams بدون ازدواج مع delta/full sync."""
         try:
-            from services.auto_update_service import get_auto_update_service
+            from core.signals import app_signals
 
-            self.auto_update_service = get_auto_update_service()
-
-            # ربط إشارة التحديث المتاح
-            self.auto_update_service.update_available.connect(
-                lambda v, u, c: self._on_update_available(main_window, v, u, c)
-            )
-
-            # بدء خدمة التحديث التلقائي
-            self.auto_update_service.start()
-            logger.info("[MainApp] تم تفعيل التحديث التلقائي - الإصدار الحالي: %s", CURRENT_VERSION)
-
+            known_tables = set(getattr(self.unified_sync, "TABLES", []))
+            if isinstance(table_name, str) and table_name in known_tables:
+                app_signals.emit_data_changed(table_name)
+                if hasattr(self.unified_sync, "request_realtime_pull"):
+                    self.unified_sync.request_realtime_pull(table_name)
         except Exception as e:
-            logger.warning("[MainApp] فشل تفعيل التحديث التلقائي: %s", e)
+            logger.debug("[MainApp] فشل معالجة realtime update: %s", e)
+
+    def _setup_auto_update(self, main_window):
+        """تفعيل نظام التحديث التلقائي - معطّل للاستقرار"""
+        # ⚡ معطّل - قد يسبب تعليق البرنامج
+        logger.info("[MainApp] التحديث التلقائي معطّل للاستقرار")
+        # try:
+        #     from services.auto_update_service import get_auto_update_service
+        #
+        #     self.auto_update_service = get_auto_update_service()
+        #
+        #     # ربط إشارة التحديث المتاح
+        #     self.auto_update_service.update_available.connect(
+        #         lambda v, u, c: self._on_update_available(main_window, v, u, c)
+        #     )
+        #
+        #     # بدء خدمة التحديث التلقائي
+        #     self.auto_update_service.start()
+        #     logger.info("[MainApp] تم تفعيل التحديث التلقائي - الإصدار الحالي: %s", CURRENT_VERSION)
+        #
+        # except Exception as e:
+        #     logger.warning("[MainApp] فشل تفعيل التحديث التلقائي: %s", e)
 
     def _setup_periodic_maintenance(self):
         """تفعيل الصيانة الدورية - معطّلة للاستقرار"""
@@ -683,11 +676,13 @@ class SkyWaveERPApp:
         # إيقاف مدير المزامنة V3
         try:
             if hasattr(self, "sync_manager") and self.sync_manager:
-                if hasattr(self.sync_manager, "stop_auto_sync"):
-                    self.sync_manager.stop_auto_sync()
-                elif hasattr(self.sync_manager, "stop"):
-                    self.sync_manager.stop()
-                logger.info("[MainApp] تم إيقاف مدير المزامنة")
+                # self.sync_manager is عادة نفس كائن self.unified_sync
+                if self.sync_manager is not getattr(self, "unified_sync", None):
+                    if hasattr(self.sync_manager, "stop_auto_sync"):
+                        self.sync_manager.stop_auto_sync()
+                    elif hasattr(self.sync_manager, "stop"):
+                        self.sync_manager.stop()
+                    logger.info("[MainApp] تم إيقاف مدير المزامنة")
         except Exception as e:
             logger.debug("[MainApp] تحذير عند إيقاف مدير المزامنة: %s", e)
 
@@ -811,6 +806,10 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         "qobject",
         "runtime error",
         "c/c++ object",
+        "qthread",
+        "qtimer",
+        "connection",
+        "signal",
     ]
 
     # تجاهل أخطاء Qt فقط
@@ -818,7 +817,7 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
         logger.debug("تجاهل خطأ Qt: %s", exc_value)
         return
 
-    # للأخطاء الأخرى، نسجلها ونعرضها للمستخدم
+    # للأخطاء الأخرى، نسجلها فقط بدون إيقاف البرنامج
     try:
         ErrorHandler.handle_exception(
             exception=exc_value,
@@ -826,9 +825,9 @@ def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
             user_message=f"حدث خطأ غير متوقع: {exc_value}",
             show_dialog=False,  # لا نعرض dialog لتجنب التعطل
         )
-    except Exception:
+    except Exception as e:
         # إذا فشل ErrorHandler، نطبع الخطأ على الأقل
-        print(f"خطأ حرج: {exc_value}")
+        logger.debug(f"خطأ في معالج الأخطاء: {e}")
 
 
 # ⚡ معالج أخطاء الـ Threads

@@ -8,9 +8,11 @@
 - إرسال إشارات لتحديث الواجهة
 """
 
+import json
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -84,6 +86,12 @@ class RealtimeSyncManager(QObject):
         self._last_sync_time = {}
         self._pending_changes = set()  # ⚡ تجميع التغييرات
         self._debounce_timer = None
+        self._realtime_enabled = True
+        self._realtime_auto_detect = True
+        self._change_stream_max_await_ms = 250
+        self._change_stream_supported = None
+        self._support_warning_logged = False
+        self._load_runtime_config()
 
         # تهيئة أوقات المزامنة
         for collection in self.COLLECTIONS:
@@ -91,17 +99,108 @@ class RealtimeSyncManager(QObject):
 
         logger.info("[RealtimeSync] ✅ تم تهيئة مدير المزامنة الفورية (محسّن)")
 
+    def _load_runtime_config(self):
+        try:
+            config_path = Path("sync_config.json")
+            if not config_path.exists():
+                return
+            with open(config_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            self._realtime_enabled = bool(cfg.get("realtime_enabled", True))
+            self._realtime_auto_detect = bool(cfg.get("realtime_auto_detect", True))
+            try:
+                self._change_stream_max_await_ms = int(
+                    cfg.get("realtime_change_stream_max_await_ms", 250)
+                )
+            except (TypeError, ValueError):
+                self._change_stream_max_await_ms = 250
+            self._change_stream_max_await_ms = max(50, min(5000, self._change_stream_max_await_ms))
+        except Exception as e:
+            logger.debug("[RealtimeSync] فشل تحميل الإعدادات: %s", e)
+
+    def _detect_change_stream_support(self) -> bool:
+        if self.repo is None or self.repo.mongo_db is None:
+            return False
+        try:
+            collection = self.repo.mongo_db[self.COLLECTIONS[0]]
+            with collection.watch(max_await_time_ms=100, full_document="default") as stream:
+                try:
+                    stream.try_next()
+                except Exception:
+                    # try_next قد لا تكون متاحة في بعض الإصدارات - لا تعتبرها فشلاً.
+                    pass
+            return True
+        except Exception as e:
+            if not self._support_warning_logged:
+                error_text = str(e).lower()
+                expected_not_supported = (
+                    "only supported on replica sets" in error_text
+                    or "code 40573" in error_text
+                    or "location40573" in error_text
+                    or "changestream" in error_text
+                    and "replica set" in error_text
+                )
+                if expected_not_supported:
+                    logger.info(
+                        "[RealtimeSync] Change Streams غير متاحة في بيئة Mongo الحالية - سيتم استخدام Delta Sync"
+                    )
+                    logger.debug("[RealtimeSync] تفاصيل فحص Change Streams: %s", e)
+                else:
+                    logger.warning(
+                        "[RealtimeSync] فشل فحص Change Streams - fallback إلى Delta Sync: %s",
+                        e,
+                    )
+                self._support_warning_logged = True
+            return False
+
     def start(self):
         """🚀 بدء المزامنة الفورية"""
         if self.is_running:
-            return
+            return True
+
+        if not self._realtime_enabled:
+            logger.info("[RealtimeSync] المزامنة الفورية معطلة من الإعدادات")
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_realtime_sync_status(False)
+            except Exception:
+                pass
+            return False
 
         if not PYMONGO_AVAILABLE:
             logger.warning("[RealtimeSync] pymongo غير متاح - المزامنة الفورية معطّلة")
-            return
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_realtime_sync_status(False)
+            except Exception:
+                pass
+            return False
 
         if not self.repo.online or self.repo.mongo_db is None:
             logger.warning("[RealtimeSync] MongoDB غير متاح حالياً - سيتم إعادة المحاولة تلقائياً")
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_realtime_sync_status(False)
+            except Exception:
+                pass
+            return False
+
+        if self._realtime_auto_detect:
+            self._change_stream_supported = self._detect_change_stream_support()
+        elif self._change_stream_supported is None:
+            self._change_stream_supported = True
+
+        if not self._change_stream_supported:
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_realtime_sync_status(False)
+            except Exception:
+                pass
+            return False
 
         self._shutdown = False
         self._stop_event.clear()
@@ -112,6 +211,13 @@ class RealtimeSyncManager(QObject):
 
         logger.info("[RealtimeSync] 🚀 بدء المزامنة الفورية (thread واحد)")
         safe_print("INFO: [RealtimeSync] 🚀 بدء المزامنة الفورية (محسّن)")
+        try:
+            from core.signals import app_signals
+
+            app_signals.emit_realtime_sync_status(True)
+        except Exception:
+            pass
+        return True
 
     def stop(self):
         """⏹️ إيقاف المزامنة الفورية"""
@@ -132,6 +238,12 @@ class RealtimeSyncManager(QObject):
 
         self._watcher_thread = None
         logger.info("[RealtimeSync] ✅ تم إيقاف المزامنة الفورية")
+        try:
+            from core.signals import app_signals
+
+            app_signals.emit_realtime_sync_status(False)
+        except Exception:
+            pass
 
     def _start_unified_watcher(self):
         """⚡ بدء مراقبة موحدة لكل الـ collections في thread واحد"""
@@ -156,7 +268,7 @@ class RealtimeSyncManager(QObject):
                             # مراقبة التغييرات مع timeout قصير جداً
                             with collection.watch(
                                 full_document="updateLookup",
-                                max_await_time_ms=250,
+                                max_await_time_ms=self._change_stream_max_await_ms,
                             ) as stream:
                                 for _change in stream:
                                     if self._stop_event.is_set() or self._shutdown:
@@ -388,6 +500,9 @@ class RealtimeSyncManager(QObject):
 
         return data
 
+    def is_change_stream_supported(self) -> bool:
+        return bool(self._change_stream_supported)
+
 
 def setup_realtime_sync(repository) -> RealtimeSyncManager | None:
     """
@@ -406,7 +521,10 @@ def setup_realtime_sync(repository) -> RealtimeSyncManager | None:
             return _REALTIME_MANAGER
 
         _REALTIME_MANAGER = RealtimeSyncManager(repository)
-        _REALTIME_MANAGER.start()
+        started = _REALTIME_MANAGER.start()
+        if not started:
+            _REALTIME_MANAGER = None
+            return None
 
         logger.info("[RealtimeSync] ✅ تم إعداد نظام المزامنة الفورية")
         return _REALTIME_MANAGER

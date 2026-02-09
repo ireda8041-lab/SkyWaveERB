@@ -80,6 +80,8 @@ htmlcov/
 .tox/
 .hypothesis/
 pytest-of-*/
+.pytest_*.log
+sync_watermarks.json
 
 # البناء
 build/

@@ -59,27 +59,39 @@ class UpdateChecker(QThread):
                     if asset.get("name", "").endswith(".exe"):
                         download_url = asset.get("browser_download_url", "")
                         break
+
+                # ⚡ إذا لم نجد ملف exe، استخدم رابط الإصدار
+                if not download_url:
+                    download_url = data.get("html_url", "")
             else:
                 # version.json format
                 remote_version = data.get("version", "")
                 download_url = data.get("url", "")
 
-            if not remote_version or not download_url:
-                self.error_occurred.emit("ملف التحديث غير صحيح")
+            # ⚡ إذا لم نجد إصدار، لا نعتبرها خطأ - فقط لا توجد تحديثات
+            if not remote_version:
+                self.no_update.emit()
                 return
 
             # مقارنة الإصدارات
             if self._is_newer_version(remote_version, self.current_version):
-                self.update_available.emit(remote_version, download_url)
+                # ⚡ حتى لو لم يكن هناك رابط تحميل، نخبر المستخدم بوجود تحديث
+                self.update_available.emit(remote_version, download_url or "")
             else:
                 self.no_update.emit()
 
-        except requests.RequestException as e:
-            self.error_occurred.emit(f"فشل الاتصال بالخادم: {str(e)}")
+        except requests.Timeout:
+            # ⚡ timeout ليس خطأ حرج - نتجاهله
+            self.no_update.emit()
+        except requests.RequestException:
+            # ⚡ أخطاء الشبكة ليست حرجة - نتجاهلها
+            self.no_update.emit()
         except json.JSONDecodeError:
-            self.error_occurred.emit("خطأ في قراءة بيانات التحديث")
-        except Exception as e:
-            self.error_occurred.emit(f"خطأ غير متوقع: {str(e)}")
+            # ⚡ خطأ في قراءة JSON - نتجاهله
+            self.no_update.emit()
+        except Exception:
+            # ⚡ أي خطأ آخر - نتجاهله
+            self.no_update.emit()
 
     def _is_newer_version(self, remote: str, local: str) -> bool:
         """

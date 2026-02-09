@@ -16,6 +16,18 @@ class Finding:
     file: str | None = None
 
 
+def _safe_print(line: str) -> None:
+    """Print defensively on Windows consoles that cannot encode Arabic/Unicode text."""
+    try:
+        print(line)
+    except UnicodeEncodeError:
+        encoding = (sys.stdout.encoding or "utf-8").lower()
+        try:
+            sys.stdout.buffer.write((line + "\n").encode(encoding, errors="replace"))
+        except Exception:
+            sys.stdout.buffer.write((line + "\n").encode("utf-8", errors="replace"))
+
+
 def _read_text(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8", errors="strict")
@@ -243,14 +255,14 @@ def main(argv: list[str]) -> int:
     findings.sort(key=lambda f: (by_sev.get(f.severity, 9), f.title, f.file or ""))
 
     if not findings:
-        print("OK: لا توجد مشاكل واضحة في configs أو أنماط أسرار ضمن نطاق الفحص.")
+        _safe_print("OK: لا توجد مشاكل واضحة في configs أو أنماط أسرار ضمن نطاق الفحص.")
         return 0
 
-    print("Findings:")
+    _safe_print("Findings:")
     for f in findings:
         loc = f" ({f.file})" if f.file else ""
-        print(f"- [{f.severity}] {f.title}{loc}")
-        print(f"  {f.details}")
+        _safe_print(f"- [{f.severity}] {f.title}{loc}")
+        _safe_print(f"  {f.details}")
     return 1 if any(f.severity in {"critical", "high"} for f in findings) else 0
 
 

@@ -50,6 +50,7 @@ class AppSignals(QObject):
     sync_failed = pyqtSignal(str)
     realtime_sync_status = pyqtSignal(bool)  # حالة المزامنة الفورية
     data_synced = pyqtSignal()  # ⚡ NEW: إشارة بعد سحب البيانات من السيرفر لتحديث الواجهة
+    client_logo_loaded = pyqtSignal(str)  # client id or mongo id
 
     # 🔔 إشارات الإشعارات التفصيلية
     operation_completed = pyqtSignal(str, str, str)  # (action, entity_type, entity_name)
@@ -139,6 +140,10 @@ class AppSignals(QObject):
     def emit_realtime_sync_status(self, is_connected: bool):
         """إرسال إشارة حالة المزامنة الفورية"""
         self.realtime_sync_status.emit(is_connected)
+
+    def emit_client_logo_loaded(self, client_id: str):
+        """إرسال إشارة اكتمال تحميل شعار عميل محدد."""
+        self.client_logo_loaded.emit(str(client_id))
 
     def safe_connect(self, signal, slot, connection_type=None):
         """

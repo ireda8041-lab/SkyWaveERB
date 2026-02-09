@@ -2,10 +2,12 @@
 
 import hashlib
 import os
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
-from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -61,6 +63,14 @@ class ClientManagerTab(QWidget):
         self._current_page_clients: list[schemas.Client] = []
         self._last_invoices_total: dict[str, float] = {}
         self._last_payments_total: dict[str, float] = {}
+        self._lazy_logo_enabled = True
+        self._logo_fetch_batch_limit = 10
+        self._logo_fetch_queue = deque()
+        self._logo_fetch_inflight: set[str] = set()
+        self._logo_fetch_timer = QTimer(self)
+        self._logo_fetch_timer.timeout.connect(self._drain_logo_fetch_queue)
+        self._logo_fetch_timer.start(250)
+        self._load_logo_sync_config()
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -77,6 +87,7 @@ class ClientManagerTab(QWidget):
         app_signals.safe_connect(app_signals.payments_changed, self._invalidate_clients_cache)
         app_signals.safe_connect(app_signals.projects_changed, self._invalidate_clients_cache)
         app_signals.safe_connect(app_signals.invoices_changed, self._invalidate_clients_cache)
+        app_signals.safe_connect(app_signals.client_logo_loaded, self._on_client_logo_loaded)
 
         # === شريط الأزرار المتجاوب ===
         from ui.responsive_toolbar import ResponsiveToolbar
@@ -502,6 +513,110 @@ class ClientManagerTab(QWidget):
         self._clients_cache.clear()
         self._clients_cache_ts.clear()
 
+    def _load_logo_sync_config(self):
+        try:
+            import json
+
+            cfg_path = Path("sync_config.json")
+            if not cfg_path.exists():
+                return
+            with open(cfg_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            self._lazy_logo_enabled = bool(cfg.get("lazy_logo_enabled", True))
+            self._logo_fetch_batch_limit = max(1, int(cfg.get("logo_fetch_batch_limit", 10)))
+        except Exception:
+            self._lazy_logo_enabled = True
+            self._logo_fetch_batch_limit = 10
+
+    @staticmethod
+    def _client_identity(client: schemas.Client) -> str:
+        return str(getattr(client, "_mongo_id", None) or getattr(client, "id", "") or "")
+
+    def _queue_logo_fetch(self, client: schemas.Client):
+        if not self._lazy_logo_enabled:
+            return
+        if not bool(getattr(client, "has_logo", False)):
+            return
+        if getattr(client, "logo_data", None):
+            return
+
+        identity = self._client_identity(client)
+        if not identity or identity in self._logo_fetch_inflight:
+            return
+        if identity in self._logo_fetch_queue:
+            return
+        self._logo_fetch_queue.append(identity)
+
+    def _drain_logo_fetch_queue(self):
+        if not self._lazy_logo_enabled:
+            return
+        # حافظ على عدد طلبات متزامنة محدود جداً
+        available_slots = max(0, self._logo_fetch_batch_limit - len(self._logo_fetch_inflight))
+        for _ in range(available_slots):
+            if not self._logo_fetch_queue:
+                break
+            identity = self._logo_fetch_queue.popleft()
+            if identity in self._logo_fetch_inflight:
+                continue
+            self._logo_fetch_inflight.add(identity)
+            threading.Thread(
+                target=self._fetch_logo_worker,
+                args=(identity,),
+                daemon=True,
+                name=f"client-logo-fetch-{identity}",
+            ).start()
+
+    def _fetch_logo_worker(self, client_identity: str):
+        success = False
+        try:
+            success = bool(self.client_service.fetch_client_logo_on_demand(client_identity))
+        except Exception:
+            success = False
+
+        def finalize():
+            self._logo_fetch_inflight.discard(client_identity)
+            if success:
+                self._on_client_logo_loaded(client_identity)
+
+        QTimer.singleShot(0, finalize)
+
+    def _on_client_logo_loaded(self, client_identity: str):
+        if not client_identity:
+            return
+        self._logo_icon_cache.pop(client_identity, None)
+        self._logo_pixmap_cache.pop(client_identity, None)
+        self._refresh_client_logo_cell(client_identity)
+
+    def _refresh_client_logo_cell(self, client_identity: str):
+        if not client_identity:
+            return
+        if not hasattr(self, "clients_table"):
+            return
+        for row_idx, client in enumerate(self._current_page_clients):
+            if self._client_identity(client) != str(client_identity):
+                continue
+            refreshed = self.client_service.get_client_by_id(
+                str(client_identity), ensure_logo=False
+            )
+            if refreshed:
+                self._current_page_clients[row_idx] = refreshed
+                client = refreshed
+            icon = self._get_client_logo_icon(client)
+            if not icon:
+                continue
+            item = self.clients_table.item(row_idx, 0)
+            if item is None:
+                continue
+            item.setIcon(icon)
+            item.setText("")
+            item.setToolTip(
+                "⭐ VIP • اضغط لعرض الشعار"
+                if bool(getattr(client, "is_vip", False))
+                else "اضغط لعرض الشعار"
+            )
+            self.clients_table.viewport().update()
+            break
+
     def _get_logo_cache_dir(self) -> Path:
         cache_dir = Path("exports") / "cache" / "client_logos"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -642,9 +757,9 @@ class ClientManagerTab(QWidget):
     def _on_client_cell_clicked(self, row: int, column: int):
         if column != 0:
             return
-        if row < 0 or row >= len(self.clients_list):
+        if row < 0 or row >= len(self._current_page_clients):
             return
-        client = self.clients_list[row]
+        client = self._current_page_clients[row]
         pixmap = self._get_client_logo_pixmap(client)
         if pixmap is None or pixmap.isNull():
             return
@@ -764,6 +879,11 @@ class ClientManagerTab(QWidget):
                         "⭐ VIP • اضغط لعرض الشعار" if is_vip else "اضغط لعرض الشعار"
                     )
                 else:
+                    # Lazy logo loading: fetch only for visible rows when metadata says logo exists.
+                    if bool(getattr(client, "has_logo", False)) and not getattr(
+                        client, "logo_data", None
+                    ):
+                        self._queue_logo_fetch(client)
                     logo_item.setText((client.name or "?")[:1])
                     logo_item.setForeground(QColor("#9CA3AF"))
                 self.clients_table.setItem(index, 0, logo_item)

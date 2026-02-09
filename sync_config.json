@@ -1,8 +1,14 @@
 {
   "enabled": true,
-  "auto_sync_interval": 60,
+  "auto_sync_interval": 300,
   "quick_sync_interval": 5,
+  "delta_sync_interval": 2,
   "connection_check_interval": 5,
+  "realtime_enabled": true,
+  "realtime_auto_detect": true,
+  "realtime_change_stream_max_await_ms": 250,
+  "lazy_logo_enabled": true,
+  "logo_fetch_batch_limit": 10,
   "max_retries": 2,
   "timeout": 5,
   "tables_to_sync": [

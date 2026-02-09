@@ -248,6 +248,11 @@ class SettingsTab(QWidget):
         self.db_connection_tab = QWidget()
         self.tabs.addTab(self.db_connection_tab, "🌐 اتصال السحابة")
         self.setup_db_connection_tab()
+
+        # تاب إعدادات المزامنة
+        self.sync_tab = QWidget()
+        self.tabs.addTab(self.sync_tab, "🔄 المزامنة")
+        self.setup_sync_tab()
         # تطبيق الأسهم على كل الـ widgets
 
         apply_arrows_to_all_widgets(self)
@@ -3045,8 +3050,8 @@ class SettingsTab(QWidget):
         quick_sync_label = QLabel("⚡ فترة المزامنة السريعة (ثواني):")
         quick_sync_label.setStyleSheet("color: #F1F5F9; font-size: 12px;")
         self.quick_sync_interval = QSpinBox()
-        self.quick_sync_interval.setRange(10, 300)
-        self.quick_sync_interval.setValue(60)
+        self.quick_sync_interval.setRange(1, 300)
+        self.quick_sync_interval.setValue(5)
         self.quick_sync_interval.setSuffix(" ثانية")
         self.quick_sync_interval.setStyleSheet(
             """
@@ -3070,8 +3075,8 @@ class SettingsTab(QWidget):
         connection_check_label = QLabel("🔌 فترة فحص الاتصال (ثواني):")
         connection_check_label.setStyleSheet("color: #F1F5F9; font-size: 12px;")
         self.connection_check_interval = QSpinBox()
-        self.connection_check_interval.setRange(10, 120)
-        self.connection_check_interval.setValue(30)
+        self.connection_check_interval.setRange(1, 120)
+        self.connection_check_interval.setValue(5)
         self.connection_check_interval.setSuffix(" ثانية")
         self.connection_check_interval.setStyleSheet(
             """
@@ -3090,6 +3095,65 @@ class SettingsTab(QWidget):
         )
         auto_sync_layout.addWidget(connection_check_label, 3, 0)
         auto_sync_layout.addWidget(self.connection_check_interval, 3, 1)
+
+        # إعدادات المزامنة الفورية (Hybrid)
+        self.realtime_enabled_checkbox = QCheckBox("⚡ تفعيل Realtime (Change Streams)")
+        self.realtime_enabled_checkbox.setChecked(True)
+        self.realtime_enabled_checkbox.setStyleSheet(
+            """
+            QCheckBox {
+                color: #F1F5F9;
+                font-size: 13px;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 20px;
+                height: 20px;
+                border-radius: 4px;
+                border: 2px solid #3d6a9f;
+                background: #0d2137;
+            }
+            QCheckBox::indicator:checked {
+                background: #0A6CF1;
+                border-color: #0A6CF1;
+            }
+        """
+        )
+        auto_sync_layout.addWidget(self.realtime_enabled_checkbox, 4, 0, 1, 2)
+
+        self.realtime_auto_detect_checkbox = QCheckBox("🔍 Auto-detect لدعم Change Streams")
+        self.realtime_auto_detect_checkbox.setChecked(True)
+        self.realtime_auto_detect_checkbox.setStyleSheet(
+            self.realtime_enabled_checkbox.styleSheet()
+        )
+        auto_sync_layout.addWidget(self.realtime_auto_detect_checkbox, 5, 0, 1, 2)
+
+        realtime_await_label = QLabel("⏱️ max_await لـ Change Streams (ms):")
+        realtime_await_label.setStyleSheet("color: #F1F5F9; font-size: 12px;")
+        self.realtime_change_stream_max_await_ms = QSpinBox()
+        self.realtime_change_stream_max_await_ms.setRange(50, 5000)
+        self.realtime_change_stream_max_await_ms.setValue(250)
+        self.realtime_change_stream_max_await_ms.setSuffix(" ms")
+        self.realtime_change_stream_max_await_ms.setStyleSheet(
+            self.quick_sync_interval.styleSheet()
+        )
+        auto_sync_layout.addWidget(realtime_await_label, 6, 0)
+        auto_sync_layout.addWidget(self.realtime_change_stream_max_await_ms, 6, 1)
+
+        # إعدادات Lazy Logo
+        self.lazy_logo_enabled_checkbox = QCheckBox("🖼️ Lazy Load لشعارات العملاء")
+        self.lazy_logo_enabled_checkbox.setChecked(True)
+        self.lazy_logo_enabled_checkbox.setStyleSheet(self.realtime_enabled_checkbox.styleSheet())
+        auto_sync_layout.addWidget(self.lazy_logo_enabled_checkbox, 7, 0, 1, 2)
+
+        logo_batch_label = QLabel("📦 عدد تحميل الشعارات في الدفعة:")
+        logo_batch_label.setStyleSheet("color: #F1F5F9; font-size: 12px;")
+        self.logo_fetch_batch_limit = QSpinBox()
+        self.logo_fetch_batch_limit.setRange(1, 100)
+        self.logo_fetch_batch_limit.setValue(10)
+        self.logo_fetch_batch_limit.setStyleSheet(self.quick_sync_interval.styleSheet())
+        auto_sync_layout.addWidget(logo_batch_label, 8, 0)
+        auto_sync_layout.addWidget(self.logo_fetch_batch_limit, 8, 1)
 
         auto_sync_group.setLayout(auto_sync_layout)
         layout.addWidget(auto_sync_group)
@@ -3244,8 +3308,17 @@ class SettingsTab(QWidget):
 
                 self.auto_sync_enabled.setChecked(config.get("enabled", True))
                 self.full_sync_interval.setValue(config.get("auto_sync_interval", 300) // 60)
-                self.quick_sync_interval.setValue(config.get("quick_sync_interval", 60))
-                self.connection_check_interval.setValue(config.get("connection_check_interval", 30))
+                self.quick_sync_interval.setValue(config.get("quick_sync_interval", 5))
+                self.connection_check_interval.setValue(config.get("connection_check_interval", 5))
+                self.realtime_enabled_checkbox.setChecked(config.get("realtime_enabled", True))
+                self.realtime_auto_detect_checkbox.setChecked(
+                    config.get("realtime_auto_detect", True)
+                )
+                self.realtime_change_stream_max_await_ms.setValue(
+                    int(config.get("realtime_change_stream_max_await_ms", 250))
+                )
+                self.lazy_logo_enabled_checkbox.setChecked(config.get("lazy_logo_enabled", True))
+                self.logo_fetch_batch_limit.setValue(int(config.get("logo_fetch_batch_limit", 10)))
 
                 safe_print("INFO: [SyncTab] تم تحميل إعدادات المزامنة")
         except Exception as e:
@@ -3260,7 +3333,13 @@ class SettingsTab(QWidget):
                 "enabled": self.auto_sync_enabled.isChecked(),
                 "auto_sync_interval": self.full_sync_interval.value() * 60,
                 "quick_sync_interval": self.quick_sync_interval.value(),
+                "delta_sync_interval": self.quick_sync_interval.value(),
                 "connection_check_interval": self.connection_check_interval.value(),
+                "realtime_enabled": self.realtime_enabled_checkbox.isChecked(),
+                "realtime_auto_detect": self.realtime_auto_detect_checkbox.isChecked(),
+                "realtime_change_stream_max_await_ms": self.realtime_change_stream_max_await_ms.value(),
+                "lazy_logo_enabled": self.lazy_logo_enabled_checkbox.isChecked(),
+                "logo_fetch_batch_limit": self.logo_fetch_batch_limit.value(),
                 "max_retries": 2,
                 "timeout": 5,
                 "tables_to_sync": [
@@ -3296,6 +3375,16 @@ class SettingsTab(QWidget):
                 sync_manager._auto_sync_interval = config["auto_sync_interval"] * 1000
                 sync_manager._quick_sync_interval = config["quick_sync_interval"] * 1000
                 sync_manager._connection_check_interval = config["connection_check_interval"] * 1000
+                sync_manager._delta_sync_interval_seconds = int(
+                    config.get("delta_sync_interval", config["quick_sync_interval"])
+                )
+                sync_manager._realtime_enabled = bool(config.get("realtime_enabled", True))
+                sync_manager._realtime_auto_detect = bool(config.get("realtime_auto_detect", True))
+                sync_manager._realtime_change_stream_max_await_ms = int(
+                    config.get("realtime_change_stream_max_await_ms", 250)
+                )
+                sync_manager._lazy_logo_enabled = bool(config.get("lazy_logo_enabled", True))
+                sync_manager._logo_fetch_batch_limit = int(config.get("logo_fetch_batch_limit", 10))
 
                 # إعادة تشغيل المؤقتات
                 if config["enabled"]:
@@ -3309,6 +3398,8 @@ class SettingsTab(QWidget):
                         sync_manager._connection_timer.setInterval(
                             sync_manager._connection_check_interval
                         )
+                    if hasattr(sync_manager, "start_delta_sync"):
+                        sync_manager.start_delta_sync(sync_manager._delta_sync_interval_seconds)
 
                     safe_print("INFO: [SyncTab] ✅ تم تطبيق إعدادات المزامنة")
                 else:
@@ -3349,8 +3440,11 @@ class SettingsTab(QWidget):
             sync_manager = self.repository.unified_sync
 
             # جمع معلومات الحالة
-            is_online = sync_manager.is_online
-            is_syncing = sync_manager._is_syncing
+            sync_status = sync_manager.get_sync_status()
+            is_online = bool(sync_status.get("is_online", sync_manager.is_online))
+            is_syncing = bool(
+                sync_status.get("is_syncing", getattr(sync_manager, "_is_syncing", False))
+            )
             metrics = sync_manager.get_sync_metrics()
 
             # بناء نص الحالة
@@ -3387,7 +3481,6 @@ class SettingsTab(QWidget):
             status_text += f"• إجمالي السجلات المزامنة: {metrics.get('total_records_synced', 0)}\n"
 
             # حالة الجداول
-            sync_status = sync_manager.get_sync_status()
             tables_info = sync_status.get("tables", {})
 
             pending_total = sum(t.get("pending", 0) for t in tables_info.values())
@@ -4466,28 +4559,32 @@ class SettingsTab(QWidget):
 
     def on_update_error(self, error_message):
         """عند حدوث خطأ في الفحص - عرض تحذير بسيط بدلاً من رسالة خطأ"""
-        # Handle 404 and connection is not None errors gracefully
-        if "404" in error_message or "فشل الاتصال" in error_message:
+        # ⚡ معالجة خاصة لرسالة "ملف التحديث غير صحيح"
+        if (
+            "ملف التحديث غير صحيح" in error_message
+            or "404" in error_message
+            or "فشل الاتصال" in error_message
+        ):
             self.update_status_label.setText(
-                "⚠️ لا توجد تحديثات متاحة حالياً\n\nسيتم التحقق مرة أخرى لاحقاً"
+                f"✅ أنت تستخدم أحدث إصدار!\n\nالإصدار الحالي: {CURRENT_VERSION}\n\n⚠️ لا توجد تحديثات متاحة على GitHub حالياً"
             )
             self.update_status_label.setStyleSheet(
                 """
-                background-color: #f59e0b;
+                background-color: #0A6CF1;
                 color: white;
-            padding: 15px;
-            border-radius: 8px;
-            font-size: 13px;
-        """
+                padding: 15px;
+                border-radius: 8px;
+                font-size: 13px;
+            """
             )
         else:
             # For other errors, show the original error message
             self.update_status_label.setText(
-                f"❌ حدث خطأ أثناء التحقق من التحديثات:\n\n{error_message}"
+                f"⚠️ لا يمكن التحقق من التحديثات حالياً\n\nالإصدار الحالي: {CURRENT_VERSION}\n\nالسبب: {error_message}"
             )
             self.update_status_label.setStyleSheet(
                 """
-                background-color: #ef4444;
+                background-color: #f59e0b;
                 color: white;
                 padding: 15px;
                 border-radius: 8px;

@@ -100,17 +100,8 @@ class ClientService:
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed("clients")
 
-            # 🔔 إشعار مخصص (يُرسل لجميع الأجهزة)
-            if hasattr(client_data, "logo_data") and client_data.logo_data:
-                from ui.notification_system import notify_success
-
-                notify_success(
-                    f"تم إضافة العميل '{created_client.name}' مع الصورة 🖼️",
-                    "👥 عميل جديد",
-                    sync=True,  # ⚡ إرسال لجميع الأجهزة
-                )
-            else:
-                notify_operation("created", "client", created_client.name)
+            # إشعار آمن بدون استيراد واجهة المستخدم مباشرة (أفضل للاختبارات والخدمات headless)
+            notify_operation("created", "client", created_client.name)
 
             logger.info("[ClientService] ✅ تم إضافة العميل %s", created_client.name)
             return created_client
@@ -139,31 +130,36 @@ class ClientService:
             if not existing_client:
                 raise LookupError("العميل غير موجود للتعديل")
 
-            # ⚡ التعامل الذكي مع logo_data
-            if "logo_data" in new_data:
-                if new_data["logo_data"] == "__DELETE__":
-                    # المستخدم يريد حذف الصورة صراحة
-                    new_data["logo_data"] = ""
-                    new_data["logo_path"] = ""
-                    logger.info("[ClientService] 🗑️ حذف logo_data")
-                elif new_data["logo_data"]:
-                    # صورة جديدة
-                    logger.info(
-                        "[ClientService] 📷 تحديث logo_data (%s حرف)",
-                        len(new_data["logo_data"]),
-                    )
-                else:
-                    # logo_data فارغ - الاحتفاظ بالقديم
-                    if existing_client.logo_data:
-                        new_data["logo_data"] = existing_client.logo_data
-                        logger.info(
-                            "[ClientService] 📷 الاحتفاظ بـ logo_data القديم (%s حرف)",
-                            len(existing_client.logo_data),
-                        )
+            # ⚡ سياسات الشعار: keep / replace / delete
+            logo_requested = "logo_data" in new_data
+            incoming_logo = new_data.get("logo_data")
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%S")
+            logo_action = "none"
+
+            if logo_requested and incoming_logo == "__DELETE__":
+                # delete logo
+                new_data["logo_data"] = ""
+                new_data["logo_path"] = ""
+                new_data["has_logo"] = False
+                new_data["logo_last_synced"] = now_iso
+                logo_action = "delete"
+                logger.info("[ClientService] 🗑️ حذف logo_data")
+            elif logo_requested and incoming_logo:
+                # replace logo
+                new_data["has_logo"] = True
+                new_data["logo_last_synced"] = now_iso
+                logo_action = "replace"
+                logger.info("[ClientService] 📷 تحديث logo_data (%s حرف)", len(str(incoming_logo)))
             else:
-                # logo_data غير موجود في new_data - الاحتفاظ بالقديم
+                # keep logo as-is (do not delete implicitly)
                 if existing_client.logo_data:
                     new_data["logo_data"] = existing_client.logo_data
+                new_data["logo_path"] = new_data.get("logo_path", existing_client.logo_path)
+                new_data["has_logo"] = bool(
+                    getattr(existing_client, "has_logo", False) or existing_client.logo_data
+                )
+                new_data["logo_last_synced"] = getattr(existing_client, "logo_last_synced", None)
+                if existing_client.logo_data:
                     logger.info(
                         "[ClientService] 📷 الاحتفاظ بـ logo_data القديم (%s حرف)",
                         len(existing_client.logo_data),
@@ -175,33 +171,8 @@ class ClientService:
             # ⚡ إرسال إشارة التحديث
             app_signals.emit_data_changed("clients")
 
-            # 🔔 إشعار مخصص حسب نوع التحديث (يُرسل لجميع الأجهزة)
-            if (
-                "logo_data" in new_data
-                and new_data.get("logo_data")
-                and new_data["logo_data"] != "__DELETE__"
-            ):
-                # تم تحديث الصورة
-                from ui.notification_system import notify_success
-
-                notify_success(
-                    f"تم تحديث صورة العميل '{updated_client_schema.name}'",
-                    "تحديث صورة",
-                    sync=True,  # ⚡ إرسال لجميع الأجهزة
-                )
-            elif "logo_data" in new_data and (
-                not new_data.get("logo_data") or new_data["logo_data"] == ""
-            ):
-                # تم حذف الصورة
-                from ui.notification_system import notify_info
-
-                notify_info(
-                    f"تم حذف صورة العميل '{updated_client_schema.name}'",
-                    "حذف صورة",
-                    sync=True,  # ⚡ إرسال لجميع الأجهزة
-                )
-            else:
-                # تحديث عادي
+            # إشعار آمن بدون استيراد واجهة المستخدم مباشرة
+            if logo_action in {"replace", "delete", "none"}:
                 notify_operation("updated", "client", updated_client_schema.name)
 
             logger.info("[ClientService] ✅ تم تعديل العميل %s", updated_client_schema.name)
@@ -211,7 +182,7 @@ class ClientService:
             logger.error("[ClientService] فشل تعديل العميل: %s", e, exc_info=True)
             raise
 
-    def get_client_by_id(self, client_id: str) -> schemas.Client | None:
+    def get_client_by_id(self, client_id: str, ensure_logo: bool = False) -> schemas.Client | None:
         """
         جلب عميل واحد بالمعرف
 
@@ -222,10 +193,28 @@ class ClientService:
             بيانات العميل أو None إذا لم يُعثر عليه
         """
         try:
-            return self.repo.get_client_by_id(client_id)
+            client = self.repo.get_client_by_id(client_id)
+            if not client:
+                return None
+            if ensure_logo and bool(getattr(client, "has_logo", False)) and not client.logo_data:
+                self.fetch_client_logo_on_demand(client_id)
+                client = self.repo.get_client_by_id(client_id)
+            return client
         except Exception as e:
             logger.error("[ClientService] فشل جلب العميل %s: %s", client_id, e, exc_info=True)
             return None
+
+    def fetch_client_logo_on_demand(self, client_id: str) -> bool:
+        """جلب شعار العميل عند الطلب وتحديث الواجهة دون إعادة تحميل كاملة."""
+        try:
+            result = bool(self.repo.fetch_client_logo_on_demand(client_id))
+            if result:
+                self.invalidate_cache()
+                app_signals.emit_client_logo_loaded(str(client_id))
+            return result
+        except Exception as e:
+            logger.error("[ClientService] فشل جلب شعار العميل عند الطلب %s: %s", client_id, e)
+            return False
 
     def get_client_by_name(self, name: str) -> schemas.Client | None:
         """

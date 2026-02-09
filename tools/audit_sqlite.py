@@ -13,6 +13,16 @@ class CheckResult:
     details: str
 
 
+def _safe_print(line: str) -> None:
+    """Print defensively on Windows consoles that cannot encode Unicode text."""
+    encoding = sys.stdout.encoding or "utf-8"
+    try:
+        safe_line = line.encode(encoding, errors="replace").decode(encoding, errors="replace")
+    except Exception:
+        safe_line = line.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+    print(safe_line, flush=True)
+
+
 def _connect_readonly(db_path: Path) -> sqlite3.Connection:
     uri = f"file:{db_path.as_posix()}?mode=ro"
     return sqlite3.connect(uri, uri=True, timeout=10.0)
@@ -123,14 +133,14 @@ def main(argv: list[str]) -> int:
 
     results = audit(db_path)
 
-    print(f"SQLite audit: {db_path}")
+    _safe_print(f"SQLite audit: {db_path}")
     exit_code = 0
     for r in results:
         status = "OK" if r.ok else "FAIL"
-        print(f"- {status}: {r.title}")
+        _safe_print(f"- {status}: {r.title}")
         if r.details:
             for line in str(r.details).splitlines():
-                print(f"  {line}")
+                _safe_print(f"  {line}")
         if not r.ok:
             exit_code = 2
 

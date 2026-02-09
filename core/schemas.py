@@ -156,6 +156,8 @@ class Client(BaseSchema):
     work_field: str | None = None
     logo_path: str | None = None  # مسار الصورة المحلي (للتوافق القديم)
     logo_data: str | None = None  # بيانات الصورة بصيغة base64 (للمزامنة بين الأجهزة)
+    has_logo: bool = False
+    logo_last_synced: str | None = None
     client_notes: str | None = None
     is_vip: bool = False  # ⚡ عميل مميز VIP
 

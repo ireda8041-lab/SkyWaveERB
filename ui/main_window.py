@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         project_service: ProjectService,
         notification_service: NotificationService | None = None,
         printing_service=None,
+        template_service=None,
         export_service=None,
         smart_scan_service=None,
         sync_manager=None,  # 🔥 نظام المزامنة الموحد
@@ -114,6 +115,7 @@ class MainWindow(QMainWindow):
         self.project_service = project_service
         self.notification_service = notification_service
         self.printing_service = printing_service
+        self.template_service = template_service
         self.export_service = export_service
         self.smart_scan_service = smart_scan_service
         self.sync_manager = sync_manager  # 🔥 نظام المزامنة الموحد
@@ -269,9 +271,10 @@ class MainWindow(QMainWindow):
         """
         )
 
-        self.template_service = TemplateService(
-            repository=self.accounting_service.repo, settings_service=self.settings_service
-        )
+        if self.template_service is None:
+            self.template_service = TemplateService(
+                repository=self.accounting_service.repo, settings_service=self.settings_service
+            )
 
         # تحديث template_service في printing_service إذا كان موجوداً
         if self.printing_service:
@@ -710,6 +713,21 @@ class MainWindow(QMainWindow):
         # المزامنة التلقائية تُدار الآن من unified_sync في main.py
         safe_print("INFO: ⚡ المزامنة التلقائية تُدار من UnifiedSyncManager")
 
+    def _get_sync_repository(self):
+        """Resolve repository from sync manager with legacy fallback."""
+        if self.sync_manager:
+            repo = getattr(self.sync_manager, "repo", None)
+            if repo:
+                return repo
+            legacy_repo = getattr(self.sync_manager, "repository", None)
+            if legacy_repo:
+                return legacy_repo
+
+        if hasattr(self, "repository") and self.repository:
+            return self.repository
+
+        return None
+
     def trigger_background_sync(self):
         """
         تشغيل المزامنة في الخلفية
@@ -719,15 +737,23 @@ class MainWindow(QMainWindow):
                 safe_print("INFO: مدير المزامنة غير متاح")
                 return
 
+            repo = self._get_sync_repository()
+            if repo is None:
+                safe_print("INFO: تخطي المزامنة التلقائية (لا يوجد repository)")
+                return
+
             # التحقق من الاتصال
-            if not self.sync_manager.repository.online:
+            if not getattr(repo, "online", False):
                 safe_print("INFO: تخطي المزامنة التلقائية (غير متصل)")
                 return
 
             safe_print("INFO: بدء المزامنة التلقائية في الخلفية...")
 
-            # تشغيل المزامنة
-            self.sync_manager.start_sync()
+            # تشغيل المزامنة باستخدام API الحديثة فقط
+            if hasattr(self.sync_manager, "instant_sync"):
+                self.sync_manager.instant_sync()
+            else:
+                safe_print("WARNING: مدير المزامنة غير متوافق: instant_sync غير متاحة")
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في المزامنة التلقائية: {e}")
@@ -858,19 +884,23 @@ class MainWindow(QMainWindow):
                     if self.sync_manager:
                         if hasattr(self.sync_manager, "instant_sync"):
                             self.sync_manager.instant_sync()
-                        elif hasattr(self.sync_manager, "start_sync"):
-                            self.sync_manager.start_sync()
                         else:
-                            safe_print("WARNING: لا توجد دالة مزامنة متاحة")
+                            safe_print("WARNING: مدير المزامنة غير متوافق: instant_sync غير متاحة")
+                            QTimer.singleShot(
+                                0, lambda: self.status_bar.update_sync_status("error")
+                            )
                             return
                     else:
                         safe_print("WARNING: لا يوجد مدير مزامنة متاح")
+                        QTimer.singleShot(0, lambda: self.status_bar.update_sync_status("error"))
                         return
 
+                    QTimer.singleShot(0, lambda: self.status_bar.update_sync_status("synced"))
                     safe_print("INFO: ✅ اكتملت المزامنة اللحظية بنجاح")
 
                 except Exception as e:
                     safe_print(f"ERROR: فشلت المزامنة اللحظية: {e}")
+                    QTimer.singleShot(0, lambda: self.status_bar.update_sync_status("error"))
 
             # تشغيل المزامنة في الخلفية
             # استخدام QTimer بدلاً من daemon thread
@@ -907,17 +937,29 @@ class MainWindow(QMainWindow):
             return
 
         # التحقق من الاتصال - محاولة الاتصال أولاً
-        if not self.sync_manager.is_online:
+        is_online = bool(getattr(self.sync_manager, "is_online", False))
+        if not is_online:
             # محاولة إعادة الاتصال
             try:
-                if (
-                    self.sync_manager.repo is not None
-                    and self.sync_manager.repo.mongo_client is not None
-                ):
-                    self.sync_manager.repo.mongo_client.admin.command("ping")
-                    self.sync_manager.repo.online = True
+                repo = self._get_sync_repository()
+                mongo_client = getattr(repo, "mongo_client", None) if repo else None
+                if mongo_client is not None:
+                    mongo_client.admin.command("ping")
+                    repo.online = True
+                    is_online = True
                     safe_print("INFO: ✅ تم استعادة الاتصال بـ MongoDB")
             except Exception:
+                QMessageBox.warning(
+                    self,
+                    "غير متصل",
+                    "لا يوجد اتصال بـ MongoDB.\n"
+                    "يرجى التحقق من:\n"
+                    "1. اتصال الإنترنت\n"
+                    "2. إعدادات MongoDB في ملف .env\n"
+                    "3. أن خادم MongoDB يعمل",
+                )
+                return
+            if not is_online:
                 QMessageBox.warning(
                     self,
                     "غير متصل",
@@ -943,23 +985,22 @@ class MainWindow(QMainWindow):
             try:
                 safe_print("INFO: 🔥 بدء المزامنة الكاملة...")
 
-                # استخدام UnifiedSyncManagerV3 مباشرة
-
-                # الحصول على repository
-                repo = None
-                if self.sync_manager is not None and hasattr(self.sync_manager, "repo"):
-                    repo = self.sync_manager.repo
-                elif self.sync_manager is not None and hasattr(self.sync_manager, "repository"):
-                    repo = self.sync_manager.repository
-
-                if repo is not None:
-                    unified_sync = UnifiedSyncManagerV3(repo)
-                    result = unified_sync.full_sync_from_cloud()
-                elif self.sync_manager is not None:
-                    # fallback للنظام القديم
-                    result = self.sync_manager.safe_sync_all()
+                result: object = {"success": False, "error": "نظام المزامنة غير متاح"}
+                if self.sync_manager is not None and hasattr(
+                    self.sync_manager, "full_sync_from_cloud"
+                ):
+                    result = self.sync_manager.full_sync_from_cloud()
                 else:
-                    result = {"success": False, "error": "نظام المزامنة غير متاح"}
+                    repo = self._get_sync_repository()
+                    if repo is not None:
+                        unified_sync = UnifiedSyncManagerV3(repo)
+                        result = unified_sync.full_sync_from_cloud()
+
+                if not isinstance(result, dict):
+                    result = {
+                        "success": bool(result),
+                        "error": "" if result else "فشلت المزامنة",
+                    }
 
                 # تحديث الواجهة في الـ main thread باستخدام signal
                 try:
