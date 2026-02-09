@@ -33,9 +33,10 @@ except ImportError:
 logger = get_logger(__name__)
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
-FULL_SYNC_INTERVAL_MS = 15 * 60 * 1000  # 15 دقيقة - مزامنة كاملة (زيادة للأداء)
-QUICK_SYNC_INTERVAL_MS = 3 * 60 * 1000  # 3 دقائق - رفع التغييرات (زيادة للأداء)
-CONNECTION_CHECK_INTERVAL_MS = 90 * 1000  # 90 ثانية - فحص الاتصال (زيادة للأداء)
+FULL_SYNC_INTERVAL_MS = 15 * 60 * 1000
+QUICK_SYNC_INTERVAL_MS = 3 * 60 * 1000
+CONNECTION_CHECK_INTERVAL_MS = 90 * 1000
+CLOUD_PULL_INTERVAL_MS = 45 * 1000
 
 
 class UnifiedSyncManagerV3(QObject):
@@ -50,6 +51,7 @@ class UnifiedSyncManagerV3(QObject):
     sync_completed = pyqtSignal(dict)
     sync_error = pyqtSignal(str)
     connection_changed = pyqtSignal(bool)  # online/offline
+    data_synced = pyqtSignal()  # ⚡ NEW: Signal emitted after successful pull for UI refresh
 
     # الجداول المدعومة
     TABLES = [
@@ -90,6 +92,7 @@ class UnifiedSyncManagerV3(QObject):
         self._max_retries = 3
         self._last_online_status = None
         self._shutdown = False  # ⚡ علامة الإغلاق
+        self._last_full_sync_at = None
 
         # ⚡ إعدادات المزامنة التلقائية - مفعّلة للمزامنة بين الأجهزة
         self._auto_sync_enabled = True
@@ -101,6 +104,12 @@ class UnifiedSyncManagerV3(QObject):
         self._auto_sync_timer = None
         self._quick_sync_timer = None
         self._connection_timer = None
+        self._cloud_pull_timer = None
+        self._delta_pull_timer = None  # ⚡ NEW: مؤقت السحب التفاضلي
+
+        # ⚡ Watermarks للـ Delta Sync
+        self._watermarks: dict[str, str] = {}
+        self._load_watermarks()
 
         logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة محسّنة للأداء")
 
@@ -279,11 +288,19 @@ class UnifiedSyncManagerV3(QObject):
         self._auto_sync_timer.timeout.connect(self._auto_full_sync)
         self._auto_sync_timer.start(self._auto_sync_interval)
 
+        self._cloud_pull_timer = QTimer(self)
+        self._cloud_pull_timer.timeout.connect(self._cloud_pull_changes)
+        self._cloud_pull_timer.start(CLOUD_PULL_INTERVAL_MS)
+
         # 4. مزامنة أولية بعد 5 ثواني
         QTimer.singleShot(5000, self._initial_sync)
 
+        # 5. ⚡ NEW: بدء Delta Sync كل 60 ثانية للمزامنة بين الأجهزة
+        self.start_delta_sync(interval_seconds=60)
+
         logger.info("⏰ المزامنة التلقائية: كل %s دقيقة", self._auto_sync_interval // 60000)
         logger.info("⏰ رفع التغييرات: كل %s دقيقة", self._quick_sync_interval // 60000)
+        logger.info("⏰ Delta Sync: كل 60 ثانية")
 
     def stop_auto_sync(self):
         """⏹️ إيقاف نظام المزامنة التلقائية"""
@@ -308,6 +325,16 @@ class UnifiedSyncManagerV3(QObject):
                 except (RuntimeError, AttributeError):
                     pass
                 self._quick_sync_timer = None
+        except Exception:
+            pass
+
+        try:
+            if self._cloud_pull_timer:
+                try:
+                    self._cloud_pull_timer.stop()
+                except (RuntimeError, AttributeError):
+                    pass
+                self._cloud_pull_timer = None
         except Exception:
             pass
 
@@ -354,7 +381,7 @@ class UnifiedSyncManagerV3(QObject):
 
                 if current_status:
                     logger.info("🟢 تم استعادة الاتصال")
-                    # لا نعمل مزامنة فورية - ننتظر الدورة التالية
+                    QTimer.singleShot(300, self._run_full_sync_async)
                 else:
                     logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
         except Exception:
@@ -370,39 +397,29 @@ class UnifiedSyncManagerV3(QObject):
             logger.info("📴 لا يوجد اتصال - العمل بالبيانات المحلية")
             return
 
-        logger.info("🚀 بدء المزامنة الأولية (تفاضلية)...")
+        logger.info("🚀 بدء المزامنة الأولية...")
 
         def sync_thread():
             if self._shutdown:
                 return
             try:
-                # ⚡ رفع التغييرات المحلية فقط - لا نحمّل كل شيء
-                self._push_pending_changes()
-                logger.info("✅ المزامنة الأولية: تم رفع التغييرات المحلية")
+                result = self.full_sync_from_cloud()
+                if result.get("success"):
+                    logger.info("✅ المزامنة الأولية: تم توحيد البيانات بالكامل")
+                else:
+                    logger.warning("⚠️ المزامنة الأولية لم تكتمل: %s", result.get("reason"))
             except Exception as e:
                 logger.warning("⚠️ المزامنة الأولية: %s", e)
 
         # استخدام QTimer بدلاً من daemon thread
-        QTimer.singleShot(100, sync_thread)
+        threading.Thread(target=sync_thread, daemon=True).start()
 
     def _auto_full_sync(self):
         """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
         if self._shutdown or self._is_syncing or not self.is_online:
             return
 
-        def sync_thread():
-            if self._shutdown:
-                return
-            try:
-                self._push_pending_changes()
-                for table_name in self.TABLES:
-                    self._sync_table_from_cloud(table_name)
-                logger.debug("✅ مزامنة تلقائية: تم رفع وجلب التغييرات")
-            except Exception as e:
-                logger.debug("مزامنة تلقائية: %s", e)
-
-        # استخدام QTimer بدلاً من daemon thread
-        QTimer.singleShot(100, sync_thread)
+        self._run_full_sync_async()
 
     def _quick_push_changes(self):
         """⚡ رفع التغييرات المحلية بسرعة"""
@@ -445,8 +462,7 @@ class UnifiedSyncManagerV3(QObject):
                     except Exception as e:
                         logger.error("❌ فشل رفع التغييرات: %s", e)
 
-                # استخدام QTimer بدلاً من daemon thread
-                QTimer.singleShot(100, push_thread)
+                threading.Thread(target=push_thread, daemon=True).start()
 
         except Exception as e:
             logger.debug("خطأ في فحص التغييرات: %s", e)
@@ -484,6 +500,29 @@ class UnifiedSyncManagerV3(QObject):
             time.sleep(0.5)
             waited += 0.5
         return self.is_online
+
+    def _run_full_sync_async(self):
+        if self._shutdown or self._is_syncing or not self.is_online:
+            return
+
+        def worker():
+            if self._shutdown:
+                return
+            try:
+                self._last_full_sync_at = datetime.now()
+                self.full_sync_from_cloud()
+            except Exception as e:
+                logger.debug("خطأ في المزامنة الخلفية: %s", e)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _cloud_pull_changes(self):
+        if self._shutdown or not self.is_online:
+            return
+        if self._last_full_sync_at:
+            if (datetime.now() - self._last_full_sync_at).total_seconds() < 30:
+                return
+        self._run_full_sync_async()
 
     def full_sync_from_cloud(self) -> dict[str, Any]:
         """
@@ -995,13 +1034,29 @@ class UnifiedSyncManagerV3(QObject):
                 local_id = row_dict.get("id")
                 mongo_id = row_dict.get("_mongo_id")
                 unique_value = row_dict.get(unique_field)
+                sync_status = row_dict.get("sync_status")
 
-                # تحضير البيانات للسحابة
+                if sync_status == "deleted":
+                    try:
+                        if mongo_id:
+                            from bson import ObjectId
+
+                            collection.delete_one({"_id": ObjectId(mongo_id)})
+                        elif unique_value:
+                            collection.delete_one({unique_field: unique_value})
+                        cursor.execute(
+                            f"DELETE FROM {table_name} WHERE id = ?",
+                            (local_id,),
+                        )
+                        pushed += 1
+                    except Exception as e:
+                        logger.error("❌ فشل حذف %s/%s: %s", table_name, local_id, e)
+                    continue
+
                 cloud_data = self._prepare_data_for_cloud(row_dict)
 
                 try:
                     if mongo_id:
-                        # تحديث سجل موجود
                         from bson import ObjectId
 
                         collection.update_one({"_id": ObjectId(mongo_id)}, {"$set": cloud_data})
@@ -1478,6 +1533,370 @@ class UnifiedSyncManagerV3(QObject):
             results["sync"] = self.full_sync_from_cloud()
 
         return results
+
+    # ==========================================
+    # ⚡ Bidirectional Delta Sync - NEW
+    # ==========================================
+
+    def _load_watermarks(self):
+        """تحميل Watermarks من ملف محلي"""
+        try:
+            from pathlib import Path
+
+            # الحصول على مسار قاعدة البيانات
+            if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn:
+                db_path = (
+                    self.repo.sqlite_conn.database
+                    if hasattr(self.repo.sqlite_conn, "database")
+                    else None
+                )
+                if db_path:
+                    watermark_file = Path(db_path).parent / "sync_watermarks.json"
+                    if watermark_file.exists():
+                        with open(watermark_file, encoding="utf-8") as f:
+                            self._watermarks = json.load(f)
+                        logger.info("📍 تم تحميل Watermarks: %s جداول", len(self._watermarks))
+                        return
+            self._watermarks = {}
+        except Exception as e:
+            logger.debug("فشل تحميل Watermarks: %s", e)
+            self._watermarks = {}
+
+    def _save_watermarks(self):
+        """حفظ Watermarks إلى ملف محلي"""
+        try:
+            from pathlib import Path
+
+            if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn:
+                db_path = (
+                    self.repo.sqlite_conn.database
+                    if hasattr(self.repo.sqlite_conn, "database")
+                    else None
+                )
+                if db_path:
+                    watermark_file = Path(db_path).parent / "sync_watermarks.json"
+                    with open(watermark_file, "w", encoding="utf-8") as f:
+                        json.dump(self._watermarks, f)
+                    logger.debug("📍 تم حفظ Watermarks")
+        except Exception as e:
+            logger.debug("فشل حفظ Watermarks: %s", e)
+
+    def push_local_changes(self) -> dict[str, Any]:
+        """
+        ⚡ Push all locally modified records (dirty_flag = 1) to MongoDB
+        Returns: dict with counts of pushed records and any errors
+        """
+        if not self.is_online:
+            return {"success": False, "reason": "offline"}
+
+        if self._shutdown:
+            return {"success": False, "reason": "shutdown"}
+
+        results = {"success": True, "pushed": 0, "deleted": 0, "errors": 0}
+
+        try:
+            cursor = self.repo.get_cursor()
+
+            for table in self.TABLES:
+                try:
+                    # التحقق من وجود الجدول
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+                    )
+                    if not cursor.fetchone():
+                        continue
+
+                    # جلب السجلات المعلّمة بـ dirty_flag = 1
+                    cursor.execute(
+                        f"""
+                        SELECT * FROM {table}
+                        WHERE dirty_flag = 1 OR dirty_flag IS NULL AND sync_status = 'new_offline'
+                    """
+                    )
+                    dirty_records = cursor.fetchall()
+
+                    if not dirty_records:
+                        continue
+
+                    columns = [desc[0] for desc in cursor.description]
+                    collection = self.repo.mongo_db[table]
+
+                    for row in dirty_records:
+                        try:
+                            record = dict(zip(columns, row, strict=False))
+                            local_id = record.get("id")
+                            mongo_id = record.get("_mongo_id")
+                            is_deleted = record.get("is_deleted", 0)
+
+                            if is_deleted:
+                                # Soft Delete: حذف من MongoDB ثم محلياً
+                                if mongo_id:
+                                    try:
+                                        from bson import ObjectId
+
+                                        # تحديث في MongoDB بـ is_deleted = True
+                                        collection.update_one(
+                                            {"_id": ObjectId(mongo_id)},
+                                            {
+                                                "$set": {
+                                                    "is_deleted": True,
+                                                    "last_modified": datetime.now().isoformat(),
+                                                }
+                                            },
+                                        )
+                                    except Exception as del_err:
+                                        logger.debug("تجاهل خطأ حذف من MongoDB: %s", del_err)
+
+                                # حذف محلياً (Hard Delete بعد المزامنة)
+                                cursor.execute(f"DELETE FROM {table} WHERE id = ?", (local_id,))
+                                results["deleted"] += 1
+                            else:
+                                # Upsert إلى MongoDB
+                                clean_record = {
+                                    k: v
+                                    for k, v in record.items()
+                                    if k not in ["id", "sync_status", "dirty_flag", "is_deleted"]
+                                }
+                                clean_record["last_modified"] = datetime.now().isoformat()
+
+                                if mongo_id:
+                                    from bson import ObjectId
+
+                                    collection.update_one(
+                                        {"_id": ObjectId(mongo_id)},
+                                        {"$set": clean_record},
+                                        upsert=True,
+                                    )
+                                else:
+                                    result = collection.insert_one(clean_record)
+                                    mongo_id = str(result.inserted_id)
+                                    cursor.execute(
+                                        f"UPDATE {table} SET _mongo_id = ? WHERE id = ?",
+                                        (mongo_id, local_id),
+                                    )
+
+                                # تحديث dirty_flag و sync_status
+                                cursor.execute(
+                                    f"""
+                                    UPDATE {table}
+                                    SET dirty_flag = 0, sync_status = 'synced'
+                                    WHERE id = ?
+                                """,
+                                    (local_id,),
+                                )
+                                results["pushed"] += 1
+
+                        except Exception as e:
+                            logger.debug("خطأ في رفع سجل من %s: %s", table, e)
+                            results["errors"] += 1
+
+                    self.repo.sqlite_conn.commit()
+
+                except Exception as e:
+                    logger.debug("خطأ في رفع جدول %s: %s", table, e)
+
+            cursor.close()
+
+            if results["pushed"] > 0 or results["deleted"] > 0:
+                logger.info("⬆️ Push: %s رفع, %s حذف", results["pushed"], results["deleted"])
+
+        except Exception as e:
+            logger.error("❌ خطأ في push_local_changes: %s", e)
+            results["success"] = False
+            results["error"] = str(e)
+
+        return results
+
+    def pull_remote_changes(self) -> dict[str, Any]:
+        """
+        ⚡ Pull changes from MongoDB since last sync (watermark-based delta sync)
+        Only pulls records where last_modified > watermark
+        Returns: dict with counts of pulled/deleted records
+        """
+        if not self.is_online:
+            return {"success": False, "reason": "offline"}
+
+        if self._shutdown:
+            return {"success": False, "reason": "shutdown"}
+
+        if self._is_syncing:
+            return {"success": False, "reason": "already_syncing"}
+
+        results = {"success": True, "pulled": 0, "deleted": 0, "errors": 0}
+
+        try:
+            cursor = self.repo.get_cursor()
+
+            for table in self.TABLES:
+                try:
+                    # الحصول على Watermark لهذا الجدول
+                    watermark = self._watermarks.get(table, "1970-01-01T00:00:00")
+
+                    # جلب السجلات من MongoDB المحدّثة بعد الـ watermark
+                    collection = self.repo.mongo_db[table]
+                    query = {"last_modified": {"$gt": watermark}}
+                    remote_records = list(collection.find(query))
+
+                    if not remote_records:
+                        continue
+
+                    # التحقق من وجود الجدول محلياً
+                    cursor.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+                    )
+                    if not cursor.fetchone():
+                        continue
+
+                    # الحصول على أعمدة الجدول
+                    cursor.execute(f"PRAGMA table_info({table})")
+                    table_columns = {row[1] for row in cursor.fetchall()}
+
+                    max_timestamp = watermark
+
+                    for remote in remote_records:
+                        try:
+                            mongo_id = str(remote["_id"])
+                            is_deleted = remote.get("is_deleted", False)
+                            last_modified = remote.get("last_modified", "")
+
+                            # تحديث max_timestamp
+                            if last_modified and last_modified > max_timestamp:
+                                max_timestamp = last_modified
+
+                            # البحث عن السجل المحلي
+                            cursor.execute(
+                                f"SELECT id FROM {table} WHERE _mongo_id = ?", (mongo_id,)
+                            )
+                            local_row = cursor.fetchone()
+
+                            if is_deleted:
+                                # حذف من MongoDB -> حذف محلياً
+                                if local_row:
+                                    cursor.execute(
+                                        f"DELETE FROM {table} WHERE id = ?", (local_row[0],)
+                                    )
+                                    results["deleted"] += 1
+                            else:
+                                # تحضير البيانات
+                                item_data = self._prepare_cloud_data(remote)
+                                item_data["_mongo_id"] = mongo_id
+                                item_data["sync_status"] = "synced"
+                                item_data["dirty_flag"] = 0
+                                item_data["is_deleted"] = 0
+
+                                # تصفية الحقول
+                                filtered = {
+                                    k: v for k, v in item_data.items() if k in table_columns
+                                }
+
+                                if local_row:
+                                    # تحديث السجل الموجود
+                                    set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
+                                    values = list(filtered.values()) + [local_row[0]]
+                                    cursor.execute(
+                                        f"UPDATE {table} SET {set_clause} WHERE id = ?", values
+                                    )
+                                else:
+                                    # إدراج سجل جديد
+                                    cols = ", ".join(filtered.keys())
+                                    placeholders = ", ".join(["?" for _ in filtered])
+                                    cursor.execute(
+                                        f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
+                                        list(filtered.values()),
+                                    )
+                                results["pulled"] += 1
+
+                        except Exception as e:
+                            logger.debug("خطأ في سحب سجل من %s: %s", table, e)
+                            results["errors"] += 1
+
+                    if remote_records:
+                        # ⚡ CRITICAL: Update watermark based on the LATEST record found
+                        try:
+                            latest_ts = max(r.get("last_modified", "") for r in remote_records)
+                            current_watermark = self._watermarks.get(table, "")
+
+                            if latest_ts and latest_ts > current_watermark:
+                                self._watermarks[table] = latest_ts
+                                self._save_watermarks()  # ⚡ Save immediately
+                                logger.info("📍 Watermark updated for %s: %s", table, latest_ts)
+                        except Exception as wm_err:
+                            logger.error("❌ Failed to update watermark for %s: %s", table, wm_err)
+
+                    self.repo.sqlite_conn.commit()
+
+                except Exception as e:
+                    logger.debug("خطأ في سحب جدول %s: %s", table, e)
+
+            cursor.close()
+
+            # حفظ الـ watermarks
+            self._save_watermarks()
+
+            if results["pulled"] > 0 or results["deleted"] > 0:
+                logger.info("⬇️ Pull: %s سحب, %s حذف", results["pulled"], results["deleted"])
+                # إرسال إشارة لتحديث الواجهة
+                try:
+                    self.data_synced.emit()
+                except RuntimeError:
+                    pass  # Qt object deleted
+
+        except Exception as e:
+            logger.error("❌ خطأ في pull_remote_changes: %s", e)
+            results["success"] = False
+            results["error"] = str(e)
+
+        return results
+
+    def force_pull(self, table: str = None):
+        """
+        ⚡ Force immediate pull (for screen open events)
+        Pushes local changes first, then pulls remote changes
+        """
+        if self._shutdown or self._is_syncing or not self.is_online:
+            return
+
+        def pull_thread():
+            if self._shutdown:
+                return
+            try:
+                # رفع التغييرات المحلية أولاً
+                self.push_local_changes()
+                # سحب التغييرات من السيرفر
+                self.pull_remote_changes()
+            except Exception as e:
+                logger.debug("خطأ في force_pull: %s", e)
+
+        threading.Thread(target=pull_thread, daemon=True).start()
+
+    def start_delta_sync(self, interval_seconds: int = 60):
+        """
+        ⚡ بدء نظام المزامنة التفاضلية (Delta Sync)
+        يقوم بسحب التغييرات الجديدة كل فترة محددة
+        """
+        if self._delta_pull_timer:
+            self._delta_pull_timer.stop()
+
+        interval_ms = interval_seconds * 1000
+
+        def periodic_delta_sync():
+            if self._shutdown or self._is_syncing or not self.is_online:
+                return
+
+            def sync_thread():
+                try:
+                    self.push_local_changes()
+                    self.pull_remote_changes()
+                except Exception as e:
+                    logger.debug("خطأ في periodic delta sync: %s", e)
+
+            threading.Thread(target=sync_thread, daemon=True).start()
+
+        self._delta_pull_timer = QTimer(self)
+        self._delta_pull_timer.timeout.connect(periodic_delta_sync)
+        self._delta_pull_timer.start(interval_ms)
+
+        logger.info("⏰ بدء Delta Sync كل %s ثانية", interval_seconds)
 
 
 def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:

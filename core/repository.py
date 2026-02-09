@@ -338,7 +338,7 @@ class Repository:
                         MONGO_URI,
                         serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال
                         connectTimeoutMS=5000,
-                        socketTimeoutMS=10000,  # ⚡ 10 ثواني للعمليات
+                        socketTimeoutMS=30000,  # ⚡ 30 ثانية للعمليات (زيادة لتجنب timeout)
                         retryWrites=True,
                         retryReads=True,
                         maxPoolSize=5,
@@ -1113,6 +1113,128 @@ class Repository:
         )
 
         self.sqlite_conn.commit()
+
+        # ==================== Smart Migration & Sanitation ====================
+        # إضافة أعمدة المزامنة لجميع الجداول الرئيسية مع تنظيف البيانات القديمة
+        # is_deleted: للحذف الناعم (Soft Delete)
+        # dirty_flag: لتعقب التغييرات المحلية غير المتزامنة
+        # last_modified: آخر تعديل للمزامنة
+        # _mongo_id: معرف MongoDB
+        sync_tables = [
+            "accounts",
+            "expenses",
+            "clients",
+            "services",
+            "invoices",
+            "projects",
+            "journal_entries",
+            "payments",
+            "currencies",
+            "notifications",
+            "users",
+            "employees",
+            "employee_loans",
+            "employee_salaries",
+            "employee_attendance",
+            "employee_leaves",
+            "loan_payments",
+            "quotations",
+            "tasks",
+        ]
+
+        for table in sync_tables:
+            # 1. إضافة عمود is_deleted (للحذف الناعم)
+            try:
+                self.sqlite_cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN is_deleted INTEGER DEFAULT 0"
+                )
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود is_deleted لجدول {table}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود بالفعل
+
+            # 2. إضافة عمود dirty_flag (لتعقب التغييرات المحلية)
+            try:
+                self.sqlite_cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN dirty_flag INTEGER DEFAULT 0"
+                )
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود dirty_flag لجدول {table}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود بالفعل
+
+            # 3. إضافة عمود last_modified إذا لم يكن موجوداً
+            try:
+                self.sqlite_cursor.execute(f"ALTER TABLE {table} ADD COLUMN last_modified TEXT")
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود last_modified لجدول {table}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود بالفعل
+
+            # 4. إضافة عمود _mongo_id إذا لم يكن موجوداً
+            try:
+                self.sqlite_cursor.execute(f"ALTER TABLE {table} ADD COLUMN _mongo_id TEXT")
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود _mongo_id لجدول {table}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود بالفعل
+
+            # 5. إضافة عمود sync_status إذا لم يكن موجوداً
+            try:
+                self.sqlite_cursor.execute(
+                    f"ALTER TABLE {table} ADD COLUMN sync_status TEXT DEFAULT 'pending'"
+                )
+                safe_print(f"INFO: [Repository] ✅ تم إضافة عمود sync_status لجدول {table}")
+            except sqlite3.OperationalError:
+                pass  # العمود موجود بالفعل
+
+        self.sqlite_conn.commit()
+
+        # ==================== Legacy Data Wake-Up (CRITICAL) ====================
+        # تنشيط البيانات القديمة: نضع dirty_flag = 1 لكل الصفوف الموجودة
+        # هذا يجبر محرك المزامنة على رفعها إلى MongoDB
+        safe_print("INFO: [Repository] 🔄 جاري تنشيط البيانات القديمة للمزامنة...")
+
+        for table in sync_tables:
+            try:
+                # تنشيط البيانات القديمة - وضع dirty_flag = 1 لكل الصفوف
+                self.sqlite_cursor.execute(
+                    f"UPDATE {table} SET dirty_flag = 1 WHERE dirty_flag IS NULL OR dirty_flag = 0"
+                )
+                updated_count = self.sqlite_cursor.rowcount
+                if updated_count > 0:
+                    safe_print(
+                        f"INFO: [Repository] ⚡ تم تنشيط {updated_count} سجل في {table} للمزامنة"
+                    )
+            except sqlite3.OperationalError as e:
+                safe_print(f"WARNING: [Repository] فشل تنشيط {table}: {e}")
+
+        self.sqlite_conn.commit()
+
+        # ==================== Sanitize Defaults ====================
+        # تنظيف القيم الفارغة: وضع قيم افتراضية للحقول NULL
+        safe_print("INFO: [Repository] 🧹 جاري تنظيف القيم الفارغة...")
+
+        for table in sync_tables:
+            try:
+                # تنظيف is_deleted: وضع 0 بدلاً من NULL
+                self.sqlite_cursor.execute(
+                    f"UPDATE {table} SET is_deleted = 0 WHERE is_deleted IS NULL"
+                )
+
+                # تنظيف sync_status: وضع 'pending' بدلاً من NULL
+                self.sqlite_cursor.execute(
+                    f"UPDATE {table} SET sync_status = 'pending' WHERE sync_status IS NULL"
+                )
+
+                # تنظيف last_modified: وضع التاريخ الحالي بدلاً من NULL
+                now_iso = datetime.now().isoformat()
+                self.sqlite_cursor.execute(
+                    f"UPDATE {table} SET last_modified = ? WHERE last_modified IS NULL", (now_iso,)
+                )
+            except sqlite3.OperationalError as e:
+                safe_print(f"WARNING: [Repository] فشل تنظيف {table}: {e}")
+
+        self.sqlite_conn.commit()
+        safe_print("INFO: [Repository] ✅ Smart Migration & Sanitation complete!")
+        # ==================== End Smart Migration ====================
+
         safe_print("INFO: الجداول المحلية جاهزة.")
 
         # ⚡ إنشاء indexes لتحسين الأداء (مهم جداً للسرعة)
@@ -1341,9 +1463,10 @@ class Repository:
             INSERT INTO clients (
                 sync_status, created_at, last_modified, name, company_name, email,
                 phone, address, country, vat_number, status,
-                client_type, work_field, logo_path, logo_data, client_notes, is_vip
+                client_type, work_field, logo_path, logo_data, client_notes, is_vip,
+                dirty_flag, is_deleted
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
         """
         # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
         is_vip_value = 1 if getattr(client_data, "is_vip", False) else 0
@@ -1425,7 +1548,8 @@ class Repository:
                     name = ?, company_name = ?, email = ?, phone = ?,
                     address = ?, country = ?, vat_number = ?, status = ?,
                     client_type = ?, work_field = ?, logo_path = ?, logo_data = ?, client_notes = ?,
-                    is_vip = ?, last_modified = ?, sync_status = 'modified_offline'
+                    is_vip = ?, last_modified = ?, sync_status = 'modified_offline',
+                    dirty_flag = 1
                 WHERE id = ? OR _mongo_id = ?
             """
             # ⚡ تحويل is_vip إلى 0 أو 1 لـ SQLite
@@ -1536,7 +1660,15 @@ class Repository:
             with self._lock:
                 cursor = self.get_cursor()
                 try:
-                    cursor.execute("SELECT * FROM clients WHERE status = ?", (active_status,))
+                    cursor.execute(
+                        """
+                        SELECT * FROM clients
+                        WHERE status = ?
+                        AND (sync_status != 'deleted' OR sync_status IS NULL)
+                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                        """,
+                        (active_status,),
+                    )
                     rows = cursor.fetchall()
                     clients_list = [schemas.Client(**dict(row)) for row in rows]
                 finally:
@@ -1597,7 +1729,14 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل جلب العملاء المؤرشفين (Mongo): {e}.")
 
-        self.sqlite_cursor.execute("SELECT * FROM clients WHERE status = ?", (archived_status,))
+        self.sqlite_cursor.execute(
+            """
+            SELECT * FROM clients
+            WHERE status = ?
+            AND (sync_status != 'deleted' OR sync_status IS NULL)
+            """,
+            (archived_status,),
+        )
         rows = self.sqlite_cursor.fetchall()
         return [schemas.Client(**dict(row)) for row in rows]
 
@@ -1637,7 +1776,6 @@ class Repository:
     def _to_objectid(self, item_id: str):
         """محاولة تحويل النص إلى ObjectId صالح لتجنب أخطاء InvalidId."""
         try:
-
             if isinstance(item_id, str) and len(item_id) == 24:
                 return ObjectId(item_id)
         except Exception:
@@ -1867,7 +2005,7 @@ class Repository:
             client_id_num = 0
 
         self.sqlite_cursor.execute(
-            "UPDATE clients SET status = ?, last_modified = ?, sync_status = 'modified_offline' WHERE id = ? OR _mongo_id = ?",
+            "UPDATE clients SET status = ?, last_modified = ?, sync_status = 'modified_offline', is_deleted = 1, dirty_flag = 1 WHERE id = ? OR _mongo_id = ?",
             (archive_status, now_iso, client_id_num, client_id),
         )
         self.sqlite_conn.commit()
@@ -1925,19 +2063,6 @@ class Repository:
             mongo_id = client_id
             local_id = client_id_num
 
-        # حذف من SQLite
-        self.sqlite_cursor.execute(
-            "DELETE FROM clients WHERE id = ? OR _mongo_id = ?", (local_id, client_id)
-        )
-        deleted_rows = self.sqlite_cursor.rowcount
-        self.sqlite_conn.commit()
-
-        if deleted_rows > 0:
-            safe_print(f"INFO: [Repo] ✅ تم حذف {deleted_rows} سجل من SQLite")
-        else:
-            safe_print("WARNING: [Repo] ❌ لم يتم حذف أي سجل من SQLite!")
-
-        # حذف من MongoDB
         if self.online:
             try:
                 result = self.mongo_db.clients.delete_one(
@@ -1949,13 +2074,26 @@ class Repository:
                     }
                 )
                 if result.deleted_count > 0:
-                    safe_print("INFO: [Repo] ✅ تم حذف العميل من MongoDB")
-                else:
-                    safe_print("WARNING: [Repo] العميل غير موجود في MongoDB")
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM clients WHERE id = ? OR _mongo_id = ?",
+                        (local_id, client_id),
+                    )
+                    deleted_rows = self.sqlite_cursor.rowcount
+                    self.sqlite_conn.commit()
+                    if deleted_rows > 0:
+                        safe_print("INFO: [Repo] ✅ تم حذف العميل محلياً بعد الحذف من MongoDB")
+                    return deleted_rows > 0
+                safe_print("WARNING: [Repo] العميل غير موجود في MongoDB")
             except Exception as e:
                 safe_print(f"WARNING: [Repo] فشل حذف العميل من MongoDB: {e}")
 
-        return deleted_rows > 0
+        now_iso = datetime.now().isoformat()
+        self.sqlite_cursor.execute(
+            "UPDATE clients SET sync_status = 'deleted', last_modified = ? WHERE id = ? OR _mongo_id = ?",
+            (now_iso, local_id, client_id),
+        )
+        self.sqlite_conn.commit()
+        return True
 
     def update_journal_entry_by_doc_id(
         self, doc_id: str, new_lines: list[schemas.JournalEntryLine], new_description: str
@@ -2152,7 +2290,9 @@ class Repository:
             with self._lock:
                 cursor = self.get_cursor()
                 try:
-                    cursor.execute("SELECT * FROM accounts WHERE sync_status != 'deleted'")
+                    cursor.execute(
+                        "SELECT * FROM accounts WHERE sync_status != 'deleted' AND (is_deleted = 0 OR is_deleted IS NULL)"
+                    )
                     rows = cursor.fetchall()
                 finally:
                     cursor.close()
@@ -2278,7 +2418,6 @@ class Repository:
     def get_user_by_username(self, username: str):
         """جلب مستخدم بالاسم"""
         try:
-
             # البحث في MongoDB أولاً
             if self.online:
                 try:
@@ -2449,7 +2588,6 @@ class Repository:
     def get_all_users(self):
         """جلب جميع المستخدمين من MongoDB أو SQLite - محسّن للأداء"""
         try:
-
             users = []
 
             # ⚡ تخطي الانتظار - استخدام SQLite مباشرة إذا كان MongoDB غير متصل
@@ -2868,30 +3006,32 @@ class Repository:
             except (ValueError, TypeError):
                 account_id_num = -1
 
-            # ⚡ حذف من SQLite فوراً (سريع جداً)
+            if self.online:
+                try:
+                    try:
+                        self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
+                    except Exception:
+                        self.mongo_db.accounts.delete_one({"code": account_id})
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM accounts WHERE id = ? OR _mongo_id = ? OR code = ?",
+                        (account_id_num, account_id, account_id),
+                    )
+                    self.sqlite_conn.commit()
+                    safe_print("INFO: [Repo] ✅ تم حذف الحساب من المحلي بعد الحذف من MongoDB")
+                    return True
+                except Exception as e:
+                    safe_print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
+
+            now_iso = datetime.now().isoformat()
             self.sqlite_cursor.execute(
-                "DELETE FROM accounts WHERE id = ? OR _mongo_id = ? OR code = ?",
-                (account_id_num, account_id, account_id),
+                """
+                UPDATE accounts
+                SET sync_status = 'deleted', last_modified = ?
+                WHERE id = ? OR _mongo_id = ? OR code = ?
+                """,
+                (now_iso, account_id_num, account_id, account_id),
             )
             self.sqlite_conn.commit()
-            safe_print("INFO: [Repo] ✅ تم حذف الحساب من المحلي")
-
-            # ⚡ حذف من MongoDB في الخلفية (لا يعطل الواجهة)
-            if self.online:
-
-                def delete_from_mongo():
-                    try:
-
-                        try:
-                            self.mongo_db.accounts.delete_one({"_id": ObjectId(account_id)})
-                        except Exception:
-                            self.mongo_db.accounts.delete_one({"code": account_id})
-                        safe_print("INFO: [Repo] ✅ تم حذف الحساب من MongoDB (خلفية)")
-                    except Exception as e:
-                        safe_print(f"WARNING: [Repo] فشل حذف الحساب من MongoDB: {e}")
-
-                QTimer.singleShot(100, delete_from_mongo)
-
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حذف الحساب: {e}")
@@ -2914,8 +3054,9 @@ class Repository:
                 _mongo_id, sync_status, created_at, last_modified, invoice_number,
                 client_id, project_id, issue_date, due_date, items,
                 subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
-                total_amount, amount_paid, status, currency, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                total_amount, amount_paid, status, currency, notes,
+                dirty_flag, is_deleted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
         """
         params = (
             None,
@@ -2993,7 +3134,9 @@ class Repository:
                 safe_print(f"ERROR: فشل جلب الفواتير من Mongo: {e}. سيتم الجلب من المحلي.")
 
         # الجلب من SQLite في حالة الأوفلاين
-        self.sqlite_cursor.execute("SELECT * FROM invoices")
+        self.sqlite_cursor.execute(
+            "SELECT * FROM invoices WHERE (sync_status != 'deleted' OR sync_status IS NULL) AND (is_deleted = 0 OR is_deleted IS NULL)"
+        )
         rows = self.sqlite_cursor.fetchall()
         invoices_list = []
         for row in rows:
@@ -3075,7 +3218,9 @@ class Repository:
         try:
             cursor = self.get_cursor()
             try:
-                cursor.execute("SELECT * FROM journal_entries ORDER BY date DESC")
+                cursor.execute(
+                    "SELECT * FROM journal_entries WHERE (is_deleted = 0 OR is_deleted IS NULL) ORDER BY date DESC"
+                )
                 rows = cursor.fetchall()
             finally:
                 cursor.close()
@@ -3303,8 +3448,8 @@ class Repository:
                 sql = """
                     INSERT INTO payments (
                         sync_status, created_at, last_modified, project_id, client_id,
-                        date, amount, account_id, method
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        date, amount, account_id, method, dirty_flag, is_deleted
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
                 """
                 params = (
                     payment_data.sync_status,
@@ -3394,7 +3539,14 @@ class Repository:
                 temp_cursor = self.sqlite_conn.cursor()
 
                 # ⚡ محاولة 1: البحث الدقيق
-                temp_cursor.execute("SELECT * FROM payments WHERE project_id = ?", (project_name,))
+                temp_cursor.execute(
+                    """
+                    SELECT * FROM payments
+                    WHERE project_id = ?
+                    AND (sync_status != 'deleted' OR sync_status IS NULL)
+                    """,
+                    (project_name,),
+                )
                 rows = temp_cursor.fetchall()
 
                 # ⚡ محاولة 2: إذا لم يتم العثور على نتائج، جرب البحث المرن
@@ -3446,7 +3598,14 @@ class Repository:
         try:
             cursor = self.get_cursor()
             try:
-                cursor.execute("SELECT * FROM payments ORDER BY date DESC")
+                cursor.execute(
+                    """
+                    SELECT * FROM payments
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    ORDER BY date DESC
+                    """
+                )
                 rows = cursor.fetchall()
             finally:
                 cursor.close()
@@ -3483,7 +3642,8 @@ class Repository:
                 cursor.execute(
                     """
                     SELECT * FROM payments
-                    WHERE account_id = ? AND date >= ? AND date <= ?
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND account_id = ? AND date >= ? AND date <= ?
                     ORDER BY date ASC
                 """,
                     (account_code, start_iso, end_iso),
@@ -3561,7 +3721,6 @@ class Repository:
 
             if self.online:
                 try:
-
                     payment_dict = {
                         "last_modified": now_dt,
                         "date": payment_data.date,
@@ -3626,21 +3785,38 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             mongo_id = row["_mongo_id"] if row else None
 
-            # حذف من SQLite
-            self.sqlite_cursor.execute(
-                "DELETE FROM payments WHERE id = ? OR _mongo_id = ?", (payment_id, str(payment_id))
-            )
-            self.sqlite_conn.commit()
-            safe_print(f"INFO: [Repo] تم حذف الدفعة محلياً (ID: {payment_id}).")
-
-            # حذف من MongoDB
             if self.online and mongo_id:
                 try:
-
                     self.mongo_db.payments.delete_one({"_id": ObjectId(mongo_id)})
-                    safe_print("INFO: [Repo] تم حذف الدفعة من MongoDB.")
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM payments WHERE id = ? OR _mongo_id = ?",
+                        (payment_id, str(payment_id)),
+                    )
+                    self.sqlite_conn.commit()
+                    safe_print("INFO: [Repo] تم حذف الدفعة محلياً بعد الحذف من MongoDB.")
                 except Exception as e:
                     safe_print(f"ERROR: [Repo] فشل حذف الدفعة من MongoDB: {e}")
+                    now_iso = datetime.now().isoformat()
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE payments
+                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                        WHERE id = ? OR _mongo_id = ?
+                        """,
+                        (now_iso, payment_id, str(payment_id)),
+                    )
+                    self.sqlite_conn.commit()
+            else:
+                now_iso = datetime.now().isoformat()
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE payments
+                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
+                    WHERE id = ? OR _mongo_id = ?
+                    """,
+                    (now_iso, payment_id, str(payment_id)),
+                )
+                self.sqlite_conn.commit()
 
             # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
             Repository._dashboard_cache = None
@@ -3811,7 +3987,6 @@ class Repository:
         # محاولة البحث بـ _mongo_id أولاً
         if self.online:
             try:
-
                 data = self.mongo_db.invoices.find_one({"_id": ObjectId(invoice_id)})
                 if data:
                     mongo_id = str(data.pop("_id"))
@@ -3948,7 +4123,15 @@ class Repository:
 
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (active_status,))
+            self.sqlite_cursor.execute(
+                """
+                SELECT * FROM services
+                WHERE status = ?
+                AND (sync_status != 'deleted' OR sync_status IS NULL)
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+                """,
+                (active_status,),
+            )
             rows = self.sqlite_cursor.fetchall()
             services_list = [schemas.Service(**dict(row)) for row in rows]
             safe_print(f"INFO: تم جلب {len(services_list)} خدمة 'نشطة' من المحلي.")
@@ -4099,14 +4282,6 @@ class Repository:
         row = self.sqlite_cursor.fetchone()
         mongo_id = row[0] if row else service_id
 
-        # حذف من SQLite
-        self.sqlite_cursor.execute(
-            "DELETE FROM services WHERE id = ? OR _mongo_id = ?", (service_id_num, service_id)
-        )
-        self.sqlite_conn.commit()
-        safe_print("INFO: [Repo] ✅ تم حذف الخدمة من SQLite")
-
-        # حذف من MongoDB
         if self.online:
             try:
                 result = self.mongo_db.services.delete_one(
@@ -4118,12 +4293,27 @@ class Repository:
                     }
                 )
                 if result.deleted_count > 0:
-                    safe_print("INFO: [Repo] ✅ تم حذف الخدمة من MongoDB")
-                else:
-                    safe_print("WARNING: [Repo] الخدمة غير موجودة في MongoDB")
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM services WHERE id = ? OR _mongo_id = ?",
+                        (service_id_num, service_id),
+                    )
+                    self.sqlite_conn.commit()
+                    safe_print("INFO: [Repo] ✅ تم حذف الخدمة محلياً بعد الحذف من MongoDB")
+                    return True
+                safe_print("WARNING: [Repo] الخدمة غير موجودة في MongoDB")
             except Exception as e:
                 safe_print(f"WARNING: [Repo] فشل حذف الخدمة من MongoDB: {e}")
 
+        now_iso = datetime.now().isoformat()
+        self.sqlite_cursor.execute(
+            """
+            UPDATE services
+            SET sync_status = 'deleted', last_modified = ?
+            WHERE id = ? OR _mongo_id = ?
+            """,
+            (now_iso, service_id_num, service_id),
+        )
+        self.sqlite_conn.commit()
         return True
 
     def get_archived_services(self) -> list[schemas.Service]:
@@ -4142,7 +4332,14 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل جلب الخدمات المؤرشفة (Mongo): {e}.")
 
-        self.sqlite_cursor.execute("SELECT * FROM services WHERE status = ?", (archived_status,))
+        self.sqlite_cursor.execute(
+            """
+            SELECT * FROM services
+            WHERE status = ?
+            AND (sync_status != 'deleted' OR sync_status IS NULL)
+            """,
+            (archived_status,),
+        )
         rows = self.sqlite_cursor.fetchall()
         return [schemas.Service(**dict(row)) for row in rows]
 
@@ -4212,7 +4409,14 @@ class Repository:
         try:
             cursor = self.get_cursor()
             try:
-                cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+                cursor.execute(
+                    """
+                    SELECT * FROM expenses
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    ORDER BY date DESC
+                    """
+                )
                 rows = cursor.fetchall()
             finally:
                 cursor.close()
@@ -4249,7 +4453,8 @@ class Repository:
                 cursor.execute(
                     """
                     SELECT * FROM expenses
-                    WHERE date >= ? AND date <= ?
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND date >= ? AND date <= ?
                     AND (
                         payment_account_id = ?
                         OR (payment_account_id IS NULL AND account_id = ?)
@@ -4412,7 +4617,6 @@ class Repository:
             # تحديث في MongoDB
             if self.online:
                 try:
-
                     expense_dict = {
                         "last_modified": now_dt,
                         "date": expense_data.date,
@@ -4460,21 +4664,38 @@ class Repository:
             row = self.sqlite_cursor.fetchone()
             mongo_id = row["_mongo_id"] if row else None
 
-            # حذف من SQLite
-            self.sqlite_cursor.execute(
-                "DELETE FROM expenses WHERE id = ? OR _mongo_id = ?", (expense_id, str(expense_id))
-            )
-            self.sqlite_conn.commit()
-            safe_print(f"INFO: تم حذف المصروف محلياً (ID: {expense_id}).")
-
-            # حذف من MongoDB
             if self.online and mongo_id:
                 try:
-
                     self.mongo_db.expenses.delete_one({"_id": ObjectId(mongo_id)})
-                    safe_print("INFO: تم حذف المصروف من الأونلاين.")
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM expenses WHERE id = ? OR _mongo_id = ?",
+                        (expense_id, str(expense_id)),
+                    )
+                    self.sqlite_conn.commit()
+                    safe_print("INFO: تم حذف المصروف محلياً بعد الحذف من الأونلاين.")
                 except Exception as e:
                     safe_print(f"ERROR: فشل حذف المصروف من Mongo: {e}")
+                    now_iso = datetime.now().isoformat()
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE expenses
+                        SET sync_status = 'deleted', last_modified = ?
+                        WHERE id = ? OR _mongo_id = ?
+                        """,
+                        (now_iso, expense_id, str(expense_id)),
+                    )
+                    self.sqlite_conn.commit()
+            else:
+                now_iso = datetime.now().isoformat()
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE expenses
+                    SET sync_status = 'deleted', last_modified = ?
+                    WHERE id = ? OR _mongo_id = ?
+                    """,
+                    (now_iso, expense_id, str(expense_id)),
+                )
+                self.sqlite_conn.commit()
 
             # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
             Repository._dashboard_cache = None
@@ -4701,14 +4922,14 @@ class Repository:
                 safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} مشروع من الـ Cache")
                 return cached_result
 
-        sql_query = "SELECT * FROM projects"
+        sql_query = "SELECT * FROM projects WHERE (sync_status != 'deleted' OR sync_status IS NULL) AND (is_deleted = 0 OR is_deleted IS NULL)"
         sql_params: list[Any] = []
 
         if status:
-            sql_query += " WHERE status = ?"
+            sql_query += " AND status = ?"
             sql_params.append(status.value)
         elif exclude_status:
-            sql_query += " WHERE status != ?"
+            sql_query += " AND status != ?"
             sql_params.append(exclude_status.value)
 
         sql_query += " ORDER BY created_at DESC"
@@ -4774,6 +4995,13 @@ class Repository:
                                 d["items"] = json.loads(d["items"])
                             except (json.JSONDecodeError, TypeError, ValueError):
                                 d["items"] = []
+
+                        # ⚡ معالجة milestones (JSON string -> list)
+                        if "milestones" in d and isinstance(d["milestones"], str):
+                            try:
+                                d["milestones"] = json.loads(d["milestones"])
+                            except (json.JSONDecodeError, TypeError, ValueError):
+                                d["milestones"] = []
                         if "currency" not in d or d["currency"] is None:
                             d["currency"] = "EGP"
                         if "status" not in d or d["status"] is None:
@@ -4805,6 +5033,23 @@ class Repository:
                     mongo_id = str(data.pop("_id"))
                     data.pop("_mongo_id", None)
                     data.pop("mongo_id", None)
+
+                    # ⚡ معالجة items (JSON string -> list)
+                    items_value = data.get("items")
+                    if isinstance(items_value, str):
+                        try:
+                            data["items"] = json.loads(items_value)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            data["items"] = []
+
+                    # ⚡ معالجة milestones (JSON string -> list)
+                    milestones_value = data.get("milestones")
+                    if isinstance(milestones_value, str):
+                        try:
+                            data["milestones"] = json.loads(milestones_value)
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            data["milestones"] = []
+
                     return schemas.Project(**data, _mongo_id=mongo_id)
             except Exception as e:
                 safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (Mongo): {e}")
@@ -4942,29 +5187,58 @@ class Repository:
                 f"INFO: [Repo] وجدنا المشروع: {project_name}, mongo_id={mongo_id}, local_id={local_id}"
             )
 
-            # 1. حذف من SQLite (الأساسي)
-            self.sqlite_cursor.execute("DELETE FROM projects WHERE name = ?", (project_name,))
-            self.sqlite_conn.commit()
-            safe_print("INFO: [Repo] تم حذف المشروع من SQLite")
-
-            # 2. حذف من MongoDB (اختياري - لا يعطل البرنامج)
             if self.online and mongo_id and self.mongo_db is not None:
                 try:
-
                     self.mongo_db.projects.delete_one({"_id": ObjectId(mongo_id)})
-                    safe_print("INFO: [Repo] تم حذف المشروع من MongoDB")
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM projects WHERE name = ?", (project_name,)
+                    )
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM payments WHERE project_id = ?", (project_name,)
+                    )
+                    self.sqlite_conn.commit()
+                    safe_print(
+                        "INFO: [Repo] تم حذف المشروع والدفعات المرتبطة محلياً بعد الحذف من MongoDB"
+                    )
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] تخطي حذف MongoDB: {e}")
-
-            # 3. حذف الدفعات المرتبطة
-            try:
+                    now_iso = datetime.now().isoformat()
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE projects
+                        SET sync_status = 'deleted', last_modified = ?
+                        WHERE name = ?
+                        """,
+                        (now_iso, project_name),
+                    )
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE payments
+                        SET sync_status = 'deleted', last_modified = ?
+                        WHERE project_id = ?
+                        """,
+                        (now_iso, project_name),
+                    )
+                    self.sqlite_conn.commit()
+            else:
+                now_iso = datetime.now().isoformat()
                 self.sqlite_cursor.execute(
-                    "DELETE FROM payments WHERE project_id = ?", (project_name,)
+                    """
+                    UPDATE projects
+                    SET sync_status = 'deleted', last_modified = ?
+                    WHERE name = ?
+                    """,
+                    (now_iso, project_name),
+                )
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE payments
+                    SET sync_status = 'deleted', last_modified = ?
+                    WHERE project_id = ?
+                    """,
+                    (now_iso, project_name),
                 )
                 self.sqlite_conn.commit()
-                safe_print("INFO: [Repo] تم حذف الدفعات المرتبطة")
-            except Exception as e:
-                safe_print(f"WARNING: [Repo] فشل حذف الدفعات المرتبطة: {e}")
 
             safe_print(f"SUCCESS: [Repo] ✅ تم حذف المشروع {project_name} بنجاح")
 
@@ -5208,7 +5482,9 @@ class Repository:
 
         # الجلب من SQLite
         try:
-            self.sqlite_cursor.execute("SELECT * FROM currencies ORDER BY is_base DESC, code ASC")
+            self.sqlite_cursor.execute(
+                "SELECT * FROM currencies WHERE (is_deleted = 0 OR is_deleted IS NULL) ORDER BY is_base DESC, code ASC"
+            )
             rows = self.sqlite_cursor.fetchall()
             currencies = []
             for row in rows:
@@ -5327,18 +5603,37 @@ class Repository:
                 safe_print("WARNING: [Repo] لا يمكن حذف العملة الأساسية")
                 return False
 
-            # حذف من SQLite
-            self.sqlite_cursor.execute("DELETE FROM currencies WHERE code = ?", (code.upper(),))
-            self.sqlite_conn.commit()
-
-            # حذف من MongoDB
             if self.online:
                 try:
                     self.mongo_db.currencies.delete_one({"code": code.upper()})
+                    self.sqlite_cursor.execute(
+                        "DELETE FROM currencies WHERE code = ?", (code.upper(),)
+                    )
+                    self.sqlite_conn.commit()
                     safe_print(f"INFO: [Repo] تم حذف العملة {code} من الأونلاين")
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل حذف العملة من MongoDB: {e}")
-
+                    now_iso = datetime.now().isoformat()
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE currencies
+                        SET sync_status = 'deleted', last_modified = ?
+                        WHERE code = ?
+                        """,
+                        (now_iso, code.upper()),
+                    )
+                    self.sqlite_conn.commit()
+            else:
+                now_iso = datetime.now().isoformat()
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE currencies
+                    SET sync_status = 'deleted', last_modified = ?
+                    WHERE code = ?
+                    """,
+                    (now_iso, code.upper()),
+                )
+                self.sqlite_conn.commit()
             safe_print(f"INFO: [Repo] تم حذف العملة {code}")
             try:
                 from core.signals import app_signals
@@ -6007,27 +6302,57 @@ class Repository:
         حذف مهمة
         """
         try:
-            # حذف من SQLite
-            with self._lock:
-                cursor = self.sqlite_conn.cursor()
-                try:
-                    cursor.execute(
-                        "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
-                    )
-                    self.sqlite_conn.commit()
-                finally:
-                    cursor.close()
-
-            safe_print(f"INFO: [Repo] تم حذف مهمة (ID: {task_id})")
-
-            # حذف من MongoDB
             if self.online:
                 try:
                     self.mongo_db.tasks.delete_one(
                         {"$or": [{"_id": self._to_objectid(task_id)}, {"id": task_id}]}
                     )
+                    with self._lock:
+                        cursor = self.sqlite_conn.cursor()
+                        try:
+                            cursor.execute(
+                                "DELETE FROM tasks WHERE id = ? OR _mongo_id = ?",
+                                (task_id, task_id),
+                            )
+                            self.sqlite_conn.commit()
+                        finally:
+                            cursor.close()
+                    safe_print(
+                        f"INFO: [Repo] تم حذف مهمة محلياً بعد الحذف من MongoDB (ID: {task_id})"
+                    )
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل حذف المهمة من MongoDB: {e}")
+                    now_iso = datetime.now().isoformat()
+                    with self._lock:
+                        cursor = self.sqlite_conn.cursor()
+                        try:
+                            cursor.execute(
+                                """
+                                UPDATE tasks
+                                SET sync_status = 'deleted', last_modified = ?
+                                WHERE id = ? OR _mongo_id = ?
+                                """,
+                                (now_iso, task_id, task_id),
+                            )
+                            self.sqlite_conn.commit()
+                        finally:
+                            cursor.close()
+            else:
+                now_iso = datetime.now().isoformat()
+                with self._lock:
+                    cursor = self.sqlite_conn.cursor()
+                    try:
+                        cursor.execute(
+                            """
+                            UPDATE tasks
+                            SET sync_status = 'deleted', last_modified = ?
+                            WHERE id = ? OR _mongo_id = ?
+                            """,
+                            (now_iso, task_id, task_id),
+                        )
+                        self.sqlite_conn.commit()
+                    finally:
+                        cursor.close()
 
             return True
         except Exception as e:
@@ -6064,7 +6389,13 @@ class Repository:
             with self._lock:
                 cursor = self.sqlite_conn.cursor()
                 try:
-                    cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+                    cursor.execute(
+                        """
+                        SELECT * FROM tasks
+                        WHERE sync_status != 'deleted' OR sync_status IS NULL
+                        ORDER BY created_at DESC
+                        """
+                    )
                     rows = cursor.fetchall()
                 finally:
                     cursor.close()
@@ -6085,7 +6416,12 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC",
+                        """
+                        SELECT * FROM tasks
+                        WHERE status = ?
+                        AND (sync_status != 'deleted' OR sync_status IS NULL)
+                        ORDER BY created_at DESC
+                        """,
                         (status,),
                     )
                     rows = cursor.fetchall()
@@ -6107,7 +6443,14 @@ class Repository:
                     with self._lock:
                         cursor = self.sqlite_conn.cursor()
                         try:
-                            cursor.execute("SELECT name FROM projects WHERE id = ?", (project_id,))
+                            cursor.execute(
+                                """
+                                SELECT name FROM projects
+                                WHERE id = ?
+                                AND (sync_status != 'deleted' OR sync_status IS NULL)
+                                """,
+                                (project_id,),
+                            )
                             row = cursor.fetchone()
                             project_name = row[0] if row else None
                         finally:

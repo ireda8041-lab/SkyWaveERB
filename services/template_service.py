@@ -1003,29 +1003,8 @@ class TemplateService(BaseService):
         """معاينة القالب - توليد PDF سريع وفتحه"""
         try:
 
-            # تحديد مجلد الصادرات
-            if getattr(sys, "frozen", False):
-                install_path = Path(sys.executable).parent
-            else:
-                install_path = Path.cwd()
-
-            exports_dir = install_path / "exports"
-            exports_dir.mkdir(parents=True, exist_ok=True)
-
-            # توليد اسم الملف
-            company_name = client_info.get("company_name", "")
-            client_name = client_info.get("name", "")
-            project_name = (
-                getattr(project, "name", "project")
-                if not isinstance(project, dict)
-                else project.get("name", "project")
-            )
-
-            display_name = company_name if company_name else client_name
-            display_name = self._sanitize_filename(display_name) if display_name else "client"
-            project_name_safe = self._sanitize_filename(project_name) if project_name else "project"
-
-            filename = f"{display_name} - {project_name_safe}"
+            exports_dir = self.get_exports_dir()
+            filename = self.build_export_basename(project, client_info)
 
             # توليد HTML
             html_content = self.generate_invoice_html(project, client_info, template_id, payments)
@@ -1069,6 +1048,31 @@ class TemplateService(BaseService):
 
             traceback.print_exc()
             return False
+
+    def get_exports_dir(self) -> Path:
+        if getattr(sys, "frozen", False):
+            install_path = Path(sys.executable).parent
+        else:
+            install_path = Path.cwd()
+
+        exports_dir = install_path / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        return exports_dir
+
+    def build_export_basename(self, project: schemas.Project, client_info: dict[str, str]) -> str:
+        company_name = client_info.get("company_name", "")
+        client_name = client_info.get("name", "")
+        project_name = (
+            getattr(project, "name", "project")
+            if not isinstance(project, dict)
+            else project.get("name", "project")
+        )
+
+        display_name = company_name if company_name else client_name
+        display_name = self._sanitize_filename(display_name) if display_name else "client"
+        project_name_safe = self._sanitize_filename(project_name) if project_name else "project"
+
+        return f"{display_name} - {project_name_safe}"
 
     def _generate_pdf_fast(self, html_content: str, exports_dir: str, filename: str) -> str | None:
         """⚡ توليد PDF سريع - يجرب عدة طرق"""

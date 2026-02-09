@@ -71,6 +71,7 @@ class RealtimeSyncManager(QObject):
         "currencies",
         "notifications",
         "tasks",
+        "system_settings",
     ]
 
     def __init__(self, repository, parent=None):
@@ -235,6 +236,17 @@ class RealtimeSyncManager(QObject):
         if collection_name not in self.COLLECTIONS:
             return
         try:
+            if collection_name == "system_settings":
+                settings_service = getattr(self.repo, "settings_service", None)
+                if settings_service:
+                    settings_service.sync_settings_from_cloud(self.repo)
+                try:
+                    from core.signals import app_signals
+
+                    app_signals.system_changed.emit()
+                except Exception:
+                    pass
+                return
             operation = change.get("operationType", "unknown")
             document = change.get("fullDocument", {})
             document_id = change.get("documentKey", {}).get("_id")

@@ -48,8 +48,10 @@ from PyQt6.QtWidgets import (
 )
 
 from core.auth_models import AuthService, PermissionManager
+from core.config import Config
 from core.data_loader import get_data_loader
 from core.repository import Repository
+from core.signals import app_signals
 from services.settings_service import SettingsService
 from services.update_service import UpdateService
 from ui.currency_editor_dialog import CurrencyEditorDialog
@@ -242,6 +244,10 @@ class SettingsTab(QWidget):
         self.tabs.addTab(self.update_tab, "🆕 التحديثات")
         self.setup_update_tab()
 
+        # تاب اتصال قواعد البيانات (MongoDB)
+        self.db_connection_tab = QWidget()
+        self.tabs.addTab(self.db_connection_tab, "🌐 اتصال السحابة")
+        self.setup_db_connection_tab()
         # تطبيق الأسهم على كل الـ widgets
 
         apply_arrows_to_all_widgets(self)
@@ -256,6 +262,7 @@ class SettingsTab(QWidget):
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
 
         apply_rtl_alignment_to_all_fields(self)
+        app_signals.safe_connect(app_signals.system_changed, self.load_settings_data)
 
     def _search_settings_tabs(self, text: str):
         if not text:
@@ -4284,6 +4291,103 @@ class SettingsTab(QWidget):
         self.update_version = None
         self.update_service = None
 
+    def setup_db_connection_tab(self):
+        layout = QVBoxLayout(self.db_connection_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        group = QGroupBox("🌐 إعداد اتصال السحابة (MongoDB)")
+        group_layout = QVBoxLayout(group)
+
+        uri_row = QHBoxLayout()
+        uri_label = QLabel("MONGO_URI:")
+        self.mongo_uri_input = QLineEdit()
+        self.mongo_uri_input.setPlaceholderText("mongodb://host:port")
+        self.mongo_uri_input.setText(Config.get_mongo_uri())
+        uri_row.addWidget(uri_label)
+        uri_row.addWidget(self.mongo_uri_input)
+        group_layout.addLayout(uri_row)
+
+        db_row = QHBoxLayout()
+        db_label = QLabel("MONGO_DB_NAME:")
+        self.mongo_db_input = QLineEdit()
+        self.mongo_db_input.setPlaceholderText("اسم قاعدة البيانات")
+        self.mongo_db_input.setText(Config.get_db_name())
+        db_row.addWidget(db_label)
+        db_row.addWidget(self.mongo_db_input)
+        group_layout.addLayout(db_row)
+
+        btns = QHBoxLayout()
+        save_btn = QPushButton("💾 حفظ وربط الأجهزة")
+        save_btn.setStyleSheet(BUTTON_STYLES["success"])
+        save_btn.clicked.connect(self._save_cloud_connection)
+        test_btn = QPushButton("🔌 اختبار الاتصال")
+        test_btn.setStyleSheet(BUTTON_STYLES["info"])
+        test_btn.clicked.connect(self._test_cloud_connection)
+        btns.addWidget(save_btn)
+        btns.addWidget(test_btn)
+        btns.addStretch()
+        group_layout.addLayout(btns)
+
+        layout.addWidget(group)
+        layout.addStretch()
+
+    def _save_cloud_connection(self):
+        try:
+            uri = self.mongo_uri_input.text().strip()
+            db_name = self.mongo_db_input.text().strip()
+            if not uri or not db_name:
+                QMessageBox.warning(self, "تنبيه", "يرجى إدخال MONGO_URI و MONGO_DB_NAME")
+                return
+
+            os.environ["MONGO_URI"] = uri
+            os.environ["MONGO_DB_NAME"] = db_name
+
+            from core.config import _persist_cloud_config
+
+            _persist_cloud_config()
+
+            QMessageBox.information(
+                self,
+                "✅ تم الحفظ",
+                "تم حفظ إعدادات السحابة وتوحيدها لكل الأجهزة.\nسيتم إعادة محاولة الاتصال تلقائياً.",
+            )
+
+            if self.repository:
+                try:
+                    if getattr(self.repository, "mongo_client", None):
+                        try:
+                            self.repository.mongo_client.close()
+                        except Exception:
+                            pass
+                    self.repository.mongo_client = None
+                    self.repository.mongo_db = None
+                    self.repository.online = False
+                    self.repository._mongo_connecting = False
+                    if hasattr(self.repository, "_start_mongo_connection"):
+                        self.repository._start_mongo_connection()
+                    if hasattr(self.repository, "unified_sync") and self.repository.unified_sync:
+                        self.repository.unified_sync._run_full_sync_async()
+                except Exception:
+                    pass
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"تعذر حفظ الإعدادات: {e}")
+
+    def _test_cloud_connection(self):
+        try:
+            if not self.repository:
+                QMessageBox.warning(self, "تنبيه", "المستودع غير مهيأ")
+                return
+            from pymongo import MongoClient
+
+            uri = self.mongo_uri_input.text().strip()
+            db_name = self.mongo_db_input.text().strip()
+            client = MongoClient(uri, serverSelectionTimeoutMS=3000)
+            client.admin.command("ping")
+            client.close()
+            QMessageBox.information(self, "نجح", f"تم الاتصال بنجاح بـ {db_name}")
+        except Exception as e:
+            QMessageBox.critical(self, "فشل الاتصال", f"خطأ: {e}")
+
     def check_for_updates(self):
         """التحقق من وجود تحديثات جديدة"""
 
@@ -4526,7 +4630,9 @@ class SettingsTab(QWidget):
 
         try:
             # تطبيق التحديث
-            success = self.update_service.apply_update(self.update_service.temp_update_path)
+            success = self.update_service.apply_update(
+                self.update_service.temp_update_path, self.update_download_url
+            )
 
             if success:
                 # إغلاق البرنامج

@@ -49,6 +49,7 @@ class AppSignals(QObject):
     sync_completed = pyqtSignal(dict)
     sync_failed = pyqtSignal(str)
     realtime_sync_status = pyqtSignal(bool)  # حالة المزامنة الفورية
+    data_synced = pyqtSignal()  # ⚡ NEW: إشارة بعد سحب البيانات من السيرفر لتحديث الواجهة
 
     # 🔔 إشارات الإشعارات التفصيلية
     operation_completed = pyqtSignal(str, str, str)  # (action, entity_type, entity_name)

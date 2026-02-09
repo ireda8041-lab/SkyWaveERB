@@ -111,6 +111,7 @@ class SkyWaveERPApp:
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
         self.settings_service.set_repository(self.repository)
+        self.repository.settings_service = self.settings_service
 
         # 🔄 نظام المزامنة الموحد - MongoDB First (النظام الرئيسي الوحيد)
         self.unified_sync = UnifiedSyncManagerV3(self.repository)
@@ -494,6 +495,12 @@ class SkyWaveERPApp:
                 self.unified_sync.sync_completed.connect(
                     lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
                 )
+
+                # ⚡ NEW: ربط إشارة سحب البيانات الجديدة بتحديث الواجهة
+                self.unified_sync.data_synced.connect(
+                    lambda: QTimer.singleShot(100, main_window.on_sync_completed)
+                )
+                logger.info("[MainApp] ✅ تم ربط إشارة data_synced بتحديث الواجهة")
             except Exception as e:
                 logger.error("[MainApp] فشل بدء المزامنة: %s", e)
 

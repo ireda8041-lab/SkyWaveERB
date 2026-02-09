@@ -213,12 +213,13 @@ class UpdateService:
         downloader = UpdateDownloader(download_url, self.temp_update_path)
         return downloader
 
-    def apply_update(self, setup_path: str) -> bool:
+    def apply_update(self, setup_path: str, download_url: str | None = None) -> bool:
         """
         تطبيق التحديث عن طريق تشغيل updater.exe
 
         Args:
             setup_path: مسار ملف Setup (exe) المحمل
+            download_url: رابط تنزيل التحديث (اختياري)
 
         Returns:
             True إذا تم تشغيل المحدث بنجاح
@@ -238,7 +239,6 @@ class UpdateService:
             updater_py = os.path.join(current_dir, "updater.py")
 
             # قراءة عنوان التحميل من الإصدار إذا لم يكن ملف الإعداد متاحاً
-            download_url: str | None = None
             if not setup_path or not os.path.exists(setup_path):
                 try:
                     version_json = os.path.join(current_dir, "version.json")
@@ -252,22 +252,46 @@ class UpdateService:
                 except Exception as e:
                     safe_print(f"WARNING: فشل قراءة version.json: {e}")
 
+            if download_url and (not setup_path or not os.path.exists(setup_path)):
+                if not setup_path:
+                    setup_path = self.temp_update_path
+                if not os.path.isabs(setup_path):
+                    setup_path = os.path.abspath(setup_path)
+                try:
+                    os.makedirs(os.path.dirname(setup_path), exist_ok=True)
+                    response = requests.get(download_url, stream=True, timeout=60)
+                    response.raise_for_status()
+                    with open(setup_path, "wb") as f:
+                        for chunk in response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                except Exception as e:
+                    safe_print(f"ERROR: فشل تنزيل التحديث: {e}")
+                    return False
+
+            setup_exists = bool(setup_path and os.path.exists(setup_path))
+            prefer_py = not getattr(sys, "frozen", False) and os.path.exists(updater_py)
+
             # اختيار المحدث المناسب مع تمرير إما setup_path أو download_url
-            if os.path.exists(updater_exe):
-                updater_path = updater_exe
-                if download_url and (not setup_path or not os.path.exists(setup_path)):
-                    command = [updater_path, download_url]
-                else:
-                    command = [updater_path, current_dir, setup_path]
-            elif os.path.exists(updater_py):
+            if prefer_py:
                 updater_path = updater_py
-                if download_url and (not setup_path or not os.path.exists(setup_path)):
+                if download_url and not setup_exists:
                     command = [sys.executable, updater_path, download_url]
                 else:
                     command = [sys.executable, updater_path, current_dir, setup_path]
+                    if download_url:
+                        command.append(download_url)
+            elif os.path.exists(updater_exe):
+                updater_path = updater_exe
+                if download_url and not setup_exists:
+                    command = [updater_path, download_url]
+                else:
+                    command = [updater_path, current_dir, setup_path]
+                    if download_url:
+                        command.append(download_url)
             else:
                 # updater.exe غير موجود - شغّل ملف Setup مباشرة أو حمّل من الرابط
-                if download_url and (not setup_path or not os.path.exists(setup_path)):
+                if download_url and not setup_exists:
                     # تشغيل المُحدّث النصي لتنزيل الملف وتثبيته
                     safe_print("INFO: تشغيل المُحدّث النصي مع رابط التنزيل...")
                     os.spawnv(

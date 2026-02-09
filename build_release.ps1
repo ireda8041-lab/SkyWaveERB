@@ -1,8 +1,8 @@
-# Build Sky Wave ERP v2.1.5 Release
+# Build Sky Wave ERP v2.1.7 Release
 # Script to build and prepare release
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "Building Sky Wave ERP v2.1.5" -ForegroundColor Green
+Write-Host "Building Sky Wave ERP v2.1.7" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -11,7 +11,8 @@ Write-Host "Step 1: Checking Python..." -ForegroundColor Yellow
 $pythonVersion = python --version 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "OK: $pythonVersion" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "ERROR: Python not installed" -ForegroundColor Red
     exit 1
 }
@@ -22,7 +23,8 @@ Write-Host "Step 2: Checking PyInstaller..." -ForegroundColor Yellow
 $pyinstallerCheck = pip show pyinstaller 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Host "OK: PyInstaller installed" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "Installing PyInstaller..." -ForegroundColor Yellow
     pip install pyinstaller
 }
@@ -44,11 +46,12 @@ Write-Host ""
 Write-Host "Step 4: Building executable..." -ForegroundColor Yellow
 Write-Host "This may take several minutes..." -ForegroundColor Cyan
 
-pyinstaller SkyWaveERP.spec --clean --noconfirm
+python -m PyInstaller SkyWaveERP.spec --clean --noconfirm
 
 if ($LASTEXITCODE -eq 0) {
     Write-Host "OK: Executable built successfully" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "ERROR: Build failed" -ForegroundColor Red
     exit 1
 }
@@ -62,7 +65,8 @@ if (Test-Path $exePath) {
     $fileSizeRounded = [math]::Round($fileSize, 2)
     Write-Host "OK: File exists: $exePath" -ForegroundColor Green
     Write-Host "Size: $fileSizeRounded MB" -ForegroundColor Cyan
-} else {
+}
+else {
     Write-Host "ERROR: Executable not found" -ForegroundColor Red
     exit 1
 }
@@ -75,10 +79,12 @@ if (Test-Path $innoSetup) {
     & $innoSetup "SkyWaveERP_Setup.iss"
     if ($LASTEXITCODE -eq 0) {
         Write-Host "OK: Installer created" -ForegroundColor Green
-    } else {
+    }
+    else {
         Write-Host "WARNING: Installer creation failed" -ForegroundColor Yellow
     }
-} else {
+}
+else {
     Write-Host "WARNING: Inno Setup not installed - skipping" -ForegroundColor Yellow
 }
 
@@ -90,11 +96,11 @@ Write-Host "============================================================" -Foreg
 Write-Host ""
 Write-Host "Files:" -ForegroundColor Yellow
 Write-Host "  - Executable: dist\SkyWaveERP\SkyWaveERP.exe" -ForegroundColor Cyan
-if (Test-Path "installer_output\SkyWaveERP-Setup-2.1.5.exe") {
-    Write-Host "  - Installer: installer_output\SkyWaveERP-Setup-2.1.5.exe" -ForegroundColor Cyan
+if (Test-Path "installer_output\SkyWaveERP-Setup-2.1.6.exe") {
+    Write-Host "  - Installer: installer_output\SkyWaveERP-Setup-2.1.6.exe" -ForegroundColor Cyan
 }
 Write-Host ""
-Write-Host "Version: v2.1.5" -ForegroundColor Yellow
+Write-Host "Version: v2.1.6" -ForegroundColor Yellow
 $currentDate = Get-Date -Format "yyyy-MM-dd"
 Write-Host "Date: $currentDate" -ForegroundColor Yellow
 Write-Host ""

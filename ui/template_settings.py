@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from services.template_service import TemplateService
+from ui.invoice_preview_dialog import InvoicePreviewDialog
 from ui.styles import BUTTON_STYLES, get_cairo_font
 from ui.template_manager import TemplateManager
 
@@ -245,12 +246,22 @@ class TemplateSettings(QWidget):
             }
 
             # معاينة القالب
-            success = self.template_service.preview_template(
+            html_content = self.template_service.generate_invoice_html(
                 sample_project, sample_client, default_template["id"]
             )
+            exports_dir = self.template_service.get_exports_dir()
+            filename = self.template_service.build_export_basename(sample_project, sample_client)
 
-            if not success:
-                QMessageBox.warning(self, "خطأ", "فشل في معاينة القالب")
+            dialog = InvoicePreviewDialog(
+                html_content=html_content,
+                title="معاينة القالب الافتراضي",
+                base_url=self.template_service.templates_dir,
+                exports_dir=exports_dir,
+                file_basename=filename,
+                auto_print=False,
+                parent=self,
+            )
+            dialog.exec()
 
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"حدث خطأ أثناء المعاينة: {e}")

@@ -263,6 +263,13 @@ class SettingsService:
                 # حفظ محلياً
                 self.save_settings(self.settings)
 
+                try:
+                    from core.signals import app_signals
+
+                    app_signals.system_changed.emit()
+                except Exception:
+                    pass
+
                 safe_print("INFO: [SettingsService] ✅ تم تحميل الإعدادات من السحابة")
                 return True
 

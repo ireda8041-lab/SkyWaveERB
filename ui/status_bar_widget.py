@@ -177,10 +177,15 @@ class SyncButton(QWidget):
 
     def set_progress(self, current: int, total: int):
         """تحديث التقدم"""
-        if total > 0:
-            self._progress = int((current / total) * 100)
-            if self._status == "syncing":
-                self.button.setText(f"◐ {self._progress}%")
+        try:
+            current = int(current)
+            total = int(total)
+            if total > 0:
+                self._progress = int((current / total) * 100)
+                if self._status == "syncing":
+                    self.button.setText(f"◐ {self._progress}%")
+        except (ValueError, TypeError):
+            pass
 
 
 class SyncIndicator(QWidget):
@@ -250,9 +255,14 @@ class SyncIndicator(QWidget):
 
     def update_progress(self, current: int, total: int):
         """تحديث التقدم"""
-        if total > 0:
-            percent = int((current / total) * 100)
-            self.status_text.setText(f"مزامنة {percent}%")
+        try:
+            current = int(current)
+            total = int(total)
+            if total > 0:
+                percent = int((current / total) * 100)
+                self.status_text.setText(f"مزامنة {percent}%")
+        except (ValueError, TypeError):
+            pass
 
 
 class ToastNotification(QWidget):
@@ -471,7 +481,6 @@ class StatusBarWidget(QWidget):
     def update_time(self):
         """تحديث الوقت بصيغة 12 ساعة مع AM/PM"""
         try:
-
             current_time = QTime.currentTime()
             if self.time_label and not self.time_label.isHidden():
                 self.time_label.setText(current_time.toString("hh:mm:ss AP"))
@@ -520,10 +529,44 @@ class StatusBarWidget(QWidget):
 
     def update_sync_progress(self, current: int, total: int):
         """تحديث تقدم المزامنة"""
-        if hasattr(self, "sync_indicator"):
-            self.sync_indicator.update_progress(current, total)
-        if hasattr(self, "sync_button"):
-            self.sync_button.set_progress(current, total)
+        self.update_progress(current, total)
+
+    def update_progress(self, current, total):
+        """
+        Safe update progress method
+        Rewritten to safely cast inputs and avoid crashes
+        """
+        try:
+            # 1. Safe Cast
+            current_int = int(current) if current is not None else 0
+            total_int = int(total) if total is not None else 0
+
+            # 2. Update Sync Button (if exists)
+            if hasattr(self, "sync_button"):
+                # Handle both set_progress (existing) and update_progress (requested)
+                if hasattr(self.sync_button, "set_progress"):
+                    self.sync_button.set_progress(current_int, total_int)
+                elif hasattr(self.sync_button, "update_progress"):
+                    self.sync_button.update_progress(current_int, total_int)
+
+            # Update Sync Indicator (Preserve existing functionality)
+            if hasattr(self, "sync_indicator"):
+                self.sync_indicator.update_progress(current_int, total_int)
+
+            # 3. Calculate Percentage safely
+            if total_int > 0:
+                percentage = int((current_int / total_int) * 100)
+            else:
+                percentage = 0
+
+            # 4. Update UI Elements
+            if hasattr(self, "progress_bar"):
+                self.progress_bar.setValue(percentage)
+                self.progress_bar.setVisible(total_int > 0)
+
+        except Exception:
+            # Silent fail to prevent crash loop
+            pass
 
     def _on_sync_clicked(self):
         """معالج النقر على زرار المزامنة"""

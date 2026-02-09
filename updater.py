@@ -350,8 +350,14 @@ if HAS_GUI:
         def __init__(self, setup_path=None, app_folder=None, download_url=None, version_info=None):
             super().__init__()
             self.setup_path = setup_path
-            self.app_folder = app_folder or os.getcwd()
-            self.download_url = download_url
+            if app_folder:
+                self.app_folder = app_folder
+            else:
+                if getattr(sys, "frozen", False):
+                    self.app_folder = os.path.dirname(sys.executable)
+                else:
+                    self.app_folder = os.path.dirname(os.path.abspath(__file__))
+            self.download_url = download_url or (version_info or {}).get("url")
             self.version_info = version_info or {}
             self.expected_sha256 = _normalize_sha256(
                 self.version_info.get("sha256")
@@ -578,7 +584,41 @@ if HAS_GUI:
                     self.signals.detail.emit(f"Backup: {backup}")
                 self.signals.progress.emit(20)
 
-                # Download if needed
+                if self.setup_path and not os.path.isabs(self.setup_path):
+                    self.setup_path = os.path.abspath(
+                        os.path.join(self.app_folder or os.getcwd(), self.setup_path)
+                    )
+
+                if not self.setup_path or not os.path.exists(self.setup_path):
+                    app_data_base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+                    candidates = [
+                        self.setup_path,
+                        os.path.join(app_data_base, "SkyWaveERP", "SkyWave-Setup-Update.exe"),
+                        os.path.join(tempfile.gettempdir(), "SkyWaveERP_Update.exe"),
+                        os.path.join(self.app_folder, "SkyWaveERP_Update.exe"),
+                        os.path.join(self.app_folder, "SkyWave-Setup-Update.exe"),
+                    ]
+                    for candidate in candidates:
+                        if candidate and os.path.exists(candidate):
+                            self.setup_path = candidate
+                            break
+
+                if not self.download_url:
+                    for base_dir in [self.app_folder, os.getcwd()]:
+                        if not base_dir:
+                            continue
+                        version_path = os.path.join(base_dir, "version.json")
+                        if os.path.exists(version_path):
+                            try:
+                                with open(version_path, encoding="utf-8") as f:
+                                    data = json.load(f)
+                                url = str(data.get("url") or "").strip()
+                                if url:
+                                    self.download_url = url
+                                    break
+                            except Exception:
+                                continue
+
                 if self.download_url and (
                     not self.setup_path or not os.path.exists(self.setup_path)
                 ):
@@ -594,7 +634,6 @@ if HAS_GUI:
 
                 self.signals.progress.emit(80)
 
-                # Verify
                 if not self.setup_path or not os.path.exists(self.setup_path):
                     self.signals.finished.emit(False, "Setup file not found")
                     return
@@ -728,7 +767,11 @@ def main():
     version_info = {}
 
     args = sys.argv[1:]
-    if len(args) >= 2:
+    if len(args) >= 3:
+        app_folder = args[0]
+        setup_path = args[1]
+        download_url = args[2]
+    elif len(args) >= 2:
         app_folder = args[0]
         setup_path = args[1]
     elif len(args) == 1:
@@ -736,6 +779,12 @@ def main():
             download_url = args[0]
         else:
             setup_path = args[0]
+
+    if not app_folder:
+        if getattr(sys, "frozen", False):
+            app_folder = os.path.dirname(sys.executable)
+        else:
+            app_folder = os.path.dirname(os.path.abspath(__file__))
 
     # Read version info
     try:

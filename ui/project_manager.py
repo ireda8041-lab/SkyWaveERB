@@ -48,6 +48,7 @@ from services.service_service import ServiceService
 from ui.client_editor_dialog import ClientEditorDialog
 from ui.custom_spinbox import CustomSpinBox
 from ui.expense_editor_dialog import ExpenseEditorDialog
+from ui.invoice_preview_dialog import InvoicePreviewDialog
 from ui.payment_dialog import PaymentDialog
 from ui.project_profit_dialog import ProjectProfitDialog
 from ui.responsive_toolbar import ResponsiveToolbar
@@ -3994,18 +3995,22 @@ class ProjectManagerTab(QWidget):
             if self.template_service:
                 safe_print("INFO: [ProjectManager] استخدام template_service للطباعة")
 
-                success = self.template_service.preview_template(
+                html_content = self.template_service.generate_invoice_html(
                     project=project, client_info=client_info, payments=payments_list
                 )
+                exports_dir = self.template_service.get_exports_dir()
+                filename = self.template_service.build_export_basename(project, client_info)
 
-                if success:
-                    QMessageBox.information(
-                        self,
-                        "✅ تم إنشاء الفاتورة",
-                        "تم فتح معاينة الفاتورة في المتصفح.\n\nيمكنك طباعتها من المتصفح (Ctrl+P)",
-                    )
-                else:
-                    QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
+                dialog = InvoicePreviewDialog(
+                    html_content=html_content,
+                    title=f"طباعة فاتورة - {project.name}",
+                    base_url=self.template_service.templates_dir,
+                    exports_dir=exports_dir,
+                    file_basename=filename,
+                    auto_print=True,
+                    parent=self,
+                )
+                dialog.exec()
                 return
 
             # Fallback: استخدام InvoicePrintingService
@@ -4192,18 +4197,22 @@ class ProjectManagerTab(QWidget):
 
             # استخدام template_service للمعاينة
             if self.template_service:
-                success = self.template_service.preview_template(
+                html_content = self.template_service.generate_invoice_html(
                     project=project, client_info=client_info, payments=payments_list
                 )
+                exports_dir = self.template_service.get_exports_dir()
+                filename = self.template_service.build_export_basename(project, client_info)
 
-                if success:
-                    QMessageBox.information(
-                        self,
-                        "✅ معاينة الفاتورة",
-                        "تم فتح معاينة الفاتورة في المتصفح.\n\nيمكنك طباعتها من المتصفح (Ctrl+P)",
-                    )
-                else:
-                    QMessageBox.critical(self, "خطأ", "فشل في معاينة الفاتورة")
+                dialog = InvoicePreviewDialog(
+                    html_content=html_content,
+                    title=f"معاينة فاتورة - {project.name}",
+                    base_url=self.template_service.templates_dir,
+                    exports_dir=exports_dir,
+                    file_basename=filename,
+                    auto_print=False,
+                    parent=self,
+                )
+                dialog.exec()
             else:
                 QMessageBox.warning(self, "خطأ", "خدمة القوالب غير متوفرة")
 
