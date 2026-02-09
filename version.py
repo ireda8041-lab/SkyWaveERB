@@ -2,8 +2,8 @@
 معلومات الإصدار - Sky Wave ERP
 """
 
-__version__ = "2.1.8"
-__version_name__ = "Sky Wave ERP v2.1.8"
+__version__ = "2.1.9"
+__version_name__ = "Sky Wave ERP v2.1.9"
 __release_date__ = "2026-02-09"
 __author__ = "Sky Wave Team"
 __email__ = "dev@skywave.agency"
@@ -26,7 +26,7 @@ UPDATE_CHECK_URL = "https://api.github.com/repos/ireda8041-lab/SkyWaveERB/releas
 # إعدادات التحديث التلقائي
 AUTO_UPDATE_ENABLED = True  # مفعّل للتحقق التلقائي من التحديثات
 AUTO_UPDATE_INTERVAL_HOURS = 24  # التحقق كل 24 ساعة
-AUTO_UPDATE_ON_STARTUP = True  # التحقق عند بدء التشغيل
+AUTO_UPDATE_ON_STARTUP = False  # ⚡ معطّل عند بدء التشغيل لتجنب التعليق
 
 
 def compare_versions(v1, v2):

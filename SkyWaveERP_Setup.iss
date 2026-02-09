@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.1.8"
+#define MyAppVersion "2.1.9"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -74,7 +74,7 @@ Name: "quicklaunchicon"; Description: "إنشاء اختصار في شريط ا�
 
 [Files]
 ; نسخ كل محتويات مجلد dist\SkyWaveERP (قاعدة البيانات موجودة في _internal)
-Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "*.db-shm,*.db-wal,*.log"
+Source: "dist\SkyWaveERP\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; نسخ قاعدة البيانات الأولية من المجلد الجذري كاحتياطي (لو مش موجودة في _internal)
 Source: "skywave_local.db"; DestDir: "{app}"; Flags: onlyifdoesntexist skipifsourcedoesntexist
@@ -86,7 +86,7 @@ Source: ".env"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "cloud_config.json"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; نسخ الأيقونة
-Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; نسخ المحدث (إذا كان موجوداً)
 Source: "updater.exe"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
@@ -152,7 +152,9 @@ begin
     if MsgBox('تم العثور على إصدار سابق من Sky Wave ERP.' + #13#10 +
               'هل تريد إلغاء تثبيته أولاً؟', mbConfirmation, MB_YESNO) = IDYES then
     begin
-      Exec(RemoveQuotes(UninstallString), '/SILENT', '', SW_SHOW, ewWaitUntilTerminated, ResultCode);
+      // استخدام /VERYSILENT بدلاً من /SILENT لتجنب أي مشاكل
+      Exec(RemoveQuotes(UninstallString), '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Sleep(2000); // انتظار إضافي للتأكد من اكتمال الإلغاء
     end;
   end;
 end;

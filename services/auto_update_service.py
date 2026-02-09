@@ -44,7 +44,8 @@ class BackgroundUpdateChecker(QThread):
                 "User-Agent": "SkyWaveERP-Updater",
             }
 
-            response = requests.get(self.check_url, headers=headers, timeout=15)
+            # ⚡ زيادة timeout إلى 30 ثانية
+            response = requests.get(self.check_url, headers=headers, timeout=30)
             response.raise_for_status()
 
             data = response.json()
@@ -73,13 +74,17 @@ class BackgroundUpdateChecker(QThread):
                 logger.debug("لا توجد تحديثات جديدة")
                 self.check_completed.emit(False)
 
+        except requests.Timeout:
+            # ⚡ معالجة خاصة لـ timeout - لا نعتبرها خطأ حرج
+            logger.debug("انتهت مهلة التحقق من التحديثات (طبيعي)")
+            self.check_completed.emit(False)
         except requests.RequestException as e:
-            logger.warning("فشل التحقق من التحديثات: %s", e)
-            self.error_occurred.emit(str(e))
+            # ⚡ أخطاء الشبكة - لا نعتبرها خطأ حرج
+            logger.debug("فشل التحقق من التحديثات (طبيعي): %s", e)
             self.check_completed.emit(False)
         except Exception as e:
-            logger.error("خطأ في التحقق من التحديثات: %s", e)
-            self.error_occurred.emit(str(e))
+            # ⚡ أخطاء أخرى - نسجلها فقط بدون إيقاف البرنامج
+            logger.debug("خطأ في التحقق من التحديثات: %s", e)
             self.check_completed.emit(False)
 
 
@@ -122,12 +127,19 @@ class AutoUpdateService(QObject):
 
         # التحقق عند بدء التشغيل
         if AUTO_UPDATE_ON_STARTUP:
-            # تأخير 60 ثانية بعد بدء التشغيل (بدلاً من 30)
-            QTimer.singleShot(60000, self.check_for_updates)
+            # ⚡ تأخير 120 ثانية (دقيقتين) بعد بدء التشغيل لتجنب التعارض مع المزامنة
+            QTimer.singleShot(120000, self._safe_check_for_updates)
 
         # بدء المؤقت الدوري
         self._timer.start(self.check_interval)
         logger.info("بدء التحقق الدوري كل %s ساعات", AUTO_UPDATE_INTERVAL_HOURS)
+
+    def _safe_check_for_updates(self):
+        """فحص آمن للتحديثات - لا يوقف البرنامج عند الفشل"""
+        try:
+            self.check_for_updates()
+        except Exception as e:
+            logger.debug("خطأ في الفحص الآمن للتحديثات: %s", e)
 
     def stop(self):
         """إيقاف خدمة التحديث التلقائي"""
