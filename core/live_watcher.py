@@ -399,27 +399,51 @@ class LiveUpdateRouter(QObject):
             logger.debug("[LiveRouter] خطأ في طلب المزامنة: %s", e)
 
     def refresh_all(self):
-        """🔄 تحديث جميع الواجهات"""
-        logger.info("[LiveRouter] 🔄 تحديث جميع الواجهات")
-        safe_print("INFO: [LiveRouter] 🔄 تحديث جميع الواجهات")
+        """
+        🔄 تحديث جميع الواجهات (Lazy Loading)
+        ⚡ يحدث التاب الظاهر فقط، والباقي يُعلّم كـ "pending" للتحديث لاحقاً
+        """
+        logger.info("[LiveRouter] 🔄 تحديث جميع الواجهات (Lazy)")
+        safe_print("INFO: [LiveRouter] 🔄 تحديث جميع الواجهات (Lazy)")
 
         try:
-            if hasattr(self.main_window, "refresh_table"):
-                tables = ["clients", "projects", "services", "accounts"]
-                for i, name in enumerate(tables):
-                    QTimer.singleShot(
-                        100 * (i + 1), lambda t=name: self.main_window.refresh_table(t)
-                    )
-            else:
-                if hasattr(self.main_window, "clients_tab"):
-                    QTimer.singleShot(100, self.main_window.clients_tab.load_clients)
-                if hasattr(self.main_window, "projects_tab"):
-                    QTimer.singleShot(200, self.main_window.projects_tab.load_projects)
-                if hasattr(self.main_window, "services_tab"):
-                    QTimer.singleShot(300, self.main_window.services_tab.load_services)
-                if hasattr(self.main_window, "accounting_tab"):
-                    QTimer.singleShot(400, self.main_window.accounting_tab.load_accounts)
-                if hasattr(self.main_window, "dashboard_tab"):
-                    QTimer.singleShot(500, self.main_window.dashboard_tab.refresh_data)
+            # الحصول على التاب الحالي
+            if not hasattr(self.main_window, "tabs"):
+                logger.debug("[LiveRouter] لا يوجد tabs في main_window")
+                return
+
+            current_index = self.main_window.tabs.currentIndex()
+            current_tab_name = self.main_window.tabs.tabText(current_index)
+
+            # قائمة جميع التابات التي تحتاج تحديث
+            all_tabs = [
+                "🏠 الصفحة الرئيسية",
+                "👤 العملاء",
+                "🚀 المشاريع",
+                "🛠️ الخدمات والباقات",
+                "💰 الدفعات",
+                "💳 المصروفات",
+                "📊 المحاسبة",
+            ]
+
+            # ⚡ تحديث التاب الظاهر فوراً فقط
+            if current_tab_name in all_tabs:
+                logger.info("[LiveRouter] ⚡ تحديث فوري للتاب الظاهر: %s", current_tab_name)
+                safe_print(f"INFO: [LiveRouter] ⚡ تحديث فوري للتاب الظاهر: {current_tab_name}")
+
+                # إبطال الـ cache وتحديث فوراً
+                if hasattr(self.main_window, "_invalidate_tab_cache"):
+                    self.main_window._invalidate_tab_cache(current_tab_name)
+
+                if hasattr(self.main_window, "_do_load_tab_data_safe"):
+                    QTimer.singleShot(0, lambda: self.main_window._do_load_tab_data_safe(current_tab_name))
+
+            # 💤 تعليم باقي التابات للتحديث لاحقاً
+            if hasattr(self.main_window, "pending_refreshes"):
+                for tab_name in all_tabs:
+                    if tab_name != current_tab_name:
+                        logger.debug("[LiveRouter] 💤 تعليم التاب للتحديث لاحقاً: %s", tab_name)
+                        self.main_window.pending_refreshes[tab_name] = True
+
         except Exception as e:
             logger.debug("[LiveRouter] خطأ في تحديث الواجهات: %s", e)
