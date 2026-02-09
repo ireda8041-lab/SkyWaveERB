@@ -24,9 +24,9 @@ CACHE_ENABLED = True  # تفعيل الـ cache
 UPDATE_CHECK_URL = "https://api.github.com/repos/ireda8041-lab/SkyWaveERB/releases/latest"
 
 # إعدادات التحديث التلقائي
-AUTO_UPDATE_ENABLED = False  # معطّل للاستقرار
+AUTO_UPDATE_ENABLED = True  # مفعّل للتحقق التلقائي من التحديثات
 AUTO_UPDATE_INTERVAL_HOURS = 24  # التحقق كل 24 ساعة
-AUTO_UPDATE_ON_STARTUP = False  # عدم التحقق عند بدء التشغيل
+AUTO_UPDATE_ON_STARTUP = True  # التحقق عند بدء التشغيل
 
 
 def compare_versions(v1, v2):
