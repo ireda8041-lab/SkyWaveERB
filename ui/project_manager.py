@@ -235,8 +235,8 @@ class ProjectEditorDialog(QDialog):
             height = max(620, int(screen_geo.height() * 0.92))
             width = min(width, screen_geo.width())
             height = min(height, screen_geo.height())
-            min_width = min(980, max(760, screen_geo.width() - 60))
-            min_height = min(700, max(520, screen_geo.height() - 80))
+            min_width = min(980, max(680, screen_geo.width() - 80))
+            min_height = min(700, max(460, screen_geo.height() - 120))
             self.setMinimumSize(min_width, min_height)
             x = screen_geo.x() + max(0, (screen_geo.width() - width) // 2)
             y = screen_geo.y() + max(0, (screen_geo.height() - height) // 2)
@@ -825,7 +825,20 @@ class ProjectEditorDialog(QDialog):
         buttons_layout.setContentsMargins(0, 5, 0, 5)
         main_layout.addLayout(buttons_layout)
 
-        self.setLayout(main_layout)
+        content_widget = QWidget()
+        content_widget.setLayout(main_layout)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setWidget(content_widget)
+
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(scroll_area)
+        self._editor_scroll = scroll_area
 
         # جعل التاب متجاوب مع حجم الشاشة
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)

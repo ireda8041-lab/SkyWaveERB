@@ -12,7 +12,7 @@ MongoDB هو المصدر الرئيسي، SQLite نسخة محلية للـ off
 import json
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -2340,6 +2340,12 @@ class UnifiedSyncManagerV3(QObject):
 
                     # الحصول على Watermark لهذا الجدول
                     watermark = self._watermarks.get(table, "1970-01-01T00:00:00")
+                    watermark_dt = self._parse_iso_datetime(watermark)
+                    if watermark_dt and watermark_dt > datetime.now() + timedelta(seconds=30):
+                        fallback_dt = datetime.now() - timedelta(minutes=5)
+                        watermark = fallback_dt.isoformat()
+                        self._watermarks[table] = watermark
+                        self._save_watermarks()
 
                     # جلب السجلات من MongoDB المحدّثة بعد الـ watermark
                     collection = self.repo.mongo_db[table]

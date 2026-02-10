@@ -4,6 +4,20 @@
 
 ---
 
+## [2.2.5] - 2026-02-10
+
+### Fixed
+- Guard future watermarks to avoid missed delta updates.
+- Settings sync respects newer local settings and pushes upstream.
+- Manual sync runs in background without UI freeze.
+
+### Changed
+- Settings sync can be triggered by notification events.
+- Main tabs and settings sub-tabs adapt better on small screens.
+- Project dialog becomes scrollable on small displays.
+
+---
+
 ## [2.2.4] - 2026-02-10
 
 ### Fixed

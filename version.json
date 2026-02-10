@@ -1,16 +1,16 @@
 ﻿{
-  "version": "2.2.4",
-  "version_name": "Sky Wave ERP v2.2.4",
+  "version": "2.2.5",
+  "version_name": "Sky Wave ERP v2.2.5",
   "release_date": "2026-02-10",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.4/SkyWaveERP-Setup-2.2.4.exe",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.5/SkyWaveERP-Setup-2.2.5.exe",
   "changelog": [
-    "Delta sync now runs in a background thread for true realtime updates.",
-    "Clears dirty flags on successful online sync to prevent repeat pushes.",
-    "Avoids closed-database errors during shutdown.",
-    "Smoother cross-device refresh during heavy UI operations."
+    "Delta sync now guards future watermarks to avoid missed updates.",
+    "Settings sync is triggered by notifications and avoids overwriting newer local changes.",
+    "Main tabs and settings sub-tabs now adapt better to small screens.",
+    "Project dialog becomes scrollable on small displays and manual sync is non-blocking."
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "تحسينات المزامنة الفورية: تشغيل الـ Delta في خلفية مستقلة، تقليل الحمل والتكرار، وتفادي أخطاء الإغلاق.",
-  "notes_en": "Realtime sync improvements: background delta loop, less duplicate pushes, and clean shutdown behavior."
+  "notes_ar": "تحسينات المزامنة الفورية والإعدادات: إصلاح watermarks المستقبلية، مزامنة إعدادات أسرع، وتحسين التوافق مع الشاشات الصغيرة.",
+  "notes_en": "Realtime + settings sync improvements, watermark guardrails, and better small-screen layout behavior."
 }

@@ -13,6 +13,7 @@ import glob
 import json
 import os
 import sys
+import threading
 import time
 import traceback
 import webbrowser
@@ -155,6 +156,7 @@ class SettingsTab(QWidget):
         self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
         self.tabs.setDocumentMode(True)
         self.tabs.setUsesScrollButtons(True)
+        self._tabs_compact = None
 
         main_layout.addWidget(self.tabs)
 
@@ -260,6 +262,8 @@ class SettingsTab(QWidget):
         # ربط تغيير التاب الفرعي لتحميل البيانات
         self.tabs.currentChanged.connect(self._on_sub_tab_changed)
 
+        self._apply_tabs_responsive()
+
         # ⚡ تحميل البيانات بعد ظهور النافذة (لتجنب التجميد)
         # self.load_settings_data() - يتم استدعاؤها من MainWindow
         # self.load_users() - يتم استدعاؤها من MainWindow
@@ -267,6 +271,24 @@ class SettingsTab(QWidget):
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
 
         apply_rtl_alignment_to_all_fields(self)
+
+    def resizeEvent(self, event):  # pylint: disable=invalid-name
+        super().resizeEvent(event)
+        self._apply_tabs_responsive()
+
+    def _apply_tabs_responsive(self):
+        if not hasattr(self, "tabs"):
+            return
+        compact = self.width() < 1200
+        if self._tabs_compact == compact:
+            return
+        self._tabs_compact = compact
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setExpanding(not compact)
+        self.tabs.setUsesScrollButtons(compact)
+        self.tabs.setElideMode(
+            Qt.TextElideMode.ElideRight if compact else Qt.TextElideMode.ElideNone
+        )
         app_signals.safe_connect(app_signals.system_changed, self.load_settings_data)
 
     def _search_settings_tabs(self, text: str):
@@ -3535,29 +3557,15 @@ class SettingsTab(QWidget):
             self.manual_sync_btn.setEnabled(False)
             self.manual_sync_btn.setText("⏳ جاري المزامنة...")
 
-            # تشغيل المزامنة
-            result = sync_manager.sync_now()
+            def worker():
+                try:
+                    result = sync_manager.sync_now()
+                except Exception as e:
+                    result = {"success": False, "reason": str(e), "pushed": 0, "pulled": 0}
 
-            # إعادة تفعيل الزر
-            self.manual_sync_btn.setEnabled(True)
-            self.manual_sync_btn.setText("🔄 مزامنة فورية الآن")
+                QTimer.singleShot(0, lambda: self._on_manual_sync_completed(result))
 
-            # عرض النتيجة
-            if result.get("success"):
-                pushed = result.get("pushed", 0)
-                pulled = result.get("pulled", 0)
-
-                QMessageBox.information(
-                    self,
-                    "✅ نجاح",
-                    f"تمت المزامنة بنجاح!\n\n• تم رفع {pushed} سجل\n• تم تنزيل {pulled} سجل",
-                )
-            else:
-                reason = result.get("reason", "غير معروف")
-                QMessageBox.warning(self, "⚠️ فشل", f"فشلت المزامنة:\n{reason}")
-
-            # تحديث الحالة
-            self.refresh_sync_status()
+            threading.Thread(target=worker, daemon=True).start()
 
         except Exception as e:
             self.manual_sync_btn.setEnabled(True)
@@ -3565,6 +3573,27 @@ class SettingsTab(QWidget):
 
             QMessageBox.critical(self, "❌ خطأ", f"حدث خطأ أثناء المزامنة:\n{e}")
             safe_print(f"ERROR: [SyncTab] فشل المزامنة اليدوية: {e}")
+
+    def _on_manual_sync_completed(self, result: dict):
+        self.manual_sync_btn.setEnabled(True)
+        self.manual_sync_btn.setText("🔄 مزامنة فورية الآن")
+
+        if result.get("success"):
+            pushed = int(result.get("pushed", 0))
+            pulled = int(result.get("pulled", 0))
+            if pushed == 0 and pulled == 0:
+                QMessageBox.information(self, "✅ نجاح", "لا توجد تغييرات جديدة للمزامنة.")
+            else:
+                QMessageBox.information(
+                    self,
+                    "✅ نجاح",
+                    f"تمت المزامنة بنجاح!\n\n• تم رفع {pushed} سجل\n• تم تنزيل {pulled} سجل",
+                )
+        else:
+            reason = result.get("reason", "غير معروف")
+            QMessageBox.warning(self, "⚠️ فشل", f"فشلت المزامنة:\n{reason}")
+
+        self.refresh_sync_status()
 
     def setup_payment_methods_tab(self):
         """إعداد تاب طرق الدفع - CRUD لطرق الدفع في الفواتير"""

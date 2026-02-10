@@ -9,6 +9,7 @@
 import hashlib
 import os
 import platform
+import threading
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -318,6 +319,9 @@ class NotificationSyncWorker(QThread):
         self._last_cleanup = 0.0
         self._last_sync_trigger = 0.0
         self._sync_trigger_cooldown = 0.4
+        self._last_settings_sync = 0.0
+        self._settings_sync_interval = 60.0
+        self._settings_sync_cooldown = 1.0
 
     def set_repository(self, repo):
         self.repo = repo
@@ -401,6 +405,7 @@ class NotificationSyncWorker(QThread):
 
             trigger_tables: set[str] = set()
             saw_new = False
+            settings_triggered = False
 
             for notif in notifications:
                 try:
@@ -429,6 +434,9 @@ class NotificationSyncWorker(QThread):
                     )
 
                     entity_type = notif.get("entity_type")
+                    entity_key = str(entity_type).strip().lower() if entity_type else ""
+                    if entity_key in {"system_settings", "settings"}:
+                        settings_triggered = True
                     table_name = self._map_entity_to_table(entity_type)
                     if table_name:
                         trigger_tables.add(table_name)
@@ -438,6 +446,12 @@ class NotificationSyncWorker(QThread):
 
             if saw_new:
                 self._trigger_instant_sync(trigger_tables)
+
+            if (
+                settings_triggered
+                or (time.time() - self._last_settings_sync) > self._settings_sync_interval
+            ):
+                self._trigger_settings_sync()
 
             # تنظيف الإشعارات القديمة (مع معالجة الأخطاء)
 
@@ -481,6 +495,26 @@ class NotificationSyncWorker(QThread):
         if not entity_type:
             return None
         return cls._ENTITY_TABLE_MAP.get(str(entity_type).strip().lower())
+
+    def _trigger_settings_sync(self):
+        repo = self.repo
+        if repo is None or not getattr(repo, "online", False):
+            return
+        settings_service = getattr(repo, "settings_service", None)
+        if settings_service is None:
+            return
+        now = time.time()
+        if (now - self._last_settings_sync) < self._settings_sync_cooldown:
+            return
+        self._last_settings_sync = now
+
+        def worker():
+            try:
+                settings_service.sync_settings_from_cloud(repo)
+            except Exception as e:
+                safe_print(f"WARNING: [NotificationSync] Settings sync failed: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _trigger_instant_sync(self, tables: set[str]):
         repo = self.repo

@@ -1,6 +1,10 @@
 import base64
+import hashlib
 import json
 import os
+import platform
+import uuid
+from datetime import datetime
 from typing import Any
 
 # استيراد دالة الطباعة الآمنة
@@ -13,6 +17,32 @@ except ImportError:
             print(msg)
         except UnicodeEncodeError:
             pass
+
+
+def _get_stable_device_id() -> str:
+    """إنشاء معرف ثابت للجهاز بدون الاعتماد على Qt."""
+    try:
+        machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
+        try:
+            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
+        except TypeError:
+            digest = hashlib.sha256(machine_info.encode()).hexdigest()
+        return digest[:8]
+    except Exception:
+        device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
+        if os.path.exists(device_file):
+            try:
+                with open(device_file, encoding="utf-8") as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        new_id = str(uuid.uuid4())[:8]
+        try:
+            with open(device_file, "w", encoding="utf-8") as f:
+                f.write(new_id)
+        except OSError:
+            pass
+        return new_id
 
 
 # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
@@ -44,6 +74,7 @@ class SettingsService:
         "print_client_logo_width_px": 120,
         "print_client_logo_max_height_px": 40,
         "print_client_logo_max_width_percent": 22,
+        "settings_last_modified": "",
     }
 
     def __init__(self):
@@ -51,6 +82,9 @@ class SettingsService:
         self.settings = self.load_settings()
         self._merge_local_settings()
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
+
+    def _touch_settings(self) -> None:
+        self.settings["settings_last_modified"] = datetime.now().isoformat()
 
     def set_repository(self, repository) -> None:
         self.repo = repository
@@ -119,6 +153,7 @@ class SettingsService:
     def update_setting(self, key: str, value: Any):
         """تحديث إعداد معين وحفظه"""
         self.settings[key] = value
+        self._touch_settings()
         self.save_settings(self.settings)
         try:
             repo = getattr(self, "repo", None)
@@ -136,6 +171,7 @@ class SettingsService:
             return
         for k, v in new_settings.items():
             self.settings[k] = v
+        self._touch_settings()
         self.save_settings(self.settings)
         try:
             repo = getattr(self, "repo", None)
@@ -170,6 +206,7 @@ class SettingsService:
             # حفظ في الإعدادات
             self.settings["company_logo_data"] = logo_base64
             self.settings["company_logo_path"] = file_path  # للعرض المحلي
+            self._touch_settings()
             self.save_settings(self.settings)
 
             safe_print(f"INFO: [SettingsService] تم حفظ اللوجو ({len(logo_base64)} حرف)")
@@ -217,6 +254,7 @@ class SettingsService:
         """مسح اللوجو"""
         self.settings["company_logo_data"] = ""
         self.settings["company_logo_path"] = ""
+        self._touch_settings()
         self.save_settings(self.settings)
         safe_print("INFO: [SettingsService] تم مسح اللوجو")
 
@@ -233,8 +271,33 @@ class SettingsService:
             # حفظ الإعدادات في مجموعة system_settings
             collection = repository.mongo_db["system_settings"]
 
+            stamp = datetime.now().isoformat()
+            payload = dict(self.settings)
+            payload["settings_last_modified"] = stamp
+
+            # حفظ محلي لتوحيد الطابع الزمني بين الأجهزة
+            self.settings["settings_last_modified"] = stamp
+            self.save_settings(self.settings)
+
             # استخدام upsert لتحديث أو إنشاء
-            collection.update_one({"_id": "company_settings"}, {"$set": self.settings}, upsert=True)
+            collection.update_one({"_id": "company_settings"}, {"$set": payload}, upsert=True)
+
+            # بث إشعار خفيف لمزامنة باقي الأجهزة (بدون اعتماد Change Streams)
+            try:
+                notifications = repository.mongo_db["notifications"]
+                notifications.insert_one(
+                    {
+                        "message": "تم تحديث إعدادات النظام",
+                        "type": "info",
+                        "title": "⚙️ الإعدادات",
+                        "device_id": _get_stable_device_id(),
+                        "created_at": stamp,
+                        "entity_type": "system_settings",
+                        "action": "updated",
+                    }
+                )
+            except Exception:
+                pass
 
             safe_print("INFO: [SettingsService] ✅ تم رفع الإعدادات للسحابة")
             return True
@@ -255,6 +318,15 @@ class SettingsService:
             if cloud_settings:
                 # إزالة _id من الإعدادات
                 cloud_settings.pop("_id", None)
+
+                local_stamp = str(self.settings.get("settings_last_modified") or "")
+                remote_stamp = str(cloud_settings.get("settings_last_modified") or "")
+
+                local_dt = self._parse_settings_timestamp(local_stamp)
+                remote_dt = self._parse_settings_timestamp(remote_stamp)
+
+                if local_dt and remote_dt and local_dt > remote_dt:
+                    return self.sync_settings_to_cloud(repository)
 
                 # دمج الإعدادات (السحابة تأخذ الأولوية)
                 for key, value in cloud_settings.items():
@@ -278,3 +350,12 @@ class SettingsService:
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل تحميل الإعدادات من السحابة: {e}")
             return False
+
+    @staticmethod
+    def _parse_settings_timestamp(value: str) -> datetime | None:
+        try:
+            if not value:
+                return None
+            return datetime.fromisoformat(value)
+        except Exception:
+            return None

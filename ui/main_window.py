@@ -145,8 +145,10 @@ class MainWindow(QMainWindow):
         screen_width = screen_geometry.width()
         screen_height = screen_geometry.height()
 
-        # تعيين الحد الأدنى للنافذة (حجم صغير يناسب أي شاشة)
-        self.setMinimumSize(QSize(1024, 600))
+        # تعيين الحد الأدنى للنافذة بناءً على حجم الشاشة
+        min_width = min(1024, max(800, screen_width - 80))
+        min_height = min(600, max(500, screen_height - 80))
+        self.setMinimumSize(QSize(min_width, min_height))
 
         # تعيين حجم النافذة بنسبة 90% من حجم الشاشة (أكثر راحة)
         window_width = int(screen_width * 0.9)
@@ -191,6 +193,7 @@ class MainWindow(QMainWindow):
         self.tabs.tabBar().setExpanding(True)
         self.tabs.setUsesScrollButtons(False)  # إيقاف أزرار التمرير لأن التابات تتمدد
         self.tabs.setElideMode(Qt.TextElideMode.ElideNone)  # عدم اقتطاع النص
+        self._tabs_compact = None
 
         # جعل الـ tabs متجاوبة مع حجم الشاشة بشكل كامل
         self.tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -270,6 +273,8 @@ class MainWindow(QMainWindow):
             }
         """
         )
+
+        self._apply_tabs_responsive()
 
         if self.template_service is None:
             self.template_service = TemplateService(
@@ -1502,6 +1507,7 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):  # pylint: disable=invalid-name
         """معالج تغيير حجم النافذة - تحديث محسّن"""
         super().resizeEvent(event)
+        self._apply_tabs_responsive()
         # إعادة ضبط جميع العناصر عند تغيير الحجم
         if hasattr(self, "tabs"):
             self.tabs.updateGeometry()
@@ -1513,6 +1519,20 @@ class MainWindow(QMainWindow):
         # تحديث central widget
         if self.centralWidget():
             self.centralWidget().updateGeometry()
+
+    def _apply_tabs_responsive(self):
+        if not hasattr(self, "tabs"):
+            return
+        compact = self.width() < 1200
+        if self._tabs_compact == compact:
+            return
+        self._tabs_compact = compact
+        tab_bar = self.tabs.tabBar()
+        tab_bar.setExpanding(not compact)
+        self.tabs.setUsesScrollButtons(compact)
+        self.tabs.setElideMode(
+            Qt.TextElideMode.ElideRight if compact else Qt.TextElideMode.ElideNone
+        )
 
     def setup_title_bar(self):
         """تخصيص شريط العنوان بألوان البرنامج"""
