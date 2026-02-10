@@ -1553,7 +1553,7 @@ class Repository:
                 client_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE clients SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE clients SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -1677,7 +1677,7 @@ class Repository:
                 )
 
                 self.sqlite_cursor.execute(
-                    "UPDATE clients SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                    "UPDATE clients SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ?",
                     (client_id, client_id),
                 )
                 self.sqlite_conn.commit()
@@ -2183,7 +2183,7 @@ class Repository:
                     {"$set": {"status": archive_status, "last_modified": now_dt}},
                 )
                 self.sqlite_cursor.execute(
-                    "UPDATE clients SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                    "UPDATE clients SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ?",
                     (client_id_num, client_id),
                 )
                 self.sqlite_conn.commit()
@@ -2309,7 +2309,7 @@ class Repository:
                     },
                 )
                 self.sqlite_cursor.execute(
-                    "UPDATE journal_entries SET sync_status = 'synced' WHERE related_document_id = ?",
+                    "UPDATE journal_entries SET sync_status = 'synced', dirty_flag = 0 WHERE related_document_id = ?",
                     (doc_id,),
                 )
                 self.sqlite_conn.commit()
@@ -2395,7 +2395,7 @@ class Repository:
                     mongo_id = str(result.inserted_id)
 
                     self.sqlite_cursor.execute(
-                        "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                        "UPDATE accounts SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                         (mongo_id, "synced", local_id),
                     )
                     self.sqlite_conn.commit()
@@ -2413,7 +2413,7 @@ class Repository:
                             if existing:
                                 mongo_id = str(existing["_id"])
                                 self.sqlite_cursor.execute(
-                                    "UPDATE accounts SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                                    "UPDATE accounts SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                                     (mongo_id, "synced", local_id),
                                 )
                                 self.sqlite_conn.commit()
@@ -2574,7 +2574,7 @@ class Repository:
 
                     # تحديث الـ mongo_id في SQLite
                     self.sqlite_cursor.execute(
-                        "UPDATE users SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                        "UPDATE users SET _mongo_id = ?, sync_status = 'synced', dirty_flag = 0 WHERE id = ?",
                         (mongo_id, local_id),
                     )
                     self.sqlite_conn.commit()
@@ -2701,7 +2701,8 @@ class Repository:
 
                     # تحديث حالة المزامنة
                     self.sqlite_cursor.execute(
-                        "UPDATE users SET sync_status = 'synced' WHERE username = ?", (username,)
+                        "UPDATE users SET sync_status = 'synced', dirty_flag = 0 WHERE username = ?",
+                        (username,),
                     )
                     self.sqlite_conn.commit()
 
@@ -2918,7 +2919,7 @@ class Repository:
                             {"_id": existing_cloud["_id"]}, {"$set": update_data}
                         )
                         self.sqlite_cursor.execute(
-                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            "UPDATE users SET _mongo_id=?, sync_status='synced', dirty_flag = 0 WHERE id=?",
                             (mongo_id, local_id),
                         )
                         result["uploaded"] += 1
@@ -2939,7 +2940,7 @@ class Repository:
                         insert_result = self.mongo_db.users.insert_one(new_user)
                         mongo_id = str(insert_result.inserted_id)
                         self.sqlite_cursor.execute(
-                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            "UPDATE users SET _mongo_id=?, sync_status='synced', dirty_flag = 0 WHERE id=?",
                             (mongo_id, local_id),
                         )
                         result["uploaded"] += 1
@@ -2978,7 +2979,7 @@ class Repository:
                                 UPDATE users SET
                                     full_name=?, email=?, role=?, is_active=?,
                                     password_hash=?, _mongo_id=?, sync_status='synced',
-                                    last_modified=?
+                                    dirty_flag = 0, last_modified=?
                                 WHERE id=?
                             """,
                                 (
@@ -3101,7 +3102,7 @@ class Repository:
                         {"$set": update_dict},
                     )
                     self.sqlite_cursor.execute(
-                        "UPDATE accounts SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ? OR code = ?",
+                        "UPDATE accounts SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ? OR code = ?",
                         (account_id_num, account_id, account_id),
                     )
                     self.sqlite_conn.commit()
@@ -3160,7 +3161,7 @@ class Repository:
                         cursor = self.sqlite_conn.cursor()
                         try:
                             cursor.execute(
-                                "UPDATE accounts SET sync_status = 'synced' WHERE code = ?",
+                                "UPDATE accounts SET sync_status = 'synced', dirty_flag = 0 WHERE code = ?",
                                 (account_code,),
                             )
                             self.sqlite_conn.commit()
@@ -3304,7 +3305,7 @@ class Repository:
                 invoice_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE invoices SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE invoices SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -3399,7 +3400,7 @@ class Repository:
                 entry_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE journal_entries SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE journal_entries SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -3695,7 +3696,7 @@ class Repository:
                 payment_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE payments SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE payments SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", payment_data.id),
                 )
                 self.sqlite_conn.commit()
@@ -4094,7 +4095,7 @@ class Repository:
                     },
                 )
                 self.sqlite_cursor.execute(
-                    "UPDATE invoices SET sync_status = 'synced' WHERE invoice_number = ?",
+                    "UPDATE invoices SET sync_status = 'synced', dirty_flag = 0 WHERE invoice_number = ?",
                     (invoice_number,),
                 )
                 self.sqlite_conn.commit()
@@ -4165,7 +4166,7 @@ class Repository:
                 )
 
                 self.sqlite_cursor.execute(
-                    "UPDATE invoices SET sync_status = 'synced' WHERE invoice_number = ?",
+                    "UPDATE invoices SET sync_status = 'synced', dirty_flag = 0 WHERE invoice_number = ?",
                     (invoice_number,),
                 )
                 self.sqlite_conn.commit()
@@ -4261,7 +4262,7 @@ class Repository:
                     {"$set": {"status": new_status.value, "last_modified": now_dt}},
                 )
                 self.sqlite_cursor.execute(
-                    "UPDATE invoices SET sync_status = 'synced' WHERE invoice_number = ?",
+                    "UPDATE invoices SET sync_status = 'synced', dirty_flag = 0 WHERE invoice_number = ?",
                     (invoice_number,),
                 )
                 self.sqlite_conn.commit()
@@ -4324,7 +4325,7 @@ class Repository:
                 service_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE services SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE services SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -4458,7 +4459,7 @@ class Repository:
                     {"$set": update_dict},
                 )
                 self.sqlite_cursor.execute(
-                    "UPDATE services SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                    "UPDATE services SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ?",
                     (service_id_num, service_id),
                 )
                 self.sqlite_conn.commit()
@@ -4621,7 +4622,7 @@ class Repository:
                 expense_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE expenses SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE expenses SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -5137,7 +5138,7 @@ class Repository:
                 project_data.sync_status = "synced"
 
                 self.sqlite_cursor.execute(
-                    "UPDATE projects SET _mongo_id = ?, sync_status = ? WHERE id = ?",
+                    "UPDATE projects SET _mongo_id = ?, sync_status = ?, dirty_flag = 0 WHERE id = ?",
                     (mongo_id, "synced", local_id),
                 )
                 self.sqlite_conn.commit()
@@ -5403,7 +5404,7 @@ class Repository:
 
                 self.mongo_db.projects.update_one({"name": project_name}, {"$set": update_dict})
                 self.sqlite_cursor.execute(
-                    "UPDATE projects SET sync_status = 'synced' WHERE name = ?",
+                    "UPDATE projects SET sync_status = 'synced', dirty_flag = 0 WHERE name = ?",
                     (project_data.name,),
                 )
                 self.sqlite_conn.commit()
@@ -5880,7 +5881,8 @@ class Repository:
 
                     # تحديث حالة المزامنة
                     self.sqlite_cursor.execute(
-                        "UPDATE currencies SET sync_status = 'synced' WHERE code = ?", (code,)
+                        "UPDATE currencies SET sync_status = 'synced', dirty_flag = 0 WHERE code = ?",
+                        (code,),
                     )
                     self.sqlite_conn.commit()
                     safe_print(f"INFO: [Repo] تم مزامنة العملة {code} أونلاين")
@@ -6516,7 +6518,7 @@ class Repository:
                 mongo_id = str(result.inserted_id)
 
                 self.sqlite_cursor.execute(
-                    "UPDATE tasks SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
+                    "UPDATE tasks SET _mongo_id = ?, sync_status = 'synced', dirty_flag = 0 WHERE id = ?",
                     (mongo_id, local_id),
                 )
                 self.sqlite_conn.commit()
@@ -6605,7 +6607,7 @@ class Repository:
                     cursor = self.sqlite_conn.cursor()
                     try:
                         cursor.execute(
-                            "UPDATE tasks SET sync_status = 'synced' WHERE id = ? OR _mongo_id = ?",
+                            "UPDATE tasks SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ?",
                             (task_id, task_id),
                         )
                         self.sqlite_conn.commit()

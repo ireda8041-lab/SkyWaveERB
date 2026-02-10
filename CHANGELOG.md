@@ -4,6 +4,18 @@
 
 ---
 
+## [2.2.4] - 2026-02-10
+
+### Fixed
+- Delta sync now runs in a background thread to avoid UI-blocked stalls.
+- Dirty flags are cleared on successful online sync to prevent repeat pushes.
+- Closed-database errors during shutdown are suppressed safely.
+
+### Changed
+- Cross-device refresh remains responsive during heavy UI work.
+
+---
+
 ## [2.2.3] - 2026-02-09
 
 ### Fixed

@@ -135,6 +135,8 @@ class UnifiedSyncManagerV3(QObject):
         self._connection_timer = None
         self._cloud_pull_timer = None
         self._delta_pull_timer = None  # ⚡ NEW: مؤقت السحب التفاضلي
+        self._delta_thread = None
+        self._delta_thread_stop = threading.Event()
 
         self._load_sync_config()
 
@@ -723,6 +725,14 @@ class UnifiedSyncManagerV3(QObject):
                 self._delta_pull_timer = None
         except Exception:
             pass
+
+        try:
+            if self._delta_thread and self._delta_thread.is_alive():
+                self._delta_thread_stop.set()
+                self._delta_thread.join(timeout=0.5)
+        except Exception:
+            pass
+        self._delta_thread = None
 
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline:
@@ -2113,6 +2123,8 @@ class UnifiedSyncManagerV3(QObject):
         ⚡ Push all locally modified records to MongoDB
         Returns: dict with counts of pushed records and any errors
         """
+        if self.repo is None or self.repo.sqlite_conn is None:
+            return {"success": False, "reason": "sqlite_closed"}
         if not self.is_online:
             return {"success": False, "reason": "offline"}
 
@@ -2304,6 +2316,8 @@ class UnifiedSyncManagerV3(QObject):
         Only pulls records where last_modified > watermark
         Returns: dict with counts of pulled/deleted records
         """
+        if self.repo is None or self.repo.sqlite_conn is None:
+            return {"success": False, "reason": "sqlite_closed"}
         if not self.is_online:
             return {"success": False, "reason": "offline"}
 
@@ -2484,6 +2498,8 @@ class UnifiedSyncManagerV3(QObject):
 
     def _run_delta_cycle(self) -> dict[str, Any]:
         """Run one guarded push+pull cycle without overlapping with another delta cycle."""
+        if self.repo is None or self.repo.sqlite_conn is None:
+            return {"success": False, "reason": "sqlite_closed"}
         if self._shutdown:
             return {"success": False, "reason": "shutdown"}
         if self._is_syncing:
@@ -2534,28 +2550,44 @@ class UnifiedSyncManagerV3(QObject):
                 self._delta_pull_timer.stop()
             except Exception:
                 pass
+            self._delta_pull_timer = None
+
+        if self._delta_thread and self._delta_thread.is_alive():
+            try:
+                self._delta_thread_stop.set()
+                self._delta_thread.join(timeout=0.5)
+            except Exception:
+                pass
+        self._delta_thread_stop = threading.Event()
 
         interval_seconds = self._safe_int(
             interval_seconds, DEFAULT_DELTA_SYNC_INTERVAL_SECONDS, 1, 300
         )
         self._delta_sync_interval_seconds = interval_seconds
-        interval_ms = interval_seconds * 1000
+        interval_seconds = max(1, int(interval_seconds))
 
-        def periodic_delta_sync():
-            if self._shutdown or self._is_syncing or not self.is_online:
-                return
-
-            def sync_thread():
+        def delta_loop():
+            next_run = time.monotonic()
+            while not self._shutdown and not self._delta_thread_stop.is_set():
+                next_run += interval_seconds
+                sleep_for = max(0.0, next_run - time.monotonic())
+                if sleep_for:
+                    time.sleep(sleep_for)
+                if self._shutdown or self._delta_thread_stop.is_set():
+                    break
+                if self._is_syncing or not self.is_online:
+                    continue
                 try:
                     self._run_delta_cycle()
                 except Exception as e:
                     logger.debug("خطأ في periodic delta sync: %s", e)
 
-            threading.Thread(target=sync_thread, daemon=True).start()
-
-        self._delta_pull_timer = QTimer(self)
-        self._delta_pull_timer.timeout.connect(periodic_delta_sync)
-        self._delta_pull_timer.start(interval_ms)
+        self._delta_thread = threading.Thread(
+            target=delta_loop,
+            daemon=True,
+            name="unified-delta-sync",
+        )
+        self._delta_thread.start()
 
         logger.info("⏰ بدء Delta Sync كل %s ثانية", interval_seconds)
 

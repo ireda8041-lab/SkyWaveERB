@@ -1,12 +1,9 @@
-## Release Notes - v2.2.3 (2026-02-09)
+﻿## Release Notes - v2.2.4 (2026-02-10)
 
-### Realtime Sync (No Replica Set)
-- Delta sync tightened to 1s for near-instant propagation.
-- Notification poller now triggers instant sync on new events.
-- Live sync triggers are non-blocking to avoid UI freezes.
+### Realtime Sync
+- Delta sync now runs in a background thread for true realtime updates.
+- Cross-device refresh stays responsive even during heavy UI work.
 
-### Data Integrity
-- Soft-delete propagation ensures deletions appear across devices.
-
-### Notifications
-- Entity metadata is included to refresh only the affected tables.
+### Stability
+- Dirty flags are cleared on successful online sync to avoid repeat pushes.
+- Closed-database errors during shutdown are suppressed safely.
