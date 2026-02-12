@@ -1,4 +1,4 @@
- ; ============================================
+﻿ ; ============================================
 ; Sky Wave ERP - Inno Setup Script
 ; ============================================
 ; لتشغيل هذا الملف:
@@ -8,7 +8,7 @@
 ; ============================================
 
 #define MyAppName "Sky Wave ERP"
-#define MyAppVersion "2.2.6"
+#define MyAppVersion "2.2.7"
 #define MyAppPublisher "Sky Wave Team"
 #define MyAppURL "https://github.com/ireda8041-lab/SkyWaveERB"
 #define MyAppExeName "SkyWaveERP.exe"
@@ -55,7 +55,7 @@ DisableWelcomePage=no
 ; ⚡ إغلاق التطبيقات تلقائياً
 CloseApplications=force
 CloseApplicationsFilter=*.exe
-RestartApplications=yes
+RestartApplications=no
 
 ; صلاحيات - lowest لأن التثبيت في D: مش محتاج Admin
 PrivilegesRequired=lowest
@@ -104,9 +104,9 @@ Name: "{userappdata}\Microsoft\Internet Explorer\Quick Launch\{#MyAppName}"; Fil
 
 [Run]
 ; تشغيل البرنامج بعد التثبيت (حتى في الوضع الصامت)
-Filename: "{app}\{#MyAppExeName}"; Description: "تشغيل {#MyAppName}"; Flags: nowait postinstall runasoriginaluser
+Filename: "{app}\{#MyAppExeName}"; Description: "تشغيل {#MyAppName}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 ; ⚡ تشغيل البرنامج في الوضع الصامت (بدون سؤال المستخدم)
-Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent runasoriginaluser shellexec
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent runasoriginaluser
 
 [UninstallDelete]
 ; حذف ملفات إضافية عند إلغاء التثبيت
@@ -167,3 +167,4 @@ begin
     // يمكن إضافة أي إجراءات بعد التثبيت هنا
   end;
 end;
+

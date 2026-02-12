@@ -235,8 +235,8 @@ class ProjectEditorDialog(QDialog):
             height = max(620, int(screen_geo.height() * 0.92))
             width = min(width, screen_geo.width())
             height = min(height, screen_geo.height())
-            min_width = min(980, max(680, screen_geo.width() - 80))
-            min_height = min(700, max(460, screen_geo.height() - 120))
+            min_width = min(920, max(640, screen_geo.width() - 120))
+            min_height = min(620, max(420, screen_geo.height() - 160))
             self.setMinimumSize(min_width, min_height)
             x = screen_geo.x() + max(0, (screen_geo.width() - width) // 2)
             y = screen_geo.y() + max(0, (screen_geo.height() - height) // 2)
@@ -339,6 +339,7 @@ class ProjectEditorDialog(QDialog):
         main_layout = QVBoxLayout()
         main_layout.setSpacing(8)  # ⚡ زيادة المسافات قليلاً
         main_layout.setContentsMargins(10, 10, 10, 10)  # ⚡ زيادة الهوامش
+        self._editor_main_layout = main_layout
 
         # === التخطيط الأفقي الرئيسي: اليسار واليمين ===
         main_horizontal_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
@@ -393,6 +394,7 @@ class ProjectEditorDialog(QDialog):
         basic_layout.addLayout(row1)
         basic_layout.addLayout(row2)
         basic_group.setLayout(basic_layout)
+        self._basic_group = basic_group
         left_side.addWidget(basic_group)
 
         # --- 2. بنود المشروع (الخدمات) ---
@@ -493,6 +495,7 @@ class ProjectEditorDialog(QDialog):
         self.items_table.setShowGrid(True)
         items_layout.addWidget(self.items_table, 1)  # ⚡ stretch factor للتمدد
         items_group.setLayout(items_layout)
+        self._items_group = items_group
         left_side.addWidget(items_group, 1)  # ⚡ stretch factor للتمدد
 
         # --- 3. الإجماليات ---
@@ -532,6 +535,7 @@ class ProjectEditorDialog(QDialog):
         totals_form.addRow(QLabel("الضريبة (%):"), self.tax_rate_input)
         totals_form.addRow(QLabel("<b>الإجمالي النهائي:</b>"), self.total_label)
         totals_group.setLayout(totals_form)
+        self._totals_group = totals_group
         left_side.addWidget(totals_group)
 
         # === الجانب الأيمن: الوصف والدفعة المقدمة ===
@@ -673,6 +677,7 @@ class ProjectEditorDialog(QDialog):
         notes_layout.addWidget(self.notes_input, 1)
 
         notes_group.setLayout(notes_layout)
+        self._notes_group = notes_group
         right_side.addWidget(notes_group, 1)
 
         payment_methods_group = QGroupBox("💳 طرق الدفع (تظهر في الفاتورة)")
@@ -716,6 +721,7 @@ class ProjectEditorDialog(QDialog):
         )
         pm_layout.addWidget(self.payment_methods_preview)
         payment_methods_group.setLayout(pm_layout)
+        self._payment_methods_group = payment_methods_group
         right_side.addWidget(payment_methods_group)
 
         # الدفعة المقدمة - تصميم احترافي
@@ -792,6 +798,7 @@ class ProjectEditorDialog(QDialog):
         payment_layout.addLayout(method_row)
 
         payment_group.setLayout(payment_layout)
+        self._payment_group = payment_group
         right_side.addWidget(payment_group)
 
         # إضافة الجانبين للتخطيط الأفقي الرئيسي
@@ -855,7 +862,8 @@ class ProjectEditorDialog(QDialog):
     def _apply_responsive_editor_layout(self):
         if not hasattr(self, "_main_horizontal_layout"):
             return
-        compact = self.width() < 1280 or self.height() < 760
+        compact = self.width() < 1450 or self.height() < 840
+        very_compact = self.width() < 1220 or self.height() < 740
         direction = (
             QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
         )
@@ -864,9 +872,33 @@ class ProjectEditorDialog(QDialog):
         if compact:
             self._main_horizontal_layout.setStretch(0, 0)
             self._main_horizontal_layout.setStretch(1, 0)
+            if hasattr(self, "items_table"):
+                self.items_table.setMinimumHeight(100 if very_compact else 118)
+            if hasattr(self, "notes_input"):
+                self.notes_input.setMinimumHeight(84 if very_compact else 100)
+            if hasattr(self, "payment_methods_preview"):
+                self.payment_methods_preview.setMinimumHeight(46)
+            if hasattr(self, "_payment_methods_group"):
+                self._payment_methods_group.setMaximumHeight(130 if very_compact else 170)
+            if hasattr(self, "_payment_group"):
+                self._payment_group.setMaximumHeight(180 if very_compact else 230)
+            if hasattr(self, "_editor_main_layout"):
+                self._editor_main_layout.setSpacing(6)
         else:
             self._main_horizontal_layout.setStretch(0, 3)
             self._main_horizontal_layout.setStretch(1, 2)
+            if hasattr(self, "items_table"):
+                self.items_table.setMinimumHeight(140)
+            if hasattr(self, "notes_input"):
+                self.notes_input.setMinimumHeight(130)
+            if hasattr(self, "payment_methods_preview"):
+                self.payment_methods_preview.setMinimumHeight(64)
+            if hasattr(self, "_payment_methods_group"):
+                self._payment_methods_group.setMaximumHeight(16777215)
+            if hasattr(self, "_payment_group"):
+                self._payment_group.setMaximumHeight(16777215)
+            if hasattr(self, "_editor_main_layout"):
+                self._editor_main_layout.setSpacing(8)
 
     def _load_payment_methods_for_combo(self):
         try:
@@ -2241,22 +2273,11 @@ class ProjectManagerTab(QWidget):
         self.on_project_selection_changed()
 
     def resizeEvent(self, event):  # pylint: disable=invalid-name
-        """تغيير اتجاه الـ splitter حسب عرض النافذة"""
+        """الحفاظ على المعاينة بجانب الجدول مع ضبط النسب حسب العرض."""
         super().resizeEvent(event)
-        width = self.width()
-
-        # إذا كان العرض/الارتفاع محدودين، نحول لعمودي
-        compact = width < 1180 or self.height() < 760
-        if compact:
-            if self.main_splitter.orientation() != Qt.Orientation.Vertical:
-                self.main_splitter.setOrientation(Qt.Orientation.Vertical)
-            total_h = self.height()
-            if total_h > 0:
-                self.main_splitter.setSizes([int(total_h * 0.58), int(total_h * 0.42)])
-        else:
-            if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
-                self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
-            self._apply_preview_splitter_sizes()
+        if self.main_splitter.orientation() != Qt.Orientation.Horizontal:
+            self.main_splitter.setOrientation(Qt.Orientation.Horizontal)
+        self._apply_preview_splitter_sizes()
 
     def _apply_preview_splitter_sizes(self):
         if not hasattr(self, "main_splitter") or not self.main_splitter:

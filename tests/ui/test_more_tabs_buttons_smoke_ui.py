@@ -97,7 +97,7 @@ def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
     QTest.mouseClick(tab.refresh_button, Qt.MouseButton.LeftButton)
 
 
-def test_projects_tab_splitter_orientation_is_responsive(qapp):
+def test_projects_tab_splitter_orientation_stays_horizontal(qapp):
     from ui import project_manager
 
     tab = project_manager.ProjectManagerTab(
@@ -113,7 +113,7 @@ def test_projects_tab_splitter_orientation_is_responsive(qapp):
 
     tab.resize(960, 700)
     qapp.processEvents()
-    assert tab.main_splitter.orientation() == Qt.Orientation.Vertical
+    assert tab.main_splitter.orientation() == Qt.Orientation.Horizontal
 
     tab.resize(1400, 900)
     qapp.processEvents()

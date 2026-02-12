@@ -20,7 +20,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QRegularExpression, Qt, QTimer
+from PyQt6.QtCore import QRegularExpression, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QRegularExpressionValidator, QValidator
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -88,6 +88,8 @@ except ImportError:
 class SettingsTab(QWidget):
     """تاب الإعدادات المتقدمة مع تابات فرعية."""
 
+    manual_sync_finished = pyqtSignal(dict)
+
     def __init__(
         self,
         settings_service: SettingsService,
@@ -116,6 +118,8 @@ class SettingsTab(QWidget):
         self._note_templates_page_size = 100
         self._note_templates_all: list[dict] = []
         self._note_templates_page_start = 0
+        self._manual_sync_watchdog: QTimer | None = None
+        self.manual_sync_finished.connect(self._on_manual_sync_completed)
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -1481,10 +1485,6 @@ class SettingsTab(QWidget):
             }
 
             self.settings_service.update_settings(new_settings)
-
-            # ⚡ رفع الإعدادات للسحابة
-            if hasattr(self, "repository") and self.repository:
-                self.settings_service.sync_settings_to_cloud(self.repository)
 
             QMessageBox.information(self, "نجاح", "تم حفظ بيانات الشركة بنجاح ✅")
             self._company_settings_snapshot = {
@@ -3581,6 +3581,12 @@ class SettingsTab(QWidget):
             # تعطيل الزر أثناء المزامنة
             self.manual_sync_btn.setEnabled(False)
             self.manual_sync_btn.setText("⏳ جاري المزامنة...")
+            if self._manual_sync_watchdog:
+                self._manual_sync_watchdog.stop()
+            self._manual_sync_watchdog = QTimer(self)
+            self._manual_sync_watchdog.setSingleShot(True)
+            self._manual_sync_watchdog.timeout.connect(self._on_manual_sync_timeout)
+            self._manual_sync_watchdog.start(35000)
 
             def worker():
                 try:
@@ -3588,7 +3594,7 @@ class SettingsTab(QWidget):
                 except Exception as e:
                     result = {"success": False, "reason": str(e), "pushed": 0, "pulled": 0}
 
-                QTimer.singleShot(0, lambda: self._on_manual_sync_completed(result))
+                self.manual_sync_finished.emit(result)
 
             threading.Thread(target=worker, daemon=True).start()
 
@@ -3600,6 +3606,8 @@ class SettingsTab(QWidget):
             safe_print(f"ERROR: [SyncTab] فشل المزامنة اليدوية: {e}")
 
     def _on_manual_sync_completed(self, result: dict):
+        if self._manual_sync_watchdog:
+            self._manual_sync_watchdog.stop()
         self.manual_sync_btn.setEnabled(True)
         self.manual_sync_btn.setText("🔄 مزامنة فورية الآن")
 
@@ -3616,9 +3624,22 @@ class SettingsTab(QWidget):
                 )
         else:
             reason = result.get("reason", "غير معروف")
+            if reason == "delta_busy":
+                reason = "هناك دورة مزامنة جارية الآن. أعد المحاولة بعد ثانية."
+            elif reason == "full_sync_in_progress":
+                reason = "المزامنة الكاملة تعمل حالياً. جرّب مرة أخرى بعد اكتمالها."
             QMessageBox.warning(self, "⚠️ فشل", f"فشلت المزامنة:\n{reason}")
 
         self.refresh_sync_status()
+
+    def _on_manual_sync_timeout(self):
+        self.manual_sync_btn.setEnabled(True)
+        self.manual_sync_btn.setText("🔄 مزامنة فورية الآن")
+        QMessageBox.warning(
+            self,
+            "⚠️ تنبيه",
+            "المزامنة اليدوية استغرقت وقتاً أطول من المتوقع. تم إعادة تفعيل الزر، ويمكنك المحاولة مرة أخرى.",
+        )
 
     def setup_payment_methods_tab(self):
         """إعداد تاب طرق الدفع - CRUD لطرق الدفع في الفواتير"""
@@ -4561,6 +4582,7 @@ class SettingsTab(QWidget):
                 check_change_stream_support,
                 ensure_replica_set_uri,
                 is_local_mongo_uri,
+                try_bootstrap_local_replica_set,
             )
 
             rs_name = "rs0"
@@ -4581,13 +4603,29 @@ class SettingsTab(QWidget):
             support_ok, support_details = check_change_stream_support(
                 client[db_name], max_await_ms=100
             )
+            bootstrap_note = ""
+            if not support_ok and is_local_mongo_uri(normalized_uri):
+                boot_ok, boot_details = try_bootstrap_local_replica_set(
+                    client,
+                    normalized_uri,
+                    replica_set_name=rs_name,
+                    timeout_seconds=8.0,
+                )
+                if boot_ok:
+                    support_ok, support_details = check_change_stream_support(
+                        client[db_name], max_await_ms=120
+                    )
+                    if support_ok:
+                        bootstrap_note = "\nتم تفعيل Replica Set تلقائياً بنجاح."
+                else:
+                    bootstrap_note = f"\nتعذر التفعيل التلقائي: {boot_details}"
             client.close()
             if support_ok:
                 self.mongo_uri_input.setText(normalized_uri)
                 QMessageBox.information(
                     self,
                     "نجح",
-                    f"تم الاتصال بنجاح بـ {db_name}\nChange Streams: متاحة",
+                    f"تم الاتصال بنجاح بـ {db_name}\nChange Streams: متاحة{bootstrap_note}",
                 )
             else:
                 QMessageBox.warning(
@@ -4595,7 +4633,7 @@ class SettingsTab(QWidget):
                     "الاتصال ناجح لكن Change Streams غير متاحة",
                     "الاتصال بالسحابة يعمل، لكن المزامنة الفورية غير متاحة حالياً.\n"
                     "سبب متوقع: MongoDB ليست Replica Set.\n\n"
-                    f"التفاصيل: {support_details}",
+                    f"التفاصيل: {support_details}{bootstrap_note}",
                 )
         except Exception as e:
             QMessageBox.critical(self, "فشل الاتصال", f"خطأ: {e}")

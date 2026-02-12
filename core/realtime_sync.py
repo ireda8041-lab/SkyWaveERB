@@ -34,10 +34,12 @@ except ImportError:
 
 # استيراد آمن لـ pymongo
 try:
+    import pymongo
     from pymongo.errors import PyMongoError
 
     PYMONGO_AVAILABLE = True
 except ImportError:
+    pymongo = None
 
     class PyMongoError(Exception):
         pass
@@ -387,11 +389,60 @@ class RealtimeSyncManager(QObject):
             timeout_seconds=self._local_rs_timeout_seconds,
         )
         if ok:
+            if not self._reconnect_repository_client(normalized_uri):
+                logger.info(
+                    "[RealtimeSync] تم تفعيل Replica Set لكن تعذر إعادة فتح اتصال Mongo بالـ URI الجديد."
+                )
+                return False
             logger.info("[RealtimeSync] %s", details)
             return True
 
         logger.info("[RealtimeSync] تعذر تفعيل Change Streams تلقائياً: %s", details)
         return False
+
+    def _reconnect_repository_client(self, mongo_uri: str) -> bool:
+        """Reconnect repository Mongo client using a replica-set-aware URI."""
+        if self.repo is None or not mongo_uri or not PYMONGO_AVAILABLE or pymongo is None:
+            return False
+
+        try:
+            old_client = getattr(self.repo, "mongo_client", None)
+            old_db = getattr(self.repo, "mongo_db", None)
+            db_name = getattr(old_db, "name", None)
+            if not db_name:
+                try:
+                    from core.config import Config
+
+                    db_name = Config.get_db_name()
+                except Exception:
+                    db_name = "skywave_erp_db"
+
+            if old_client is not None:
+                try:
+                    old_client.close()
+                except Exception:
+                    pass
+
+            new_client = pymongo.MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=30000,
+                retryWrites=True,
+                retryReads=True,
+                maxPoolSize=5,
+                minPoolSize=1,
+                maxIdleTimeMS=60000,
+                waitQueueTimeoutMS=5000,
+            )
+            new_client.admin.command("ping")
+            self.repo.mongo_client = new_client
+            self.repo.mongo_db = new_client[str(db_name)]
+            self.repo.online = True
+            return True
+        except Exception as e:
+            logger.debug("[RealtimeSync] فشل إعادة الاتصال بـ Mongo بعد تفعيل Replica Set: %s", e)
+            return False
 
     def _sync_system_settings_from_cloud(self):
         try:

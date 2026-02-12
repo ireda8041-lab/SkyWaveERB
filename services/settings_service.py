@@ -57,6 +57,8 @@ class SettingsService:
     """قسم الإعدادات المسؤول عن حفظ وقراءة إعدادات التطبيق."""
 
     SETTINGS_FILE = os.path.join(_APP_DATA_DIR, "skywave_settings.json")
+    CLOUD_EXCLUDED_KEYS = {"company_logo_path"}
+    CLOUD_META_KEYS = {"settings_last_modified", "settings_content_hash"}
 
     DEFAULT_SETTINGS = {
         "company_name": "Sky Wave",
@@ -85,6 +87,31 @@ class SettingsService:
 
     def _touch_settings(self) -> None:
         self.settings["settings_last_modified"] = datetime.now().isoformat()
+
+    @classmethod
+    def _build_cloud_payload(cls, source: dict[str, Any]) -> dict[str, Any]:
+        payload: dict[str, Any] = {}
+        for key, value in source.items():
+            if key in cls.CLOUD_EXCLUDED_KEYS:
+                continue
+            if key in cls.CLOUD_META_KEYS:
+                continue
+            payload[key] = value
+        return payload
+
+    @staticmethod
+    def _compute_settings_hash(payload: dict[str, Any]) -> str:
+        try:
+            normalized = json.dumps(
+                payload,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            )
+        except Exception:
+            normalized = str(payload)
+        return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
     def set_repository(self, repository) -> None:
         self.repo = repository
@@ -162,7 +189,7 @@ class SettingsService:
                 and getattr(repo, "online", False)
                 and getattr(repo, "mongo_db", None) is not None
             ):
-                self.sync_settings_to_cloud(repo)
+                self.sync_settings_to_cloud(repo, emit_notification=False)
         except Exception:
             pass
 
@@ -180,7 +207,7 @@ class SettingsService:
                 and getattr(repo, "online", False)
                 and getattr(repo, "mongo_db", None) is not None
             ):
-                self.sync_settings_to_cloud(repo)
+                self.sync_settings_to_cloud(repo, emit_notification=False)
         except Exception:
             pass
 
@@ -262,7 +289,12 @@ class SettingsService:
     # ⚡ مزامنة الإعدادات مع MongoDB
     # ==========================================
 
-    def sync_settings_to_cloud(self, repository) -> bool:
+    def sync_settings_to_cloud(
+        self,
+        repository,
+        emit_notification: bool = False,
+        silent_notification: bool = True,
+    ) -> bool:
         """رفع الإعدادات للسحابة"""
         try:
             if not repository or not repository.online or repository.mongo_db is None:
@@ -271,33 +303,61 @@ class SettingsService:
             # حفظ الإعدادات في مجموعة system_settings
             collection = repository.mongo_db["system_settings"]
 
-            stamp = datetime.now().isoformat()
-            payload = dict(self.settings)
-            payload["settings_last_modified"] = stamp
+            payload_core = self._build_cloud_payload(self.settings)
+            payload_hash = self._compute_settings_hash(payload_core)
 
-            # حفظ محلي لتوحيد الطابع الزمني بين الأجهزة
+            remote_doc = collection.find_one({"_id": "company_settings"}) or {}
+            remote_hash = str(remote_doc.get("settings_content_hash") or "")
+            if not remote_hash:
+                remote_core = {
+                    k: v
+                    for k, v in remote_doc.items()
+                    if k not in {"_id"} | self.CLOUD_META_KEYS | self.CLOUD_EXCLUDED_KEYS
+                }
+                remote_hash = self._compute_settings_hash(remote_core) if remote_core else ""
+
+            if remote_hash and remote_hash == payload_hash:
+                remote_stamp = str(remote_doc.get("settings_last_modified") or "")
+                local_changed = False
+                if remote_stamp and self.settings.get("settings_last_modified") != remote_stamp:
+                    self.settings["settings_last_modified"] = remote_stamp
+                    local_changed = True
+                if self.settings.get("settings_content_hash") != payload_hash:
+                    self.settings["settings_content_hash"] = payload_hash
+                    local_changed = True
+                if local_changed:
+                    self.save_settings(self.settings)
+                return True
+
+            stamp = datetime.now().isoformat()
+            payload = dict(payload_core)
+            payload["settings_last_modified"] = stamp
+            payload["settings_content_hash"] = payload_hash
+
             self.settings["settings_last_modified"] = stamp
+            self.settings["settings_content_hash"] = payload_hash
             self.save_settings(self.settings)
 
-            # استخدام upsert لتحديث أو إنشاء
             collection.update_one({"_id": "company_settings"}, {"$set": payload}, upsert=True)
 
-            # بث إشعار خفيف لمزامنة باقي الأجهزة (بدون اعتماد Change Streams)
-            try:
-                notifications = repository.mongo_db["notifications"]
-                notifications.insert_one(
-                    {
-                        "message": "تم تحديث إعدادات النظام",
-                        "type": "info",
-                        "title": "⚙️ الإعدادات",
-                        "device_id": _get_stable_device_id(),
-                        "created_at": stamp,
-                        "entity_type": "system_settings",
-                        "action": "updated",
-                    }
-                )
-            except Exception:
-                pass
+            # system_settings notification is silent by default to avoid noisy startup toasts.
+            if emit_notification:
+                try:
+                    notifications = repository.mongo_db["notifications"]
+                    notifications.insert_one(
+                        {
+                            "message": "تم تحديث إعدادات النظام",
+                            "type": "info",
+                            "title": "⚙️ الإعدادات",
+                            "device_id": _get_stable_device_id(),
+                            "created_at": stamp,
+                            "entity_type": "system_settings",
+                            "action": "updated",
+                            "silent": bool(silent_notification),
+                        }
+                    )
+                except Exception:
+                    pass
 
             safe_print("INFO: [SettingsService] ✅ تم رفع الإعدادات للسحابة")
             return True
@@ -315,37 +375,65 @@ class SettingsService:
             collection = repository.mongo_db["system_settings"]
             cloud_settings = collection.find_one({"_id": "company_settings"})
 
-            if cloud_settings:
-                # إزالة _id من الإعدادات
-                cloud_settings.pop("_id", None)
+            if not cloud_settings:
+                # First writer wins without noisy notifications.
+                return self.sync_settings_to_cloud(repository, emit_notification=False)
 
-                local_stamp = str(self.settings.get("settings_last_modified") or "")
-                remote_stamp = str(cloud_settings.get("settings_last_modified") or "")
+            cloud_settings = dict(cloud_settings)
+            cloud_settings.pop("_id", None)
 
-                local_dt = self._parse_settings_timestamp(local_stamp)
-                remote_dt = self._parse_settings_timestamp(remote_stamp)
+            local_stamp = str(self.settings.get("settings_last_modified") or "")
+            remote_stamp = str(cloud_settings.get("settings_last_modified") or "")
 
-                if local_dt and remote_dt and local_dt > remote_dt:
-                    return self.sync_settings_to_cloud(repository)
+            local_dt = self._parse_settings_timestamp(local_stamp)
+            remote_dt = self._parse_settings_timestamp(remote_stamp)
 
-                # دمج الإعدادات (السحابة تأخذ الأولوية)
-                for key, value in cloud_settings.items():
-                    self.settings[key] = value
+            local_core = self._build_cloud_payload(self.settings)
+            remote_core = {
+                k: v
+                for k, v in cloud_settings.items()
+                if k not in self.CLOUD_META_KEYS and k not in self.CLOUD_EXCLUDED_KEYS
+            }
+            local_hash = self._compute_settings_hash(local_core)
+            remote_hash = str(cloud_settings.get("settings_content_hash") or "")
+            if not remote_hash:
+                remote_hash = self._compute_settings_hash(remote_core)
 
-                # حفظ محلياً
-                self.save_settings(self.settings)
-
-                try:
-                    from core.signals import app_signals
-
-                    app_signals.system_changed.emit()
-                except Exception:
-                    pass
-
-                safe_print("INFO: [SettingsService] ✅ تم تحميل الإعدادات من السحابة")
+            if local_hash == remote_hash:
+                updated = False
+                if remote_stamp and self.settings.get("settings_last_modified") != remote_stamp:
+                    self.settings["settings_last_modified"] = remote_stamp
+                    updated = True
+                if self.settings.get("settings_content_hash") != remote_hash:
+                    self.settings["settings_content_hash"] = remote_hash
+                    updated = True
+                if updated:
+                    self.save_settings(self.settings)
                 return True
 
-            return False
+            if local_dt and remote_dt and local_dt > remote_dt:
+                return self.sync_settings_to_cloud(repository, emit_notification=False)
+
+            # دمج الإعدادات (السحابة تأخذ الأولوية) مع تجاهل الحقول المحلية الخاصة بالجهاز.
+            for key, value in cloud_settings.items():
+                if key in self.CLOUD_EXCLUDED_KEYS:
+                    continue
+                self.settings[key] = value
+            self.settings["settings_content_hash"] = remote_hash
+            if remote_stamp:
+                self.settings["settings_last_modified"] = remote_stamp
+
+            self.save_settings(self.settings)
+
+            try:
+                from core.signals import app_signals
+
+                app_signals.system_changed.emit()
+            except Exception:
+                pass
+
+            safe_print("INFO: [SettingsService] ✅ تم تحميل الإعدادات من السحابة")
+            return True
 
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل تحميل الإعدادات من السحابة: {e}")

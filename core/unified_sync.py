@@ -16,7 +16,7 @@ import platform
 import threading
 import time
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -185,7 +185,7 @@ class UnifiedSyncManagerV3(QObject):
         if not self.is_online or self.repo is None or self.repo.mongo_db is None:
             return
         collection = self.repo.mongo_db["notifications"]
-        now_iso = datetime.now().isoformat()
+        now_iso = self._to_iso_timestamp(self._get_mongo_server_now())
         now_ts = time.time()
         for table in tables:
             # Avoid notification table echo storms.
@@ -209,6 +209,25 @@ class UnifiedSyncManagerV3(QObject):
                 collection.insert_one(payload)
             except Exception as e:
                 logger.debug("تعذر إرسال sync ping لـ %s: %s", table, e)
+
+    def emit_sync_ping_for_table(self, table: str | None) -> bool:
+        """
+        Public helper used by app signals to notify other devices immediately
+        even when no local dirty rows are pending for push.
+        """
+        table_key = self._normalize_table_key(table)
+        if table_key == "__all__":
+            return False
+        if self._shutdown or not self.is_online:
+            return False
+        if self.repo is None or self.repo.mongo_db is None:
+            return False
+        try:
+            self._emit_sync_pings({table_key})
+            return True
+        except Exception as e:
+            logger.debug("تعذر بث sync ping فوري للجدول %s: %s", table_key, e)
+            return False
 
     def _update_sync_metrics(self, success: bool, records_synced: int = 0):
         """Update lightweight sync counters used by settings UI."""
@@ -381,6 +400,36 @@ class UnifiedSyncManagerV3(QObject):
         except ValueError:
             return None
 
+    @staticmethod
+    def _normalize_datetime(value: datetime | None) -> datetime | None:
+        """Normalize datetimes for safe comparisons (convert aware -> naive UTC)."""
+        if value is None:
+            return None
+        if value.tzinfo is not None:
+            try:
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+            except Exception:
+                return value.replace(tzinfo=None)
+        return value
+
+    def _get_mongo_server_now(self) -> datetime:
+        """
+        Return server-side current time when possible.
+        Using server time avoids cross-device clock drift in last_modified watermarks.
+        """
+        try:
+            if self.repo is None or self.repo.mongo_client is None:
+                return datetime.now()
+            hello = self.repo.mongo_client.admin.command("hello")
+            server_now = hello.get("localTime")
+            if hasattr(server_now, "isoformat"):
+                normalized = self._normalize_datetime(server_now)
+                if normalized is not None:
+                    return normalized
+            return datetime.now()
+        except Exception:
+            return datetime.now()
+
     def _build_last_modified_query(self, watermark: str) -> dict[str, Any]:
         """Build query that handles mixed datetime/string storage in MongoDB."""
         conditions: list[dict[str, Any]] = [{"last_modified": {"$gt": watermark}}]
@@ -398,6 +447,35 @@ class UnifiedSyncManagerV3(QObject):
             size /= 1024.0
             unit_idx += 1
         return f"{size:.1f}{units[unit_idx]}"
+
+    def _invalidate_repository_cache(self, table_name: str | None = None) -> None:
+        """Clear repository-level caches so pulled changes become visible immediately."""
+        if self.repo is None:
+            return
+
+        try:
+            if hasattr(self.repo, "invalidate_table_cache"):
+                self.repo.invalidate_table_cache(table_name)
+                return
+        except Exception as e:
+            logger.debug("تعذر إبطال cache للجدول %s: %s", table_name, e)
+
+        # Fallback for older Repository implementations.
+        table = (table_name or "").strip().lower()
+        attr_map = {
+            "clients": "_clients_cache",
+            "projects": "_projects_cache",
+            "services": "_services_cache",
+            "accounts": "_accounts_cache",
+            "expenses": "_expenses_cache",
+        }
+        attr_name = attr_map.get(table)
+        if not attr_name or not hasattr(self.repo, attr_name):
+            return
+        try:
+            getattr(self.repo, attr_name).invalidate()
+        except Exception:
+            pass
 
     def request_realtime_pull(self, table: str | None = None) -> bool:
         """
@@ -1063,11 +1141,8 @@ class UnifiedSyncManagerV3(QObject):
             try:
                 from core.signals import app_signals
 
-                app_signals.emit_data_changed("clients")
-                app_signals.emit_data_changed("projects")
-                app_signals.emit_data_changed("accounts")
-                app_signals.emit_data_changed("payments")
-                app_signals.emit_data_changed("expenses")
+                for table_name in self.TABLES:
+                    app_signals.emit_ui_data_changed(table_name)
                 logger.info("📢 تم إرسال إشارات تحديث الواجهة")
             except Exception as e:
                 logger.warning("⚠️ فشل إرسال إشارات التحديث: %s", e)
@@ -1190,6 +1265,8 @@ class UnifiedSyncManagerV3(QObject):
                 stats["deleted"] = deleted
 
                 conn.commit()
+                if stats["inserted"] > 0 or stats["updated"] > 0 or stats["deleted"] > 0:
+                    self._invalidate_repository_cache(table_name)
                 logger.info(
                     "✅ %s: +%s ~%s -%s",
                     table_name,
@@ -1980,8 +2057,33 @@ class UnifiedSyncManagerV3(QObject):
             self._update_sync_metrics(success=False, records_synced=0)
             return result
 
-        push_result = self.push_local_changes()
-        pull_result = self.pull_remote_changes()
+        if self._is_syncing:
+            result = {
+                "success": False,
+                "reason": "full_sync_in_progress",
+                "pushed": 0,
+                "pulled": 0,
+                "errors": 0,
+            }
+            self._update_sync_metrics(success=False, records_synced=0)
+            return result
+
+        if not self._delta_cycle_lock.acquire(timeout=2.0):
+            result = {
+                "success": False,
+                "reason": "delta_busy",
+                "pushed": 0,
+                "pulled": 0,
+                "errors": 0,
+            }
+            self._update_sync_metrics(success=False, records_synced=0)
+            return result
+
+        try:
+            push_result = self.push_local_changes()
+            pull_result = self.pull_remote_changes()
+        finally:
+            self._delta_cycle_lock.release()
 
         pushed = int(push_result.get("pushed", 0))
         pulled = int(pull_result.get("pulled", 0))
@@ -2199,6 +2301,8 @@ class UnifiedSyncManagerV3(QObject):
         changed_tables: set[str] = set()
 
         try:
+            server_now_dt = self._get_mongo_server_now()
+            server_now_iso = self._to_iso_timestamp(server_now_dt)
             cursor = self.repo.get_cursor()
 
             for table in self.TABLES:
@@ -2243,7 +2347,7 @@ class UnifiedSyncManagerV3(QObject):
 
                             if is_deleted or sync_status == "deleted":
                                 # حذف منطقي في السحابة لضمان مزامنة الحذف عبر Delta Sync
-                                now_dt = datetime.now()
+                                now_dt = server_now_dt
                                 remote_error = False
                                 remote_matched = False
 
@@ -2317,7 +2421,7 @@ class UnifiedSyncManagerV3(QObject):
                                     for k, v in record.items()
                                     if k not in ["id", "sync_status", "dirty_flag", "is_deleted"]
                                 }
-                                clean_record["last_modified"] = datetime.now().isoformat()
+                                clean_record["last_modified"] = server_now_iso
 
                                 if mongo_id:
                                     try:
@@ -2343,14 +2447,24 @@ class UnifiedSyncManagerV3(QObject):
                                     )
 
                                 # تحديث dirty_flag و sync_status
-                                cursor.execute(
-                                    f"""
-                                    UPDATE {table}
-                                    SET dirty_flag = 0, sync_status = 'synced'
-                                    WHERE id = ?
-                                """,
-                                    (local_id,),
-                                )
+                                if "last_modified" in columns:
+                                    cursor.execute(
+                                        f"""
+                                        UPDATE {table}
+                                        SET dirty_flag = 0, sync_status = 'synced', last_modified = ?
+                                        WHERE id = ?
+                                    """,
+                                        (server_now_iso, local_id),
+                                    )
+                                else:
+                                    cursor.execute(
+                                        f"""
+                                        UPDATE {table}
+                                        SET dirty_flag = 0, sync_status = 'synced'
+                                        WHERE id = ?
+                                    """,
+                                        (local_id,),
+                                    )
                                 results["pushed"] += 1
 
                         except Exception as e:
@@ -2402,6 +2516,7 @@ class UnifiedSyncManagerV3(QObject):
         changed_tables: set[str] = set()
 
         try:
+            reference_now = self._get_mongo_server_now()
             cursor = self.repo.get_cursor()
 
             for table in self.TABLES:
@@ -2411,9 +2526,9 @@ class UnifiedSyncManagerV3(QObject):
 
                     # الحصول على Watermark لهذا الجدول
                     watermark = self._watermarks.get(table, "1970-01-01T00:00:00")
-                    watermark_dt = self._parse_iso_datetime(watermark)
-                    if watermark_dt and watermark_dt > datetime.now() + timedelta(seconds=30):
-                        fallback_dt = datetime.now() - timedelta(minutes=5)
+                    watermark_dt = self._normalize_datetime(self._parse_iso_datetime(watermark))
+                    if watermark_dt and watermark_dt > reference_now + timedelta(seconds=30):
+                        fallback_dt = reference_now - timedelta(minutes=5)
                         watermark = fallback_dt.isoformat()
                         self._watermarks[table] = watermark
                         self._save_watermarks()
@@ -2537,6 +2652,7 @@ class UnifiedSyncManagerV3(QObject):
                             logo_clients,
                         )
                     if results["pulled"] > before_pulled or results["deleted"] > before_deleted:
+                        self._invalidate_repository_cache(table)
                         changed_tables.add(table)
 
                 except Exception as e:

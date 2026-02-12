@@ -7,13 +7,16 @@
 """
 
 import hashlib
+import json
 import os
 import platform
 import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 
 from PyQt6.QtCore import QEasingCurve, QObject, QPropertyAnimation, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -313,15 +316,44 @@ class NotificationSyncWorker(QThread):
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
+        self._seen_order = deque()
+        self._max_seen_ids = 1200
         # Poll below 1s for fast cross-device fallback when Change Streams are unavailable.
         self._check_interval = 700
-        self._poll_lookback_seconds = 120
+        self._poll_lookback_seconds = 3600
         self._last_cleanup = 0.0
         self._last_sync_trigger = 0.0
         self._sync_trigger_cooldown = 0.4
         self._last_settings_sync = 0.0
         self._settings_sync_interval = 20.0
         self._settings_sync_cooldown = 1.0
+        self._load_runtime_config()
+
+    def _load_runtime_config(self):
+        try:
+            config_path = Path("sync_config.json")
+            if not config_path.exists():
+                return
+            with open(config_path, encoding="utf-8") as f:
+                cfg = json.load(f)
+            poll_ms = cfg.get("notification_poll_interval_ms")
+            lookback_s = cfg.get("notification_poll_lookback_seconds")
+            if poll_ms is not None:
+                self._check_interval = max(300, min(5000, int(poll_ms)))
+            if lookback_s is not None:
+                self._poll_lookback_seconds = max(60, min(24 * 3600, int(lookback_s)))
+        except Exception:
+            # Keep safe defaults.
+            pass
+
+    def _mark_seen(self, notif_id: str) -> None:
+        if not notif_id or notif_id in self._seen_ids:
+            return
+        self._seen_ids.add(notif_id)
+        self._seen_order.append(notif_id)
+        while len(self._seen_order) > self._max_seen_ids:
+            old_id = self._seen_order.popleft()
+            self._seen_ids.discard(old_id)
 
     def set_repository(self, repo):
         self.repo = repo
@@ -413,31 +445,44 @@ class NotificationSyncWorker(QThread):
                     if notif_id in self._seen_ids:
                         continue
 
-                    self._seen_ids.add(notif_id)
+                    self._mark_seen(notif_id)
                     saw_new = True
-                    if len(self._seen_ids) > 100:
-                        self._seen_ids = set(list(self._seen_ids)[-50:])
 
                     safe_print(
                         f"INFO: [NotificationSync] Received from {notif.get('device_id')}: {notif.get('title')}"
                     )
 
+                    entity_type = notif.get("entity_type")
+                    entity_key = str(entity_type).strip().lower() if entity_type else ""
                     action_value = str(notif.get("action") or "").strip().lower()
+                    title_text = str(notif.get("title") or "").strip()
+                    message_text = str(notif.get("message") or "").strip()
                     silent = bool(notif.get("silent")) or action_value == "sync_ping"
+                    if entity_key in {"system_settings", "settings"}:
+                        # system_settings notifications are operational signals, not user toasts.
+                        silent = True
+                    elif (
+                        "تم تحديث إعدادات النظام" in message_text
+                        or "system settings" in message_text.lower()
+                        or title_text in {"⚙️ الإعدادات", "الاعدادات"}
+                        or title_text.lower() in {"settings", "system settings"}
+                    ):
+                        # Backward-compat: older app versions may send settings notifications
+                        # without entity_type. Keep them silent to avoid noisy startup toasts.
+                        silent = True
+                        settings_triggered = True
                     if not silent:
                         self.new_notification.emit(
                             {
-                                "message": notif.get("message", ""),
+                                "message": message_text,
                                 "type": notif.get("type", "info"),
-                                "title": notif.get("title"),
+                                "title": title_text,
                                 "device_id": notif.get("device_id"),
-                                "entity_type": notif.get("entity_type"),
+                                "entity_type": entity_type,
                                 "action": notif.get("action"),
                             }
                         )
 
-                    entity_type = notif.get("entity_type")
-                    entity_key = str(entity_type).strip().lower() if entity_type else ""
                     if entity_key in {"system_settings", "settings"}:
                         settings_triggered = True
                     table_name = self._map_entity_to_table(entity_type)

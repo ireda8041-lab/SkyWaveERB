@@ -98,6 +98,12 @@ class AppSignals(QObject):
 
         if self._sync_manager:
             try:
+                if hasattr(self._sync_manager, "emit_sync_ping_for_table"):
+                    # Signal remote devices to pull this table immediately.
+                    self._sync_manager.emit_sync_ping_for_table(data_type)
+            except Exception:
+                pass
+            try:
                 if hasattr(self._sync_manager, "schedule_instant_sync"):
                     self._sync_manager.schedule_instant_sync(data_type)
                 elif hasattr(self._sync_manager, "instant_sync"):

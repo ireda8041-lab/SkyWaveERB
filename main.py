@@ -581,7 +581,8 @@ class SkyWaveERPApp:
 
             known_tables = set(getattr(self.unified_sync, "TABLES", []))
             if isinstance(table_name, str) and table_name in known_tables:
-                app_signals.emit_data_changed(table_name)
+                # Realtime events originate from cloud state; refresh UI only to avoid sync echo loops.
+                app_signals.emit_ui_data_changed(table_name)
                 if hasattr(self.unified_sync, "request_realtime_pull"):
                     self.unified_sync.request_realtime_pull(table_name)
         except Exception as e:

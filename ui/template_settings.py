@@ -54,6 +54,8 @@ class TemplateSettings(QWidget):
     def setup_ui(self):
         """إعداد واجهة المستخدم"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
         # عنوان القسم
         title_label = QLabel("🎨 إدارة قوالب الفواتير")
@@ -65,9 +67,9 @@ class TemplateSettings(QWidget):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 #667eea, stop:1 #764ba2);
                 color: white;
-                padding: 15px;
+                padding: 10px;
                 border-radius: 8px;
-                margin-bottom: 10px;
+                margin-bottom: 4px;
             }
         """
         )
@@ -94,6 +96,7 @@ class TemplateSettings(QWidget):
         default_layout.addWidget(QLabel("القالب الافتراضي:"))
 
         self.default_template_combo = QComboBox()
+        self.default_template_combo.currentIndexChanged.connect(self.change_default_template)
         default_layout.addWidget(self.default_template_combo)
 
         default_layout.addStretch()
@@ -131,9 +134,7 @@ class TemplateSettings(QWidget):
         # مدير القوالب المدمج
         self.template_manager = TemplateManager(self.template_service)
         self.template_manager.template_changed.connect(self.load_template_settings)
-        layout.addWidget(self.template_manager)
-
-        layout.addStretch()
+        layout.addWidget(self.template_manager, 1)
 
     def load_template_settings(self):
         """تحميل إعدادات القوالب"""
@@ -150,6 +151,7 @@ class TemplateSettings(QWidget):
                 self.default_template_label.setText("القالب الافتراضي: غير محدد")
 
             # تحديث قائمة القوالب في الـ ComboBox
+            self.default_template_combo.blockSignals(True)
             self.default_template_combo.clear()
             for template in templates:
                 self.default_template_combo.addItem(
@@ -162,8 +164,13 @@ class TemplateSettings(QWidget):
                     if self.default_template_combo.itemData(i) == default_template["id"]:
                         self.default_template_combo.setCurrentIndex(i)
                         break
+            self.default_template_combo.blockSignals(False)
 
         except Exception as e:
+            try:
+                self.default_template_combo.blockSignals(False)
+            except Exception:
+                pass
             QMessageBox.critical(self, "خطأ", f"فشل في تحميل إعدادات القوالب: {e}")
 
     def change_default_template(self):

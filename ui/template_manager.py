@@ -400,7 +400,7 @@ class TemplateManager(QWidget):
         self.templates_table.setAlternatingRowColors(True)
         self.templates_table.itemSelectionChanged.connect(self.on_selection_changed)
 
-        layout.addWidget(self.templates_table)
+        layout.addWidget(self.templates_table, 1)
 
         pagination_layout = QHBoxLayout()
         pagination_layout.setContentsMargins(0, 6, 0, 0)

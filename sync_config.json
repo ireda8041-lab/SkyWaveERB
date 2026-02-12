@@ -10,6 +10,8 @@
   "realtime_attempt_local_rs_bootstrap": true,
   "realtime_replica_set_name": "rs0",
   "realtime_local_rs_bootstrap_timeout_s": 12,
+  "notification_poll_interval_ms": 700,
+  "notification_poll_lookback_seconds": 3600,
   "lazy_logo_enabled": true,
   "logo_fetch_batch_limit": 10,
   "max_retries": 2,

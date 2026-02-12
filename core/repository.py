@@ -261,6 +261,43 @@ class Repository:
                 safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
                 raise
 
+    def invalidate_table_cache(self, table_name: str | None = None) -> None:
+        """Invalidate repository caches for one table (or all tables when not provided)."""
+        if not CACHE_ENABLED:
+            return
+
+        cache_map = {
+            "clients": "_clients_cache",
+            "projects": "_projects_cache",
+            "services": "_services_cache",
+            "accounts": "_accounts_cache",
+            "expenses": "_expenses_cache",
+        }
+
+        normalized = (table_name or "").strip().lower()
+        keys = list(cache_map.keys()) if not normalized else [normalized]
+
+        for key in keys:
+            attr_name = cache_map.get(key)
+            if not attr_name or not hasattr(self, attr_name):
+                continue
+            try:
+                getattr(self, attr_name).invalidate()
+            except Exception:
+                pass
+
+        # Dashboard depends on accounting/projects/payments/expenses totals.
+        if not normalized or normalized in {
+            "projects",
+            "payments",
+            "expenses",
+            "accounts",
+            "journal_entries",
+            "invoices",
+        }:
+            Repository._dashboard_cache = None
+            Repository._dashboard_cache_time = 0
+
     def close(self):
         """⚡ إغلاق اتصالات قاعدة البيانات"""
         try:
