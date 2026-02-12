@@ -4,6 +4,20 @@
 
 ---
 
+## [2.2.6] - 2026-02-12
+
+### Fixed
+- Realtime sync now re-checks Change Streams support after local bootstrap attempt.
+- Mongo reconnect flow now always reloads URI/DB from runtime config before reconnect.
+
+### Changed
+- Added safe local Replica Set bootstrap flow for localhost Mongo deployments.
+- Normalized local Mongo URIs to include replica-set query parameters automatically.
+- Replaced per-collection watcher loop with a single database Change Stream watcher.
+- Cloud connection test now validates Change Streams support and reports fallback clearly.
+
+---
+
 ## [2.2.5] - 2026-02-10
 
 ### Fixed

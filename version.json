@@ -1,16 +1,17 @@
 {
-  "version": "2.2.5",
-  "version_name": "Sky Wave ERP v2.2.5",
-  "release_date": "2026-02-10",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.5/SkyWaveERP-Setup-2.2.5.exe",
+  "version": "2.2.6",
+  "version_name": "Sky Wave ERP v2.2.6",
+  "release_date": "2026-02-12",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.6/SkyWaveERP-Setup-2.2.6.exe",
   "changelog": [
-    "Delta sync now guards future watermarks to avoid missed updates.",
-    "Settings sync is triggered by notifications and avoids overwriting newer local changes.",
-    "Main tabs and settings sub-tabs now adapt better to small screens.",
-    "Project dialog becomes scrollable on small displays and manual sync is non-blocking."
+    "Realtime sync now attempts safe local Replica Set bootstrap when available.",
+    "Mongo URI normalization adds replicaSet params for local hosts automatically.",
+    "Unified database Change Stream watcher improves event delivery and reduces lag.",
+    "Cloud connection test now validates Change Streams support with clear fallback messages.",
+    "Repository reconnect flow now refreshes Mongo URI/DB values from runtime config."
   ],
   "min_version": "1.0.0",
   "mandatory": false,
-  "notes_ar": "تحسينات المزامنة الفورية والإعدادات: إصلاح watermarks المستقبلية، مزامنة إعدادات أسرع، وتحسين التوافق مع الشاشات الصغيرة.",
-  "notes_en": "Realtime + settings sync improvements, watermark guardrails, and better small-screen layout behavior."
+  "notes_ar": "تحسينات جوهرية في المزامنة اللحظية: تفعيل آمن لـ Change Streams محلياً عند الإمكان، تحسين مراقبة الأحداث، وتوضيح fallback إلى Delta Sync مع ثبات أعلى بين الأجهزة.",
+  "notes_en": "Major realtime sync improvements: safe local Change Streams activation, more reliable event watching, and clearer Delta fallback behavior."
 }

@@ -9,10 +9,12 @@
 """
 
 import json
+import os
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -48,6 +50,160 @@ logger = get_logger(__name__)
 _REALTIME_MANAGER = None
 
 
+def _split_mongo_hosts(uri: str) -> list[str]:
+    try:
+        if not isinstance(uri, str):
+            return []
+        parts = urlsplit(uri)
+        if not parts.netloc:
+            return []
+        netloc = parts.netloc.split("@")[-1]
+        return [h.strip() for h in netloc.split(",") if h.strip()]
+    except Exception:
+        return []
+
+
+def is_local_mongo_uri(uri: str) -> bool:
+    if not isinstance(uri, str):
+        return False
+    uri_l = uri.strip().lower()
+    if uri_l.startswith("mongodb+srv://"):
+        return False
+    if not uri_l.startswith("mongodb://"):
+        return False
+    hosts = _split_mongo_hosts(uri)
+    if not hosts:
+        return False
+    local_hosts = {"localhost", "127.0.0.1", "::1"}
+    for host_item in hosts:
+        host = host_item
+        if host.startswith("[") and "]" in host:
+            host = host[1 : host.index("]")]
+        else:
+            host = host.split(":", 1)[0]
+        if host.strip().lower() not in local_hosts:
+            return False
+    return True
+
+
+def ensure_replica_set_uri(uri: str, replica_set_name: str = "rs0") -> str:
+    """
+    Ensure URI contains replicaSet and directConnection=false for local single-node setups.
+    Non mongodb:// URIs are returned unchanged.
+    """
+    try:
+        if not isinstance(uri, str) or not uri.strip():
+            return uri
+        if not uri.lower().startswith("mongodb://"):
+            return uri
+
+        rs_name = (replica_set_name or "rs0").strip() or "rs0"
+        parts = urlsplit(uri)
+        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        query_map = dict(query_pairs)
+        if not query_map.get("replicaSet"):
+            query_map["replicaSet"] = rs_name
+        if "directConnection" not in query_map:
+            query_map["directConnection"] = "false"
+
+        rebuilt_query = urlencode(list(query_map.items()))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, rebuilt_query, parts.fragment))
+    except Exception:
+        return uri
+
+
+def _extract_preferred_member_host(uri: str, hello_payload: dict | None = None) -> str:
+    hello_payload = hello_payload or {}
+    me_host = str(hello_payload.get("me") or "").strip()
+    if me_host:
+        return me_host
+
+    hosts = _split_mongo_hosts(uri)
+    if not hosts:
+        return ""
+    first = hosts[0]
+    if ":" in first:
+        return first
+    return f"{first}:27017"
+
+
+def try_bootstrap_local_replica_set(
+    mongo_client,
+    uri: str,
+    replica_set_name: str = "rs0",
+    timeout_seconds: float = 12.0,
+) -> tuple[bool, str]:
+    """
+    Try to initialize a local single-node replica set for Change Streams.
+    Returns (success, details).
+    """
+    if mongo_client is None:
+        return False, "Mongo client غير متاح."
+    if not is_local_mongo_uri(uri):
+        return False, "الاتصال ليس Localhost؛ التفعيل التلقائي متاح فقط للـ Mongo المحلي."
+
+    try:
+        admin = mongo_client.admin
+        hello = admin.command("hello")
+        set_name = str(hello.get("setName") or "").strip()
+        if set_name:
+            return True, f"Replica Set مفعل بالفعل ({set_name})."
+
+        rs_name = (replica_set_name or "rs0").strip() or "rs0"
+        preferred_host = _extract_preferred_member_host(uri, hello)
+        if not preferred_host:
+            return False, "تعذر تحديد عنوان السيرفر لتهيئة Replica Set."
+
+        try:
+            admin.command(
+                {
+                    "replSetInitiate": {
+                        "_id": rs_name,
+                        "members": [{"_id": 0, "host": preferred_host}],
+                    }
+                }
+            )
+        except Exception as initiate_error:
+            error_text = str(initiate_error).lower()
+            # Accept already-initialized states.
+            if "already initialized" not in error_text and "already initiated" not in error_text:
+                if "not running with --replset" in error_text:
+                    return (
+                        False,
+                        "Mongo يعمل بدون replSetName. فعّل replication.replSetName ثم أعد التشغيل.",
+                    )
+                return False, f"فشل تهيئة Replica Set: {initiate_error}"
+
+        deadline = time.time() + max(3.0, float(timeout_seconds))
+        while time.time() < deadline:
+            try:
+                probe = admin.command("hello")
+                probe_set_name = str(probe.get("setName") or "").strip()
+                if probe_set_name:
+                    return True, f"تم تفعيل Replica Set بنجاح ({probe_set_name})."
+            except Exception:
+                pass
+            time.sleep(0.4)
+
+        return False, "تم إرسال أوامر التهيئة لكن لم تصبح العقدة Replica Set ضمن المهلة."
+    except Exception as e:
+        return False, f"تعذر تفعيل Replica Set تلقائياً: {e}"
+
+
+def check_change_stream_support(mongo_db, max_await_ms: int = 100) -> tuple[bool, str]:
+    if mongo_db is None:
+        return False, "Mongo database غير متاحة."
+    try:
+        with mongo_db.watch(max_await_time_ms=max_await_ms) as stream:
+            try:
+                stream.try_next()
+            except Exception:
+                pass
+        return True, "Change Streams مدعومة."
+    except Exception as e:
+        return False, str(e)
+
+
 class RealtimeSyncManager(QObject):
     """
     🔄 مدير المزامنة الفورية
@@ -59,6 +215,7 @@ class RealtimeSyncManager(QObject):
     data_updated = pyqtSignal(str, dict)  # (collection_name, change_data)
     connection_status_changed = pyqtSignal(bool)  # (is_connected)
     sync_completed = pyqtSignal(str)  # (collection_name)
+    _emit_pending_requested = pyqtSignal()
 
     # الجداول المراقبة - تقليل العدد للأداء
     COLLECTIONS = [
@@ -91,7 +248,12 @@ class RealtimeSyncManager(QObject):
         self._change_stream_max_await_ms = 250
         self._change_stream_supported = None
         self._support_warning_logged = False
+        self._local_rs_bootstrap_enabled = True
+        self._local_rs_name = "rs0"
+        self._local_rs_timeout_seconds = 12.0
+        self._local_rs_bootstrap_attempted = False
         self._load_runtime_config()
+        self._emit_pending_requested.connect(self._emit_pending_changes_slot)
 
         # تهيئة أوقات المزامنة
         for collection in self.COLLECTIONS:
@@ -115,22 +277,27 @@ class RealtimeSyncManager(QObject):
             except (TypeError, ValueError):
                 self._change_stream_max_await_ms = 250
             self._change_stream_max_await_ms = max(50, min(5000, self._change_stream_max_await_ms))
+            self._local_rs_bootstrap_enabled = bool(
+                cfg.get("realtime_attempt_local_rs_bootstrap", True)
+            )
+            rs_name = str(cfg.get("realtime_replica_set_name", "rs0")).strip()
+            self._local_rs_name = rs_name or "rs0"
+            try:
+                timeout_value = float(cfg.get("realtime_local_rs_bootstrap_timeout_s", 12.0))
+            except (TypeError, ValueError):
+                timeout_value = 12.0
+            self._local_rs_timeout_seconds = max(3.0, min(60.0, timeout_value))
         except Exception as e:
             logger.debug("[RealtimeSync] فشل تحميل الإعدادات: %s", e)
 
     def _detect_change_stream_support(self) -> bool:
         if self.repo is None or self.repo.mongo_db is None:
             return False
-        try:
-            collection = self.repo.mongo_db[self.COLLECTIONS[0]]
-            with collection.watch(max_await_time_ms=100, full_document="default") as stream:
-                try:
-                    stream.try_next()
-                except Exception:
-                    # try_next قد لا تكون متاحة في بعض الإصدارات - لا تعتبرها فشلاً.
-                    pass
+        supported, details = check_change_stream_support(self.repo.mongo_db, max_await_ms=100)
+        if supported:
             return True
-        except Exception as e:
+        e = details
+        try:
             if not self._support_warning_logged:
                 error_text = str(e).lower()
                 expected_not_supported = (
@@ -152,6 +319,93 @@ class RealtimeSyncManager(QObject):
                     )
                 self._support_warning_logged = True
             return False
+        except Exception:
+            return False
+
+    def _get_current_mongo_uri(self) -> str:
+        uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI")
+        if uri:
+            return str(uri).strip()
+        try:
+            from core.config import Config
+
+            return str(Config.get_mongo_uri()).strip()
+        except Exception:
+            return ""
+
+    def _persist_runtime_mongo_uri(self, uri: str) -> None:
+        clean_uri = str(uri or "").strip()
+        if not clean_uri:
+            return
+        try:
+            os.environ["MONGO_URI"] = clean_uri
+        except Exception:
+            pass
+        try:
+            import core.repository as repository_module
+
+            repository_module.MONGO_URI = clean_uri
+        except Exception:
+            pass
+        try:
+            from core.config import _persist_cloud_config
+
+            _persist_cloud_config()
+        except Exception:
+            pass
+
+    def _try_enable_change_streams_locally(self) -> bool:
+        if not self._local_rs_bootstrap_enabled:
+            return False
+        if self._local_rs_bootstrap_attempted:
+            return False
+        self._local_rs_bootstrap_attempted = True
+
+        if self.repo is None or self.repo.mongo_client is None:
+            return False
+
+        current_uri = self._get_current_mongo_uri()
+        if not current_uri:
+            logger.info("[RealtimeSync] لم يتم العثور على MONGO_URI لتفعيل Change Streams تلقائياً")
+            return False
+        if not is_local_mongo_uri(current_uri):
+            logger.info("[RealtimeSync] التفعيل التلقائي للـ Replica Set متاح فقط لـ Mongo المحلي")
+            return False
+
+        normalized_uri = ensure_replica_set_uri(current_uri, self._local_rs_name)
+        if normalized_uri != current_uri:
+            self._persist_runtime_mongo_uri(normalized_uri)
+            logger.info(
+                "[RealtimeSync] تم تحديث URI المحلي لدعم Replica Set (%s)",
+                self._local_rs_name,
+            )
+
+        ok, details = try_bootstrap_local_replica_set(
+            self.repo.mongo_client,
+            normalized_uri,
+            replica_set_name=self._local_rs_name,
+            timeout_seconds=self._local_rs_timeout_seconds,
+        )
+        if ok:
+            logger.info("[RealtimeSync] %s", details)
+            return True
+
+        logger.info("[RealtimeSync] تعذر تفعيل Change Streams تلقائياً: %s", details)
+        return False
+
+    def _sync_system_settings_from_cloud(self):
+        try:
+            settings_service = getattr(self.repo, "settings_service", None)
+            if settings_service:
+                settings_service.sync_settings_from_cloud(self.repo)
+            try:
+                from core.signals import app_signals
+
+                app_signals.system_changed.emit()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug("[RealtimeSync] فشل مزامنة system_settings: %s", e)
 
     def start(self):
         """🚀 بدء المزامنة الفورية"""
@@ -190,6 +444,8 @@ class RealtimeSyncManager(QObject):
 
         if self._realtime_auto_detect:
             self._change_stream_supported = self._detect_change_stream_support()
+            if not self._change_stream_supported and self._try_enable_change_streams_locally():
+                self._change_stream_supported = self._detect_change_stream_support()
         elif self._change_stream_supported is None:
             self._change_stream_supported = True
 
@@ -250,62 +506,51 @@ class RealtimeSyncManager(QObject):
 
         def watch_all_collections():
             logger.debug("[RealtimeSync] بدء المراقبة الموحدة")
+            pipeline = [{"$match": {"ns.coll": {"$in": self.COLLECTIONS}}}]
 
             while not self._stop_event.is_set() and not self._shutdown:
                 try:
                     if self.repo.mongo_db is None or self.repo.mongo_client is None:
-                        time.sleep(2)
+                        time.sleep(1.0)
                         continue
 
-                    # مراقبة كل collection بالتناوب
-                    for collection_name in self.COLLECTIONS:
-                        if self._stop_event.is_set() or self._shutdown:
-                            break
-
-                        try:
-                            collection = self.repo.mongo_db[collection_name]
-
-                            # مراقبة التغييرات مع timeout قصير جداً
-                            with collection.watch(
-                                full_document="updateLookup",
-                                max_await_time_ms=self._change_stream_max_await_ms,
-                            ) as stream:
-                                for _change in stream:
-                                    if self._stop_event.is_set() or self._shutdown:
-                                        break
-
-                                    # ⚡ تجميع التغييرات بدلاً من معالجتها فوراً
-                                    self._pending_changes.add(collection_name)
-                                    self._schedule_emit_changes()
-                                    break  # ⚡ معالجة تغيير واحد فقط ثم الانتقال للـ collection التالي
-
-                        except PyMongoError as e:
-                            if self._shutdown:
+                    with self.repo.mongo_db.watch(
+                        pipeline=pipeline,
+                        full_document="updateLookup",
+                        max_await_time_ms=self._change_stream_max_await_ms,
+                    ) as stream:
+                        for change in stream:
+                            if self._stop_event.is_set() or self._shutdown:
                                 break
-                            error_msg = str(e)
-                            if "Cannot use MongoClient after close" in error_msg:
-                                break
-                            # تجاهل أخطاء timeout
-                            if "timed out" not in error_msg.lower():
-                                logger.debug(
-                                    "[RealtimeSync] خطأ في مراقبة %s: %s", collection_name, e
-                                )
-                        except (OSError, RuntimeError, ValueError) as e:
-                            if self._shutdown:
-                                break
-                            logger.debug(
-                                "[RealtimeSync] خطأ غير متوقع في مراقبة %s: %s",
-                                collection_name,
-                                e,
-                            )
+                            if not isinstance(change, dict):
+                                continue
 
-                    time.sleep(0.5)
+                            namespace = change.get("ns") or {}
+                            collection_name = namespace.get("coll")
+                            if collection_name not in self.COLLECTIONS:
+                                continue
 
+                            if collection_name == "system_settings":
+                                self._sync_system_settings_from_cloud()
+                                continue
+
+                            self._pending_changes.add(collection_name)
+                            self._schedule_emit_changes()
+
+                except PyMongoError as e:
+                    if self._shutdown:
+                        break
+                    error_msg = str(e).lower()
+                    if "cannot use mongoclient after close" in error_msg:
+                        break
+                    if "timed out" not in error_msg:
+                        logger.debug("[RealtimeSync] خطأ في stream الموحد: %s", e)
+                    time.sleep(0.8)
                 except Exception as e:
                     if self._shutdown:
                         break
                     logger.debug("[RealtimeSync] خطأ في المراقبة الموحدة: %s", e)
-                    time.sleep(2)
+                    time.sleep(1.5)
 
             logger.debug("[RealtimeSync] انتهاء المراقبة الموحدة")
 
@@ -317,13 +562,8 @@ class RealtimeSyncManager(QObject):
 
     def _schedule_emit_changes(self):
         """⚡ جدولة إرسال التغييرات المجمعة"""
-        from PyQt6.QtCore import QMetaObject, Qt
-
-        # إرسال التغييرات بعد 500ms
         try:
-            QMetaObject.invokeMethod(
-                self, "_emit_pending_changes_slot", Qt.ConnectionType.QueuedConnection
-            )
+            self._emit_pending_requested.emit()
         except Exception:
             pass
 

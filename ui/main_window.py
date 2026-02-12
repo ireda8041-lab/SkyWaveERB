@@ -1528,11 +1528,14 @@ class MainWindow(QMainWindow):
             return
         self._tabs_compact = compact
         tab_bar = self.tabs.tabBar()
-        tab_bar.setExpanding(not compact)
-        self.tabs.setUsesScrollButtons(compact)
+        tab_bar.setExpanding(True)
+        self.tabs.setUsesScrollButtons(False)
         self.tabs.setElideMode(
             Qt.TextElideMode.ElideRight if compact else Qt.TextElideMode.ElideNone
         )
+        tab_font = tab_bar.font()
+        tab_font.setPointSize(10 if compact else 11)
+        tab_bar.setFont(tab_font)
 
     def setup_title_bar(self):
         """تخصيص شريط العنوان بألوان البرنامج"""

@@ -313,14 +313,14 @@ class NotificationSyncWorker(QThread):
         self.is_running = True
         self.repo = None
         self._seen_ids = set()
-        # Poll every 1s for near-instant cross-device notifications when Change Streams are unavailable.
-        self._check_interval = 1000
+        # Poll below 1s for fast cross-device fallback when Change Streams are unavailable.
+        self._check_interval = 700
         self._poll_lookback_seconds = 120
         self._last_cleanup = 0.0
         self._last_sync_trigger = 0.0
         self._sync_trigger_cooldown = 0.4
         self._last_settings_sync = 0.0
-        self._settings_sync_interval = 60.0
+        self._settings_sync_interval = 20.0
         self._settings_sync_cooldown = 1.0
 
     def set_repository(self, repo):
@@ -422,16 +422,19 @@ class NotificationSyncWorker(QThread):
                         f"INFO: [NotificationSync] Received from {notif.get('device_id')}: {notif.get('title')}"
                     )
 
-                    self.new_notification.emit(
-                        {
-                            "message": notif.get("message", ""),
-                            "type": notif.get("type", "info"),
-                            "title": notif.get("title"),
-                            "device_id": notif.get("device_id"),
-                            "entity_type": notif.get("entity_type"),
-                            "action": notif.get("action"),
-                        }
-                    )
+                    action_value = str(notif.get("action") or "").strip().lower()
+                    silent = bool(notif.get("silent")) or action_value == "sync_ping"
+                    if not silent:
+                        self.new_notification.emit(
+                            {
+                                "message": notif.get("message", ""),
+                                "type": notif.get("type", "info"),
+                                "title": notif.get("title"),
+                                "device_id": notif.get("device_id"),
+                                "entity_type": notif.get("entity_type"),
+                                "action": notif.get("action"),
+                            }
+                        )
 
                     entity_type = notif.get("entity_type")
                     entity_key = str(entity_type).strip().lower() if entity_type else ""
@@ -531,6 +534,10 @@ class NotificationSyncWorker(QThread):
         table = None
         if len(tables) == 1:
             table = next(iter(tables))
+        # For single-table remote events, prefer targeted pull to avoid watermark drift issues.
+        if table and hasattr(syncer, "force_pull"):
+            syncer.force_pull(table)
+            return
         if hasattr(syncer, "schedule_instant_sync"):
             syncer.schedule_instant_sync(table)
         else:

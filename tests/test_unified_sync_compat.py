@@ -2,7 +2,7 @@ import sqlite3
 import time
 from datetime import datetime
 
-from core.realtime_sync import RealtimeSyncManager
+from core.realtime_sync import RealtimeSyncManager, ensure_replica_set_uri, is_local_mongo_uri
 from core.unified_sync import UnifiedSyncManagerV3
 
 
@@ -323,11 +323,50 @@ def test_realtime_events_are_queued_during_full_sync_then_flushed():
     assert not manager._queued_realtime_tables
 
 
+def test_ensure_replica_set_uri_for_local_connection():
+    uri = "mongodb://localhost:27017/skywave_erp_db"
+    normalized = ensure_replica_set_uri(uri, "rs0")
+
+    assert "replicaSet=rs0" in normalized
+    assert "directConnection=false" in normalized
+
+
+def test_is_local_mongo_uri_detects_remote_hosts():
+    assert is_local_mongo_uri("mongodb://localhost:27017") is True
+    assert is_local_mongo_uri("mongodb://127.0.0.1:27017") is True
+    assert is_local_mongo_uri("mongodb://mongo.internal:27017") is False
+    assert is_local_mongo_uri("mongodb+srv://cluster.example.com/test") is False
+
+
+def test_realtime_manager_rechecks_after_local_bootstrap(monkeypatch):
+    repo = _FakeRepo(online=True)
+    manager = RealtimeSyncManager(repo)
+    detect_calls = {"count": 0}
+
+    def _fake_detect():
+        detect_calls["count"] += 1
+        return detect_calls["count"] >= 2
+
+    monkeypatch.setattr(manager, "_detect_change_stream_support", _fake_detect)
+    monkeypatch.setattr(manager, "_try_enable_change_streams_locally", lambda: True)
+    monkeypatch.setattr(manager, "_start_unified_watcher", lambda: None)
+
+    manager._realtime_auto_detect = True
+    manager._realtime_enabled = True
+
+    started = manager.start()
+
+    assert started is True
+    assert manager.is_running is True
+    assert detect_calls["count"] == 2
+
+
 def test_realtime_manager_fallback_when_change_stream_not_supported(monkeypatch):
     repo = _FakeRepo(online=True)
     manager = RealtimeSyncManager(repo)
 
     monkeypatch.setattr(manager, "_detect_change_stream_support", lambda: False)
+    monkeypatch.setattr(manager, "_try_enable_change_streams_locally", lambda: False)
     manager._realtime_auto_detect = True
     manager._realtime_enabled = True
 
@@ -358,3 +397,39 @@ def test_schedule_instant_sync_batches_rapid_requests(monkeypatch):
         time.sleep(0.01)
 
     assert calls == ["delta"]
+
+
+def test_force_pull_single_table_prefers_targeted_reconcile(monkeypatch):
+    manager = UnifiedSyncManagerV3(_FakeRepo(online=True))
+    calls = []
+
+    monkeypatch.setattr(
+        manager,
+        "_run_table_reconcile_cycle",
+        lambda table: calls.append(("table", table)) or {"success": True},
+    )
+    monkeypatch.setattr(
+        manager,
+        "_run_delta_cycle",
+        lambda: calls.append(("delta", None)) or {"success": True},
+    )
+
+    manager.force_pull("clients")
+
+    deadline = time.monotonic() + 1.0
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert calls == [("table", "clients")]
+
+
+def test_sync_pings_skip_notifications_table():
+    repo = _FakeRepo(online=True)
+    repo.mongo_db = _FakeMongoDB()
+    manager = UnifiedSyncManagerV3(repo)
+
+    manager._emit_sync_pings({"notifications", "clients"})
+
+    inserted = repo.mongo_db["notifications"].inserted
+    assert len(inserted) == 1
+    assert inserted[0]["entity_type"] == "clients"

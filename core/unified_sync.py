@@ -9,9 +9,13 @@ MongoDB هو المصدر الرئيسي، SQLite نسخة محلية للـ off
 - عند استعادة الاتصال: رفع التغييرات المحلية ثم مسح وإعادة تحميل من MongoDB
 """
 
+import hashlib
 import json
+import os
+import platform
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -33,6 +37,33 @@ except ImportError:
 
 
 logger = get_logger(__name__)
+
+
+def _get_stable_device_id() -> str:
+    """Return a stable device id used for cross-device sync pings."""
+    try:
+        machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
+        try:
+            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
+        except TypeError:
+            digest = hashlib.sha256(machine_info.encode()).hexdigest()
+        return digest[:8]
+    except Exception:
+        device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
+        if os.path.exists(device_file):
+            try:
+                with open(device_file, encoding="utf-8") as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        new_id = str(uuid.uuid4())[:8]
+        try:
+            with open(device_file, "w", encoding="utf-8") as f:
+                f.write(new_id)
+        except OSError:
+            pass
+        return new_id
+
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
 FULL_SYNC_INTERVAL_MS = 15 * 60 * 1000
@@ -128,6 +159,8 @@ class UnifiedSyncManagerV3(QObject):
         self._instant_sync_worker_running = False
         self._instant_sync_dedupe_ms = 250
         self._last_instant_sync_request_ms: dict[str, int] = {}
+        self._device_id = _get_stable_device_id()
+        self._last_sync_ping_at: dict[str, float] = {}
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -145,6 +178,37 @@ class UnifiedSyncManagerV3(QObject):
         self._load_watermarks()
 
         logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة محسّنة للأداء")
+
+    def _emit_sync_pings(self, tables: set[str]) -> None:
+        if not tables:
+            return
+        if not self.is_online or self.repo is None or self.repo.mongo_db is None:
+            return
+        collection = self.repo.mongo_db["notifications"]
+        now_iso = datetime.now().isoformat()
+        now_ts = time.time()
+        for table in tables:
+            # Avoid notification table echo storms.
+            if table == "notifications":
+                continue
+            last_ping = self._last_sync_ping_at.get(table, 0.0)
+            if (now_ts - last_ping) < 0.6:
+                continue
+            self._last_sync_ping_at[table] = now_ts
+            payload = {
+                "message": f"sync ping: {table}",
+                "type": "info",
+                "title": "sync",
+                "device_id": self._device_id,
+                "created_at": now_iso,
+                "entity_type": table,
+                "action": "sync_ping",
+                "silent": True,
+            }
+            try:
+                collection.insert_one(payload)
+            except Exception as e:
+                logger.debug("تعذر إرسال sync ping لـ %s: %s", table, e)
 
     def _update_sync_metrics(self, success: bool, records_synced: int = 0):
         """Update lightweight sync counters used by settings UI."""
@@ -2132,12 +2196,15 @@ class UnifiedSyncManagerV3(QObject):
             return {"success": False, "reason": "shutdown"}
 
         results = {"success": True, "pushed": 0, "deleted": 0, "errors": 0}
+        changed_tables: set[str] = set()
 
         try:
             cursor = self.repo.get_cursor()
 
             for table in self.TABLES:
                 try:
+                    before_pushed = results["pushed"]
+                    before_deleted = results["deleted"]
                     # التحقق من وجود الجدول
                     cursor.execute(
                         "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -2294,11 +2361,15 @@ class UnifiedSyncManagerV3(QObject):
 
                 except Exception as e:
                     logger.debug("خطأ في رفع جدول %s: %s", table, e)
+                finally:
+                    if results["pushed"] > before_pushed or results["deleted"] > before_deleted:
+                        changed_tables.add(table)
 
             cursor.close()
 
             if results["pushed"] > 0 or results["deleted"] > 0:
                 logger.info("⬆️ Delta رفع: %s، حذف: %s", results["pushed"], results["deleted"])
+                self._emit_sync_pings(changed_tables)
 
         except Exception as e:
             if self._shutdown and self._is_closed_sqlite_error(e):
@@ -2527,6 +2598,59 @@ class UnifiedSyncManagerV3(QObject):
         finally:
             self._delta_cycle_lock.release()
 
+    def _run_table_reconcile_cycle(self, table: str) -> dict[str, Any]:
+        """
+        Run one guarded targeted cycle for a single table.
+        Used by remote notification-triggered pulls to bypass watermark stalls safely.
+        """
+        if table not in self.TABLES:
+            return {"success": False, "reason": "invalid_table"}
+        if self.repo is None or self.repo.sqlite_conn is None:
+            return {"success": False, "reason": "sqlite_closed"}
+        if self._shutdown:
+            return {"success": False, "reason": "shutdown"}
+        if self._is_syncing:
+            return {"success": False, "reason": "full_sync_in_progress"}
+
+        if not self._delta_cycle_lock.acquire(blocking=False):
+            return {"success": False, "reason": "delta_busy"}
+
+        pushed = 0
+        errors = 0
+        try:
+            push_result = self.push_local_changes()
+            pushed = int(push_result.get("pushed", 0))
+            errors += int(push_result.get("errors", 0))
+            self._sync_single_table_from_cloud(table)
+            try:
+                from core.signals import app_signals
+
+                app_signals.emit_ui_data_changed(table)
+            except Exception:
+                pass
+            try:
+                self.data_synced.emit()
+            except RuntimeError:
+                pass
+            return {
+                "success": bool(push_result.get("success", True)),
+                "pushed": pushed,
+                "pulled": 0,
+                "deleted": int(push_result.get("deleted", 0)),
+                "errors": errors,
+                "table": table,
+            }
+        except Exception as e:
+            logger.debug("خطأ في table reconcile cycle (%s): %s", table, e)
+            return {
+                "success": False,
+                "reason": "table_reconcile_failed",
+                "table": table,
+                "error": str(e),
+            }
+        finally:
+            self._delta_cycle_lock.release()
+
     def force_pull(self, table: str = None):
         """
         ⚡ Force immediate pull (for screen open events)
@@ -2539,8 +2663,12 @@ class UnifiedSyncManagerV3(QObject):
             if self._shutdown:
                 return
             try:
-                # حالياً force_pull ينفذ دورة delta كاملة لضمان الاتساق.
-                self._run_delta_cycle()
+                target_table = table if isinstance(table, str) and table in self.TABLES else None
+                if target_table:
+                    self._run_table_reconcile_cycle(target_table)
+                else:
+                    # Fallback: full delta cycle for broad refresh.
+                    self._run_delta_cycle()
             except Exception as e:
                 logger.debug("خطأ في force_pull: %s", e)
 

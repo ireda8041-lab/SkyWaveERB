@@ -320,10 +320,23 @@ class Repository:
 
     def _start_mongo_connection(self):
         """⚡ الاتصال بـ MongoDB في Background Thread - محسّن ومحاول"""
+        global MONGO_URI, DB_NAME
+
         if os.environ.get("SKYWAVE_DISABLE_MONGO") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
             safe_print("INFO: MongoDB معطل في بيئة الاختبار")
             self.online = False
             return
+
+        try:
+            if CONFIG_LOADED:
+                MONGO_URI = Config.get_mongo_uri()
+                DB_NAME = Config.get_db_name()
+            else:
+                MONGO_URI = os.environ.get("MONGO_URI", MONGO_URI)
+                DB_NAME = os.environ.get("MONGO_DB_NAME", DB_NAME)
+        except Exception:
+            pass
+
         # ⚡ فحص توفر pymongo أولاً
         if not PYMONGO_AVAILABLE or pymongo is None:
             safe_print("INFO: pymongo غير متاح - العمل بالبيانات المحلية فقط")

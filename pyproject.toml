@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skywave-erp"
-version = "2.2.5"
+version = "2.2.6"
 description = "نظام إدارة موارد المؤسسات - Sky Wave ERP"
 readme = "README.md"
 license = "MIT"

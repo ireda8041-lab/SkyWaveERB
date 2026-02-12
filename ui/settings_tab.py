@@ -261,6 +261,7 @@ class SettingsTab(QWidget):
 
         # ربط تغيير التاب الفرعي لتحميل البيانات
         self.tabs.currentChanged.connect(self._on_sub_tab_changed)
+        app_signals.safe_connect(app_signals.system_changed, self.load_settings_data)
 
         self._apply_tabs_responsive()
 
@@ -284,12 +285,14 @@ class SettingsTab(QWidget):
             return
         self._tabs_compact = compact
         tab_bar = self.tabs.tabBar()
-        tab_bar.setExpanding(not compact)
-        self.tabs.setUsesScrollButtons(compact)
+        tab_bar.setExpanding(True)
+        self.tabs.setUsesScrollButtons(False)
         self.tabs.setElideMode(
             Qt.TextElideMode.ElideRight if compact else Qt.TextElideMode.ElideNone
         )
-        app_signals.safe_connect(app_signals.system_changed, self.load_settings_data)
+        tab_font = tab_bar.font()
+        tab_font.setPointSize(10 if compact else 11)
+        tab_bar.setFont(tab_font)
 
     def _search_settings_tabs(self, text: str):
         if not text:
@@ -1117,21 +1120,6 @@ class SettingsTab(QWidget):
         self.create_backup_btn.clicked.connect(self.create_backup)
         backup_btns.addWidget(self.create_backup_btn)
 
-        self.auto_backup_btn = QPushButton("⏰ نسخ احتياطي تلقائي")
-        self.auto_backup_btn.setStyleSheet(
-            """
-            QPushButton {
-                background: rgba(59, 130, 246, 0.2);
-                color: #93C5FD; border: 1px solid rgba(59, 130, 246, 0.4);
-                border-radius: 10px; padding: 12px 25px;
-                font-size: 13px; font-weight: bold;
-            }
-            QPushButton:hover { background: rgba(59, 130, 246, 0.4); }
-        """
-        )
-        self.auto_backup_btn.clicked.connect(self._setup_auto_backup)
-        backup_btns.addWidget(self.auto_backup_btn)
-
         backup_btns.addStretch()
         backup_layout.addLayout(backup_btns)
         backup_group.setLayout(backup_layout)
@@ -1278,16 +1266,6 @@ class SettingsTab(QWidget):
         # تحميل الإحصائيات
         self.load_db_stats()
         self._load_backup_history()
-
-    def _setup_auto_backup(self):
-        """إعداد النسخ الاحتياطي التلقائي"""
-        QMessageBox.information(
-            self,
-            "النسخ الاحتياطي التلقائي",
-            "🔜 قريباً!\n\n"
-            "سيتم إضافة ميزة النسخ الاحتياطي التلقائي في التحديث القادم.\n\n"
-            "حالياً يمكنك إنشاء نسخة احتياطية يدوياً.",
-        )
 
     def _optimize_database(self):
         """تحسين قاعدة البيانات"""
@@ -3293,6 +3271,7 @@ class SettingsTab(QWidget):
 
         info_text = QLabel(
             "• المزامنة اللحظية تضمن تحديث البيانات تلقائياً على جميع الأجهزة\n"
+            "• Change Streams تحتاج MongoDB Replica Set (وإلا يعمل Delta fallback)\n"
             "• المزامنة السريعة ترفع التغييرات المحلية فقط (أسرع)\n"
             "• المزامنة الكاملة تزامن جميع البيانات من وإلى السحابة\n"
             "• يتم فحص الاتصال بالسحابة بشكل دوري تلقائياً\n"
@@ -3349,6 +3328,21 @@ class SettingsTab(QWidget):
     def save_sync_settings(self):
         """حفظ إعدادات المزامنة وتطبيقها"""
         try:
+            config_path = Path("sync_config.json")
+            previous_config = {}
+            if config_path.exists():
+                try:
+                    with open(config_path, encoding="utf-8") as f:
+                        previous_config = json.load(f)
+                except Exception:
+                    previous_config = {}
+
+            try:
+                rs_timeout_seconds = int(
+                    previous_config.get("realtime_local_rs_bootstrap_timeout_s", 12)
+                )
+            except (TypeError, ValueError):
+                rs_timeout_seconds = 12
 
             # إعداد التكوين الجديد
             config = {
@@ -3382,10 +3376,17 @@ class SettingsTab(QWidget):
                 "enable_compression": False,
                 "enable_encryption": False,
                 "sync_status": "ready",
+                "realtime_attempt_local_rs_bootstrap": bool(
+                    previous_config.get("realtime_attempt_local_rs_bootstrap", True)
+                ),
+                "realtime_replica_set_name": str(
+                    previous_config.get("realtime_replica_set_name", "rs0")
+                )
+                or "rs0",
+                "realtime_local_rs_bootstrap_timeout_s": rs_timeout_seconds,
             }
 
             # حفظ في الملف
-            config_path = Path("sync_config.json")
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
 
@@ -3427,6 +3428,30 @@ class SettingsTab(QWidget):
                 else:
                     sync_manager.stop_auto_sync()
                     safe_print("INFO: [SyncTab] ⏸️ تم إيقاف المزامنة التلقائية")
+
+            try:
+                from core.realtime_sync import get_realtime_manager
+
+                realtime_manager = get_realtime_manager()
+                if realtime_manager is not None:
+                    realtime_manager._realtime_enabled = bool(config.get("realtime_enabled", True))
+                    realtime_manager._realtime_auto_detect = bool(
+                        config.get("realtime_auto_detect", True)
+                    )
+                    realtime_manager._change_stream_max_await_ms = int(
+                        config.get("realtime_change_stream_max_await_ms", 250)
+                    )
+                    realtime_manager._local_rs_bootstrap_enabled = bool(
+                        config.get("realtime_attempt_local_rs_bootstrap", True)
+                    )
+                    realtime_manager._local_rs_name = str(
+                        config.get("realtime_replica_set_name", "rs0")
+                    )
+                    realtime_manager._local_rs_timeout_seconds = float(
+                        config.get("realtime_local_rs_bootstrap_timeout_s", 12)
+                    )
+            except Exception:
+                pass
 
             QMessageBox.information(
                 self,
@@ -4462,8 +4487,36 @@ class SettingsTab(QWidget):
                 QMessageBox.warning(self, "تنبيه", "يرجى إدخال MONGO_URI و MONGO_DB_NAME")
                 return
 
-            os.environ["MONGO_URI"] = uri
+            normalized_uri = uri
+            rs_name = "rs0"
+            try:
+                config_path = Path("sync_config.json")
+                if config_path.exists():
+                    with open(config_path, encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    rs_name = str(cfg.get("realtime_replica_set_name", "rs0")) or "rs0"
+            except Exception:
+                rs_name = "rs0"
+            try:
+                from core.realtime_sync import ensure_replica_set_uri, is_local_mongo_uri
+
+                if is_local_mongo_uri(uri):
+                    normalized_uri = ensure_replica_set_uri(uri, rs_name)
+            except Exception:
+                normalized_uri = uri
+
+            self.mongo_uri_input.setText(normalized_uri)
+
+            os.environ["MONGO_URI"] = normalized_uri
             os.environ["MONGO_DB_NAME"] = db_name
+
+            try:
+                import core.repository as repository_module
+
+                repository_module.MONGO_URI = normalized_uri
+                repository_module.DB_NAME = db_name
+            except Exception:
+                pass
 
             from core.config import _persist_cloud_config
 
@@ -4504,10 +4557,46 @@ class SettingsTab(QWidget):
 
             uri = self.mongo_uri_input.text().strip()
             db_name = self.mongo_db_input.text().strip()
-            client = MongoClient(uri, serverSelectionTimeoutMS=3000)
+            from core.realtime_sync import (
+                check_change_stream_support,
+                ensure_replica_set_uri,
+                is_local_mongo_uri,
+            )
+
+            rs_name = "rs0"
+            try:
+                config_path = Path("sync_config.json")
+                if config_path.exists():
+                    with open(config_path, encoding="utf-8") as f:
+                        cfg = json.load(f)
+                    rs_name = str(cfg.get("realtime_replica_set_name", "rs0")) or "rs0"
+            except Exception:
+                rs_name = "rs0"
+
+            normalized_uri = (
+                ensure_replica_set_uri(uri, rs_name) if is_local_mongo_uri(uri) else uri
+            )
+            client = MongoClient(normalized_uri, serverSelectionTimeoutMS=3000)
             client.admin.command("ping")
+            support_ok, support_details = check_change_stream_support(
+                client[db_name], max_await_ms=100
+            )
             client.close()
-            QMessageBox.information(self, "نجح", f"تم الاتصال بنجاح بـ {db_name}")
+            if support_ok:
+                self.mongo_uri_input.setText(normalized_uri)
+                QMessageBox.information(
+                    self,
+                    "نجح",
+                    f"تم الاتصال بنجاح بـ {db_name}\nChange Streams: متاحة",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "الاتصال ناجح لكن Change Streams غير متاحة",
+                    "الاتصال بالسحابة يعمل، لكن المزامنة الفورية غير متاحة حالياً.\n"
+                    "سبب متوقع: MongoDB ليست Replica Set.\n\n"
+                    f"التفاصيل: {support_details}",
+                )
         except Exception as e:
             QMessageBox.critical(self, "فشل الاتصال", f"خطأ: {e}")
 

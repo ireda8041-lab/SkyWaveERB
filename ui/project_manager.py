@@ -828,17 +828,10 @@ class ProjectEditorDialog(QDialog):
         content_widget = QWidget()
         content_widget.setLayout(main_layout)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setWidget(content_widget)
-
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.addWidget(scroll_area)
-        self._editor_scroll = scroll_area
+        outer_layout.addWidget(content_widget)
+        self._editor_scroll = None
 
         # جعل التاب متجاوب مع حجم الشاشة
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
