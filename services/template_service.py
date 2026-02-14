@@ -737,14 +737,9 @@ class TemplateService(BaseService):
                         "account_name": account_name,
                     }
                     payments_list.append(payment_entry)
-                    safe_print(f"  - دفعة: {payment_entry}")
 
             # حساب المتبقي - إصلاح المشكلة المحاسبية
             remaining = max(0, grand_total - total_paid)  # ⚡ لا يمكن أن يكون سالب
-
-            safe_print(f"  - الإجمالي الكلي: {grand_total}")
-            safe_print(f"  - المدفوع: {total_paid}")
-            safe_print(f"  - المتبقي: {remaining}")
 
             # إضافة معلومات الشركة من الإعدادات
 

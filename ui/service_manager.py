@@ -2,6 +2,7 @@
 
 import time
 
+from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox,
@@ -44,6 +45,9 @@ class ServiceManagerTab(QWidget):
     تاب إدارة الخدمات باستخدام محرر منبثق وحالة أرشيف.
     """
 
+    _services_loaded_signal = pyqtSignal(object, bool)
+    _services_load_error_signal = pyqtSignal(str, bool)
+
     def __init__(self, service_service: ServiceService, parent=None):
         """
         تهيئة تاب إدارة الخدمات
@@ -63,6 +67,15 @@ class ServiceManagerTab(QWidget):
         self._current_page = 1
         self._page_size = 100
         self._current_page_services: list[schemas.Service] = []
+        self._load_in_progress = False
+        self._queued_reload_force = False
+        self._last_load_started_at = 0.0
+        self._min_reload_interval_s = 1.2
+        self._reload_timer = QTimer(self)
+        self._reload_timer.setSingleShot(True)
+        self._reload_timer.timeout.connect(self._flush_queued_reload)
+        self._services_loaded_signal.connect(self._on_services_loaded_ui)
+        self._services_load_error_signal.connect(self._on_services_load_error_ui)
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
@@ -237,7 +250,24 @@ class ServiceManagerTab(QWidget):
 
     def load_services_data(self, force_refresh: bool = False) -> None:
         """⚡ تحميل بيانات الخدمات في الخلفية لمنع التجميد"""
-        logger.info("[ServiceManager] جاري تحميل بيانات الخدمات")
+        force_refresh = bool(force_refresh)
+        now = time.monotonic()
+
+        if self._load_in_progress:
+            self._queued_reload_force = self._queued_reload_force or force_refresh
+            self._schedule_reload(350)
+            return
+
+        elapsed = now - self._last_load_started_at
+        if elapsed < self._min_reload_interval_s:
+            self._queued_reload_force = self._queued_reload_force or force_refresh
+            remaining_ms = int((self._min_reload_interval_s - elapsed) * 1000) + 80
+            self._schedule_reload(max(120, remaining_ms))
+            return
+
+        self._load_in_progress = True
+        self._last_load_started_at = now
+        logger.debug("[ServiceManager] تحميل بيانات الخدمات...")
 
         from core.data_loader import get_data_loader
 
@@ -262,29 +292,10 @@ class ServiceManagerTab(QWidget):
 
         # دالة تحديث الواجهة
         def on_data_loaded(services):
-            try:
-                self.services_list = services
-
-                self._render_current_page()
-                logger.info("[ServiceManager] ✅ تم تحميل %s خدمة", len(self.services_list))
-                self.update_buttons_state(False)
-                cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
-                self._set_cached_services(cache_key, services)
-
-            except Exception as e:
-                logger.error("[ServiceManager] فشل تحديث الجدول: %s", e, exc_info=True)
-            finally:
-                self.services_table.blockSignals(False)
-                self.services_table.setUpdatesEnabled(True)
-                if sorting_enabled:
-                    self.services_table.setSortingEnabled(True)
+            self._services_loaded_signal.emit(services, sorting_enabled)
 
         def on_error(error_msg):
-            logger.error("[ServiceManager] فشل تحميل الخدمات: %s", error_msg)
-            self.services_table.blockSignals(False)
-            self.services_table.setUpdatesEnabled(True)
-            if sorting_enabled:
-                self.services_table.setSortingEnabled(True)
+            self._services_load_error_signal.emit(str(error_msg), sorting_enabled)
 
         if force_refresh:
             self._services_cache.clear()
@@ -307,6 +318,53 @@ class ServiceManagerTab(QWidget):
             on_error=on_error,
             use_thread_pool=True,
         )
+
+    def _schedule_reload(self, delay_ms: int = 250) -> None:
+        if self._reload_timer.isActive():
+            return
+        self._reload_timer.start(max(100, int(delay_ms)))
+
+    def _flush_queued_reload(self) -> None:
+        if self._load_in_progress:
+            self._schedule_reload(250)
+            return
+        force_refresh = bool(self._queued_reload_force)
+        self._queued_reload_force = False
+        self.load_services_data(force_refresh=force_refresh)
+
+    def _complete_load_cycle(self) -> None:
+        self._load_in_progress = False
+        if self._queued_reload_force:
+            self._schedule_reload(120)
+        elif self._reload_timer.isActive():
+            self._reload_timer.stop()
+
+    def _on_services_loaded_ui(self, services, sorting_enabled: bool) -> None:
+        try:
+            self.services_list = services or []
+            self._render_current_page()
+            logger.debug("[ServiceManager] ✅ تم تحميل %s خدمة", len(self.services_list))
+            self.update_buttons_state(False)
+            cache_key = "archived" if self.show_archived_checkbox.isChecked() else "active"
+            self._set_cached_services(cache_key, self.services_list)
+        except Exception as e:
+            logger.error("[ServiceManager] فشل تحديث الجدول: %s", e, exc_info=True)
+        finally:
+            self.services_table.blockSignals(False)
+            self.services_table.setUpdatesEnabled(True)
+            if sorting_enabled:
+                self.services_table.setSortingEnabled(True)
+            self._complete_load_cycle()
+
+    def _on_services_load_error_ui(self, error_msg: str, sorting_enabled: bool) -> None:
+        try:
+            logger.error("[ServiceManager] فشل تحميل الخدمات: %s", error_msg)
+        finally:
+            self.services_table.blockSignals(False)
+            self.services_table.setUpdatesEnabled(True)
+            if sorting_enabled:
+                self.services_table.setSortingEnabled(True)
+            self._complete_load_cycle()
 
     def _get_total_pages(self) -> int:
         total = len(self.services_list)
@@ -392,7 +450,14 @@ class ServiceManagerTab(QWidget):
 
     def _on_services_changed(self):
         """⚡ استجابة لإشارة تحديث الخدمات - تحديث الجدول أوتوماتيك"""
-        safe_print("INFO: [ServiceManager] ⚡ استلام إشارة تحديث الخدمات - جاري التحديث...")
+        if not self.isVisible():
+            if hasattr(self.service_service, "invalidate_cache"):
+                self.service_service.invalidate_cache()
+            return
+        root_window = self.window()
+        if root_window is not None and hasattr(root_window, "refresh_table"):
+            # MainWindow handles this signal centrally; avoid duplicate tab refresh storms.
+            return
         self.load_services_data(force_refresh=True)
 
     def _get_cached_services(self, key: str) -> list[schemas.Service] | None:

@@ -212,6 +212,13 @@ class Repository:
         self._lock = threading.RLock()
         self._mongo_connecting = False
         self._mongo_retry_thread_started = False
+        self._mongo_indexes_initialized = False
+        self._mongo_retry_interval_seconds = self._safe_int_env(
+            "SKYWAVE_MONGO_RETRY_INTERVAL_SEC",
+            default=10,
+            minimum=5,
+            maximum=120,
+        )
 
         # ⚡ Cache للبيانات المتكررة - TTL محسّن للسرعة
         if CACHE_ENABLED:
@@ -243,6 +250,62 @@ class Repository:
         self._start_mongo_connection()
         self._start_mongo_retry_loop()
 
+    @staticmethod
+    def _is_sqlite_closed_error(exc: Exception) -> bool:
+        text = str(exc).lower()
+        return ("sqlite_closed" in text) or ("nonetype" in text and "cursor" in text)
+
+    @staticmethod
+    def _safe_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+        try:
+            value = int(str(os.environ.get(name, default)).strip())
+        except Exception:
+            value = int(default)
+        if value < minimum:
+            value = minimum
+        if value > maximum:
+            value = maximum
+        return value
+
+    def _mongo_client_options(self) -> dict[str, Any]:
+        max_pool = self._safe_int_env(
+            "SKYWAVE_MONGO_MAX_POOL_SIZE",
+            default=20,
+            minimum=4,
+            maximum=200,
+        )
+        min_pool = self._safe_int_env(
+            "SKYWAVE_MONGO_MIN_POOL_SIZE",
+            default=2,
+            minimum=0,
+            maximum=max_pool,
+        )
+        return {
+            "retryWrites": True,
+            "retryReads": True,
+            "maxPoolSize": max_pool,
+            "minPoolSize": min_pool,
+            "maxIdleTimeMS": self._safe_int_env(
+                "SKYWAVE_MONGO_MAX_IDLE_MS",
+                default=120000,
+                minimum=30000,
+                maximum=600000,
+            ),
+            "waitQueueTimeoutMS": self._safe_int_env(
+                "SKYWAVE_MONGO_WAIT_QUEUE_TIMEOUT_MS",
+                default=10000,
+                minimum=1000,
+                maximum=120000,
+            ),
+            "appname": "SkyWaveERP",
+        }
+
+    def _ensure_mongo_indexes_ready(self) -> None:
+        if not self.online or self.mongo_db is None or self._mongo_indexes_initialized:
+            return
+        if self._init_mongo_indexes():
+            self._mongo_indexes_initialized = True
+
     def get_cursor(self):
         """
         ⚡ الحصول على cursor منفصل لتجنب مشكلة Recursive cursor
@@ -253,12 +316,15 @@ class Repository:
                 cursor.execute(...)
         """
         with self._lock:
+            if self.sqlite_conn is None:
+                raise RuntimeError("sqlite_closed")
             try:
                 cursor = self.sqlite_conn.cursor()
                 cursor.row_factory = sqlite3.Row  # تأكد من تطبيق row_factory
                 return CursorContextManager(cursor)
             except Exception as e:
-                safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
+                if "sqlite_closed" not in str(e).lower():
+                    safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
                 raise
 
     def invalidate_table_cache(self, table_name: str | None = None) -> None:
@@ -326,6 +392,7 @@ class Repository:
                 self.mongo_client = None
                 self.mongo_db = None
                 self.online = False
+                self._mongo_indexes_initialized = False
             safe_print("INFO: [Repository] تم إغلاق اتصالات قاعدة البيانات")
         except Exception as e:
             safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
@@ -351,6 +418,9 @@ class Repository:
             self.sqlite_cursor.execute("PRAGMA page_size=4096")
             # ⚡ تفعيل busy_timeout لتجنب أخطاء القفل
             self.sqlite_cursor.execute("PRAGMA busy_timeout=30000")
+            self.sqlite_cursor.execute("PRAGMA wal_autocheckpoint=1000")
+            self.sqlite_cursor.execute("PRAGMA automatic_index=ON")
+            self.sqlite_cursor.execute("PRAGMA optimize")
             safe_print("INFO: ⚡ تم تطبيق تحسينات SQLite للسرعة والأمان")
         except Exception as e:
             safe_print(f"WARNING: فشل تطبيق تحسينات SQLite: {e}")
@@ -397,18 +467,15 @@ class Repository:
                         serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال
                         connectTimeoutMS=5000,
                         socketTimeoutMS=30000,  # ⚡ 30 ثانية للعمليات (زيادة لتجنب timeout)
-                        retryWrites=True,
-                        retryReads=True,
-                        maxPoolSize=5,
-                        minPoolSize=1,
-                        maxIdleTimeMS=60000,
-                        waitQueueTimeoutMS=5000,
+                        **self._mongo_client_options(),
                     )
 
                     # اختبار الاتصال
                     self.mongo_client.server_info()
                     self.mongo_db = self.mongo_client[DB_NAME]
                     self.online = True
+                    self._mongo_indexes_initialized = False
+                    self._ensure_mongo_indexes_ready()
                     safe_print("INFO: ✅ متصل بـ MongoDB بنجاح!")
                     break  # نجح الاتصال
 
@@ -434,7 +501,7 @@ class Repository:
 
         def retry_loop():
             while True:
-                time.sleep(30)
+                time.sleep(self._mongo_retry_interval_seconds)
                 if self.online:
                     continue
                 if self._mongo_connecting:
@@ -1322,7 +1389,7 @@ class Repository:
 
         # إنشاء collection و indexes في MongoDB إذا كان متصل
         if self.online:
-            self._init_mongo_indexes()
+            self._ensure_mongo_indexes_ready()
 
     def _create_sqlite_indexes(self):
         """
@@ -1427,6 +1494,54 @@ class Repository:
                 "CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)"
             )
 
+            sync_tables = [
+                "accounts",
+                "clients",
+                "services",
+                "projects",
+                "invoices",
+                "payments",
+                "expenses",
+                "journal_entries",
+                "currencies",
+                "notifications",
+                "tasks",
+                "users",
+            ]
+            for table in sync_tables:
+                try:
+                    self.sqlite_cursor.execute(
+                        f"CREATE INDEX IF NOT EXISTS idx_{table}_sync_status ON {table}(sync_status)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.sqlite_cursor.execute(
+                        f"CREATE INDEX IF NOT EXISTS idx_{table}_dirty_flag ON {table}(dirty_flag)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.sqlite_cursor.execute(
+                        f"CREATE INDEX IF NOT EXISTS idx_{table}_mongo_ref ON {table}(_mongo_id)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.sqlite_cursor.execute(
+                        f"CREATE INDEX IF NOT EXISTS idx_{table}_last_modified ON {table}(last_modified)"
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.sqlite_cursor.execute(
+                        f"CREATE INDEX IF NOT EXISTS idx_{table}_sync_scan "
+                        f"ON {table}(sync_status, dirty_flag, _mongo_id, last_modified)"
+                    )
+                except Exception:
+                    pass
+
+            self.sqlite_cursor.execute("PRAGMA optimize")
             self.sqlite_conn.commit()
             safe_print("INFO: تم إنشاء indexes في SQLite بنجاح.")
         except Exception as e:
@@ -1443,60 +1558,93 @@ class Repository:
             self.sqlite_cursor.execute("PRAGMA journal_mode=WAL")
 
             # زيادة حجم الـ cache
-            self.sqlite_cursor.execute("PRAGMA cache_size=10000")
+            self.sqlite_cursor.execute("PRAGMA cache_size=20000")
 
             # تفعيل memory-mapped I/O
-            self.sqlite_cursor.execute("PRAGMA mmap_size=268435456")  # 256MB
+            self.sqlite_cursor.execute("PRAGMA mmap_size=536870912")  # 512MB
 
             # تحسين synchronous mode
             self.sqlite_cursor.execute("PRAGMA synchronous=NORMAL")
 
             # تفعيل temp store في الذاكرة
             self.sqlite_cursor.execute("PRAGMA temp_store=MEMORY")
+            self.sqlite_cursor.execute("PRAGMA wal_autocheckpoint=1000")
+            self.sqlite_cursor.execute("PRAGMA optimize")
 
             self.sqlite_conn.commit()
             safe_print("INFO: تم تحسين أداء قاعدة البيانات بنجاح.")
         except Exception as e:
             safe_print(f"WARNING: فشل تحسين أداء قاعدة البيانات: {e}")
 
-    def _init_mongo_indexes(self):
+    def _init_mongo_indexes(self) -> bool:
         """
         إنشاء indexes في MongoDB لتحسين الأداء
         """
+        if self.mongo_db is None:
+            return False
+
         try:
             safe_print("INFO: جاري إنشاء indexes في MongoDB...")
 
-            # Indexes لـ sync_queue
+            # sync_queue
             self.mongo_db.sync_queue.create_index([("status", 1)])
             self.mongo_db.sync_queue.create_index([("priority", 1), ("status", 1)])
             self.mongo_db.sync_queue.create_index([("entity_type", 1), ("entity_id", 1)])
+            self.mongo_db.sync_queue.create_index([("created_at", -1)])
+            self.mongo_db.sync_queue.create_index([("updated_at", -1)])
 
-            # Indexes لـ projects
+            # projects / clients
             self.mongo_db.projects.create_index([("client_id", 1)])
             self.mongo_db.projects.create_index([("status", 1)])
             self.mongo_db.projects.create_index([("start_date", -1)])
-
-            # Indexes لـ clients
+            self.mongo_db.projects.create_index([("last_modified", -1)])
             self.mongo_db.clients.create_index([("name", 1)])
             self.mongo_db.clients.create_index([("status", 1)])
+            self.mongo_db.clients.create_index([("phone", 1)])
+            self.mongo_db.clients.create_index([("last_modified", -1)])
 
-            # Indexes لـ journal_entries
+            # accounting collections
+            self.mongo_db.accounts.create_index([("code", 1)])
+            self.mongo_db.accounts.create_index([("type", 1)])
+            self.mongo_db.accounts.create_index([("last_modified", -1)])
+            self.mongo_db.invoices.create_index([("invoice_number", 1)])
+            self.mongo_db.invoices.create_index([("client_id", 1)])
+            self.mongo_db.invoices.create_index([("status", 1)])
+            self.mongo_db.invoices.create_index([("issue_date", -1)])
+            self.mongo_db.invoices.create_index([("last_modified", -1)])
+            self.mongo_db.payments.create_index([("project_id", 1)])
+            self.mongo_db.payments.create_index([("client_id", 1)])
+            self.mongo_db.payments.create_index([("date", -1)])
+            self.mongo_db.payments.create_index([("account_id", 1)])
+            self.mongo_db.payments.create_index([("last_modified", -1)])
             self.mongo_db.journal_entries.create_index([("date", -1)])
             self.mongo_db.journal_entries.create_index([("related_document_id", 1)])
-
-            # Indexes لـ expenses
+            self.mongo_db.journal_entries.create_index([("last_modified", -1)])
             self.mongo_db.expenses.create_index([("date", -1)])
             self.mongo_db.expenses.create_index([("project_id", 1)])
+            self.mongo_db.expenses.create_index([("account_id", 1)])
+            self.mongo_db.expenses.create_index([("payment_account_id", 1)])
+            self.mongo_db.expenses.create_index([("last_modified", -1)])
 
-            # Indexes لـ notifications
+            # ui-driven collections
             self.mongo_db.notifications.create_index([("is_read", 1)])
             self.mongo_db.notifications.create_index([("type", 1)])
             self.mongo_db.notifications.create_index([("created_at", -1)])
             self.mongo_db.notifications.create_index([("expires_at", 1)])
+            self.mongo_db.notifications.create_index([("entity_type", 1), ("created_at", -1)])
+            self.mongo_db.tasks.create_index([("status", 1)])
+            self.mongo_db.tasks.create_index([("due_date", 1)])
+            self.mongo_db.tasks.create_index([("last_modified", -1)])
+            self.mongo_db.users.create_index([("username", 1)])
+            self.mongo_db.users.create_index([("last_modified", -1)])
+            self.mongo_db.currencies.create_index([("code", 1)])
+            self.mongo_db.currencies.create_index([("active", 1)])
 
             safe_print("INFO: تم إنشاء indexes في MongoDB بنجاح.")
+            return True
         except Exception as e:
             safe_print(f"WARNING: فشل إنشاء بعض indexes في MongoDB: {e}")
+            return False
 
     def is_online(self) -> bool:
         """دالة بسيطة لمعرفة حالة الاتصال"""
@@ -2529,6 +2677,8 @@ class Repository:
                 safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
                 return accounts_list
         except Exception as e:
+            if self._is_sqlite_closed_error(e):
+                return []
             safe_print(f"ERROR: فشل جلب الحسابات من SQLite: {e}")
 
         # Fallback إلى MongoDB
@@ -3864,6 +4014,8 @@ class Repository:
             safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
             return payments
         except Exception as e:
+            if self._is_sqlite_closed_error(e):
+                return []
             safe_print(f"ERROR: [Repo] فشل جلب الدفعات (SQLite): {e}")
 
         # Fallback إلى MongoDB
@@ -5227,6 +5379,90 @@ class Repository:
                 safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} مشروع من الـ Cache")
                 return cached_result
 
+        allowed_statuses = {s.value for s in schemas.ProjectStatus}
+        allowed_currencies = {c.value for c in schemas.CurrencyCode}
+        now_iso = datetime.now().isoformat()
+
+        def _safe_float(value: Any, default: float = 0.0) -> float:
+            if value is None or value == "":
+                return float(default)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
+        def _safe_int(value: Any, default: int = 0) -> int:
+            if value is None or value == "":
+                return int(default)
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return int(default)
+
+        def _safe_bool(value: Any) -> bool:
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, int | float):
+                return int(value) != 0
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in {"1", "true", "yes", "on"}:
+                    return True
+                if normalized in {"0", "false", "no", "off", ""}:
+                    return False
+            return False
+
+        def _normalize_project_payload(raw: dict[str, Any]) -> dict[str, Any] | None:
+            payload = dict(raw)
+
+            name = str(payload.get("name") or "").strip()
+            client_id = str(payload.get("client_id") or "").strip()
+            if not name or not client_id:
+                return None
+            payload["name"] = name
+            payload["client_id"] = client_id
+
+            status_value = str(payload.get("status") or schemas.ProjectStatus.ACTIVE.value)
+            if status_value not in allowed_statuses:
+                status_value = schemas.ProjectStatus.ACTIVE.value
+            payload["status"] = status_value
+
+            currency_value = str(payload.get("currency") or schemas.CurrencyCode.EGP.value)
+            if currency_value not in allowed_currencies:
+                currency_value = schemas.CurrencyCode.EGP.value
+            payload["currency"] = currency_value
+
+            payload["created_at"] = str(payload.get("created_at") or now_iso)
+            payload["last_modified"] = str(payload.get("last_modified") or now_iso)
+            payload["status_manually_set"] = _safe_bool(payload.get("status_manually_set"))
+            payload["is_retainer"] = _safe_bool(payload.get("is_retainer"))
+            payload["sequence_number"] = _safe_int(payload.get("sequence_number"), 0)
+
+            for numeric_field in [
+                "subtotal",
+                "discount_rate",
+                "discount_amount",
+                "tax_rate",
+                "tax_amount",
+                "total_amount",
+                "total_estimated_cost",
+                "estimated_profit",
+                "profit_margin",
+            ]:
+                payload[numeric_field] = _safe_float(payload.get(numeric_field), 0.0)
+
+            for list_field in ["items", "milestones"]:
+                value = payload.get(list_field)
+                if isinstance(value, str):
+                    try:
+                        payload[list_field] = json.loads(value)
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        payload[list_field] = []
+                elif value is None:
+                    payload[list_field] = []
+
+            return payload
+
         sql_query = "SELECT * FROM projects WHERE (sync_status != 'deleted' OR sync_status IS NULL) AND (is_deleted = 0 OR is_deleted IS NULL)"
         sql_params: list[Any] = []
 
@@ -5241,38 +5477,33 @@ class Repository:
 
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
-            cursor = self.get_cursor()
-            try:
-                cursor.execute(sql_query, sql_params)
-                rows = cursor.fetchall()
-                data_list: list[schemas.Project] = []
-                for row in rows:
-                    row_dict = dict(row)
-                    items_value = row_dict.get("items")
-                    if isinstance(items_value, str):
+            with self._lock:
+                cursor = self.get_cursor()
+                try:
+                    cursor.execute(sql_query, sql_params)
+                    rows = cursor.fetchall()
+                    data_list: list[schemas.Project] = []
+                    for row in rows:
                         try:
-                            row_dict["items"] = json.loads(items_value)
-                        except json.JSONDecodeError:
-                            row_dict["items"] = []
-                    # ⚡ معالجة milestones (JSON string -> list)
-                    milestones_value = row_dict.get("milestones")
-                    if isinstance(milestones_value, str):
-                        try:
-                            row_dict["milestones"] = json.loads(milestones_value)
-                        except json.JSONDecodeError:
-                            row_dict["milestones"] = []
-                    data_list.append(schemas.Project(**row_dict))
+                            row_dict = _normalize_project_payload(dict(row))
+                            if not row_dict:
+                                continue
+                            data_list.append(schemas.Project(**row_dict))
+                        except Exception:
+                            continue
 
-                # ⚡ حفظ في الـ cache
-                if CACHE_ENABLED and hasattr(self, "_projects_cache"):
-                    cache_key = f"all_projects_{status}_{exclude_status}"
-                    self._projects_cache.set(cache_key, data_list)
+                    # ⚡ حفظ في الـ cache
+                    if CACHE_ENABLED and hasattr(self, "_projects_cache"):
+                        cache_key = f"all_projects_{status}_{exclude_status}"
+                        self._projects_cache.set(cache_key, data_list)
 
-                safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
-                return data_list
-            finally:
-                cursor.close()
+                    safe_print(f"INFO: تم جلب {len(data_list)} مشروع من المحلي.")
+                    return data_list
+                finally:
+                    cursor.close()
         except Exception as e:
+            if self._is_sqlite_closed_error(e):
+                return []
             safe_print(f"ERROR: فشل جلب المشاريع من SQLite: {e}")
 
         # Fallback إلى MongoDB
@@ -5289,31 +5520,12 @@ class Repository:
                 for d in data:
                     try:
                         mongo_id = str(d.pop("_id"))
-                        if "client_id" not in d or not d["client_id"]:
-                            d["client_id"] = "unknown"
-                        if "name" not in d or not d["name"]:
-                            continue
-                        if "items" not in d or d["items"] is None:
-                            d["items"] = []
-                        elif isinstance(d["items"], str):
-                            try:
-                                d["items"] = json.loads(d["items"])
-                            except (json.JSONDecodeError, TypeError, ValueError):
-                                d["items"] = []
-
-                        # ⚡ معالجة milestones (JSON string -> list)
-                        if "milestones" in d and isinstance(d["milestones"], str):
-                            try:
-                                d["milestones"] = json.loads(d["milestones"])
-                            except (json.JSONDecodeError, TypeError, ValueError):
-                                d["milestones"] = []
-                        if "currency" not in d or d["currency"] is None:
-                            d["currency"] = "EGP"
-                        if "status" not in d or d["status"] is None:
-                            d["status"] = "نشط"
                         d.pop("_mongo_id", None)
                         d.pop("mongo_id", None)
-                        data_list.append(schemas.Project(**d, _mongo_id=mongo_id))
+                        normalized = _normalize_project_payload(d)
+                        if not normalized:
+                            continue
+                        data_list.append(schemas.Project(**normalized, _mongo_id=mongo_id))
                     except Exception:
                         continue
 

@@ -545,14 +545,8 @@ class ProjectProfitDialog(QDialog):
             return str(payment.account_id)
 
     def resizeEvent(self, event):
-        """تغيير اتجاه الـ splitter حسب عرض النافذة"""
+        """الحفاظ على splitter أفقيًا لضمان ثبات التخطيط الجانبي."""
         super().resizeEvent(event)
-        width = self.width()
-
         if hasattr(self, "tables_splitter"):
-            if width < 700:
-                if self.tables_splitter.orientation() != Qt.Orientation.Vertical:
-                    self.tables_splitter.setOrientation(Qt.Orientation.Vertical)
-            else:
-                if self.tables_splitter.orientation() != Qt.Orientation.Horizontal:
-                    self.tables_splitter.setOrientation(Qt.Orientation.Horizontal)
+            if self.tables_splitter.orientation() != Qt.Orientation.Horizontal:
+                self.tables_splitter.setOrientation(Qt.Orientation.Horizontal)

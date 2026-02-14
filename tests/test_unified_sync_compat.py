@@ -1,7 +1,9 @@
 import sqlite3
 import time
 from datetime import datetime
+from pathlib import Path
 
+import core.realtime_sync as realtime_mod
 from core.realtime_sync import RealtimeSyncManager, ensure_replica_set_uri, is_local_mongo_uri
 from core.unified_sync import UnifiedSyncManagerV3
 
@@ -143,7 +145,12 @@ def test_build_last_modified_query_supports_string_and_datetime_thresholds():
 
     assert "$or" in query
     assert len(query["$or"]) == 2
-    assert query["$or"][0]["last_modified"]["$gt"] == "2026-02-01T10:20:30"
+    date_branch = query["$or"][0]["$and"]
+    string_branch = query["$or"][1]["$and"]
+
+    assert date_branch[0]["last_modified"]["$type"] == "date"
+    assert string_branch[0]["last_modified"]["$type"] == "string"
+    assert string_branch[1]["last_modified"]["$gt"] == "2026-02-01T10:20:30"
 
 
 def test_pull_remote_changes_handles_datetime_last_modified_and_persists_watermark(tmp_path):
@@ -331,6 +338,14 @@ def test_ensure_replica_set_uri_for_local_connection():
     assert "directConnection=false" in normalized
 
 
+def test_ensure_replica_set_uri_updates_existing_query_values():
+    uri = "mongodb://mongo.example.com:27017/skywave_erp_db?replicaSet=oldRs&directConnection=true"
+    normalized = ensure_replica_set_uri(uri, "rs0")
+
+    assert "replicaSet=rs0" in normalized
+    assert "directConnection=false" in normalized
+
+
 def test_is_local_mongo_uri_detects_remote_hosts():
     assert is_local_mongo_uri("mongodb://localhost:27017") is True
     assert is_local_mongo_uri("mongodb://127.0.0.1:27017") is True
@@ -433,3 +448,162 @@ def test_sync_pings_skip_notifications_table():
     inserted = repo.mongo_db["notifications"].inserted
     assert len(inserted) == 1
     assert inserted[0]["entity_type"] == "clients"
+
+
+def test_realtime_queue_change_dedupes_burst(monkeypatch):
+    manager = RealtimeSyncManager(_FakeRepo(online=True))
+    scheduled = []
+
+    monkeypatch.setattr(manager, "_schedule_emit_changes", lambda: scheduled.append("emit"))
+    manager._event_dedupe_ms = 1000
+
+    manager._queue_collection_change("clients")
+    manager._queue_collection_change("clients")
+
+    assert scheduled == ["emit"]
+    with manager._pending_changes_lock:
+        assert "clients" in manager._pending_changes
+        assert manager._emit_dispatch_queued is True
+
+
+def test_realtime_emit_slot_clears_pending_state():
+    manager = RealtimeSyncManager(_FakeRepo(online=True))
+    with manager._pending_changes_lock:
+        manager._pending_changes.add("clients")
+        manager._emit_dispatch_queued = True
+
+    manager._emit_pending_changes_slot()
+
+    with manager._pending_changes_lock:
+        assert not manager._pending_changes
+        assert manager._emit_dispatch_queued is False
+
+
+def test_realtime_manager_attempts_service_fix_when_direct_bootstrap_fails(monkeypatch):
+    repo = _FakeRepo(online=True)
+    manager = RealtimeSyncManager(repo)
+    manager._local_rs_bootstrap_enabled = True
+    manager._local_service_replset_fix_enabled = True
+    manager._local_rs_bootstrap_attempted = False
+    manager._local_service_replset_fix_attempted = False
+    service_fix_calls = []
+
+    monkeypatch.setattr(
+        realtime_mod,
+        "try_bootstrap_local_replica_set",
+        lambda *_args, **_kwargs: (False, "not running with --replset"),
+    )
+    monkeypatch.setattr(manager, "_get_current_mongo_uri", lambda: "mongodb://localhost:27017")
+    monkeypatch.setattr(manager, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        manager,
+        "_start_local_service_replset_fix_background",
+        lambda: service_fix_calls.append("started") or True,
+    )
+
+    assert manager._try_enable_change_streams_locally() is True
+    assert service_fix_calls == ["started"]
+
+
+def test_realtime_script_uses_configured_mongo_service_name(monkeypatch):
+    manager = RealtimeSyncManager(_FakeRepo(online=True))
+    manager._local_mongo_service_name = "MongoDB-7.0"
+    manager._local_rs_name = "rs0"
+    captured = {"cmd": None}
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(manager, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        manager,
+        "_resolve_local_replset_enabler_script",
+        lambda: Path("tools/enable_local_replset.ps1"),
+    )
+    monkeypatch.setattr(
+        realtime_mod.subprocess,
+        "run",
+        lambda cmd, **_kwargs: captured.update({"cmd": cmd}) or _Proc(),
+    )
+
+    assert manager._run_local_replset_enabler_script() is True
+    assert captured["cmd"] is not None
+    assert "-MongoServiceName" in captured["cmd"]
+    assert "MongoDB-7.0" in captured["cmd"]
+
+
+def test_realtime_service_fix_respects_cooldown(monkeypatch):
+    repo = _FakeRepo(online=True)
+    manager = RealtimeSyncManager(repo)
+    manager._local_rs_bootstrap_enabled = False
+    manager._local_service_replset_fix_enabled = True
+    manager._local_service_replset_fix_cooldown_seconds = 3600
+    manager._last_local_service_replset_fix_attempt_at = time.time()
+    started = []
+
+    monkeypatch.setattr(manager, "_get_current_mongo_uri", lambda: "mongodb://localhost:27017")
+    monkeypatch.setattr(manager, "_is_windows_platform", lambda: True)
+    monkeypatch.setattr(
+        manager,
+        "_start_local_service_replset_fix_background",
+        lambda: started.append("started") or True,
+    )
+
+    assert manager._try_enable_change_streams_locally() is False
+    assert started == []
+
+
+def test_remote_replica_set_uri_auto_normalization(monkeypatch):
+    repo = _FakeRepo(online=True)
+    manager = RealtimeSyncManager(repo)
+    persisted = []
+    reconnected = []
+
+    monkeypatch.setattr(
+        manager,
+        "_get_current_mongo_uri",
+        lambda: "mongodb://mongo.example.com:27017/skywave_erp_db?authSource=skywave_erp_db",
+    )
+    monkeypatch.setattr(
+        repo.mongo_client.admin,
+        "command",
+        lambda *_args, **_kwargs: {"ok": 1, "setName": "rs0"},
+    )
+    monkeypatch.setattr(manager, "_persist_runtime_mongo_uri", lambda uri: persisted.append(uri))
+    monkeypatch.setattr(
+        manager,
+        "_reconnect_repository_client",
+        lambda uri: reconnected.append(uri) or True,
+    )
+
+    assert manager._try_enable_change_streams_for_remote_replica_set() is True
+    assert len(persisted) == 1
+    assert "replicaSet=rs0" in persisted[0]
+    assert "directConnection=false" in persisted[0]
+    assert reconnected == persisted
+
+
+def test_realtime_manager_rechecks_after_remote_uri_fix(monkeypatch):
+    repo = _FakeRepo(online=True)
+    manager = RealtimeSyncManager(repo)
+    detect_calls = {"count": 0}
+
+    def _fake_detect():
+        detect_calls["count"] += 1
+        return detect_calls["count"] >= 2
+
+    monkeypatch.setattr(manager, "_detect_change_stream_support", _fake_detect)
+    monkeypatch.setattr(manager, "_try_enable_change_streams_locally", lambda: False)
+    monkeypatch.setattr(manager, "_try_enable_change_streams_for_remote_replica_set", lambda: True)
+    monkeypatch.setattr(manager, "_start_unified_watcher", lambda: None)
+
+    manager._realtime_auto_detect = True
+    manager._realtime_enabled = True
+
+    started = manager.start()
+
+    assert started is True
+    assert manager.is_running is True
+    assert detect_calls["count"] == 2

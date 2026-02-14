@@ -987,7 +987,6 @@ class ClientManagerTab(QWidget):
 
     def _on_clients_changed(self):
         """⚡ استجابة لإشارة تحديث العملاء - تحديث الجدول أوتوماتيك"""
-        safe_print("INFO: [ClientManager] ⚡ استلام إشارة تحديث العملاء - جاري التحديث...")
         self._invalidate_clients_cache()
         self._logo_icon_cache.clear()
         self._logo_pixmap_cache.clear()
@@ -997,6 +996,8 @@ class ClientManagerTab(QWidget):
         # ⚡ إبطال الـ cache لضمان جلب البيانات الجديدة (بما فيها الصور)
         if hasattr(self.client_service, "invalidate_cache"):
             self.client_service.invalidate_cache()
+        if not self.isVisible():
+            return
         self.load_clients_data(force_refresh=True)
 
     def open_editor(self, client_to_edit: schemas.Client | None):

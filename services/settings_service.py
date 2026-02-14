@@ -2,10 +2,10 @@ import base64
 import hashlib
 import json
 import os
-import platform
-import uuid
 from datetime import datetime
 from typing import Any
+
+from core.device_identity import get_stable_device_id
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -17,32 +17,6 @@ except ImportError:
             print(msg)
         except UnicodeEncodeError:
             pass
-
-
-def _get_stable_device_id() -> str:
-    """إنشاء معرف ثابت للجهاز بدون الاعتماد على Qt."""
-    try:
-        machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
-        try:
-            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
-        except TypeError:
-            digest = hashlib.sha256(machine_info.encode()).hexdigest()
-        return digest[:8]
-    except Exception:
-        device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
-        if os.path.exists(device_file):
-            try:
-                with open(device_file, encoding="utf-8") as f:
-                    return f.read().strip()
-            except Exception:
-                pass
-        new_id = str(uuid.uuid4())[:8]
-        try:
-            with open(device_file, "w", encoding="utf-8") as f:
-                f.write(new_id)
-        except OSError:
-            pass
-        return new_id
 
 
 # استخدام مجلد AppData للمستخدم بدلاً من مجلد البرنامج (لتجنب مشاكل الصلاحيات في Program Files)
@@ -189,7 +163,11 @@ class SettingsService:
                 and getattr(repo, "online", False)
                 and getattr(repo, "mongo_db", None) is not None
             ):
-                self.sync_settings_to_cloud(repo, emit_notification=False)
+                self.sync_settings_to_cloud(
+                    repo,
+                    emit_notification=True,
+                    silent_notification=True,
+                )
         except Exception:
             pass
 
@@ -207,7 +185,11 @@ class SettingsService:
                 and getattr(repo, "online", False)
                 and getattr(repo, "mongo_db", None) is not None
             ):
-                self.sync_settings_to_cloud(repo, emit_notification=False)
+                self.sync_settings_to_cloud(
+                    repo,
+                    emit_notification=True,
+                    silent_notification=True,
+                )
         except Exception:
             pass
 
@@ -349,7 +331,7 @@ class SettingsService:
                             "message": "تم تحديث إعدادات النظام",
                             "type": "info",
                             "title": "⚙️ الإعدادات",
-                            "device_id": _get_stable_device_id(),
+                            "device_id": get_stable_device_id(),
                             "created_at": stamp,
                             "entity_type": "system_settings",
                             "action": "updated",

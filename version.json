@@ -1,17 +1,17 @@
-{
-    "version":  "2.2.7",
-    "version_name":  "Sky Wave ERP v2.2.7",
-    "release_date":  "2026-02-12",
-    "url":  "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.7/SkyWaveERP-Setup-2.2.7.exe",
+﻿{
+    "version":  "2.2.8",
+    "version_name":  "Sky Wave ERP v2.2.8",
+    "release_date":  "2026-02-14",
+    "url":  "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.8/SkyWaveERP-Setup-2.2.8.exe",
     "changelog":  [
-                      "Cross-device delta sync now uses Mongo server time to prevent clock-drift delays.",
-                      "Startup settings notification spam is suppressed across devices (including legacy payloads).",
-                      "Instant sync now sends explicit table ping events so CRUD appears on other devices quickly.",
-                      "Notification sync deduplication was hardened to avoid repeated processing and UI stalls.",
-                      "Realtime path now refreshes UI without triggering sync echo loops."
+                      "New Project dialog layout now opens correctly on first render without manual resize.",
+                      "Project editor responsiveness was improved with safer adaptive sizing and scroll behavior.",
+                      "Instant sync fallback logic was hardened for lightweight repositories and test environments.",
+                      "Remote MongoDB replica-set helper script was added for professional server-side setup.",
+                      "Stable per-device identity utility added to reduce cross-device collision risks."
                   ],
     "min_version":  "1.0.0",
     "mandatory":  false,
-    "notes_ar":  "تم تحسين المزامنة الفورية بين الأجهزة: معالجة تأخير اختلاف التوقيت، منع إشعارات إعدادات مزعجة عند التشغيل، وتسريع ظهور عمليات الإضافة/التعديل/الحذف عبر Sync Ping فوري مع ثبات أعلى.",
-    "notes_en":  "Realtime cross-device sync has been stabilized: clock-drift delays fixed, startup settings toast noise removed, and CRUD propagation accelerated with explicit sync pings."
+    "notes_ar":  "هذا الإصدار يحسن فتح شاشة مشروع جديد تلقائياً ويقوي استقرار المزامنة الفورية مع أدوات احترافية لإعداد Replica Set.",
+    "notes_en":  "This release improves first-open project dialog layout, strengthens realtime sync stability, and adds professional replica-set setup tooling."
 }

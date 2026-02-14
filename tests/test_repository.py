@@ -84,3 +84,22 @@ def test_fetch_client_logo_on_demand_updates_sqlite(repo):
     assert bool(row["logo_data"])
     assert row["has_logo"] == 1
     assert row["logo_last_synced"] is not None
+
+
+def test_mongo_client_options_are_bounded(repo, monkeypatch):
+    monkeypatch.setenv("SKYWAVE_MONGO_MAX_POOL_SIZE", "99")
+    monkeypatch.setenv("SKYWAVE_MONGO_MIN_POOL_SIZE", "3")
+    monkeypatch.setenv("SKYWAVE_MONGO_MAX_IDLE_MS", "90000")
+    monkeypatch.setenv("SKYWAVE_MONGO_WAIT_QUEUE_TIMEOUT_MS", "15000")
+
+    options = repo._mongo_client_options()
+
+    assert options["maxPoolSize"] == 99
+    assert options["minPoolSize"] == 3
+    assert options["maxIdleTimeMS"] == 90000
+    assert options["waitQueueTimeoutMS"] == 15000
+
+
+def test_init_mongo_indexes_returns_false_without_connection(repo):
+    repo.mongo_db = None
+    assert repo._init_mongo_indexes() is False

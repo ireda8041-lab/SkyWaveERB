@@ -291,6 +291,27 @@ class MainWindow(QMainWindow):
         # ⚡ Lazy Refresh: تتبع التابات التي تحتاج تحديث
         self.pending_refreshes: dict[str, bool] = {}
         self._deferred_refresh_timers: dict[str, QTimer] = {}
+        # ⚡ تجميع طلبات تحديث الجداول لتقليل ضغط الإشارات المتكررة
+        self._queued_table_refreshes: set[str] = set()
+        self._table_refresh_timer = QTimer(self)
+        self._table_refresh_timer.setSingleShot(True)
+        self._table_refresh_timer.timeout.connect(self._flush_enqueued_table_refreshes)
+        # Tables with dedicated direct signals (clients_changed, etc.).
+        # Ignore duplicate handling through generic data_changed for these tables.
+        self._tables_with_direct_refresh_signals = {
+            "clients",
+            "projects",
+            "expenses",
+            "payments",
+            "services",
+            "accounts",
+            "accounting",
+            "tasks",
+            # Notifications are handled by dedicated notification workers/toasts.
+            "notifications",
+        }
+        self._last_sync_ui_refresh_at = 0.0
+        self._sync_ui_refresh_cooldown_seconds = 0.8
 
         # ⚡ إنشاء كل التابات فوراً (بدون تحميل بيانات)
         self._create_all_tabs()
@@ -363,6 +384,11 @@ class MainWindow(QMainWindow):
         app_signals.safe_connect(
             app_signals.accounting_changed,
             self._refresh_accounting_tab,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        app_signals.safe_connect(
+            app_signals.tasks_changed,
+            self._refresh_tasks_tab,
             Qt.ConnectionType.QueuedConnection,
         )
 
@@ -523,13 +549,10 @@ class MainWindow(QMainWindow):
         """⚡ تحميل بيانات التاب عند التنقل - محسّن للسرعة"""
         try:
             tab_name = self.tabs.tabText(index)
-            safe_print(f"INFO: [MainWindow] تم اختيار التاب: {tab_name}")
 
             # ⚡ تحميل البيانات إذا لم تكن محملة أو تحتاج تحديث (Lazy Refresh)
             needs_refresh = self.pending_refreshes.get(tab_name, False)
             if not self._tab_data_loaded.get(tab_name, False) or needs_refresh:
-                safe_print(f"INFO: [MainWindow] جاري تحميل بيانات: {tab_name}")
-
                 # ⚡ إعادة تعيين علامة التحديث فوراً لمنع التكرار
                 if tab_name in self.pending_refreshes:
                     del self.pending_refreshes[tab_name]
@@ -539,8 +562,6 @@ class MainWindow(QMainWindow):
 
                 # ⚡ تحميل البيانات
                 self._do_load_tab_data_safe(tab_name)
-            else:
-                safe_print(f"INFO: [MainWindow] البيانات محملة مسبقاً: {tab_name}")
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في تغيير التاب: {e}")
@@ -552,7 +573,6 @@ class MainWindow(QMainWindow):
         """⚡ تحميل بيانات التاب في الخلفية (لتجنب التجميد)"""
         # ⚡ تجنب إعادة التحميل إذا البيانات محملة بالفعل
         if not force_reload and self._tab_data_loaded.get(tab_name, False):
-            safe_print(f"INFO: [MainWindow] ⚡ التاب محمل بالفعل: {tab_name}")
             return
 
         # ⚡ تحميل البيانات بعد 50ms لإعطاء الواجهة فرصة للظهور
@@ -595,13 +615,16 @@ class MainWindow(QMainWindow):
             try:
                 self._update_tab_ui(tab_name, data)
                 self._tab_data_loaded[tab_name] = True
-                safe_print(f"INFO: [MainWindow] ⚡ تم تحميل بيانات التاب: {tab_name}")
             except Exception as e:
                 safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
             finally:
                 self._refresh_in_progress[f"tab_{tab_name}"] = False
                 if self.pending_refreshes.pop(tab_name, False):
-                    QTimer.singleShot(0, lambda t=tab_name: self._do_load_tab_data_safe(t))
+                    current_tab = self.tabs.tabText(self.tabs.currentIndex())
+                    if current_tab == tab_name:
+                        QTimer.singleShot(220, lambda t=tab_name: self._do_load_tab_data_safe(t))
+                    else:
+                        self.pending_refreshes[tab_name] = True
 
         def on_error(error_msg):
             """معالج الخطأ"""
@@ -712,11 +735,9 @@ class MainWindow(QMainWindow):
     def _load_initial_data_safely(self):
         """⚡ تحميل البيانات الأولية بسرعة"""
         try:
-            safe_print("INFO: [MainWindow] بدء تحميل البيانات الأولية...")
             # ⚡ تحميل بيانات الداشبورد فوراً
             if hasattr(self, "dashboard_tab"):
                 self.dashboard_tab.refresh_data()
-            safe_print("INFO: [MainWindow] تم تحميل البيانات الأولية")
         except Exception as e:
             safe_print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
 
@@ -825,6 +846,10 @@ class MainWindow(QMainWindow):
         يقوم بتحديث البيانات في التاب الحالي
         """
         try:
+            now = time.monotonic()
+            if (now - self._last_sync_ui_refresh_at) < self._sync_ui_refresh_cooldown_seconds:
+                return
+            self._last_sync_ui_refresh_at = now
             # تحديث البيانات في التاب الحالي
             current_index = self.tabs.currentIndex()
             self.on_tab_changed(current_index)
@@ -869,8 +894,6 @@ class MainWindow(QMainWindow):
         ⚡ Lazy Refresh: يتم تحديث التاب الحالي فقط، والباقي يتم تعليمه كـ pending
         """
         try:
-            safe_print(f"INFO: [MainWindow] 🔄 إشارة تحديث جدول: {table_name}")
-
             # 1. تحديد التابات المتأثرة
             mapping = {
                 "clients": ["👤 العملاء"],
@@ -880,15 +903,25 @@ class MainWindow(QMainWindow):
                 "currencies": ["🔧 الإعدادات"],
                 "ids": ["🔧 الإعدادات"],  # IDs sequences
                 "accounts": ["📊 المحاسبة"],
-                "payments": ["💰 الدفعات", "📊 المحاسبة"],
-                "expenses": ["💳 المصروفات", "📊 المحاسبة"],
+                "payments": ["💰 الدفعات"],
+                "expenses": ["💳 المصروفات"],
                 "journal_entries": ["📊 المحاسبة"],
             }
 
             target_tabs = list(mapping.get(table_name, []))
 
             # ⚡ Dashboard يُحدث دائماً (لكن بحذر)
-            if self._can_refresh("dashboard", min_interval=5.0):
+            dashboard_related_tables = {
+                "accounts",
+                "payments",
+                "expenses",
+                "journal_entries",
+                "invoices",
+                "projects",
+            }
+            if table_name in dashboard_related_tables and self._can_refresh(
+                "dashboard", min_interval=5.0
+            ):
                 target_tabs.append("🏠 الصفحة الرئيسية")
 
             if not target_tabs:
@@ -900,7 +933,6 @@ class MainWindow(QMainWindow):
                 # ⚡ إذا كان التاب ظاهرًا: تحديث فوري
                 if tab_name == current_tab_name:
                     if self._can_refresh(f"tab_{tab_name}", min_interval=1.0):
-                        safe_print(f"INFO: [MainWindow] ⚡ تحديث فوري للتاب الظاهر: {tab_name}")
                         # ⚡ إبطال cache وتحديث
                         self._invalidate_tab_cache(tab_name)
                         self._do_load_tab_data_safe(tab_name)
@@ -909,7 +941,6 @@ class MainWindow(QMainWindow):
                         self._schedule_deferred_refresh(table_name, tab_name)
                 else:
                     # 💤 إذا كان مخفيًا: تعليم للتحديث لاحقًا
-                    safe_print(f"INFO: [MainWindow] 💤 جدولة تحديث لاحق للتاب: {tab_name}")
                     self.pending_refreshes[tab_name] = True
 
         except Exception as e:
@@ -1610,6 +1641,14 @@ class MainWindow(QMainWindow):
         - Otherwise → Mark as pending for lazy loading
         """
         try:
+            if table_name in self._tables_with_direct_refresh_signals:
+                return
+
+            # Notification entries include operational sync pings and should not trigger
+            # generic tab refresh routing.
+            if table_name == "notifications":
+                return
+
             # Map incoming table names to UI Tab Text Names
             tab_map = {
                 "clients": "👤 العملاء",
@@ -1636,18 +1675,31 @@ class MainWindow(QMainWindow):
 
             # CRITICAL: If user is looking at this tab, refresh NOW
             if target_tab == current_tab:
-                safe_print(
-                    f"⚡ [MainWindow] تحديث فوري للتاب النشط: {target_tab} (جدول: {table_name})"
-                )
-                # Immediate refresh using QTimer to ensure main thread execution
-                QTimer.singleShot(0, lambda: self.refresh_table(table_name))
+                # Queue refresh to merge bursts from sync/realtime events.
+                self._enqueue_table_refresh(table_name)
             else:
                 # Otherwise, mark for later to prevent background lag
-                safe_print(f"💤 [MainWindow] جدولة تحديث لاحق: {target_tab} (جدول: {table_name})")
                 self.pending_refreshes[target_tab] = True
 
         except Exception as e:
             safe_print(f"❌ [MainWindow] خطأ في معالجة إشارة {table_name}: {e}")
+
+    def _enqueue_table_refresh(self, table_name: str, delay_ms: int = 120) -> None:
+        """Queue table refresh requests and flush them in one batch."""
+        if not isinstance(table_name, str) or not table_name.strip():
+            return
+        self._queued_table_refreshes.add(table_name.strip())
+        if not self._table_refresh_timer.isActive():
+            self._table_refresh_timer.start(max(60, int(delay_ms)))
+
+    def _flush_enqueued_table_refreshes(self) -> None:
+        """Run batched table refreshes after debounce window."""
+        if not self._queued_table_refreshes:
+            return
+        tables = sorted(self._queued_table_refreshes)
+        self._queued_table_refreshes.clear()
+        for table_name in tables:
+            self.refresh_table(table_name)
 
     # 🔥 دوال تحديث الواجهة الفورية (INSTANT UI REFRESH)
     # ⚡ حماية من التحديث المتكرر - تقليل الفترة لـ 0.5 ثانية
@@ -1661,12 +1713,10 @@ class MainWindow(QMainWindow):
 
         # ⚡ فحص إذا كان التحديث جاري بالفعل
         if self._refresh_in_progress.get(tab_name, False):
-            safe_print(f"⏳ [MainWindow] تحديث {tab_name} جاري بالفعل - تم تجاهل الطلب")
             return False
 
         last_time = self._last_refresh_times.get(tab_name, 0)
         if (current_time - last_time) < min_interval:
-            safe_print(f"⏳ [MainWindow] تحديث {tab_name} متكرر سريع - تم تجاهل الطلب")
             return False
         self._last_refresh_times[tab_name] = current_time
         return True
@@ -1697,7 +1747,7 @@ class MainWindow(QMainWindow):
             self.pending_refreshes[tab_name] = True
             return
 
-        if not self._can_refresh(f"tab_{tab_name}", min_interval=0.2):
+        if not self._can_refresh(f"tab_{tab_name}", min_interval=0.5):
             self._schedule_deferred_refresh(table_name, tab_name, delay_ms=350)
             return
 
@@ -1707,31 +1757,31 @@ class MainWindow(QMainWindow):
 
     def _refresh_clients_tab(self):
         """تحديث تاب العملاء (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("clients"))
+        self._enqueue_table_refresh("clients")
 
     def _refresh_projects_tab(self):
         """تحديث تاب المشاريع (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("projects"))
+        self._enqueue_table_refresh("projects")
 
     def _refresh_expenses_tab(self):
         """تحديث تاب المصروفات (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("expenses"))
+        self._enqueue_table_refresh("expenses")
 
     def _refresh_payments_tab(self):
         """تحديث تاب الدفعات (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("payments"))
+        self._enqueue_table_refresh("payments")
 
     def _refresh_services_tab(self):
         """تحديث تاب الخدمات (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("services"))
+        self._enqueue_table_refresh("services")
 
     def _refresh_accounting_tab(self):
         """تحديث تاب المحاسبة (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("accounts"))
+        self._enqueue_table_refresh("accounts")
 
     def _refresh_tasks_tab(self):
         """تحديث تاب المهام (موجه لنظام Lazy Refresh)"""
-        QTimer.singleShot(0, lambda: self.refresh_table("tasks"))
+        self._enqueue_table_refresh("tasks")
 
     def closeEvent(self, event):  # pylint: disable=invalid-name
         """

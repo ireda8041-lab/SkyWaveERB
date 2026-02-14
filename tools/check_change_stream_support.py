@@ -46,7 +46,13 @@ def main() -> int:
         print("Change Streams supported: YES")
         return 0
     except Exception as exc:
-        print(f"Change Streams supported: NO ({exc})")
+        error_text = str(exc)
+        print(f"Change Streams supported: NO ({error_text})")
+        lowered = error_text.lower()
+        if "only supported on replica sets" in lowered or "location40573" in lowered:
+            print(
+                "Hint: run `powershell -ExecutionPolicy Bypass -File tools/enable_local_replset.ps1` as Administrator."
+            )
         return 2
 
 

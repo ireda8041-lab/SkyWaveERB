@@ -376,23 +376,24 @@ class ProjectEditorDialog(QDialog):
         self.end_date_input = QDateEdit(QDate.currentDate().addDays(30))
         self.end_date_input.setCalendarPopup(True)
 
-        # ترتيب الحقول في صفوف أفقية (2 في كل صف)
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("العميل:"))
-        row1.addWidget(self.client_combo, 2)
-        row1.addWidget(QLabel("اسم المشروع:"))
-        row1.addWidget(self.name_input, 2)
+        self.client_label = QLabel("العميل:")
+        self.name_label = QLabel("اسم المشروع:")
+        self.status_label = QLabel("الحالة:")
+        self.start_date_label = QLabel("تاريخ الإصدار:")
+        self.end_date_label = QLabel("تاريخ الاستحقاق:")
+        for label in [
+            self.client_label,
+            self.name_label,
+            self.status_label,
+            self.start_date_label,
+            self.end_date_label,
+        ]:
+            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("الحالة:"))
-        row2.addWidget(self.status_combo, 1)
-        row2.addWidget(QLabel("تاريخ الإصدار:"))
-        row2.addWidget(self.start_date_input, 1)
-        row2.addWidget(QLabel("تاريخ الاستحقاق:"))
-        row2.addWidget(self.end_date_input, 1)
-
-        basic_layout.addLayout(row1)
-        basic_layout.addLayout(row2)
+        self._basic_grid = QGridLayout()
+        self._basic_grid.setHorizontalSpacing(6)
+        self._basic_grid.setVerticalSpacing(4)
+        basic_layout.addLayout(self._basic_grid)
         basic_group.setLayout(basic_layout)
         self._basic_group = basic_group
         left_side.addWidget(basic_group)
@@ -402,8 +403,9 @@ class ProjectEditorDialog(QDialog):
         items_layout = QVBoxLayout()
         items_layout.setSpacing(4)
         items_layout.setContentsMargins(6, 12, 6, 6)
-        add_item_layout = QHBoxLayout()
-        add_item_layout.setSpacing(4)
+        self._items_add_grid = QGridLayout()
+        self._items_add_grid.setHorizontalSpacing(4)
+        self._items_add_grid.setVerticalSpacing(4)
         # SmartFilterComboBox للخدمة مع فلترة
         self.service_combo = SmartFilterComboBox()
         self.service_combo.addItem("اختر الخدمة أو الباقة...", userData=None)
@@ -418,15 +420,17 @@ class ProjectEditorDialog(QDialog):
         self.item_quantity_input.setValue(1.0)
         self.add_item_button = QPushButton("➕ إضافة البند")
         self.add_item_button.setStyleSheet(BUTTON_STYLES["primary"])
-        add_item_layout.addWidget(self.service_combo, 3)
-        add_item_layout.addWidget(QLabel("الكمية:"))
-        add_item_layout.addWidget(self.item_quantity_input, 1)
-        add_item_layout.addWidget(QLabel("السعر:"))
-        add_item_layout.addWidget(self.item_price_input, 1)
-        add_item_layout.addWidget(self.add_item_button, 1)
+        self.item_quantity_label = QLabel("الكمية:")
+        self.item_price_label = QLabel("السعر:")
+        self.item_quantity_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.item_price_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         self.service_combo.currentIndexChanged.connect(self.on_service_selected)
         self.add_item_button.clicked.connect(self._on_add_item_clicked)
-        items_layout.addLayout(add_item_layout)
+        items_layout.addLayout(self._items_add_grid)
 
         # ⚡ إضافة label لعرض وصف الخدمة بشكل واضح
         self.service_description_label = QLabel("")
@@ -548,12 +552,18 @@ class ProjectEditorDialog(QDialog):
         notes_layout.setContentsMargins(8, 8, 8, 8)
         notes_layout.setSpacing(6)
 
-        # شريط أدوات
-        toolbar_layout = QHBoxLayout()
+        # شريط أدوات مرن (صفّين) لمنع التداخل على الشاشات الصغيرة
+        toolbar_layout = QVBoxLayout()
         toolbar_layout.setSpacing(4)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_top_row = QHBoxLayout()
+        toolbar_top_row.setSpacing(4)
+        toolbar_bottom_row = QHBoxLayout()
+        toolbar_bottom_row.setSpacing(6)
 
         reset_btn = QPushButton("إعادة القالب")
-        reset_btn.setFixedHeight(20)
+        reset_btn.setFixedHeight(22)
+        reset_btn.setMinimumWidth(110)
         reset_btn.setStyleSheet(
             """
             QPushButton {
@@ -570,7 +580,8 @@ class ProjectEditorDialog(QDialog):
         reset_btn.clicked.connect(self._reset_notes_template)
 
         clear_btn = QPushButton("مسح الكل")
-        clear_btn.setFixedHeight(20)
+        clear_btn.setFixedHeight(22)
+        clear_btn.setMinimumWidth(90)
         clear_btn.setStyleSheet(
             """
             QPushButton {
@@ -586,11 +597,16 @@ class ProjectEditorDialog(QDialog):
         )
         clear_btn.clicked.connect(self._clear_notes_input)
 
-        toolbar_layout.addWidget(reset_btn)
-        toolbar_layout.addWidget(clear_btn)
+        toolbar_top_row.addWidget(reset_btn)
+        toolbar_top_row.addWidget(clear_btn)
+        toolbar_top_row.addStretch(1)
 
         self.notes_template_combo = SmartFilterComboBox()
         self.notes_template_combo.setFixedHeight(24)
+        self.notes_template_combo.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.notes_template_combo.setStyleSheet(
             """
             QComboBox {
@@ -609,6 +625,7 @@ class ProjectEditorDialog(QDialog):
 
         apply_template_btn = QPushButton("تطبيق")
         apply_template_btn.setFixedHeight(24)
+        apply_template_btn.setMinimumWidth(82)
         apply_template_btn.setStyleSheet(
             """
             QPushButton {
@@ -626,6 +643,7 @@ class ProjectEditorDialog(QDialog):
 
         refresh_templates_btn = QPushButton("تحديث")
         refresh_templates_btn.setFixedHeight(24)
+        refresh_templates_btn.setMinimumWidth(82)
         refresh_templates_btn.setStyleSheet(
             """
             QPushButton {
@@ -641,9 +659,12 @@ class ProjectEditorDialog(QDialog):
         )
         refresh_templates_btn.clicked.connect(self._load_note_templates)
 
-        toolbar_layout.addWidget(self.notes_template_combo, 1)
-        toolbar_layout.addWidget(apply_template_btn)
-        toolbar_layout.addWidget(refresh_templates_btn)
+        toolbar_bottom_row.addWidget(self.notes_template_combo, 1)
+        toolbar_bottom_row.addWidget(apply_template_btn, 0, Qt.AlignmentFlag.AlignTop)
+        toolbar_bottom_row.addWidget(refresh_templates_btn, 0, Qt.AlignmentFlag.AlignTop)
+
+        toolbar_layout.addLayout(toolbar_top_row)
+        toolbar_layout.addLayout(toolbar_bottom_row)
 
         notes_layout.addLayout(toolbar_layout)
 
@@ -677,8 +698,9 @@ class ProjectEditorDialog(QDialog):
         notes_layout.addWidget(self.notes_input, 1)
 
         notes_group.setLayout(notes_layout)
+        notes_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._notes_group = notes_group
-        right_side.addWidget(notes_group, 1)
+        right_side.addWidget(notes_group, 3)
 
         payment_methods_group = QGroupBox("💳 طرق الدفع (تظهر في الفاتورة)")
         payment_methods_group.setStyleSheet(
@@ -721,8 +743,11 @@ class ProjectEditorDialog(QDialog):
         )
         pm_layout.addWidget(self.payment_methods_preview)
         payment_methods_group.setLayout(pm_layout)
+        payment_methods_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self._payment_methods_group = payment_methods_group
-        right_side.addWidget(payment_methods_group)
+        right_side.addWidget(payment_methods_group, 2)
 
         # الدفعة المقدمة - تصميم احترافي
         payment_group = QGroupBox("💳 تسجيل دفعة مقدمة")
@@ -754,7 +779,8 @@ class ProjectEditorDialog(QDialog):
         # المبلغ
         amount_row = QHBoxLayout()
         amount_label = QLabel("💰 المبلغ:")
-        amount_label.setMinimumWidth(62)
+        amount_label.setMinimumWidth(96)
+        amount_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.payment_amount_input = CustomSpinBox(decimals=2, minimum=0, maximum=9999999)
         self.payment_amount_input.setValue(0.0)
         self.payment_amount_input.setSuffix(" ج.م")
@@ -765,7 +791,8 @@ class ProjectEditorDialog(QDialog):
         # التاريخ
         date_row = QHBoxLayout()
         date_label = QLabel("📅 التاريخ:")
-        date_label.setMinimumWidth(62)
+        date_label.setMinimumWidth(96)
+        date_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.payment_date_input = QDateEdit(QDate.currentDate())
         self.payment_date_input.setCalendarPopup(True)
         date_row.addWidget(date_label)
@@ -775,7 +802,8 @@ class ProjectEditorDialog(QDialog):
         # الحساب
         account_row = QHBoxLayout()
         account_label = QLabel("🏦 الحساب:")
-        account_label.setMinimumWidth(62)
+        account_label.setMinimumWidth(96)
+        account_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         # SmartFilterComboBox للحساب مع فلترة
         self.payment_account_combo = SmartFilterComboBox()
         self.payment_account_combo.addItem("اختر الحساب...", userData=None)
@@ -789,7 +817,8 @@ class ProjectEditorDialog(QDialog):
 
         method_row = QHBoxLayout()
         method_label = QLabel("💳 الطريقة:")
-        method_label.setMinimumWidth(62)
+        method_label.setMinimumWidth(96)
+        method_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.payment_method_combo = SmartFilterComboBox()
         self.payment_method_combo.addItem("تلقائي حسب الحساب", userData=None)
         self._load_payment_methods_for_combo()
@@ -798,8 +827,9 @@ class ProjectEditorDialog(QDialog):
         payment_layout.addLayout(method_row)
 
         payment_group.setLayout(payment_layout)
+        payment_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._payment_group = payment_group
-        right_side.addWidget(payment_group)
+        right_side.addWidget(payment_group, 2)
 
         # إضافة الجانبين للتخطيط الأفقي الرئيسي
         main_horizontal_layout.addLayout(left_side, 3)  # البيانات والبنود على اليسار (أوسع)
@@ -835,14 +865,23 @@ class ProjectEditorDialog(QDialog):
         content_widget = QWidget()
         content_widget.setLayout(main_layout)
 
+        editor_scroll = QScrollArea()
+        editor_scroll.setWidgetResizable(True)
+        editor_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        editor_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        editor_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        editor_scroll.setWidget(content_widget)
+
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.addWidget(content_widget)
-        self._editor_scroll = None
+        outer_layout.addWidget(editor_scroll)
+        self._editor_scroll = editor_scroll
+        self._editor_layout_mode = None
 
         # جعل التاب متجاوب مع حجم الشاشة
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._apply_responsive_editor_layout()
+        QTimer.singleShot(0, self._apply_responsive_editor_layout)
 
         self.on_service_selected(0)
 
@@ -859,46 +898,213 @@ class ProjectEditorDialog(QDialog):
         super().resizeEvent(event)
         self._apply_responsive_editor_layout()
 
+    def showEvent(self, event):  # pylint: disable=invalid-name
+        super().showEvent(event)
+        self._editor_layout_mode = None
+        QTimer.singleShot(0, self._apply_responsive_editor_layout)
+        QTimer.singleShot(80, self._apply_responsive_editor_layout)
+
+    def _clear_layout_items(self, layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            child_layout = item.layout()
+            if child_layout is not None:
+                self._clear_layout_items(child_layout)
+
+    def _relayout_basic_fields(self, compact: bool, very_compact: bool):
+        if not hasattr(self, "_basic_grid"):
+            return
+
+        self._clear_layout_items(self._basic_grid)
+
+        label_min = 66 if very_compact else 78
+        field_min = 112 if very_compact else (128 if compact else 150)
+        pairs_per_row = 1 if very_compact else (2 if compact else 3)
+
+        labels = [
+            self.client_label,
+            self.name_label,
+            self.status_label,
+            self.start_date_label,
+            self.end_date_label,
+        ]
+        for label in labels:
+            label.setMinimumWidth(label_min)
+            label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        fields = [
+            (self.client_label, self.client_combo),
+            (self.name_label, self.name_input),
+            (self.status_label, self.status_combo),
+            (self.start_date_label, self.start_date_input),
+            (self.end_date_label, self.end_date_input),
+        ]
+        for _label, widget in fields:
+            widget.setMinimumWidth(field_min)
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        row = 0
+        pair_index = 0
+        for label, widget in fields:
+            col = pair_index * 2
+            self._basic_grid.addWidget(label, row, col)
+            self._basic_grid.addWidget(widget, row, col + 1)
+            pair_index += 1
+            if pair_index >= pairs_per_row:
+                pair_index = 0
+                row += 1
+
+        max_cols = pairs_per_row * 2
+        for col in range(max_cols):
+            self._basic_grid.setColumnStretch(col, 1 if col % 2 == 1 else 0)
+        self._basic_grid.setHorizontalSpacing(4 if very_compact else 6)
+        self._basic_grid.setVerticalSpacing(3 if very_compact else 4)
+
+    def _relayout_item_add_row(self, compact: bool, very_compact: bool):
+        if not hasattr(self, "_items_add_grid"):
+            return
+
+        self._clear_layout_items(self._items_add_grid)
+
+        self.service_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.service_combo.setMinimumWidth(150 if very_compact else 180)
+        self.item_quantity_label.setMinimumWidth(48 if very_compact else 56)
+        self.item_price_label.setMinimumWidth(48 if very_compact else 56)
+        self.item_quantity_input.setMaximumWidth(88 if very_compact else 98)
+        self.item_price_input.setMaximumWidth(110 if very_compact else 126)
+        self.add_item_button.setMinimumWidth(112 if very_compact else 126)
+
+        if very_compact:
+            self._items_add_grid.addWidget(self.service_combo, 0, 0, 1, 4)
+            self._items_add_grid.addWidget(self.add_item_button, 0, 4, 1, 2)
+            self._items_add_grid.addWidget(self.item_quantity_label, 1, 0)
+            self._items_add_grid.addWidget(self.item_quantity_input, 1, 1)
+            self._items_add_grid.addWidget(self.item_price_label, 1, 2)
+            self._items_add_grid.addWidget(self.item_price_input, 1, 3)
+            self._items_add_grid.setColumnStretch(0, 1)
+            self._items_add_grid.setColumnStretch(1, 0)
+            self._items_add_grid.setColumnStretch(2, 0)
+            self._items_add_grid.setColumnStretch(3, 0)
+            self._items_add_grid.setColumnStretch(4, 0)
+            self._items_add_grid.setColumnStretch(5, 0)
+        elif compact:
+            self._items_add_grid.addWidget(self.service_combo, 0, 0, 1, 5)
+            self._items_add_grid.addWidget(self.add_item_button, 0, 5)
+            self._items_add_grid.addWidget(self.item_quantity_label, 1, 0)
+            self._items_add_grid.addWidget(self.item_quantity_input, 1, 1)
+            self._items_add_grid.addWidget(self.item_price_label, 1, 2)
+            self._items_add_grid.addWidget(self.item_price_input, 1, 3)
+            self._items_add_grid.setColumnStretch(0, 1)
+            self._items_add_grid.setColumnStretch(1, 0)
+            self._items_add_grid.setColumnStretch(2, 0)
+            self._items_add_grid.setColumnStretch(3, 0)
+            self._items_add_grid.setColumnStretch(4, 1)
+            self._items_add_grid.setColumnStretch(5, 0)
+        else:
+            self._items_add_grid.addWidget(self.service_combo, 0, 0, 1, 3)
+            self._items_add_grid.addWidget(self.item_quantity_label, 0, 3)
+            self._items_add_grid.addWidget(self.item_quantity_input, 0, 4)
+            self._items_add_grid.addWidget(self.item_price_label, 0, 5)
+            self._items_add_grid.addWidget(self.item_price_input, 0, 6)
+            self._items_add_grid.addWidget(self.add_item_button, 0, 7)
+            self._items_add_grid.setColumnStretch(0, 1)
+            self._items_add_grid.setColumnStretch(1, 1)
+            self._items_add_grid.setColumnStretch(2, 1)
+            self._items_add_grid.setColumnStretch(3, 0)
+            self._items_add_grid.setColumnStretch(4, 0)
+            self._items_add_grid.setColumnStretch(5, 0)
+            self._items_add_grid.setColumnStretch(6, 0)
+            self._items_add_grid.setColumnStretch(7, 0)
+
+        self._items_add_grid.setHorizontalSpacing(4 if very_compact else 6)
+        self._items_add_grid.setVerticalSpacing(3 if very_compact else 4)
+
     def _apply_responsive_editor_layout(self):
         if not hasattr(self, "_main_horizontal_layout"):
             return
-        compact = self.width() < 1450 or self.height() < 840
-        very_compact = self.width() < 1220 or self.height() < 740
-        direction = (
-            QBoxLayout.Direction.TopToBottom if compact else QBoxLayout.Direction.LeftToRight
-        )
-        if self._main_horizontal_layout.direction() != direction:
-            self._main_horizontal_layout.setDirection(direction)
-        if compact:
-            self._main_horizontal_layout.setStretch(0, 0)
-            self._main_horizontal_layout.setStretch(1, 0)
-            if hasattr(self, "items_table"):
-                self.items_table.setMinimumHeight(100 if very_compact else 118)
-            if hasattr(self, "notes_input"):
-                self.notes_input.setMinimumHeight(84 if very_compact else 100)
-            if hasattr(self, "payment_methods_preview"):
-                self.payment_methods_preview.setMinimumHeight(46)
-            if hasattr(self, "_payment_methods_group"):
-                self._payment_methods_group.setMaximumHeight(130 if very_compact else 170)
-            if hasattr(self, "_payment_group"):
-                self._payment_group.setMaximumHeight(180 if very_compact else 230)
-            if hasattr(self, "_editor_main_layout"):
-                self._editor_main_layout.setSpacing(6)
+
+        available_width = self.width()
+        available_height = self.height()
+        editor_scroll = getattr(self, "_editor_scroll", None)
+        if editor_scroll is not None:
+            viewport = editor_scroll.viewport()
+            if viewport is not None:
+                if viewport.width() > 0:
+                    available_width = max(available_width, viewport.width())
+                if viewport.height() > 0:
+                    available_height = max(available_height, viewport.height())
+
+        stacked = False
+        compact = available_width < 1280 or available_height < 760
+        very_compact = available_width < 1100 or available_height < 680
+
+        target_direction = QBoxLayout.Direction.LeftToRight
+        if self._main_horizontal_layout.direction() != target_direction:
+            self._main_horizontal_layout.setDirection(target_direction)
+
+        layout_mode = (compact, very_compact)
+        if self._editor_layout_mode != layout_mode:
+            self._relayout_basic_fields(compact, very_compact)
+            self._relayout_item_add_row(compact, very_compact)
+            self._editor_layout_mode = layout_mode
+
+        if stacked:
+            self._main_horizontal_layout.setStretch(0, 9)
+            self._main_horizontal_layout.setStretch(1, 8)
+        elif compact:
+            self._main_horizontal_layout.setStretch(0, 6)
+            self._main_horizontal_layout.setStretch(1, 5)
         else:
             self._main_horizontal_layout.setStretch(0, 3)
             self._main_horizontal_layout.setStretch(1, 2)
-            if hasattr(self, "items_table"):
+
+        if hasattr(self, "items_table"):
+            if very_compact:
+                self.items_table.setMinimumHeight(98)
+                self.items_table.verticalHeader().setDefaultSectionSize(24)
+            elif compact:
+                self.items_table.setMinimumHeight(118)
+                self.items_table.verticalHeader().setDefaultSectionSize(26)
+            else:
                 self.items_table.setMinimumHeight(140)
-            if hasattr(self, "notes_input"):
-                self.notes_input.setMinimumHeight(130)
-            if hasattr(self, "payment_methods_preview"):
-                self.payment_methods_preview.setMinimumHeight(64)
-            if hasattr(self, "_payment_methods_group"):
-                self._payment_methods_group.setMaximumHeight(16777215)
-            if hasattr(self, "_payment_group"):
-                self._payment_group.setMaximumHeight(16777215)
-            if hasattr(self, "_editor_main_layout"):
+                self.items_table.verticalHeader().setDefaultSectionSize(30)
+
+        if hasattr(self, "notes_input"):
+            if very_compact:
+                self.notes_input.setMinimumHeight(110)
+            elif compact:
+                self.notes_input.setMinimumHeight(145)
+            else:
+                self.notes_input.setMinimumHeight(170)
+
+        if hasattr(self, "payment_methods_preview"):
+            self.payment_methods_preview.setMinimumHeight(52 if very_compact else 64)
+
+        if hasattr(self, "service_description_label"):
+            if very_compact:
+                self.service_description_label.setMaximumHeight(86)
+            elif compact:
+                self.service_description_label.setMaximumHeight(120)
+            else:
+                self.service_description_label.setMaximumHeight(16777215)
+
+        if hasattr(self, "_payment_methods_group"):
+            self._payment_methods_group.setMaximumHeight(16777215)
+        if hasattr(self, "_payment_group"):
+            self._payment_group.setMaximumHeight(16777215)
+
+        if hasattr(self, "_editor_main_layout"):
+            if very_compact:
+                self._editor_main_layout.setSpacing(4)
+                self._editor_main_layout.setContentsMargins(6, 6, 6, 6)
+            elif compact:
+                self._editor_main_layout.setSpacing(6)
+                self._editor_main_layout.setContentsMargins(8, 8, 8, 8)
+            else:
                 self._editor_main_layout.setSpacing(8)
+                self._editor_main_layout.setContentsMargins(10, 10, 10, 10)
+
+        return
 
     def _load_payment_methods_for_combo(self):
         try:
@@ -3779,10 +3985,11 @@ class ProjectManagerTab(QWidget):
 
     def _on_projects_changed(self):
         """⚡ استجابة لإشارة تحديث المشاريع - تحديث الجدول أوتوماتيك"""
-        safe_print("INFO: [ProjectManager] ⚡ استلام إشارة تحديث المشاريع - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
         if hasattr(self.project_service, "invalidate_cache"):
             self.project_service.invalidate_cache()
+        if not self.isVisible():
+            return
         self.load_projects_data()
 
     def _update_invoices_summary(self):

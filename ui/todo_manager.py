@@ -1638,6 +1638,9 @@ class TodoManagerWidget(QWidget):
 
     def _on_tasks_changed(self):
         """معالج تحديث المهام"""
+        if not self.isVisible():
+            self._reload_from_db = True
+            return
         self._schedule_tasks_reload(reload_from_db=True)
 
     def _schedule_tasks_reload(self, *_, reload_from_db: bool = False):

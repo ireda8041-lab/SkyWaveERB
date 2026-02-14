@@ -120,6 +120,9 @@ class SkyWaveERPApp:
         # ⚡ ربط مدير المزامنة بالـ repository لتتمكن واجهة الإعدادات من الوصول إليه
         self.repository.unified_sync = self.unified_sync
         self.realtime_manager = None
+        self._realtime_setup_attempts = 0
+        self._realtime_setup_max_attempts = 24
+        self._realtime_setup_retry_ms = 15000
 
         # ⚡ ربط إشارة تغيير البيانات بنظام الإشارات المركزي (للمزامنة الفورية)
         from core.signals import app_signals
@@ -203,6 +206,21 @@ class SkyWaveERPApp:
 
         logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
         logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
+
+    @staticmethod
+    def _is_local_mongo_target() -> bool:
+        """True only when effective Mongo URI points to localhost."""
+        try:
+            from core.realtime_sync import is_local_mongo_uri
+
+            uri = os.environ.get("MONGO_URI") or os.environ.get("MONGODB_URI")
+            if not uri:
+                from core.config import Config
+
+                uri = Config.get_mongo_uri()
+            return is_local_mongo_uri(str(uri or "").strip())
+        except Exception:
+            return False
 
     def _init_background_timers(self):
         """تهيئة الـ timers في الخلفية - يجب استدعاؤها بعد بدء event loop"""
@@ -512,33 +530,61 @@ class SkyWaveERPApp:
                     lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
                 )
 
-                # ⚡ NEW: ربط إشارة سحب البيانات الجديدة بتحديث الواجهة
-                self.unified_sync.data_synced.connect(
-                    lambda: QTimer.singleShot(100, main_window.on_sync_completed)
-                )
-                logger.info("[MainApp] ✅ تم ربط إشارة data_synced بتحديث الواجهة")
+                # ملاحظة: لا نربط data_synced هنا لتجنب تحديث واجهة مزدوج.
+                # تحديثات Delta/Pull تصل بالفعل عبر app_signals.emit_ui_data_changed لكل جدول متغير.
+                logger.info("[MainApp] ✅ تم الاكتفاء بتحديثات الواجهة عبر إشارات الجداول المتغيرة")
 
                 # Hybrid Realtime: Change Streams عند التوفر + Delta Sync fallback دائم
                 realtime_enabled = bool(getattr(self.unified_sync, "_realtime_enabled", True))
                 if realtime_enabled:
-                    try:
-                        from core.realtime_sync import setup_realtime_sync
+                    self._realtime_setup_attempts = 0
 
-                        self.realtime_manager = setup_realtime_sync(self.repository)
-                        if self.realtime_manager:
-                            self.realtime_manager.data_updated.connect(
-                                self._on_realtime_data_updated
+                    def _attempt_realtime_setup():
+                        if self.realtime_manager is not None:
+                            return
+
+                        self._realtime_setup_attempts += 1
+                        try:
+                            from core.realtime_sync import setup_realtime_sync
+
+                            manager = setup_realtime_sync(self.repository)
+                            if manager is not None:
+                                self.realtime_manager = manager
+                                self.realtime_manager.data_updated.connect(
+                                    self._on_realtime_data_updated
+                                )
+                                logger.info("[MainApp] ✅ تم تفعيل المزامنة الفورية (Hybrid)")
+                                return
+                        except Exception as realtime_error:
+                            logger.warning(
+                                "[MainApp] ⚠️ فشل تفعيل realtime - fallback إلى Delta فقط: %s",
+                                realtime_error,
                             )
-                            logger.info("[MainApp] ✅ تم تفعيل المزامنة الفورية (Hybrid)")
+
+                        if not self._is_local_mongo_target():
+                            logger.info(
+                                "[MainApp] ℹ️ MONGO_URI الحالي ليس localhost؛ لذلك لن تظهر نافذة UAC. "
+                                "تفعيل Change Streams يحتاج Replica Set على خادم Mongo نفسه."
+                            )
+                            return
+
+                        if self._realtime_setup_attempts < self._realtime_setup_max_attempts:
+                            logger.info(
+                                "[MainApp] ℹ️ Change Streams غير متاحة حالياً (%s/%s) - إعادة المحاولة خلال %s ثانية",
+                                self._realtime_setup_attempts,
+                                self._realtime_setup_max_attempts,
+                                int(self._realtime_setup_retry_ms / 1000),
+                            )
+                            QTimer.singleShot(
+                                self._realtime_setup_retry_ms, _attempt_realtime_setup
+                            )
                         else:
                             logger.info(
-                                "[MainApp] ℹ️ Change Streams غير متاحة - النظام يعمل على Delta Sync فقط"
+                                "[MainApp] ℹ️ لم تتفعّل Change Streams بعد %s محاولة - الاستمرار على Delta Sync",
+                                self._realtime_setup_max_attempts,
                             )
-                    except Exception as realtime_error:
-                        logger.warning(
-                            "[MainApp] ⚠️ فشل تفعيل realtime - fallback إلى Delta فقط: %s",
-                            realtime_error,
-                        )
+
+                    _attempt_realtime_setup()
                 else:
                     logger.info("[MainApp] ℹ️ المزامنة الفورية معطلة من الإعدادات")
             except Exception as e:
@@ -568,6 +614,7 @@ class SkyWaveERPApp:
 
         # تشغيل التطبيق
         exit_code = app.exec()
+        logger.info("[MainApp] انتهت حلقة Qt الرئيسية. exit_code=%s", exit_code)
 
         # ✅ تنظيف نهائي قبل الخروج
         self._cleanup_on_exit()
@@ -577,12 +624,10 @@ class SkyWaveERPApp:
     def _on_realtime_data_updated(self, table_name: str, _payload: dict):
         """معالجة event فوري من Change Streams بدون ازدواج مع delta/full sync."""
         try:
-            from core.signals import app_signals
-
             known_tables = set(getattr(self.unified_sync, "TABLES", []))
             if isinstance(table_name, str) and table_name in known_tables:
-                # Realtime events originate from cloud state; refresh UI only to avoid sync echo loops.
-                app_signals.emit_ui_data_changed(table_name)
+                # Realtime change should trigger a targeted pull only.
+                # UI refresh will be emitted once from pull_remote_changes after local DB update.
                 if hasattr(self.unified_sync, "request_realtime_pull"):
                     self.unified_sync.request_realtime_pull(table_name)
         except Exception as e:

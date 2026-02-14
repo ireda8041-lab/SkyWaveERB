@@ -1,4 +1,4 @@
 {
-  "MONGO_URI": "mongodb://localhost:27017",
+  "MONGO_URI": "mongodb://skywave_app:SkywavePassword2025@147.79.66.116:27017/skywave_erp_db?authSource=skywave_erp_db&replicaSet=rs0&directConnection=false",
   "MONGO_DB_NAME": "skywave_erp_db"
 }

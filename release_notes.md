@@ -1,15 +1,14 @@
-﻿## Release Notes - v2.2.7 (2026-02-12)
+﻿## Release Notes - v2.2.8 (2026-02-14)
 
-### Cross-Device Sync Reliability
-- Delta sync now uses MongoDB server time for `last_modified` writes to eliminate client clock drift issues.
-- Watermark future-time guards now compare against server time, reducing delayed pull behavior.
-- `emit_data_changed` now emits an explicit sync ping per table so other devices pull changes quickly.
+### UI and Layout Stability
+- New Project dialog now opens with a correct first-render layout without requiring manual resize.
+- Responsive sizing logic was hardened across startup/show/resize cycles for consistent behavior on different screen sizes.
+- Notes and payment side panels now keep better proportional space with smoother scroll handling.
 
-### Notification and UX Stability
-- Settings update toast spam is suppressed for both new and legacy payload formats.
-- Notification worker dedupe was hardened to avoid reprocessing loops and random burst refreshes.
-- Realtime event handling now refreshes UI with `emit_ui_data_changed` to avoid sync echo loops.
+### Sync and Realtime Reliability
+- Instant sync worker now falls back safely when lightweight repositories miss full table-reconcile dependencies.
+- Repository compatibility checks were hardened to avoid background worker crashes in edge test/runtime scenarios.
 
-### Change Streams
-- Existing Replica Set bootstrap and reconnect improvements remain active.
-- If MongoDB is not running as Replica Set, system continues on fast Delta fallback without breaking.
+### Deployment and Operations
+- Added remote MongoDB replica-set helper (`tools/enable_remote_replset.py`) for server-side professional setup.
+- Added stable per-device identity utility (`core/device_identity.py`) to reduce cross-device collision risk.

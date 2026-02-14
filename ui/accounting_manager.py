@@ -113,6 +113,8 @@ class AccountingManagerTab(QWidget):
         if hasattr(self.accounting_service, "_hierarchy_cache"):
             self.accounting_service._hierarchy_cache = None
             self.accounting_service._hierarchy_cache_time = 0
+        if not self.isVisible():
+            return
         self.load_accounts_data(force_refresh=True)
 
     def _on_any_data_changed(self, _data_type: str = None):
@@ -125,6 +127,8 @@ class AccountingManagerTab(QWidget):
         # إبطال الـ cache لضمان جلب البيانات الجديدة
         self.accounting_service._hierarchy_cache = None
         self.accounting_service._hierarchy_cache_time = 0
+        if not self.isVisible():
+            return
         self.load_accounts_data(force_refresh=True)
 
     def on_data_changed(self):
@@ -1034,12 +1038,7 @@ class AccountingManagerTab(QWidget):
             # تحديث صافي الربح مع تغيير اللون حسب القيمة
             self._update_profit_value(self.net_profit_summary_label, net_profit)
 
-            safe_print("INFO: [AccManager] الملخص المالي:")
-            safe_print(f"  - الأصول: {total_assets:,.2f}")
-            safe_print(f"  - الخصوم: {total_liabilities:,.2f}")
-            safe_print(f"  - الإيرادات: {total_revenue:,.2f}")
-            safe_print(f"  - المصروفات: {total_expenses:,.2f}")
-            safe_print(f"  - صافي الربح: {net_profit:,.2f}")
+            # تجنب طباعة الملخص في كل تحديث لأن ذلك يسبب ضوضاء ويؤثر على الأداء.
 
         except Exception as e:
             safe_print(f"ERROR: [AccManager] فشل تحديث الملخص المالي: {e}")

@@ -9,19 +9,16 @@ MongoDB هو المصدر الرئيسي، SQLite نسخة محلية للـ off
 - عند استعادة الاتصال: رفع التغييرات المحلية ثم مسح وإعادة تحميل من MongoDB
 """
 
-import hashlib
 import json
-import os
-import platform
 import threading
 import time
-import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from core.device_identity import get_stable_device_id
 from core.logger import get_logger
 
 # استيراد دالة الطباعة الآمنة
@@ -38,33 +35,6 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-
-def _get_stable_device_id() -> str:
-    """Return a stable device id used for cross-device sync pings."""
-    try:
-        machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
-        try:
-            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
-        except TypeError:
-            digest = hashlib.sha256(machine_info.encode()).hexdigest()
-        return digest[:8]
-    except Exception:
-        device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
-        if os.path.exists(device_file):
-            try:
-                with open(device_file, encoding="utf-8") as f:
-                    return f.read().strip()
-            except Exception:
-                pass
-        new_id = str(uuid.uuid4())[:8]
-        try:
-            with open(device_file, "w", encoding="utf-8") as f:
-                f.write(new_id)
-        except OSError:
-            pass
-        return new_id
-
-
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
 FULL_SYNC_INTERVAL_MS = 15 * 60 * 1000
 QUICK_SYNC_INTERVAL_MS = 3 * 60 * 1000
@@ -74,6 +44,10 @@ DEFAULT_DELTA_SYNC_INTERVAL_SECONDS = 2
 DEFAULT_REALTIME_CHANGE_STREAM_MAX_AWAIT_MS = 250
 DEFAULT_LAZY_LOGO_ENABLED = True
 DEFAULT_LOGO_FETCH_BATCH_LIMIT = 10
+DEFAULT_DELTA_PUSH_BATCH_LIMIT = 40
+DEFAULT_SYNC_PING_COOLDOWN_SECONDS = 5.0
+DEFAULT_INSTANT_SYNC_DEDUPE_MS = 900
+DEFAULT_REALTIME_PULL_DEDUPE_MS = 900
 
 
 class UnifiedSyncManagerV3(QObject):
@@ -151,16 +125,18 @@ class UnifiedSyncManagerV3(QObject):
         self._realtime_change_stream_max_await_ms = DEFAULT_REALTIME_CHANGE_STREAM_MAX_AWAIT_MS
         self._lazy_logo_enabled = DEFAULT_LAZY_LOGO_ENABLED
         self._logo_fetch_batch_limit = DEFAULT_LOGO_FETCH_BATCH_LIMIT
-        self._realtime_pull_dedupe_ms = 400
+        self._realtime_pull_dedupe_ms = DEFAULT_REALTIME_PULL_DEDUPE_MS
         self._last_realtime_pull_ms: dict[str, int] = {}
         self._queued_realtime_tables: set[str] = set()
         self._instant_sync_schedule_lock = threading.Lock()
         self._instant_sync_pending_tables: set[str] = set()
         self._instant_sync_worker_running = False
-        self._instant_sync_dedupe_ms = 250
+        self._instant_sync_dedupe_ms = DEFAULT_INSTANT_SYNC_DEDUPE_MS
         self._last_instant_sync_request_ms: dict[str, int] = {}
-        self._device_id = _get_stable_device_id()
+        self._device_id = get_stable_device_id()
         self._last_sync_ping_at: dict[str, float] = {}
+        self._sync_ping_cooldown_seconds = DEFAULT_SYNC_PING_COOLDOWN_SECONDS
+        self._delta_push_batch_limit = DEFAULT_DELTA_PUSH_BATCH_LIMIT
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -176,6 +152,8 @@ class UnifiedSyncManagerV3(QObject):
         # ⚡ Watermarks للـ Delta Sync
         self._watermarks: dict[str, str] = {}
         self._load_watermarks()
+        self._table_exists_cache: dict[str, bool] = {}
+        self._table_columns_cache: dict[str, set[str]] = {}
 
         logger.info("✅ تم تهيئة UnifiedSyncManager - مزامنة محسّنة للأداء")
 
@@ -192,7 +170,7 @@ class UnifiedSyncManagerV3(QObject):
             if table == "notifications":
                 continue
             last_ping = self._last_sync_ping_at.get(table, 0.0)
-            if (now_ts - last_ping) < 0.6:
+            if (now_ts - last_ping) < self._sync_ping_cooldown_seconds:
                 continue
             self._last_sync_ping_at[table] = now_ts
             payload = {
@@ -312,6 +290,31 @@ class UnifiedSyncManagerV3(QObject):
                 minimum=1,
                 maximum=100,
             )
+            self._delta_push_batch_limit = self._safe_int(
+                config.get("delta_push_batch_limit", DEFAULT_DELTA_PUSH_BATCH_LIMIT),
+                DEFAULT_DELTA_PUSH_BATCH_LIMIT,
+                minimum=10,
+                maximum=500,
+            )
+            self._instant_sync_dedupe_ms = self._safe_int(
+                config.get("instant_sync_dedupe_ms", DEFAULT_INSTANT_SYNC_DEDUPE_MS),
+                DEFAULT_INSTANT_SYNC_DEDUPE_MS,
+                minimum=100,
+                maximum=5000,
+            )
+            self._realtime_pull_dedupe_ms = self._safe_int(
+                config.get("realtime_pull_dedupe_ms", DEFAULT_REALTIME_PULL_DEDUPE_MS),
+                DEFAULT_REALTIME_PULL_DEDUPE_MS,
+                minimum=100,
+                maximum=5000,
+            )
+            try:
+                ping_cooldown = float(
+                    config.get("sync_ping_cooldown_s", DEFAULT_SYNC_PING_COOLDOWN_SECONDS)
+                )
+            except (TypeError, ValueError):
+                ping_cooldown = DEFAULT_SYNC_PING_COOLDOWN_SECONDS
+            self._sync_ping_cooldown_seconds = max(0.5, min(30.0, ping_cooldown))
 
             self._auto_sync_interval = auto_seconds * 1000
             self._quick_sync_interval = quick_seconds * 1000
@@ -383,9 +386,24 @@ class UnifiedSyncManagerV3(QObject):
         """Normalize timestamp values from Mongo/SQLite to ISO string."""
         if value is None:
             return ""
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return ""
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed.isoformat()
+            except ValueError:
+                return text
         if hasattr(value, "isoformat"):
             try:
-                return value.isoformat()
+                iso_text = value.isoformat()
+                parsed = datetime.fromisoformat(str(iso_text).replace("Z", "+00:00"))
+                if parsed.tzinfo is not None:
+                    parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                return parsed.isoformat()
             except Exception:
                 return str(value)
         return str(value)
@@ -430,13 +448,118 @@ class UnifiedSyncManagerV3(QObject):
         except Exception:
             return datetime.now()
 
-    def _build_last_modified_query(self, watermark: str) -> dict[str, Any]:
-        """Build query that handles mixed datetime/string storage in MongoDB."""
-        conditions: list[dict[str, Any]] = [{"last_modified": {"$gt": watermark}}]
-        watermark_dt = self._parse_iso_datetime(watermark)
+    def _build_last_modified_query(
+        self, watermark: str, upper_bound_dt: datetime | None = None
+    ) -> dict[str, Any]:
+        """
+        Build query that handles mixed datetime/string storage in MongoDB safely.
+
+        Important: do not compare dates to string directly in a single condition,
+        because BSON cross-type ordering can make `date > "string"` always true and
+        cause full-table pulls on every cycle.
+        """
+        watermark_str = str(watermark or "")
+        watermark_dt = self._parse_iso_datetime(watermark_str)
+        upper_bound_str = (
+            upper_bound_dt.isoformat() if hasattr(upper_bound_dt, "isoformat") else None
+        )
+        branches: list[dict[str, Any]] = []
+
         if watermark_dt is not None:
-            conditions.append({"last_modified": {"$gt": watermark_dt}})
-        return conditions[0] if len(conditions) == 1 else {"$or": conditions}
+            date_cond: dict[str, Any] = {"$gt": watermark_dt}
+            if upper_bound_dt is not None:
+                date_cond["$lte"] = upper_bound_dt
+            branches.append(
+                {
+                    "$and": [
+                        {"last_modified": {"$type": "date"}},
+                        {"last_modified": date_cond},
+                    ]
+                }
+            )
+
+        if watermark_str:
+            string_cond: dict[str, Any] = {"$gt": watermark_str}
+            if upper_bound_str:
+                string_cond["$lte"] = upper_bound_str
+            branches.append(
+                {
+                    "$and": [
+                        {"last_modified": {"$type": "string"}},
+                        {"last_modified": string_cond},
+                    ]
+                }
+            )
+
+        if not branches:
+            return {"last_modified": {"$exists": True}}
+        return branches[0] if len(branches) == 1 else {"$or": branches}
+
+    @staticmethod
+    def _to_safe_float(value: Any, default: float = 0.0) -> float:
+        if value is None or value == "":
+            return float(default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _to_safe_int(value: Any, default: int = 0) -> int:
+        if value is None or value == "":
+            return int(default)
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return int(default)
+
+    @staticmethod
+    def _to_safe_bool_int(value: Any) -> int:
+        if isinstance(value, bool):
+            return 1 if value else 0
+        if isinstance(value, int | float):
+            return 1 if int(value) != 0 else 0
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on"}:
+                return 1
+            if normalized in {"0", "false", "no", "off", ""}:
+                return 0
+        return 0
+
+    @staticmethod
+    def _merge_query_with_notification_filter(base_query: dict[str, Any]) -> dict[str, Any]:
+        """
+        Ignore operational sync ping notifications in generic table synchronization.
+        Notification toasts are handled by dedicated notification workers.
+        """
+        sync_ping_filter = {
+            "$and": [
+                {"$or": [{"action": {"$exists": False}}, {"action": {"$ne": "sync_ping"}}]},
+                {"$or": [{"silent": {"$exists": False}}, {"silent": {"$ne": True}}]},
+            ]
+        }
+        if not base_query:
+            return sync_ping_filter
+        return {"$and": [base_query, sync_ping_filter]}
+
+    def _is_newer_timestamp(self, candidate: Any, reference: Any) -> bool:
+        """
+        True when candidate timestamp is strictly newer than reference timestamp.
+        Handles mixed datetime/string formats safely.
+        """
+        candidate_iso = self._to_iso_timestamp(candidate)
+        reference_iso = self._to_iso_timestamp(reference)
+        if not candidate_iso:
+            return False
+        if not reference_iso:
+            return True
+
+        candidate_dt = self._normalize_datetime(self._parse_iso_datetime(candidate_iso))
+        reference_dt = self._normalize_datetime(self._parse_iso_datetime(reference_iso))
+        if candidate_dt is not None and reference_dt is not None:
+            return candidate_dt > reference_dt
+        return candidate_iso > reference_iso
 
     @staticmethod
     def _format_bytes(value: int) -> str:
@@ -476,6 +599,24 @@ class UnifiedSyncManagerV3(QObject):
             getattr(self.repo, attr_name).invalidate()
         except Exception:
             pass
+
+    def _sqlite_table_exists(self, cursor, table: str) -> bool:
+        cached = self._table_exists_cache.get(table)
+        if cached is not None:
+            return cached
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,))
+        exists = bool(cursor.fetchone())
+        self._table_exists_cache[table] = exists
+        return exists
+
+    def _sqlite_table_columns(self, cursor, table: str) -> set[str]:
+        cached = self._table_columns_cache.get(table)
+        if cached is not None:
+            return cached
+        cursor.execute(f"PRAGMA table_info({table})")
+        columns = {row[1] for row in cursor.fetchall()}
+        self._table_columns_cache[table] = columns
+        return columns
 
     def request_realtime_pull(self, table: str | None = None) -> bool:
         """
@@ -562,8 +703,30 @@ class UnifiedSyncManagerV3(QObject):
                     # Offline mode: skip immediate cycle; periodic sync will recover on reconnect.
                     continue
 
-                result = self._run_delta_cycle()
-                if result.get("reason") in {"delta_busy", "full_sync_in_progress"}:
+                specific_tables = sorted(t for t in pending if t in self.TABLES)
+                run_full_cycle = (
+                    "__all__" in pending or not specific_tables or len(specific_tables) > 3
+                )
+                busy = False
+
+                if run_full_cycle:
+                    result = self._run_delta_cycle()
+                    busy = result.get("reason") in {"delta_busy", "full_sync_in_progress"}
+                else:
+                    for table_name in specific_tables:
+                        result = self._run_table_reconcile_cycle(table_name)
+                        # Fallback for lightweight test repositories that do not expose
+                        # full table-reconcile dependencies.
+                        if not result.get("success", False) and result.get("reason") not in {
+                            "delta_busy",
+                            "full_sync_in_progress",
+                        }:
+                            result = self._run_delta_cycle()
+                        if result.get("reason") in {"delta_busy", "full_sync_in_progress"}:
+                            busy = True
+                            break
+
+                if busy:
                     with self._instant_sync_schedule_lock:
                         self._instant_sync_pending_tables.update(pending)
                     time.sleep(0.15)
@@ -1191,7 +1354,10 @@ class UnifiedSyncManagerV3(QObject):
 
             # جلب البيانات من السحابة
             try:
-                cloud_data = list(self.repo.mongo_db[table_name].find())
+                cloud_query: dict[str, Any] = {}
+                if table_name == "notifications":
+                    cloud_query = self._merge_query_with_notification_filter(cloud_query)
+                cloud_data = list(self.repo.mongo_db[table_name].find(cloud_query))
             except Exception as mongo_err:
                 error_msg = str(mongo_err)
                 if (
@@ -1230,6 +1396,9 @@ class UnifiedSyncManagerV3(QObject):
 
                     # تحضير البيانات
                     item_data = self._prepare_cloud_data(cloud_item, table_name=table_name)
+                    if item_data.pop("__skip_sync__", False):
+                        logger.warning("⚠️ تم تخطي سجل %s غير صالح من السحابة", table_name)
+                        continue
                     item_data["_mongo_id"] = mongo_id
                     item_data["sync_status"] = "synced"
 
@@ -1444,6 +1613,42 @@ class UnifiedSyncManagerV3(QObject):
                     data.get("name", "غير معروف"),
                     len(str(raw_logo)),
                 )
+        elif table_name == "projects":
+            # Guard against partially broken cloud payloads that previously caused
+            # validation crashes in SQLite readers.
+            name = str(item.get("name") or "").strip()
+            client_id = str(item.get("client_id") or "").strip()
+            if not name or not client_id:
+                item["__skip_sync__"] = True
+                return item
+
+            item["name"] = name
+            item["client_id"] = client_id
+            item["status"] = str(item.get("status") or "نشط")
+            item["currency"] = str(item.get("currency") or "EGP")
+            item["status_manually_set"] = self._to_safe_bool_int(item.get("status_manually_set"))
+            item["is_retainer"] = self._to_safe_bool_int(item.get("is_retainer"))
+            item["sequence_number"] = self._to_safe_int(item.get("sequence_number"), 0)
+
+            for numeric_field in [
+                "subtotal",
+                "discount_rate",
+                "discount_amount",
+                "tax_rate",
+                "tax_amount",
+                "total_amount",
+                "total_estimated_cost",
+                "estimated_profit",
+                "profit_margin",
+            ]:
+                item[numeric_field] = self._to_safe_float(item.get(numeric_field), 0.0)
+
+            if item.get("items") is None:
+                item["items"] = []
+            if item.get("milestones") is None:
+                item["milestones"] = []
+            if not item.get("contract_type"):
+                item["contract_type"] = "مرة واحدة"
 
         # تحويل التواريخ
         date_fields = [
@@ -2264,7 +2469,20 @@ class UnifiedSyncManagerV3(QObject):
             watermark_file = self._get_watermark_file_path()
             if watermark_file and watermark_file.exists():
                 with open(watermark_file, encoding="utf-8") as f:
-                    self._watermarks = json.load(f)
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    sanitized: dict[str, str] = {}
+                    for table, value in loaded.items():
+                        key = str(table or "").strip()
+                        if not key:
+                            continue
+                        text = str(value or "").strip()
+                        if not text:
+                            continue
+                        sanitized[key] = text
+                    self._watermarks = sanitized
+                else:
+                    self._watermarks = {}
                 logger.info("📍 تم تحميل Watermarks: %s جداول", len(self._watermarks))
                 return
             self._watermarks = {}
@@ -2284,12 +2502,14 @@ class UnifiedSyncManagerV3(QObject):
         except Exception as e:
             logger.debug("فشل حفظ Watermarks: %s", e)
 
-    def push_local_changes(self) -> dict[str, Any]:
+    def push_local_changes(self, target_tables: set[str] | None = None) -> dict[str, Any]:
         """
         ⚡ Push all locally modified records to MongoDB
         Returns: dict with counts of pushed records and any errors
         """
-        if self.repo is None or self.repo.sqlite_conn is None:
+        if self.repo is None:
+            return {"success": False, "reason": "sqlite_closed"}
+        if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn is None:
             return {"success": False, "reason": "sqlite_closed"}
         if not self.is_online:
             return {"success": False, "reason": "offline"}
@@ -2305,15 +2525,17 @@ class UnifiedSyncManagerV3(QObject):
             server_now_iso = self._to_iso_timestamp(server_now_dt)
             cursor = self.repo.get_cursor()
 
-            for table in self.TABLES:
+            if target_tables:
+                table_names = [t for t in self.TABLES if t in target_tables]
+            else:
+                table_names = list(self.TABLES)
+
+            for table in table_names:
                 try:
                     before_pushed = results["pushed"]
                     before_deleted = results["deleted"]
                     # التحقق من وجود الجدول
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-                    )
-                    if not cursor.fetchone():
+                    if not self._sqlite_table_exists(cursor, table):
                         continue
 
                     # جلب كل السجلات المحلية غير المتزامنة
@@ -2325,7 +2547,9 @@ class UnifiedSyncManagerV3(QObject):
                            OR sync_status IS NULL
                            OR sync_status IN ('new_offline', 'modified_offline', 'pending', 'deleted')
                            OR _mongo_id IS NULL
-                    """
+                        LIMIT ?
+                    """,
+                        (self._delta_push_batch_limit,),
                     )
                     dirty_records = cursor.fetchall()
 
@@ -2501,7 +2725,9 @@ class UnifiedSyncManagerV3(QObject):
         Only pulls records where last_modified > watermark
         Returns: dict with counts of pulled/deleted records
         """
-        if self.repo is None or self.repo.sqlite_conn is None:
+        if self.repo is None:
+            return {"success": False, "reason": "sqlite_closed"}
+        if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn is None:
             return {"success": False, "reason": "sqlite_closed"}
         if not self.is_online:
             return {"success": False, "reason": "offline"}
@@ -2514,6 +2740,7 @@ class UnifiedSyncManagerV3(QObject):
 
         results = {"success": True, "pulled": 0, "deleted": 0, "errors": 0}
         changed_tables: set[str] = set()
+        watermarks_dirty = False
 
         try:
             reference_now = self._get_mongo_server_now()
@@ -2525,17 +2752,25 @@ class UnifiedSyncManagerV3(QObject):
                     before_deleted = results["deleted"]
 
                     # الحصول على Watermark لهذا الجدول
-                    watermark = self._watermarks.get(table, "1970-01-01T00:00:00")
+                    watermark = str(self._watermarks.get(table) or "1970-01-01T00:00:00").strip()
+                    if watermark and self._parse_iso_datetime(watermark) is None:
+                        watermark = "1970-01-01T00:00:00"
+                        self._watermarks[table] = watermark
+                        watermarks_dirty = True
                     watermark_dt = self._normalize_datetime(self._parse_iso_datetime(watermark))
                     if watermark_dt and watermark_dt > reference_now + timedelta(seconds=30):
                         fallback_dt = reference_now - timedelta(minutes=5)
                         watermark = fallback_dt.isoformat()
                         self._watermarks[table] = watermark
-                        self._save_watermarks()
+                        watermarks_dirty = True
 
                     # جلب السجلات من MongoDB المحدّثة بعد الـ watermark
                     collection = self.repo.mongo_db[table]
-                    query = self._build_last_modified_query(watermark)
+                    query = self._build_last_modified_query(
+                        watermark, upper_bound_dt=reference_now + timedelta(seconds=2)
+                    )
+                    if table == "notifications":
+                        query = self._merge_query_with_notification_filter(query)
                     projection = None
                     if table == "clients" and self._lazy_logo_enabled:
                         projection = {"logo_data": 0}
@@ -2552,17 +2787,12 @@ class UnifiedSyncManagerV3(QObject):
                         continue
 
                     # التحقق من وجود الجدول محلياً
-                    cursor.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-                    )
-                    if not cursor.fetchone():
+                    if not self._sqlite_table_exists(cursor, table):
                         continue
 
                     # الحصول على أعمدة الجدول
-                    cursor.execute(f"PRAGMA table_info({table})")
-                    table_columns = {row[1] for row in cursor.fetchall()}
+                    table_columns = self._sqlite_table_columns(cursor, table)
 
-                    max_timestamp = watermark
                     logo_clients = 0
 
                     for remote in remote_records:
@@ -2573,26 +2803,31 @@ class UnifiedSyncManagerV3(QObject):
                                 remote.get("last_modified", "")
                             )
 
-                            # تحديث max_timestamp
-                            if last_modified_iso and last_modified_iso > max_timestamp:
-                                max_timestamp = last_modified_iso
-
                             # البحث عن السجل المحلي
                             cursor.execute(
-                                f"SELECT id FROM {table} WHERE _mongo_id = ?", (mongo_id,)
+                                f"SELECT id, last_modified FROM {table} WHERE _mongo_id = ?",
+                                (mongo_id,),
                             )
                             local_row = cursor.fetchone()
+                            local_id = local_row[0] if local_row else None
+                            local_last_modified = (
+                                self._to_iso_timestamp(local_row[1]) if local_row else ""
+                            )
 
                             if is_deleted:
                                 # حذف من MongoDB -> حذف محلياً
-                                if local_row:
-                                    cursor.execute(
-                                        f"DELETE FROM {table} WHERE id = ?", (local_row[0],)
-                                    )
+                                if local_id:
+                                    cursor.execute(f"DELETE FROM {table} WHERE id = ?", (local_id,))
                                     results["deleted"] += 1
                             else:
                                 # تحضير البيانات
                                 item_data = self._prepare_cloud_data(remote, table_name=table)
+                                if item_data.pop("__skip_sync__", False):
+                                    logger.warning(
+                                        "⚠️ تم تجاهل سجل projects غير صالح أثناء delta pull (mongo_id=%s)",
+                                        mongo_id,
+                                    )
+                                    continue
                                 item_data["_mongo_id"] = mongo_id
                                 item_data["sync_status"] = "synced"
                                 item_data["dirty_flag"] = 0
@@ -2605,10 +2840,21 @@ class UnifiedSyncManagerV3(QObject):
                                     k: v for k, v in item_data.items() if k in table_columns
                                 }
 
-                                if local_row:
+                                # Extra safety: when query returns broad sets, skip no-op rows.
+                                if (
+                                    local_id
+                                    and last_modified_iso
+                                    and local_last_modified
+                                    and not self._is_newer_timestamp(
+                                        last_modified_iso, local_last_modified
+                                    )
+                                ):
+                                    continue
+
+                                if local_id:
                                     # تحديث السجل الموجود
                                     set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
-                                    values = list(filtered.values()) + [local_row[0]]
+                                    values = list(filtered.values()) + [local_id]
                                     cursor.execute(
                                         f"UPDATE {table} SET {set_clause} WHERE id = ?", values
                                     )
@@ -2629,29 +2875,31 @@ class UnifiedSyncManagerV3(QObject):
                     if remote_records:
                         # ⚡ CRITICAL: Update watermark based on the LATEST record found
                         try:
-                            latest_ts = max(
-                                (
-                                    self._to_iso_timestamp(r.get("last_modified", ""))
-                                    for r in remote_records
-                                ),
-                                default="",
-                            )
+                            latest_ts = ""
+                            for remote_row in remote_records:
+                                row_ts = self._to_iso_timestamp(remote_row.get("last_modified", ""))
+                                if self._is_newer_timestamp(row_ts, latest_ts):
+                                    latest_ts = row_ts
                             current_watermark = self._watermarks.get(table, "")
 
-                            if latest_ts and latest_ts > current_watermark:
+                            if self._is_newer_timestamp(latest_ts, current_watermark):
                                 self._watermarks[table] = latest_ts
-                                self._save_watermarks()  # ⚡ Save immediately
+                                watermarks_dirty = True
                                 logger.debug("📍 Watermark updated for %s: %s", table, latest_ts)
                         except Exception as wm_err:
                             logger.error("❌ Failed to update watermark for %s: %s", table, wm_err)
 
-                    self.repo.sqlite_conn.commit()
+                    table_changed = (
+                        results["pulled"] > before_pulled or results["deleted"] > before_deleted
+                    )
+                    if table_changed:
+                        self.repo.sqlite_conn.commit()
                     if table == "clients" and logo_clients > 0 and self._lazy_logo_enabled:
                         logger.info(
                             "📷 clients delta: %s عميل لديه شعار (metadata only - lazy mode)",
                             logo_clients,
                         )
-                    if results["pulled"] > before_pulled or results["deleted"] > before_deleted:
+                    if table_changed:
                         self._invalidate_repository_cache(table)
                         changed_tables.add(table)
 
@@ -2660,8 +2908,9 @@ class UnifiedSyncManagerV3(QObject):
 
             cursor.close()
 
-            # حفظ الـ watermarks
-            self._save_watermarks()
+            # حفظ الـ watermarks (مرة واحدة في نهاية الدورة لتقليل I/O)
+            if watermarks_dirty:
+                self._save_watermarks()
 
             if results["pulled"] > 0 or results["deleted"] > 0:
                 logger.info("⬇️ Delta سحب: %s، حذف: %s", results["pulled"], results["deleted"])
@@ -2691,7 +2940,9 @@ class UnifiedSyncManagerV3(QObject):
 
     def _run_delta_cycle(self) -> dict[str, Any]:
         """Run one guarded push+pull cycle without overlapping with another delta cycle."""
-        if self.repo is None or self.repo.sqlite_conn is None:
+        if self.repo is None:
+            return {"success": False, "reason": "sqlite_closed"}
+        if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn is None:
             return {"success": False, "reason": "sqlite_closed"}
         if self._shutdown:
             return {"success": False, "reason": "shutdown"}
@@ -2721,7 +2972,9 @@ class UnifiedSyncManagerV3(QObject):
         """
         if table not in self.TABLES:
             return {"success": False, "reason": "invalid_table"}
-        if self.repo is None or self.repo.sqlite_conn is None:
+        if self.repo is None:
+            return {"success": False, "reason": "sqlite_closed"}
+        if hasattr(self.repo, "sqlite_conn") and self.repo.sqlite_conn is None:
             return {"success": False, "reason": "sqlite_closed"}
         if self._shutdown:
             return {"success": False, "reason": "shutdown"}
@@ -2734,7 +2987,7 @@ class UnifiedSyncManagerV3(QObject):
         pushed = 0
         errors = 0
         try:
-            push_result = self.push_local_changes()
+            push_result = self.push_local_changes({table})
             pushed = int(push_result.get("pushed", 0))
             errors += int(push_result.get("errors", 0))
             self._sync_single_table_from_cloud(table)
@@ -2817,18 +3070,31 @@ class UnifiedSyncManagerV3(QObject):
         interval_seconds = max(1, int(interval_seconds))
 
         def delta_loop():
-            next_run = time.monotonic()
+            idle_streak = 0
             while not self._shutdown and not self._delta_thread_stop.is_set():
-                next_run += interval_seconds
-                sleep_for = max(0.0, next_run - time.monotonic())
-                if sleep_for:
-                    time.sleep(sleep_for)
+                backoff_factor = 1
+                if self._realtime_enabled and idle_streak >= 2:
+                    backoff_factor = min(4, 1 + (idle_streak // 2))
+                wait_seconds = float(interval_seconds * backoff_factor)
+                if self._delta_thread_stop.wait(wait_seconds):
+                    break
                 if self._shutdown or self._delta_thread_stop.is_set():
                     break
                 if self._is_syncing or not self.is_online:
                     continue
                 try:
-                    self._run_delta_cycle()
+                    result = self._run_delta_cycle()
+                    changed = (
+                        int(result.get("pushed", 0))
+                        + int(result.get("pulled", 0))
+                        + int(result.get("deleted", 0))
+                    )
+                    if changed > 0:
+                        idle_streak = 0
+                    elif result.get("reason") in {"delta_busy", "full_sync_in_progress"}:
+                        idle_streak = max(0, idle_streak - 1)
+                    else:
+                        idle_streak = min(10, idle_streak + 1)
                 except Exception as e:
                     logger.debug("خطأ في periodic delta sync: %s", e)
 
@@ -2839,7 +3105,7 @@ class UnifiedSyncManagerV3(QObject):
         )
         self._delta_thread.start()
 
-        logger.info("⏰ بدء Delta Sync كل %s ثانية", interval_seconds)
+        logger.info("⏰ بدء Delta Sync كل %s ثانية (Adaptive idle backoff مفعّل)", interval_seconds)
 
 
 def create_unified_sync_manager(repository) -> UnifiedSyncManagerV3:

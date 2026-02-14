@@ -6,13 +6,9 @@
 - مزامنة الإشعارات بين الأجهزة عبر MongoDB
 """
 
-import hashlib
 import json
-import os
-import platform
 import threading
 import time
-import uuid
 from collections import deque
 from datetime import datetime, timedelta
 from enum import Enum
@@ -29,6 +25,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.device_identity import get_stable_device_id
 from ui.styles import COLORS
 
 try:
@@ -49,34 +46,7 @@ class NotificationType(Enum):
     INFO = "info"
 
 
-def _get_stable_device_id() -> str:
-    """إنشاء معرف ثابت للجهاز"""
-    try:
-        machine_info = f"{platform.node()}-{platform.machine()}-{platform.processor()}"
-        try:
-            digest = hashlib.md5(machine_info.encode(), usedforsecurity=False).hexdigest()
-        except TypeError:
-            digest = hashlib.sha256(machine_info.encode()).hexdigest()
-        device_hash = digest[:8]
-        return device_hash
-    except Exception:
-
-        device_file = os.path.join(os.path.expanduser("~"), ".skywave_device_id")
-        if os.path.exists(device_file):
-            with open(device_file, encoding="utf-8") as f:
-                return f.read().strip()
-        else:
-            new_id = str(uuid.uuid4())[:8]
-            try:
-                with open(device_file, "w", encoding="utf-8") as f:
-                    f.write(new_id)
-            except OSError:
-                # فشل حفظ Device ID
-                pass
-            return new_id
-
-
-DEVICE_ID = _get_stable_device_id()
+DEVICE_ID = get_stable_device_id()
 safe_print(f"INFO: [NotificationSystem] Device ID: {DEVICE_ID}")
 
 

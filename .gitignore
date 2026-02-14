@@ -103,3 +103,5 @@ SkyWaveERB/
 .theORQL/
 
 .venv/
+.localappdata_test/
+.tmp_test/

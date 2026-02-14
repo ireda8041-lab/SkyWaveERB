@@ -410,5 +410,11 @@ class ClientService:
                 cursor.close()
 
         except Exception as e:
-            logger.error("[ClientService] فشل جلب الإجماليات المالية: %s", e, exc_info=True)
+            # During app shutdown, repository may already be closed.
+            if "sqlite_closed" in str(e).lower():
+                logger.debug(
+                    "[ClientService] تم تجاهل جلب الإجماليات: قاعدة البيانات مغلقة أثناء الإغلاق"
+                )
+            else:
+                logger.error("[ClientService] فشل جلب الإجماليات المالية: %s", e, exc_info=True)
             return {}, {}

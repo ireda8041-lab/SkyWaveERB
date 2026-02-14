@@ -10,6 +10,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -50,6 +52,9 @@ logger = get_logger(__name__)
 
 # المتغير العام لمدير المزامنة الفورية
 _REALTIME_MANAGER = None
+DEFAULT_CHANGE_STREAM_MAX_AWAIT_MS = 250
+DEFAULT_EVENT_DEDUPE_MS = 120
+_PROCESS_LOCAL_RS_BOOTSTRAP_ATTEMPTED = False
 
 
 def _split_mongo_hosts(uri: str) -> list[str]:
@@ -103,9 +108,12 @@ def ensure_replica_set_uri(uri: str, replica_set_name: str = "rs0") -> str:
         parts = urlsplit(uri)
         query_pairs = parse_qsl(parts.query, keep_blank_values=True)
         query_map = dict(query_pairs)
-        if not query_map.get("replicaSet"):
+        existing_rs = str(query_map.get("replicaSet") or "").strip()
+        if not existing_rs or existing_rs.lower() != rs_name.lower():
             query_map["replicaSet"] = rs_name
-        if "directConnection" not in query_map:
+
+        direct_connection = str(query_map.get("directConnection") or "").strip().lower()
+        if (not direct_connection) or direct_connection != "false":
             query_map["directConnection"] = "false"
 
         rebuilt_query = urlencode(list(query_map.items()))
@@ -243,17 +251,30 @@ class RealtimeSyncManager(QObject):
         self._stop_event = threading.Event()
         self._watcher_thread = None  # ⚡ thread واحد فقط
         self._last_sync_time = {}
+        self._pending_changes_lock = threading.Lock()
+        self._emit_dispatch_queued = False
+        self._event_dedupe_ms = DEFAULT_EVENT_DEDUPE_MS
+        self._last_collection_event_ms: dict[str, int] = {}
         self._pending_changes = set()  # ⚡ تجميع التغييرات
         self._debounce_timer = None
         self._realtime_enabled = True
         self._realtime_auto_detect = True
-        self._change_stream_max_await_ms = 250
+        self._change_stream_max_await_ms = DEFAULT_CHANGE_STREAM_MAX_AWAIT_MS
         self._change_stream_supported = None
         self._support_warning_logged = False
         self._local_rs_bootstrap_enabled = True
         self._local_rs_name = "rs0"
         self._local_rs_timeout_seconds = 12.0
-        self._local_rs_bootstrap_attempted = False
+        self._local_rs_bootstrap_attempted = bool(_PROCESS_LOCAL_RS_BOOTSTRAP_ATTEMPTED)
+        self._local_service_replset_fix_enabled = True
+        self._local_service_replset_fix_timeout_seconds = 180.0
+        self._local_service_replset_fix_attempted = False
+        self._local_service_replset_fix_running = False
+        self._local_service_replset_fix_cooldown_seconds = 300.0
+        self._last_local_service_replset_fix_attempt_at = 0.0
+        self._local_mongo_service_name = (
+            str(os.environ.get("SKYWAVE_MONGO_SERVICE_NAME", "MongoDB")).strip() or "MongoDB"
+        )
         self._load_runtime_config()
         self._emit_pending_requested.connect(self._emit_pending_changes_slot)
 
@@ -274,11 +295,21 @@ class RealtimeSyncManager(QObject):
             self._realtime_auto_detect = bool(cfg.get("realtime_auto_detect", True))
             try:
                 self._change_stream_max_await_ms = int(
-                    cfg.get("realtime_change_stream_max_await_ms", 250)
+                    cfg.get(
+                        "realtime_change_stream_max_await_ms",
+                        DEFAULT_CHANGE_STREAM_MAX_AWAIT_MS,
+                    )
                 )
             except (TypeError, ValueError):
-                self._change_stream_max_await_ms = 250
+                self._change_stream_max_await_ms = DEFAULT_CHANGE_STREAM_MAX_AWAIT_MS
             self._change_stream_max_await_ms = max(50, min(5000, self._change_stream_max_await_ms))
+            try:
+                self._event_dedupe_ms = int(
+                    cfg.get("realtime_event_dedupe_ms", DEFAULT_EVENT_DEDUPE_MS)
+                )
+            except (TypeError, ValueError):
+                self._event_dedupe_ms = DEFAULT_EVENT_DEDUPE_MS
+            self._event_dedupe_ms = max(0, min(5000, self._event_dedupe_ms))
             self._local_rs_bootstrap_enabled = bool(
                 cfg.get("realtime_attempt_local_rs_bootstrap", True)
             )
@@ -289,6 +320,32 @@ class RealtimeSyncManager(QObject):
             except (TypeError, ValueError):
                 timeout_value = 12.0
             self._local_rs_timeout_seconds = max(3.0, min(60.0, timeout_value))
+            self._local_service_replset_fix_enabled = bool(
+                cfg.get("realtime_attempt_service_replset_fix", True)
+            )
+            try:
+                service_fix_timeout = float(
+                    cfg.get("realtime_service_replset_fix_timeout_s", 180.0)
+                )
+            except (TypeError, ValueError):
+                service_fix_timeout = 180.0
+            self._local_service_replset_fix_timeout_seconds = max(
+                20.0, min(600.0, service_fix_timeout)
+            )
+            try:
+                service_fix_cooldown = float(
+                    cfg.get("realtime_service_replset_fix_cooldown_s", 300.0)
+                )
+            except (TypeError, ValueError):
+                service_fix_cooldown = 300.0
+            self._local_service_replset_fix_cooldown_seconds = max(
+                60.0, min(3600.0, service_fix_cooldown)
+            )
+            mongo_service_name = str(
+                cfg.get("realtime_mongo_service_name", self._local_mongo_service_name)
+            ).strip()
+            if mongo_service_name:
+                self._local_mongo_service_name = mongo_service_name
         except Exception as e:
             logger.debug("[RealtimeSync] فشل تحميل الإعدادات: %s", e)
 
@@ -356,12 +413,120 @@ class RealtimeSyncManager(QObject):
         except Exception:
             pass
 
+    @staticmethod
+    def _is_windows_platform() -> bool:
+        return os.name == "nt"
+
+    def _resolve_local_replset_enabler_script(self) -> Path | None:
+        candidates = [
+            Path("tools") / "enable_local_replset.ps1",
+            Path(__file__).resolve().parent.parent / "tools" / "enable_local_replset.ps1",
+        ]
+        if getattr(sys, "frozen", False):
+            exe_dir = Path(sys.executable).resolve().parent
+            candidates.extend(
+                [
+                    exe_dir / "tools" / "enable_local_replset.ps1",
+                    exe_dir / "enable_local_replset.ps1",
+                ]
+            )
+
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate
+            except Exception:
+                continue
+        return None
+
+    def _run_local_replset_enabler_script(self) -> bool:
+        if not self._is_windows_platform():
+            return False
+
+        script_path = self._resolve_local_replset_enabler_script()
+        if script_path is None:
+            logger.info("[RealtimeSync] لم يتم العثور على سكربت تفعيل Replica Set المحلي.")
+            return False
+
+        cmd = [
+            "powershell.exe",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+            "-ReplicaSetName",
+            self._local_rs_name,
+            "-MongoServiceName",
+            self._local_mongo_service_name,
+        ]
+        script_timeout = max(45, min(300, int(self._local_service_replset_fix_timeout_seconds)))
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=script_timeout,
+                check=False,
+            )
+        except Exception as e:
+            logger.info("[RealtimeSync] تعذر تشغيل سكربت تفعيل Replica Set: %s", e)
+            return False
+
+        output = (str(proc.stdout or "") + "\n" + str(proc.stderr or "")).strip()
+        if output:
+            logger.info("[RealtimeSync] Local Replica Set script output: %s", output)
+        if int(proc.returncode) != 0:
+            logger.info("[RealtimeSync] سكربت تفعيل Replica Set أنهى بكود %s", proc.returncode)
+            return False
+        return True
+
+    def _start_local_service_replset_fix_background(self) -> bool:
+        if self._local_service_replset_fix_running:
+            return False
+        self._local_service_replset_fix_running = True
+        self._last_local_service_replset_fix_attempt_at = time.time()
+
+        def _worker():
+            try:
+                ok = self._run_local_replset_enabler_script()
+                if ok:
+                    logger.info(
+                        "[RealtimeSync] تم تشغيل إصلاح خدمة Mongo في الخلفية. سيتم تفعيل Change Streams تلقائياً بعد اكتمال الإصلاح وإعادة المحاولة."
+                    )
+                else:
+                    logger.info(
+                        "[RealtimeSync] فشل تشغيل إصلاح خدمة Mongo تلقائياً. سيستمر النظام على Delta Sync."
+                    )
+            except Exception as e:
+                logger.info("[RealtimeSync] خطأ أثناء إصلاح خدمة Mongo في الخلفية: %s", e)
+            finally:
+                self._local_service_replset_fix_running = False
+
+        threading.Thread(
+            target=_worker,
+            daemon=True,
+            name="RealtimeSync-LocalReplsetFix",
+        ).start()
+        return True
+
+    def _wait_for_change_stream_support_after_local_fix(self, normalized_uri: str) -> bool:
+        deadline = time.time() + max(20.0, float(self._local_service_replset_fix_timeout_seconds))
+        while time.time() < deadline:
+            if self._shutdown:
+                return False
+            if (
+                self._reconnect_repository_client(normalized_uri)
+                and self._detect_change_stream_support()
+            ):
+                return True
+            time.sleep(2.0)
+        return False
+
     def _try_enable_change_streams_locally(self) -> bool:
-        if not self._local_rs_bootstrap_enabled:
+        global _PROCESS_LOCAL_RS_BOOTSTRAP_ATTEMPTED
+
+        if (not self._local_rs_bootstrap_enabled) and (not self._local_service_replset_fix_enabled):
             return False
-        if self._local_rs_bootstrap_attempted:
-            return False
-        self._local_rs_bootstrap_attempted = True
 
         if self.repo is None or self.repo.mongo_client is None:
             return False
@@ -382,23 +547,78 @@ class RealtimeSyncManager(QObject):
                 self._local_rs_name,
             )
 
-        ok, details = try_bootstrap_local_replica_set(
-            self.repo.mongo_client,
-            normalized_uri,
-            replica_set_name=self._local_rs_name,
-            timeout_seconds=self._local_rs_timeout_seconds,
-        )
-        if ok:
-            if not self._reconnect_repository_client(normalized_uri):
-                logger.info(
-                    "[RealtimeSync] تم تفعيل Replica Set لكن تعذر إعادة فتح اتصال Mongo بالـ URI الجديد."
-                )
-                return False
-            logger.info("[RealtimeSync] %s", details)
-            return True
+        if self._local_rs_bootstrap_enabled and not self._local_rs_bootstrap_attempted:
+            self._local_rs_bootstrap_attempted = True
+            _PROCESS_LOCAL_RS_BOOTSTRAP_ATTEMPTED = True
+            ok, details = try_bootstrap_local_replica_set(
+                self.repo.mongo_client,
+                normalized_uri,
+                replica_set_name=self._local_rs_name,
+                timeout_seconds=self._local_rs_timeout_seconds,
+            )
+            if ok:
+                if not self._reconnect_repository_client(normalized_uri):
+                    logger.info(
+                        "[RealtimeSync] تم تفعيل Replica Set لكن تعذر إعادة فتح اتصال Mongo بالـ URI الجديد."
+                    )
+                    return False
+                logger.info("[RealtimeSync] %s", details)
+                return True
+            logger.info("[RealtimeSync] تعذر تفعيل Change Streams تلقائياً: %s", details)
 
-        logger.info("[RealtimeSync] تعذر تفعيل Change Streams تلقائياً: %s", details)
+        if self._local_service_replset_fix_enabled and self._is_windows_platform():
+            now = time.time()
+            cooldown = max(60.0, float(self._local_service_replset_fix_cooldown_seconds))
+            if (now - self._last_local_service_replset_fix_attempt_at) < cooldown:
+                return False
+            self._local_service_replset_fix_attempted = True
+            if self._start_local_service_replset_fix_background():
+                logger.info(
+                    "[RealtimeSync] تم إطلاق إصلاح خدمة Mongo بالخلفية بدون حجب واجهة المستخدم. سيستمر Delta Sync مؤقتاً."
+                )
+                return True
         return False
+
+    def _try_enable_change_streams_for_remote_replica_set(self) -> bool:
+        """
+        For remote Mongo servers: if the server is already a replica set, normalize URI
+        with replicaSet/directConnection and reconnect so Change Streams can work.
+        """
+        if self.repo is None or self.repo.mongo_client is None:
+            return False
+
+        current_uri = self._get_current_mongo_uri()
+        if not current_uri:
+            return False
+        if is_local_mongo_uri(current_uri):
+            return False
+
+        try:
+            hello = self.repo.mongo_client.admin.command("hello")
+        except Exception as e:
+            logger.debug("[RealtimeSync] تعذر فحص hello على Mongo البعيد: %s", e)
+            return False
+
+        remote_set_name = str(hello.get("setName") or "").strip()
+        if not remote_set_name:
+            return False
+
+        normalized_uri = ensure_replica_set_uri(current_uri, remote_set_name)
+        if normalized_uri == current_uri:
+            return False
+
+        self._persist_runtime_mongo_uri(normalized_uri)
+        if not self._reconnect_repository_client(normalized_uri):
+            logger.info(
+                "[RealtimeSync] تم تحديث URI للـ Replica Set البعيد لكن تعذر إعادة الاتصال الفوري."
+            )
+            return False
+
+        logger.info(
+            "[RealtimeSync] تم تحديث URI للاتصال البعيد ليتوافق مع Replica Set (%s)",
+            remote_set_name,
+        )
+        return True
 
     def _reconnect_repository_client(self, mongo_uri: str) -> bool:
         """Reconnect repository Mongo client using a replica-set-aware URI."""
@@ -430,10 +650,11 @@ class RealtimeSyncManager(QObject):
                 socketTimeoutMS=30000,
                 retryWrites=True,
                 retryReads=True,
-                maxPoolSize=5,
-                minPoolSize=1,
-                maxIdleTimeMS=60000,
-                waitQueueTimeoutMS=5000,
+                maxPoolSize=20,
+                minPoolSize=2,
+                maxIdleTimeMS=120000,
+                waitQueueTimeoutMS=10000,
+                appname="SkyWaveERP-Realtime",
             )
             new_client.admin.command("ping")
             self.repo.mongo_client = new_client
@@ -497,6 +718,11 @@ class RealtimeSyncManager(QObject):
             self._change_stream_supported = self._detect_change_stream_support()
             if not self._change_stream_supported and self._try_enable_change_streams_locally():
                 self._change_stream_supported = self._detect_change_stream_support()
+            if (
+                not self._change_stream_supported
+                and self._try_enable_change_streams_for_remote_replica_set()
+            ):
+                self._change_stream_supported = self._detect_change_stream_support()
         elif self._change_stream_supported is None:
             self._change_stream_supported = True
 
@@ -543,6 +769,10 @@ class RealtimeSyncManager(QObject):
         except Exception:
             pass
 
+        with self._pending_changes_lock:
+            self._pending_changes.clear()
+            self._emit_dispatch_queued = False
+            self._last_collection_event_ms.clear()
         self._watcher_thread = None
         logger.info("[RealtimeSync] ✅ تم إيقاف المزامنة الفورية")
         try:
@@ -557,7 +787,14 @@ class RealtimeSyncManager(QObject):
 
         def watch_all_collections():
             logger.debug("[RealtimeSync] بدء المراقبة الموحدة")
-            pipeline = [{"$match": {"ns.coll": {"$in": self.COLLECTIONS}}}]
+            pipeline = [
+                {
+                    "$match": {
+                        "ns.coll": {"$in": self.COLLECTIONS},
+                        "operationType": {"$in": ["insert", "update", "replace", "delete"]},
+                    }
+                }
+            ]
 
             while not self._stop_event.is_set() and not self._shutdown:
                 try:
@@ -567,7 +804,6 @@ class RealtimeSyncManager(QObject):
 
                     with self.repo.mongo_db.watch(
                         pipeline=pipeline,
-                        full_document="updateLookup",
                         max_await_time_ms=self._change_stream_max_await_ms,
                     ) as stream:
                         for change in stream:
@@ -585,8 +821,7 @@ class RealtimeSyncManager(QObject):
                                 self._sync_system_settings_from_cloud()
                                 continue
 
-                            self._pending_changes.add(collection_name)
-                            self._schedule_emit_changes()
+                            self._queue_collection_change(collection_name)
 
                 except PyMongoError as e:
                     if self._shutdown:
@@ -611,6 +846,21 @@ class RealtimeSyncManager(QObject):
         )
         self._watcher_thread.start()
 
+    def _queue_collection_change(self, collection_name: str) -> None:
+        now_ms = int(time.time() * 1000)
+        should_schedule = False
+        with self._pending_changes_lock:
+            last_seen = self._last_collection_event_ms.get(collection_name, 0)
+            if self._event_dedupe_ms > 0 and (now_ms - last_seen) < self._event_dedupe_ms:
+                return
+            self._last_collection_event_ms[collection_name] = now_ms
+            self._pending_changes.add(collection_name)
+            if not self._emit_dispatch_queued:
+                self._emit_dispatch_queued = True
+                should_schedule = True
+        if should_schedule:
+            self._schedule_emit_changes()
+
     def _schedule_emit_changes(self):
         """⚡ جدولة إرسال التغييرات المجمعة"""
         try:
@@ -620,11 +870,13 @@ class RealtimeSyncManager(QObject):
 
     def _emit_pending_changes_slot(self):
         """⚡ إرسال التغييرات المجمعة (يعمل على main thread)"""
-        if not self._pending_changes:
-            return
-
-        changes = list(self._pending_changes)
-        self._pending_changes.clear()
+        with self._pending_changes_lock:
+            if not self._pending_changes:
+                self._emit_dispatch_queued = False
+                return
+            changes = list(self._pending_changes)
+            self._pending_changes.clear()
+            self._emit_dispatch_queued = False
 
         for collection_name in changes:
             try:

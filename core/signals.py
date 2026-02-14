@@ -60,7 +60,7 @@ class AppSignals(QObject):
 
     # ⚡ منع التكرارات - تتبع آخر إشارة مرسلة
     _last_emitted = {}
-    _emit_cooldown_ms = 100  # الحد الأدنى بين الإشارات المتكررة
+    _emit_cooldown_ms = 250  # الحد الأدنى بين الإشارات المتكررة
 
     @classmethod
     def set_sync_manager(cls, sync_manager):

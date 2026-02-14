@@ -1189,10 +1189,11 @@ class PaymentsManagerTab(QWidget):
 
     def _on_payments_changed(self):
         """⚡ استجابة لإشارة تحديث الدفعات - تحديث الجدول أوتوماتيك"""
-        safe_print("INFO: [PaymentsManager] ⚡ استلام إشارة تحديث الدفعات - جاري التحديث...")
         # ⚡ إبطال الـ cache أولاً لضمان جلب البيانات الجديدة من السيرفر
         if hasattr(self.project_service, "invalidate_cache"):
             self.project_service.invalidate_cache()
+        if not self.isVisible():
+            return
         self.load_payments_data(force_refresh=True)
 
     def get_selected_payment(self) -> schemas.Payment | None:
