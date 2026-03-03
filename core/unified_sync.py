@@ -48,6 +48,7 @@ DEFAULT_DELTA_PUSH_BATCH_LIMIT = 40
 DEFAULT_SYNC_PING_COOLDOWN_SECONDS = 5.0
 DEFAULT_INSTANT_SYNC_DEDUPE_MS = 900
 DEFAULT_REALTIME_PULL_DEDUPE_MS = 900
+DEFAULT_MIN_FULL_SYNC_WHEN_DELTA_ACTIVE_SECONDS = 1800
 
 
 class UnifiedSyncManagerV3(QObject):
@@ -102,7 +103,12 @@ class UnifiedSyncManagerV3(QObject):
         self._delta_cycle_lock = threading.Lock()
         self._is_syncing = False
         self._max_retries = 3
-        self._last_online_status = None
+        self._last_online_status = bool(getattr(repository, "online", False))
+        self._online_status_lock = threading.Lock()
+        self._last_online_probe_mono = time.monotonic()
+        self._online_status_cache_ttl_seconds = 1.2
+        self._connection_probe_lock = threading.Lock()
+        self._connection_probe_in_flight = False
         self._shutdown = False  # ⚡ علامة الإغلاق
         self._last_full_sync_at = None
         self._sync_metrics_lock = threading.RLock()
@@ -137,6 +143,11 @@ class UnifiedSyncManagerV3(QObject):
         self._last_sync_ping_at: dict[str, float] = {}
         self._sync_ping_cooldown_seconds = DEFAULT_SYNC_PING_COOLDOWN_SECONDS
         self._delta_push_batch_limit = DEFAULT_DELTA_PUSH_BATCH_LIMIT
+        self._min_full_sync_when_delta_active_seconds = (
+            DEFAULT_MIN_FULL_SYNC_WHEN_DELTA_ACTIVE_SECONDS
+        )
+        self._last_delta_cycle_mono = 0.0
+        self._last_delta_change_mono = 0.0
 
         # ⚡ المؤقتات
         self._auto_sync_timer = None
@@ -315,6 +326,15 @@ class UnifiedSyncManagerV3(QObject):
             except (TypeError, ValueError):
                 ping_cooldown = DEFAULT_SYNC_PING_COOLDOWN_SECONDS
             self._sync_ping_cooldown_seconds = max(0.5, min(30.0, ping_cooldown))
+            self._min_full_sync_when_delta_active_seconds = self._safe_int(
+                config.get(
+                    "min_full_sync_when_delta_active_seconds",
+                    DEFAULT_MIN_FULL_SYNC_WHEN_DELTA_ACTIVE_SECONDS,
+                ),
+                DEFAULT_MIN_FULL_SYNC_WHEN_DELTA_ACTIVE_SECONDS,
+                minimum=300,
+                maximum=7200,
+            )
 
             self._auto_sync_interval = auto_seconds * 1000
             self._quick_sync_interval = quick_seconds * 1000
@@ -560,6 +580,62 @@ class UnifiedSyncManagerV3(QObject):
         if candidate_dt is not None and reference_dt is not None:
             return candidate_dt > reference_dt
         return candidate_iso > reference_iso
+
+    def _values_equal_for_sync(self, local_value: Any, incoming_value: Any) -> bool:
+        """Best-effort value comparison to skip no-op SQLite updates."""
+        local_iso = self._to_iso_timestamp(local_value)
+        incoming_iso = self._to_iso_timestamp(incoming_value)
+        local_dt = self._normalize_datetime(self._parse_iso_datetime(local_iso))
+        incoming_dt = self._normalize_datetime(self._parse_iso_datetime(incoming_iso))
+        if local_dt is not None and incoming_dt is not None:
+            return local_dt == incoming_dt
+
+        if local_value is None:
+            local_value = ""
+        if incoming_value is None:
+            incoming_value = ""
+
+        if isinstance(local_value, bool):
+            local_value = int(local_value)
+        if isinstance(incoming_value, bool):
+            incoming_value = int(incoming_value)
+
+        if isinstance(local_value, int | float) or isinstance(incoming_value, int | float):
+            try:
+                return abs(float(local_value) - float(incoming_value)) < 1e-9
+            except (TypeError, ValueError):
+                pass
+
+        if isinstance(local_value, str):
+            local_value = local_value.strip()
+        if isinstance(incoming_value, str):
+            incoming_value = incoming_value.strip()
+
+        return local_value == incoming_value
+
+    def _should_update_local_record(
+        self, cursor, table_name: str, local_id: int, incoming: dict[str, Any]
+    ) -> bool:
+        """Return True only when incoming data differs from local SQLite row."""
+        if not incoming:
+            return False
+
+        columns = list(incoming.keys())
+        select_clause = ", ".join(columns)
+        cursor.execute(f"SELECT {select_clause} FROM {table_name} WHERE id = ?", (local_id,))
+        current_row = cursor.fetchone()
+        if not current_row:
+            return True
+
+        if hasattr(current_row, "keys"):
+            current_map = {col: current_row[col] for col in columns}
+        else:
+            current_map = dict(zip(columns, current_row, strict=False))
+
+        for column, incoming_value in incoming.items():
+            if not self._values_equal_for_sync(current_map.get(column), incoming_value):
+                return True
+        return False
 
     @staticmethod
     def _format_bytes(value: int) -> str:
@@ -917,6 +993,9 @@ class UnifiedSyncManagerV3(QObject):
         self._connection_timer = QTimer(self)
         self._connection_timer.timeout.connect(self._check_connection)
         self._connection_timer.start(self._connection_check_interval)
+        # Trigger one non-blocking probe immediately to seed online cache
+        # before the first sync-related checks run on the UI thread.
+        self._check_connection()
 
         # 2. مؤقت رفع التغييرات المحلية:
         # Delta Sync ينفذ push+pull بالفعل، لذا نتجنب التكرار عندما يكون Delta أسرع.
@@ -1054,44 +1133,82 @@ class UnifiedSyncManagerV3(QObject):
     def stop(self):
         self.stop_auto_sync()
 
+    def _probe_online_status(self, *, max_time_ms: int = 800) -> bool:
+        """Probe Mongo connectivity with a bounded ping."""
+        if self.repo is None:
+            return False
+
+        mongo_client = getattr(self.repo, "mongo_client", None)
+        mongo_db = getattr(self.repo, "mongo_db", None)
+        if mongo_client is None or mongo_db is None:
+            return False
+
+        try:
+            mongo_client.admin.command("ping", maxTimeMS=max(100, int(max_time_ms)))
+            return True
+        except TypeError:
+            # Backward compatibility for environments that ignore maxTimeMS kwarg.
+            try:
+                mongo_client.admin.command("ping")
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+
+    def _set_online_status(self, status: bool) -> bool | None:
+        """Update cached online status and return previous cached value."""
+        previous_status = None
+        current_status = bool(status)
+        with self._online_status_lock:
+            previous_status = self._last_online_status
+            self._last_online_status = current_status
+            self._last_online_probe_mono = time.monotonic()
+        try:
+            if self.repo is not None:
+                self.repo.online = current_status
+        except Exception:
+            pass
+        return previous_status
+
     def _check_connection(self):
-        """🔌 فحص حالة الاتصال - محسّن"""
+        """🔌 Non-blocking connection probe to avoid UI freezes."""
         if self._shutdown:  # ⚡ تجاهل إذا تم الإغلاق
             return
 
-        try:
-            # ⚡ فحص أن MongoDB client لا يزال متاحاً قبل الاستخدام
-            if self.repo is None or self.repo.mongo_client is None or self.repo.mongo_db is None:
-                current_status = False
-            else:
-                try:
-                    # محاولة ping للتأكد من أن الاتصال فعال
-                    self.repo.mongo_client.admin.command("ping")
-                    current_status = True
-                except Exception:
-                    current_status = False
+        with self._connection_probe_lock:
+            if self._connection_probe_in_flight:
+                return
+            self._connection_probe_in_flight = True
 
-            # إرسال إشارة عند تغيير الحالة فقط
-            if current_status != self._last_online_status:
-                previous_status = self._last_online_status
-                self._last_online_status = current_status
-                try:
-                    if not self._shutdown:
-                        self.connection_changed.emit(current_status)
-                except RuntimeError:
-                    return  # Qt object deleted
+        def worker():
+            try:
+                current_status = self._probe_online_status(max_time_ms=700)
+                previous_status = self._set_online_status(current_status)
 
-                if current_status:
-                    logger.info("🟢 تم استعادة الاتصال")
-                    # لا نطلق Full Sync فوري في أول تشغيل (None -> True)
-                    # لأن _initial_sync مجدول بالفعل بعد بدء النظام.
-                    if previous_status is False:
-                        QTimer.singleShot(300, self._run_full_sync_async)
-                else:
-                    logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
-        except Exception:
-            # تجاهل الأخطاء
-            pass
+                # إرسال إشارة عند تغيير الحالة فقط
+                if current_status != previous_status:
+                    try:
+                        if not self._shutdown:
+                            self.connection_changed.emit(current_status)
+                    except RuntimeError:
+                        return  # Qt object deleted
+
+                    if current_status:
+                        logger.info("🟢 تم استعادة الاتصال")
+                        # لا نطلق Full Sync فوري في أول تشغيل.
+                        if previous_status is False:
+                            self._run_full_sync_async()
+                    else:
+                        logger.warning("🔴 انقطع الاتصال - العمل في وضع Offline")
+            except Exception:
+                # تجاهل أخطاء probe
+                pass
+            finally:
+                with self._connection_probe_lock:
+                    self._connection_probe_in_flight = False
+
+        threading.Thread(target=worker, daemon=True, name="unified-connection-check").start()
 
     def _initial_sync(self):
         """🚀 المزامنة الأولية عند بدء التشغيل - تفاضلية للسرعة"""
@@ -1123,6 +1240,21 @@ class UnifiedSyncManagerV3(QObject):
         """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
         if self._shutdown or self._is_syncing or not self.is_online:
             return
+
+        if self._delta_sync_interval_seconds <= 10:
+            now_mono = time.monotonic()
+            delta_is_active = (now_mono - self._last_delta_cycle_mono) <= max(
+                40.0, float(self._delta_sync_interval_seconds) * 6.0
+            )
+            if delta_is_active and self._last_full_sync_at:
+                age_seconds = max(0.0, (datetime.now() - self._last_full_sync_at).total_seconds())
+                if age_seconds < float(self._min_full_sync_when_delta_active_seconds):
+                    logger.debug(
+                        "⏭️ skip periodic full sync while delta is healthy | age=%.1fs threshold=%ss",
+                        age_seconds,
+                        self._min_full_sync_when_delta_active_seconds,
+                    )
+                    return
 
         self._run_full_sync_async()
 
@@ -1181,20 +1313,38 @@ class UnifiedSyncManagerV3(QObject):
 
     @property
     def is_online(self) -> bool:
-        """التحقق من الاتصال مع فحص حالة MongoDB client"""
+        """التحقق من الاتصال مع كاش سريع لتفادي حظر واجهة المستخدم."""
         if self.repo is None:
             return False
 
-        # ⚡ فحص أن MongoDB client متاح ولم يُغلق
-        if self.repo.mongo_client is None or self.repo.mongo_db is None:
+        mongo_client = getattr(self.repo, "mongo_client", None)
+        mongo_db = getattr(self.repo, "mongo_db", None)
+        if mongo_client is None or mongo_db is None:
+            self._set_online_status(False)
             return False
 
-        try:
-            # محاولة ping سريعة للتأكد من أن الاتصال فعال
-            self.repo.mongo_client.admin.command("ping")
-            return True
-        except Exception:
-            return False
+        now_mono = time.monotonic()
+        with self._online_status_lock:
+            cached_status = self._last_online_status
+            cache_age = now_mono - self._last_online_probe_mono
+
+        # Fast path: recently probed status.
+        if cached_status is not None and cache_age <= self._online_status_cache_ttl_seconds:
+            return bool(cached_status)
+
+        is_ui_thread = threading.current_thread() is threading.main_thread()
+        if is_ui_thread:
+            # Never block UI thread on ping.
+            self._check_connection()
+            fallback = bool(getattr(self.repo, "online", False))
+            if cached_status is None:
+                return fallback
+            return bool(cached_status or fallback)
+
+        # Background threads can perform bounded probe.
+        current_status = self._probe_online_status(max_time_ms=900)
+        self._set_online_status(current_status)
+        return bool(current_status)
 
     def _wait_for_connection(self, timeout: int = 10) -> bool:
         """⚡ انتظار اتصال MongoDB مع timeout"""
@@ -1265,6 +1415,7 @@ class UnifiedSyncManagerV3(QObject):
         self.sync_started.emit()
 
         results = {"success": True, "tables": {}, "total_synced": 0, "total_deleted": 0}
+        changed_tables: set[str] = set()
 
         try:
             with self._lock:
@@ -1281,6 +1432,12 @@ class UnifiedSyncManagerV3(QObject):
                         results["tables"][table] = stats
                         results["total_synced"] += stats.get("synced", 0)
                         results["total_deleted"] += stats.get("deleted", 0)
+                        if (
+                            stats.get("inserted", 0) > 0
+                            or stats.get("updated", 0) > 0
+                            or stats.get("deleted", 0) > 0
+                        ):
+                            changed_tables.add(table)
                     except Exception as e:
                         logger.error("❌ خطأ في مزامنة %s: %s", table, e)
                         results["tables"][table] = {"error": str(e)}
@@ -1291,12 +1448,16 @@ class UnifiedSyncManagerV3(QObject):
 
             # ⚡ إعادة حساب أرصدة الحسابات النقدية بعد المزامنة
             try:
-                from services.accounting_service import AccountingService
+                accounting_tables = {"accounts", "payments", "expenses", "journal_entries"}
+                if changed_tables.intersection(accounting_tables):
+                    from services.accounting_service import AccountingService
 
-                # إبطال الـ cache أولاً
-                AccountingService._hierarchy_cache = None
-                AccountingService._hierarchy_cache_time = 0
-                logger.info("📊 تم إبطال cache الحسابات - سيتم إعادة الحساب عند فتح تاب المحاسبة")
+                    # إبطال الـ cache أولاً
+                    AccountingService._hierarchy_cache = None
+                    AccountingService._hierarchy_cache_time = 0
+                    logger.info(
+                        "📊 تم إبطال cache الحسابات بعد تغيّر بيانات محاسبية - سيتم إعادة الحساب عند فتح تاب المحاسبة"
+                    )
             except Exception as e:
                 logger.warning("⚠️ فشل إبطال cache الحسابات: %s", e)
 
@@ -1304,9 +1465,10 @@ class UnifiedSyncManagerV3(QObject):
             try:
                 from core.signals import app_signals
 
-                for table_name in self.TABLES:
+                for table_name in sorted(changed_tables):
                     app_signals.emit_ui_data_changed(table_name)
-                logger.info("📢 تم إرسال إشارات تحديث الواجهة")
+                if changed_tables:
+                    logger.info("📢 تم إرسال إشارات تحديث الواجهة للجداول المتغيرة فقط")
             except Exception as e:
                 logger.warning("⚠️ فشل إرسال إشارات التحديث: %s", e)
 
@@ -1419,15 +1581,16 @@ class UnifiedSyncManagerV3(QObject):
                     filtered = {k: v for k, v in item_data.items() if k in table_columns}
 
                     if local_id:
-                        # تحديث السجل الموجود
-                        self._update_record(cursor, table_name, local_id, filtered)
-                        stats["updated"] += 1
+                        # تحديث السجل فقط عند وجود فرق حقيقي لتقليل الحمل على SQLite والواجهة.
+                        if self._should_update_local_record(cursor, table_name, local_id, filtered):
+                            self._update_record(cursor, table_name, local_id, filtered)
+                            stats["updated"] += 1
+                            stats["synced"] += 1
                     else:
                         # إدراج سجل جديد
                         self._insert_record(cursor, table_name, filtered)
                         stats["inserted"] += 1
-
-                    stats["synced"] += 1
+                        stats["synced"] += 1
 
                 # حذف السجلات المحلية غير الموجودة في السحابة
                 deleted = self._delete_orphan_records(cursor, table_name, cloud_mongo_ids)
@@ -1436,13 +1599,14 @@ class UnifiedSyncManagerV3(QObject):
                 conn.commit()
                 if stats["inserted"] > 0 or stats["updated"] > 0 or stats["deleted"] > 0:
                     self._invalidate_repository_cache(table_name)
-                logger.info(
-                    "✅ %s: +%s ~%s -%s",
-                    table_name,
-                    stats["inserted"],
-                    stats["updated"],
-                    stats["deleted"],
-                )
+                if stats["inserted"] > 0 or stats["updated"] > 0 or stats["deleted"] > 0:
+                    logger.info(
+                        "✅ %s: +%s ~%s -%s",
+                        table_name,
+                        stats["inserted"],
+                        stats["updated"],
+                        stats["deleted"],
+                    )
                 if table_name == "clients" and logo_clients > 0:
                     if self._lazy_logo_enabled:
                         logger.info(
@@ -1676,10 +1840,20 @@ class UnifiedSyncManagerV3(QObject):
 
         # التأكد من الحقول المطلوبة
         now = datetime.now().isoformat()
-        if not item.get("created_at"):
-            item["created_at"] = now
-        if not item.get("last_modified"):
-            item["last_modified"] = now
+        created_at = self._to_iso_timestamp(item.get("created_at"))
+        last_modified = self._to_iso_timestamp(item.get("last_modified"))
+        fallback_timestamp = (
+            self._to_iso_timestamp(item.get("date"))
+            or self._to_iso_timestamp(item.get("issue_date"))
+            or self._to_iso_timestamp(item.get("start_date"))
+        )
+        if not created_at:
+            created_at = last_modified or fallback_timestamp or now
+        if not last_modified:
+            # Use deterministic fallback to avoid touching unchanged rows every full sync.
+            last_modified = created_at or fallback_timestamp or now
+        item["created_at"] = created_at
+        item["last_modified"] = last_modified
 
         return item
 
@@ -1717,6 +1891,65 @@ class UnifiedSyncManagerV3(QObject):
                         self._update_record(cursor, table_name, existing[0], data)
                         logger.debug("تم تحديث دفعة موجودة: %s - %s", project_id, amount)
                         return
+                except Exception:
+                    pass
+
+        if table_name == "expenses":
+            project_id = str(data.get("project_id") or "").strip()
+            date = data.get("date", "")
+            date_short = str(date)[:10] if date else ""
+            try:
+                amount = round(float(data.get("amount", 0) or 0.0), 2)
+            except (TypeError, ValueError):
+                amount = 0.0
+            amount_min = amount - 0.01
+            amount_max = amount + 0.01
+            account_id = str(data.get("account_id") or "").strip()
+            payment_account_id = str(data.get("payment_account_id") or account_id).strip()
+            category_norm = " ".join(str(data.get("category", "") or "").split()).strip().casefold()
+            description_norm = (
+                " ".join(str(data.get("description", "") or "").split()).strip().casefold()
+            )
+
+            if project_id and amount:
+                try:
+                    cursor.execute(
+                        """
+                        SELECT id, category, description
+                        FROM expenses
+                        WHERE COALESCE(project_id, '') = ?
+                          AND amount >= ? AND amount <= ?
+                          AND date LIKE ?
+                          AND COALESCE(account_id, '') = ?
+                          AND COALESCE(payment_account_id, '') = ?
+                        ORDER BY id ASC
+                        """,
+                        (
+                            project_id,
+                            amount_min,
+                            amount_max,
+                            f"{date_short}%",
+                            account_id,
+                            payment_account_id,
+                        ),
+                    )
+                    existing_rows = cursor.fetchall()
+                    for row in existing_rows:
+                        row_dict = dict(row)
+                        row_category = (
+                            " ".join(str(row_dict.get("category", "") or "").split())
+                            .strip()
+                            .casefold()
+                        )
+                        row_description = (
+                            " ".join(str(row_dict.get("description", "") or "").split())
+                            .strip()
+                            .casefold()
+                        )
+                        if row_category == category_norm and row_description == description_norm:
+                            self._update_record(cursor, table_name, row_dict["id"], data)
+                            logger.debug("تم تحديث مصروف موجود: %s - %s", project_id, amount)
+                            return
                 except Exception:
                     pass
 
@@ -1892,6 +2125,69 @@ class UnifiedSyncManagerV3(QObject):
                                         "date": {"$regex": f"^{date_short}"},
                                     }
                                 )
+                        elif table_name == "expenses":
+                            project_id = str(row_dict.get("project_id") or "").strip()
+                            date_short = str(row_dict.get("date", "") or "")[:10]
+                            try:
+                                amount = round(float(row_dict.get("amount", 0) or 0.0), 2)
+                            except (TypeError, ValueError):
+                                amount = 0.0
+                            amount_min = amount - 0.01
+                            amount_max = amount + 0.01
+                            account_id = str(row_dict.get("account_id") or "").strip()
+                            payment_account_id = str(
+                                row_dict.get("payment_account_id") or account_id
+                            ).strip()
+                            category_norm = (
+                                " ".join(str(row_dict.get("category", "") or "").split())
+                                .strip()
+                                .casefold()
+                            )
+                            description_norm = (
+                                " ".join(str(row_dict.get("description", "") or "").split())
+                                .strip()
+                                .casefold()
+                            )
+
+                            if project_id and amount:
+                                try:
+                                    remote_candidates = list(
+                                        collection.find(
+                                            {
+                                                "project_id": project_id,
+                                                "amount": {"$gte": amount_min, "$lte": amount_max},
+                                                "account_id": account_id,
+                                                "payment_account_id": payment_account_id,
+                                            }
+                                        )
+                                    )
+                                except Exception:
+                                    remote_candidates = []
+
+                                for candidate in remote_candidates:
+                                    candidate_date_short = str(candidate.get("date", "") or "")[:10]
+                                    if candidate_date_short != date_short:
+                                        continue
+
+                                    candidate_category = (
+                                        " ".join(str(candidate.get("category", "") or "").split())
+                                        .strip()
+                                        .casefold()
+                                    )
+                                    candidate_description = (
+                                        " ".join(
+                                            str(candidate.get("description", "") or "").split()
+                                        )
+                                        .strip()
+                                        .casefold()
+                                    )
+
+                                    if (
+                                        candidate_category == category_norm
+                                        and candidate_description == description_norm
+                                    ):
+                                        existing = candidate
+                                        break
                         elif unique_value:
                             existing = collection.find_one({unique_field: unique_value})
 
@@ -3084,12 +3380,14 @@ class UnifiedSyncManagerV3(QObject):
                     continue
                 try:
                     result = self._run_delta_cycle()
+                    self._last_delta_cycle_mono = time.monotonic()
                     changed = (
                         int(result.get("pushed", 0))
                         + int(result.get("pulled", 0))
                         + int(result.get("deleted", 0))
                     )
                     if changed > 0:
+                        self._last_delta_change_mono = self._last_delta_cycle_mono
                         idle_streak = 0
                     elif result.get("reason") in {"delta_busy", "full_sync_in_progress"}:
                         idle_streak = max(0, idle_streak - 1)
@@ -3103,6 +3401,7 @@ class UnifiedSyncManagerV3(QObject):
             daemon=True,
             name="unified-delta-sync",
         )
+        self._last_delta_cycle_mono = time.monotonic()
         self._delta_thread.start()
 
         logger.info("⏰ بدء Delta Sync كل %s ثانية (Adaptive idle backoff مفعّل)", interval_seconds)

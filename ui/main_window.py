@@ -6,7 +6,6 @@ import ctypes
 import gc
 import os
 import platform
-import sys
 import threading
 import time
 import traceback
@@ -97,6 +96,10 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self._connection_check_timer = None
+        self._allow_close = False
+        self._last_close_request_ts = 0.0
+        self._last_close_event_log_ts = 0.0
+        self._exit_confirmation_open = False
 
         # إخفاء النافذة مؤقتاً لمنع الشاشة البيضاء
         self.setWindowOpacity(0.0)
@@ -311,7 +314,8 @@ class MainWindow(QMainWindow):
             "notifications",
         }
         self._last_sync_ui_refresh_at = 0.0
-        self._sync_ui_refresh_cooldown_seconds = 0.8
+        # Keep UI responsive under bursty sync/realtime events.
+        self._sync_ui_refresh_cooldown_seconds = 2.0
 
         # ⚡ إنشاء كل التابات فوراً (بدون تحميل بيانات)
         self._create_all_tabs()
@@ -920,7 +924,7 @@ class MainWindow(QMainWindow):
                 "projects",
             }
             if table_name in dashboard_related_tables and self._can_refresh(
-                "dashboard", min_interval=5.0
+                "dashboard", min_interval=12.0
             ):
                 target_tabs.append("🏠 الصفحة الرئيسية")
 
@@ -932,7 +936,7 @@ class MainWindow(QMainWindow):
             for tab_name in target_tabs:
                 # ⚡ إذا كان التاب ظاهرًا: تحديث فوري
                 if tab_name == current_tab_name:
-                    if self._can_refresh(f"tab_{tab_name}", min_interval=1.0):
+                    if self._can_refresh(f"tab_{tab_name}", min_interval=2.5):
                         # ⚡ إبطال cache وتحديث
                         self._invalidate_tab_cache(tab_name)
                         self._do_load_tab_data_safe(tab_name)
@@ -1255,28 +1259,40 @@ class MainWindow(QMainWindow):
 
     def _handle_logout(self):
         """معالج تسجيل الخروج"""
-        reply = QMessageBox.question(
-            self,
-            "تأكيد تسجيل الخروج",
-            "هل أنت متأكد من تسجيل الخروج؟\n\nسيتم إغلاق البرنامج.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        if self._confirm_exit(
+            title="تأكيد تسجيل الخروج",
+            message="هل أنت متأكد من تسجيل الخروج؟\n\nسيتم إغلاق البرنامج.",
+        ):
+            self._trigger_safe_quit("logout")
 
-        if reply == QMessageBox.StandardButton.Yes:
-            safe_print("INFO: [MainWindow] جاري تسجيل الخروج...")
+    def _confirm_exit(self, title: str, message: str) -> bool:
+        """عرض نافذة تأكيد موحدة ومنع تكرار النوافذ أثناء ضغطات الإغلاق المتتالية."""
+        if self._exit_confirmation_open:
+            return False
 
-            # إيقاف أي عمليات خلفية
-            if hasattr(self, "sync_manager") and self.sync_manager:
-                try:
-                    if hasattr(self.sync_manager, "stop_auto_sync"):
-                        self.sync_manager.stop_auto_sync()
-                except Exception:
-                    pass
+        self._exit_confirmation_open = True
+        try:
+            reply = QMessageBox.question(
+                self,
+                title,
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return reply == QMessageBox.StandardButton.Yes
+        finally:
+            self._exit_confirmation_open = False
 
-            # إغلاق البرنامج نهائياً
-            QApplication.quit()
-            sys.exit(0)
+    def _trigger_safe_quit(self, source: str = "unknown"):
+        """تشغيل مسار الإغلاق الرسمي بحيث يمر عبر closeEvent الآمن."""
+        if self._allow_close:
+            return
+
+        safe_print(f"INFO: [MainWindow] طلب إغلاق آمن من المصدر: {source}")
+        self._allow_close = True
+
+        # نستدعي quit بشكل مؤجل لتجنب إعادة الدخول داخل closeEvent الحالي.
+        QTimer.singleShot(0, QApplication.quit)
 
     def _connect_shortcuts(self):
         """ربط الاختصارات بالإجراءات"""
@@ -1684,13 +1700,13 @@ class MainWindow(QMainWindow):
         except Exception as e:
             safe_print(f"❌ [MainWindow] خطأ في معالجة إشارة {table_name}: {e}")
 
-    def _enqueue_table_refresh(self, table_name: str, delay_ms: int = 120) -> None:
+    def _enqueue_table_refresh(self, table_name: str, delay_ms: int = 260) -> None:
         """Queue table refresh requests and flush them in one batch."""
         if not isinstance(table_name, str) or not table_name.strip():
             return
         self._queued_table_refreshes.add(table_name.strip())
         if not self._table_refresh_timer.isActive():
-            self._table_refresh_timer.start(max(60, int(delay_ms)))
+            self._table_refresh_timer.start(max(150, int(delay_ms)))
 
     def _flush_enqueued_table_refreshes(self) -> None:
         """Run batched table refreshes after debounce window."""
@@ -1721,7 +1737,7 @@ class MainWindow(QMainWindow):
         self._last_refresh_times[tab_name] = current_time
         return True
 
-    def _schedule_deferred_refresh(self, table_name: str, tab_name: str, delay_ms: int = 900):
+    def _schedule_deferred_refresh(self, table_name: str, tab_name: str, delay_ms: int = 1200):
         """جدولة تحديث مؤجل للتاب بدل إسقاط التحديثات السريعة."""
         self.pending_refreshes[tab_name] = True
         if self._deferred_refresh_timers.get(tab_name):
@@ -1747,7 +1763,7 @@ class MainWindow(QMainWindow):
             self.pending_refreshes[tab_name] = True
             return
 
-        if not self._can_refresh(f"tab_{tab_name}", min_interval=0.5):
+        if not self._can_refresh(f"tab_{tab_name}", min_interval=1.2):
             self._schedule_deferred_refresh(table_name, tab_name, delay_ms=350)
             return
 
@@ -1789,6 +1805,33 @@ class MainWindow(QMainWindow):
         يحل مشكلة التجميد والإغلاق المفاجئ
         """
         try:
+            now = time.monotonic()
+            if (now - self._last_close_event_log_ts) > 8.0:
+                self._last_close_event_log_ts = now
+                safe_print(
+                    f"WARNING: [MainWindow] closeEvent triggered | spontaneous={event.spontaneous()} allow_close={self._allow_close}"
+                )
+
+            if not self._allow_close:
+                if (now - self._last_close_request_ts) > 0.35:
+                    self._last_close_request_ts = now
+                    confirmed = self._confirm_exit(
+                        title="تأكيد الإغلاق",
+                        message="هل تريد إغلاق البرنامج الآن؟\n\nسيتم إيقاف المزامنة والخدمات بشكل آمن.",
+                    )
+                    if confirmed:
+                        self._allow_close = True
+                        # main.py disables quit-on-last-window-close; request quit explicitly.
+                        app = QApplication.instance()
+                        if app is not None:
+                            QTimer.singleShot(0, app.quit)
+                    else:
+                        event.ignore()
+                        return
+                else:
+                    event.ignore()
+                    return
+
             safe_print("INFO: [MainWindow] بدء عملية الإغلاق الآمن...")
 
             # 1. إيقاف مؤقت فحص المشاريع

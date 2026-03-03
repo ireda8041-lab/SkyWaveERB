@@ -6,7 +6,9 @@
 """
 
 import os
+import signal
 import sys
+import traceback
 import uuid
 
 # ==================== ثوابت التوقيت (بالمللي ثانية) ====================
@@ -260,6 +262,16 @@ class SkyWaveERPApp:
             os.environ["QT_QPA_PLATFORM"] = "windows:darkmode=2"
 
         app = QApplication(sys.argv)
+        # Handle Ctrl+C gracefully when the app is launched from terminal.
+        try:
+            signal.signal(signal.SIGINT, lambda *_args: app.quit())
+            self._sigint_pump_timer = QTimer()
+            self._sigint_pump_timer.setInterval(250)
+            self._sigint_pump_timer.timeout.connect(lambda: None)
+            self._sigint_pump_timer.start()
+        except Exception as e:
+            logger.debug("[MainApp] تعذر تفعيل graceful Ctrl+C: %s", e)
+
         if getattr(self, "_notification_bridge_pending", False):
             try:
                 from core.notification_bridge import setup_notification_bridge
@@ -525,10 +537,8 @@ class SkyWaveERPApp:
                 # تشغيل نظام المزامنة التلقائية
                 self.unified_sync.start_auto_sync()
 
-                # ربط إشارة اكتمال المزامنة بتحديث الواجهة
-                self.unified_sync.sync_completed.connect(
-                    lambda result: QTimer.singleShot(500, main_window.on_sync_completed)
-                )
+                # لا نعمل full-tab refresh إضافي هنا لتجنب تجميد متكرر للواجهة.
+                # تحديثات الواجهة تأتي بالفعل عبر إشارات الجداول المتغيرة (app_signals).
 
                 # ملاحظة: لا نربط data_synced هنا لتجنب تحديث واجهة مزدوج.
                 # تحديثات Delta/Pull تصل بالفعل عبر app_signals.emit_ui_data_changed لكل جدول متغير.
@@ -604,16 +614,32 @@ class SkyWaveERPApp:
         # ⚡ صيانة دورية كل ساعة
         self._setup_periodic_maintenance()
 
+        # ✅ تتبع سبب الإغلاق (تشخيص للإغلاق المفاجئ)
+        def _trace_quit_signals():
+            try:
+                stack_text = "".join(traceback.format_stack(limit=20))
+                logger.warning("[MainApp] aboutToQuit received. Call stack:\n%s", stack_text)
+            except Exception:
+                logger.warning("[MainApp] aboutToQuit received.")
+
+        app.aboutToQuit.connect(_trace_quit_signals)
+        app.lastWindowClosed.connect(lambda: logger.warning("[MainApp] lastWindowClosed emitted."))
+
         # ✅ ربط إشارة الإغلاق لتنظيف الموارد
         app.aboutToQuit.connect(self._cleanup_on_exit)
 
-        # ✅ تفعيل الإغلاق عند إغلاق آخر نافذة
-        app.setQuitOnLastWindowClosed(True)
+        # ✅ منع الإغلاق التلقائي عند إغلاق/اختفاء أي نافذة بشكل غير متوقع.
+        # الإغلاق النهائي يتم فقط عبر QApplication.quit من مسار مصرح (مثل تسجيل الخروج).
+        app.setQuitOnLastWindowClosed(False)
 
         logger.info("[MainApp] البرنامج يعمل الآن.")
 
         # تشغيل التطبيق
-        exit_code = app.exec()
+        try:
+            exit_code = app.exec()
+        except KeyboardInterrupt:
+            logger.info("[MainApp] تم استلام Ctrl+C من الطرفية - جاري الإغلاق الآمن.")
+            exit_code = 0
         logger.info("[MainApp] انتهت حلقة Qt الرئيسية. exit_code=%s", exit_code)
 
         # ✅ تنظيف نهائي قبل الخروج
