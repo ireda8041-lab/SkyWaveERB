@@ -1,14 +1,15 @@
-﻿## Release Notes - v2.2.8 (2026-02-14)
+## Release Notes - v2.2.9 (2026-03-03)
 
-### UI and Layout Stability
-- New Project dialog now opens with a correct first-render layout without requiring manual resize.
-- Responsive sizing logic was hardened across startup/show/resize cycles for consistent behavior on different screen sizes.
-- Notes and payment side panels now keep better proportional space with smoother scroll handling.
+### Stability and Freeze Fixes
+- MongoDB connection checks in sync manager are now non-blocking and no longer stall the UI thread.
+- Online state checks use cached probe status on UI paths, with bounded background probes for safety.
+- Main window refresh behavior was tuned with stronger debounce/cooldown settings under sync bursts.
 
-### Sync and Realtime Reliability
-- Instant sync worker now falls back safely when lightweight repositories miss full table-reconcile dependencies.
-- Repository compatibility checks were hardened to avoid background worker crashes in edge test/runtime scenarios.
+### Sync and Notification Performance
+- Notification polling now uses adaptive idle backoff to reduce unnecessary background pressure.
+- Full-sync completion no longer triggers redundant full-tab refresh flow.
+- Sync-triggered UI updates are smoother when rapid changes arrive from realtime/delta channels.
 
-### Deployment and Operations
-- Added remote MongoDB replica-set helper (`tools/enable_remote_replset.py`) for server-side professional setup.
-- Added stable per-device identity utility (`core/device_identity.py`) to reduce cross-device collision risk.
+### Update Reliability
+- `auto_updater.py` now correctly parses GitHub Releases API payloads (`tag_name`, assets, release body).
+- Version metadata updated for `v2.2.9` and release download path prepared for installer rollout.

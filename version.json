@@ -1,17 +1,17 @@
-﻿{
-    "version":  "2.2.8",
-    "version_name":  "Sky Wave ERP v2.2.8",
-    "release_date":  "2026-02-14",
-    "url":  "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.8/SkyWaveERP-Setup-2.2.8.exe",
-    "changelog":  [
-                      "New Project dialog layout now opens correctly on first render without manual resize.",
-                      "Project editor responsiveness was improved with safer adaptive sizing and scroll behavior.",
-                      "Instant sync fallback logic was hardened for lightweight repositories and test environments.",
-                      "Remote MongoDB replica-set helper script was added for professional server-side setup.",
-                      "Stable per-device identity utility added to reduce cross-device collision risks."
-                  ],
-    "min_version":  "1.0.0",
-    "mandatory":  false,
-    "notes_ar":  "هذا الإصدار يحسن فتح شاشة مشروع جديد تلقائياً ويقوي استقرار المزامنة الفورية مع أدوات احترافية لإعداد Replica Set.",
-    "notes_en":  "This release improves first-open project dialog layout, strengthens realtime sync stability, and adds professional replica-set setup tooling."
+{
+  "version": "2.2.9",
+  "version_name": "Sky Wave ERP v2.2.9",
+  "release_date": "2026-03-03",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.9/SkyWaveERP-Setup-2.2.9.exe",
+  "changelog": [
+    "Fixed periodic UI freezes by making sync connection checks non-blocking on the main thread.",
+    "Reduced refresh bursts in MainWindow with safer debounce/cooldown behavior under heavy sync activity.",
+    "Notification polling now uses adaptive idle backoff to reduce load and keep the app responsive.",
+    "Auto updater now correctly parses GitHub Releases API payloads for version and download links.",
+    "Stability hardening validated with full automated test suite before release."
+  ],
+  "min_version": "1.0.0",
+  "mandatory": false,
+  "notes_ar": "Stability-focused release that reduces sync freezes and improves safe auto-update behavior.",
+  "notes_en": "This stability release reduces sync-related UI freezes, smooths refresh bursts, and improves auto-update compatibility with GitHub Releases."
 }

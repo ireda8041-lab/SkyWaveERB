@@ -1,4 +1,16 @@
-﻿## [2.2.8] - 2026-02-14
+﻿## [2.2.9] - 2026-03-03
+
+### Fixed
+- Prevented sync-related UI freezes by moving connectivity probes off the main thread.
+- Corrected auto-updater parsing for GitHub Releases API payloads.
+
+### Changed
+- Increased UI refresh debounce/cooldown during burst sync events for smoother runtime behavior.
+- Added adaptive idle backoff for notification polling to reduce background pressure.
+- Removed redundant full-tab refresh callback after full sync completion.
+
+---
+## [2.2.8] - 2026-02-14
 
 ### Fixed
 - New Project dialog first-open layout no longer requires manual resize to render correctly.
@@ -241,4 +253,5 @@
 - `âŒ Removed` Ù„Ù„Ù…Ù…ÙŠØ²Ø§Øª Ø§Ù„Ù…Ø­Ø°ÙˆÙØ©
 - `ðŸ”§ Fixed` Ù„Ù„Ø¥ØµÙ„Ø§Ø­Ø§Øª
 - `ðŸ” Security` Ù„Ù„ØªØ­Ø³ÙŠÙ†Ø§Øª Ø§Ù„Ø£Ù…Ù†ÙŠØ©
+
 
