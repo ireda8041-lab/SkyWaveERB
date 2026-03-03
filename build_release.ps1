@@ -79,6 +79,23 @@ Copy-Item -Force "updater.exe" "dist\SkyWaveERP\updater.exe"
 Write-Host "OK: Synced updater.exe into dist\\SkyWaveERP" -ForegroundColor Green
 
 Write-Step "Building installer (Inno Setup)"
+$issPath = "SkyWaveERP_Setup.iss"
+if (-not (Test-Path $issPath)) {
+    throw "SkyWaveERP_Setup.iss not found"
+}
+
+$issContent = Get-Content $issPath -Raw
+$issVersionMatch = [regex]::Match($issContent, '#define\s+MyAppVersion\s+"([^"]+)"')
+if (-not $issVersionMatch.Success) {
+    throw "Could not read MyAppVersion from SkyWaveERP_Setup.iss"
+}
+
+$issVersion = [string]$issVersionMatch.Groups[1].Value
+if ($issVersion -ne $version) {
+    throw "Installer version mismatch: SkyWaveERP_Setup.iss has '$issVersion' but version.json has '$version'"
+}
+Write-Host "OK: Installer script version matches ($issVersion)" -ForegroundColor Green
+
 $installerBuilt = $false
 $isccPaths = @(
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -87,10 +104,7 @@ $isccPaths = @(
 $iscc = $isccPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
 
 if ($null -ne $iscc) {
-    if (-not (Test-Path "SkyWaveERP_Setup.iss")) {
-        throw "SkyWaveERP_Setup.iss not found"
-    }
-    & $iscc "SkyWaveERP_Setup.iss"
+    & $iscc $issPath
     if ($LASTEXITCODE -eq 0) {
         $installerBuilt = $true
         Write-Host "OK: Installer compiled successfully" -ForegroundColor Green
