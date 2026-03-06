@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QMessageBox
+
+from core import schemas
 
 
 class _NoopService:
@@ -14,6 +17,16 @@ class _NoopService:
             return None
 
         return _noop
+
+
+class _RecordingProjectService(_NoopService):
+    def __init__(self):
+        super().__init__()
+        self.deleted_refs: list[str] = []
+
+    def delete_project(self, project_ref):
+        self.deleted_refs.append(str(project_ref))
+        return True
 
 
 def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
@@ -114,6 +127,45 @@ def test_projects_tab_splitter_orientation_stays_horizontal(qapp):
     tab.resize(960, 700)
     qapp.processEvents()
     assert tab.main_splitter.orientation() == Qt.Orientation.Horizontal
+
+
+def test_projects_tab_delete_selected_project_uses_project_id(monkeypatch, qapp):
+    from ui import project_manager
+
+    project_service = _RecordingProjectService()
+    monkeypatch.setattr(
+        QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        project_manager.ProjectManagerTab,
+        "load_projects_data",
+        lambda self: None,
+        raising=True,
+    )
+
+    tab = project_manager.ProjectManagerTab(
+        project_service=project_service,
+        client_service=_NoopService(),
+        service_service=_NoopService(),
+        accounting_service=_NoopService(),
+        expense_service=_NoopService(),
+        printing_service=None,
+        template_service=None,
+    )
+    tab.selected_project = schemas.Project(
+        id=77,
+        name="Shared Name",
+        client_id="CLIENT-77",
+        total_amount=5000.0,
+    )
+
+    tab.delete_selected_project()
+    qapp.processEvents()
+
+    assert project_service.deleted_refs == ["77"]
 
     tab.resize(1400, 900)
     qapp.processEvents()

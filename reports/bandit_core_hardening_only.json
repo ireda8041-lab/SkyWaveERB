@@ -1,0 +1,1514 @@
+{
+  "errors": [],
+  "generated_at": "2026-03-06T23:14:28Z",
+  "metrics": {
+    ".\\core\\db_maintenance.py": {
+      "CONFIDENCE.HIGH": 5,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 5,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 531,
+      "nosec": 0,
+      "skipped_tests": 3
+    },
+    ".\\core\\repository.py": {
+      "CONFIDENCE.HIGH": 39,
+      "CONFIDENCE.LOW": 3,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 39,
+      "SEVERITY.MEDIUM": 3,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 8311,
+      "nosec": 0,
+      "skipped_tests": 13
+    },
+    ".\\core\\sqlite_identifiers.py": {
+      "CONFIDENCE.HIGH": 0,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 0,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 39,
+      "nosec": 0,
+      "skipped_tests": 0
+    },
+    ".\\core\\unified_sync.py": {
+      "CONFIDENCE.HIGH": 21,
+      "CONFIDENCE.LOW": 0,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 21,
+      "SEVERITY.MEDIUM": 0,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 2637,
+      "nosec": 0,
+      "skipped_tests": 27
+    },
+    "_totals": {
+      "CONFIDENCE.HIGH": 65,
+      "CONFIDENCE.LOW": 3,
+      "CONFIDENCE.MEDIUM": 0,
+      "CONFIDENCE.UNDEFINED": 0,
+      "SEVERITY.HIGH": 0,
+      "SEVERITY.LOW": 65,
+      "SEVERITY.MEDIUM": 3,
+      "SEVERITY.UNDEFINED": 0,
+      "loc": 11518,
+      "nosec": 0,
+      "skipped_tests": 43
+    }
+  },
+  "results": [
+    {
+      "code": "210                 self.cursor.execute(f\"DROP INDEX IF EXISTS {idx_name}\")\n211             except Exception:\n212                 pass\n213 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\db_maintenance.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 211,
+      "line_range": [
+        211,
+        212
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "251                 self.cursor.execute(sql)\n252             except Exception:\n253                 pass\n254 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\db_maintenance.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 252,
+      "line_range": [
+        252,
+        253
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "263                 )\n264             except Exception:\n265                 pass\n266 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\db_maintenance.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 264,
+      "line_range": [
+        264,
+        265
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "285                 )\n286             except Exception:\n287                 pass\n288 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\db_maintenance.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 286,
+      "line_range": [
+        286,
+        287
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "630                             cleaned += 1\n631                     except Exception:\n632                         pass\n633 \n",
+      "col_offset": 20,
+      "end_col_offset": 28,
+      "filename": ".\\core\\db_maintenance.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 631,
+      "line_range": [
+        631,
+        632
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "57                 print(clean_msg)\n58             except Exception:\n59                 pass  # \u062a\u062c\u0627\u0647\u0644 \u0623\u064a \u062e\u0637\u0623 \u0641\u064a \u0627\u0644\u0637\u0628\u0627\u0639\u0629\n60 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 58,
+      "line_range": [
+        58,
+        59
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "165             self._cursor.close()\n166         except Exception:\n167             pass\n168         return False  # \u0644\u0627 \u0646\u0628\u062a\u0644\u0639 \u0627\u0644\u0627\u0633\u062a\u062b\u0646\u0627\u0621\u0627\u062a\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 166,
+      "line_range": [
+        166,
+        167
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "736                 getattr(self, attr_name).invalidate()\n737             except Exception:\n738                 pass\n739 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 737,
+      "line_range": [
+        737,
+        738
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "757                     self.sqlite_cursor.close()\n758             except Exception:\n759                 pass\n760             finally:\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 758,
+      "line_range": [
+        758,
+        759
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "765                     self.sqlite_conn.close()\n766             except Exception:\n767                 pass\n768             finally:\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 766,
+      "line_range": [
+        766,
+        767
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "773                     self.mongo_client.close()\n774             except Exception:\n775                 pass\n776             finally:\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 774,
+      "line_range": [
+        774,
+        775
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "828                 DB_NAME = os.environ.get(\"MONGO_DB_NAME\", DB_NAME)\n829         except Exception:\n830             pass\n831 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 829,
+      "line_range": [
+        829,
+        830
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "895                     self._start_mongo_connection()\n896                 except Exception:\n897                     pass\n898 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 896,
+      "line_range": [
+        896,
+        897
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1107             safe_print(\"INFO: [Repository] \u062a\u0645 \u0625\u0636\u0627\u0641\u0629 \u0639\u0645\u0648\u062f logo_data \u0644\u062c\u062f\u0648\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621\")\n1108         except Exception:\n1109             pass  # \u0627\u0644\u0639\u0645\u0648\u062f \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644\n1110 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1108,
+      "line_range": [
+        1108,
+        1109
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1117             safe_print(\"INFO: [Repository] \u062a\u0645 \u0625\u0636\u0627\u0641\u0629 \u0639\u0645\u0648\u062f has_logo \u0644\u062c\u062f\u0648\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621\")\n1118         except Exception:\n1119             pass  # \u0627\u0644\u0639\u0645\u0648\u062f \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644\n1120 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1118,
+      "line_range": [
+        1118,
+        1119
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1124             safe_print(\"INFO: [Repository] \u062a\u0645 \u0625\u0636\u0627\u0641\u0629 \u0639\u0645\u0648\u062f logo_last_synced \u0644\u062c\u062f\u0648\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621\")\n1125         except Exception:\n1126             pass  # \u0627\u0644\u0639\u0645\u0648\u062f \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644\n1127 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1125,
+      "line_range": [
+        1125,
+        1126
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1132             safe_print(\"INFO: [Repository] \u062a\u0645 \u0625\u0636\u0627\u0641\u0629 \u0639\u0645\u0648\u062f is_vip \u0644\u062c\u062f\u0648\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621\")\n1133         except Exception:\n1134             pass  # \u0627\u0644\u0639\u0645\u0648\u062f \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644\n1135 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1133,
+      "line_range": [
+        1133,
+        1134
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1558             self.sqlite_cursor.execute(\"ALTER TABLE tasks ADD COLUMN is_archived INTEGER DEFAULT 0\")\n1559         except Exception:\n1560             pass  # \u0627\u0644\u062d\u0642\u0644 \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644\n1561 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1559,
+      "line_range": [
+        1559,
+        1560
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1589             safe_print(\"INFO: [Repository] Added 'action' column to sync_queue table\")\n1590         except Exception:\n1591             # \u0627\u0644\u0639\u0645\u0648\u062f \u0645\u0648\u062c\u0648\u062f \u0628\u0627\u0644\u0641\u0639\u0644 \u0623\u0648 \u062e\u0637\u0623 \u0622\u062e\u0631\n1592             pass\n1593 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1590,
+      "line_range": [
+        1590,
+        1591,
+        1592
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1829                     self.sqlite_cursor.execute(f\"DROP INDEX IF EXISTS {index_name}\")\n1830                 except Exception:\n1831                     pass\n1832 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1830,
+      "line_range": [
+        1830,
+        1831
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1842                 )\n1843             except Exception:\n1844                 pass\n1845 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1843,
+      "line_range": [
+        1843,
+        1844
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1855                 )\n1856             except Exception:\n1857                 pass\n1858 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1856,
+      "line_range": [
+        1856,
+        1857
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1868                 )\n1869             except Exception:\n1870                 pass\n1871 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1869,
+      "line_range": [
+        1869,
+        1870
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1880                 )\n1881             except Exception:\n1882                 pass\n1883 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1881,
+      "line_range": [
+        1881,
+        1882
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1913                     )\n1914                 except Exception:\n1915                     pass\n1916                 try:\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1914,
+      "line_range": [
+        1914,
+        1915
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1919                     )\n1920                 except Exception:\n1921                     pass\n1922                 try:\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1920,
+      "line_range": [
+        1920,
+        1921
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1925                     )\n1926                 except Exception:\n1927                     pass\n1928                 try:\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1926,
+      "line_range": [
+        1926,
+        1927
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1931                     )\n1932                 except Exception:\n1933                     pass\n1934                 try:\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1932,
+      "line_range": [
+        1932,
+        1933
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1938                     )\n1939                 except Exception:\n1940                     pass\n1941 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1939,
+      "line_range": [
+        1939,
+        1940
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "2266                             update_dict[\"has_logo\"] = bool(client_data.has_logo)\n2267                     except Exception:\n2268                         pass\n2269 \n",
+      "col_offset": 20,
+      "end_col_offset": 28,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 2267,
+      "line_range": [
+        2267,
+        2268
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "2351                         clients_list.append(schemas.Client(**c, _mongo_id=mongo_id))\n2352                     except Exception:\n2353                         continue\n2354 \n",
+      "col_offset": 20,
+      "end_col_offset": 32,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Continue detected.",
+      "line_number": 2352,
+      "line_range": [
+        2352,
+        2353
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b112_try_except_continue.html",
+      "test_id": "B112",
+      "test_name": "try_except_continue"
+    },
+    {
+      "code": "2507                     )\n2508                 except Exception:\n2509                     pass\n2510 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 2508,
+      "line_range": [
+        2508,
+        2509
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "2548                 return ObjectId(item_id)\n2549         except Exception:\n2550             pass\n2551         return item_id\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 2549,
+      "line_range": [
+        2549,
+        2550
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3141                         return existing\n3142             except Exception:\n3143                 pass\n3144 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 3142,
+      "line_range": [
+        3142,
+        3143
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3561                                 self.sqlite_conn.commit()\n3562                         except Exception:\n3563                             pass\n3564                     else:\n",
+      "col_offset": 24,
+      "end_col_offset": 32,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 3562,
+      "line_range": [
+        3562,
+        3563
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3821 \n3822             sql = f\"UPDATE users SET {set_clause} WHERE username = ?\"\n3823 \n",
+      "col_offset": 18,
+      "end_col_offset": 69,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 3822,
+      "line_range": [
+        3822
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "4839                     self.sqlite_cursor.execute(\"ROLLBACK\")\n4840                 except Exception:\n4841                     # \u0641\u0634\u0644 \u0627\u0644\u0640 rollback\n4842                     pass\n4843                 raise e\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 4840,
+      "line_range": [
+        4840,
+        4841,
+        4842
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "5089 \n5090             sql = f\"\"\"\n5091                 UPDATE payments SET\n5092                     last_modified = ?, date = ?, amount = ?,\n5093                     account_id = ?, method = ?,\n5094                     client_id = ?, project_id = ?, sync_status = ?\n5095                 {where_clause}\n5096             \"\"\"\n5097             params = (\n",
+      "col_offset": 18,
+      "end_col_offset": 15,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 5090,
+      "line_range": [
+        5090,
+        5091,
+        5092,
+        5093,
+        5094,
+        5095,
+        5096
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "5138                         self.sqlite_conn.commit()\n5139                 except Exception:\n5140                     pass  # Ignore sync errors\n5141 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 5139,
+      "line_range": [
+        5139,
+        5140
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "5413                     return schemas.Invoice(**data, _mongo_id=mongo_id)\n5414             except Exception:\n5415                 pass\n5416 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 5414,
+      "line_range": [
+        5414,
+        5415
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "5427                 return schemas.Invoice(**row_dict)\n5428         except Exception:\n5429             pass\n5430 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 5428,
+      "line_range": [
+        5428,
+        5429
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "6144 \n6145             sql = f\"\"\"\n6146                 UPDATE expenses SET\n6147                     last_modified = ?, date = ?, category = ?, amount = ?,\n6148                     description = ?, account_id = ?, payment_account_id = ?, project_id = ?, sync_status = ?\n6149                 {where_clause}\n6150             \"\"\"\n6151             params = (\n",
+      "col_offset": 18,
+      "end_col_offset": 15,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "LOW",
+      "issue_cwe": {
+        "id": 89,
+        "link": "https://cwe.mitre.org/data/definitions/89.html"
+      },
+      "issue_severity": "MEDIUM",
+      "issue_text": "Possible SQL injection vector through string-based query construction.",
+      "line_number": 6145,
+      "line_range": [
+        6145,
+        6146,
+        6147,
+        6148,
+        6149,
+        6150
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b608_hardcoded_sql_expressions.html",
+      "test_id": "B608",
+      "test_name": "hardcoded_sql_expressions"
+    },
+    {
+      "code": "6195                         self.sqlite_conn.commit()\n6196                 except Exception:\n6197                     pass  # Ignore sync errors\n6198 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 6196,
+      "line_range": [
+        6196,
+        6197
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "6588                             data_list.append(schemas.Project(**row_dict))\n6589                         except Exception:\n6590                             continue\n6591 \n",
+      "col_offset": 24,
+      "end_col_offset": 36,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Continue detected.",
+      "line_number": 6589,
+      "line_range": [
+        6589,
+        6590
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b112_try_except_continue.html",
+      "test_id": "B112",
+      "test_name": "try_except_continue"
+    },
+    {
+      "code": "6629                         data_list.append(schemas.Project(**normalized, _mongo_id=mongo_id))\n6630                     except Exception:\n6631                         continue\n6632 \n",
+      "col_offset": 20,
+      "end_col_offset": 32,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Continue detected.",
+      "line_number": 6630,
+      "line_range": [
+        6630,
+        6631
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b112_try_except_continue.html",
+      "test_id": "B112",
+      "test_name": "try_except_continue"
+    },
+    {
+      "code": "7304                 app_signals.emit_data_changed(\"currencies\")\n7305             except Exception:\n7306                 pass\n7307 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 7305,
+      "line_range": [
+        7305,
+        7306
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "7406                 app_signals.emit_data_changed(\"currencies\")\n7407             except Exception:\n7408                 pass\n7409             return True\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\repository.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 7407,
+      "line_range": [
+        7407,
+        7408
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "232                 self._sync_metrics[\"last_sync_time\"] = datetime.now().isoformat()\n233         except Exception:\n234             # Metrics are non-critical.\n235             pass\n236 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 233,
+      "line_range": [
+        233,
+        234,
+        235
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "679             getattr(self.repo, attr_name).invalidate()\n680         except Exception:\n681             pass\n682 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 680,
+      "line_range": [
+        680,
+        681
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "949                     timer.stop()\n950                 except Exception:\n951                     pass\n952                 setattr(self, timer_name, None)\n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 950,
+      "line_range": [
+        950,
+        951
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1031                 self._auto_sync_timer = None\n1032         except Exception:\n1033             pass\n1034 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1032,
+      "line_range": [
+        1032,
+        1033
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1041                 self._quick_sync_timer = None\n1042         except Exception:\n1043             pass\n1044 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1042,
+      "line_range": [
+        1042,
+        1043
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1051                 self._cloud_pull_timer = None\n1052         except Exception:\n1053             pass\n1054 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1052,
+      "line_range": [
+        1052,
+        1053
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1061                 self._connection_timer = None\n1062         except Exception:\n1063             pass\n1064 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1062,
+      "line_range": [
+        1062,
+        1063
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1071                 self._delta_pull_timer = None\n1072         except Exception:\n1073             pass\n1074 \n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1072,
+      "line_range": [
+        1072,
+        1073
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1078                 self._delta_thread.join(timeout=0.5)\n1079         except Exception:\n1080             pass\n1081         self._delta_thread = None\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1079,
+      "line_range": [
+        1079,
+        1080
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1131                 self.repo.online = current_status\n1132         except Exception:\n1133             pass\n1134         return previous_status\n",
+      "col_offset": 8,
+      "end_col_offset": 16,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1132,
+      "line_range": [
+        1132,
+        1133
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1165                         logger.warning(\"\ud83d\udd34 \u0627\u0646\u0642\u0637\u0639 \u0627\u0644\u0627\u062a\u0635\u0627\u0644 - \u0627\u0644\u0639\u0645\u0644 \u0641\u064a \u0648\u0636\u0639 Offline\")\n1166             except Exception:\n1167                 # \u062a\u062c\u0627\u0647\u0644 \u0623\u062e\u0637\u0627\u0621 probe\n1168                 pass\n1169             finally:\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1166,
+      "line_range": [
+        1166,
+        1167,
+        1168
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1244                             break\n1245                     except Exception:\n1246                         # \u0641\u0634\u0644 \u0641\u062d\u0635 \u0627\u0644\u0639\u0646\u0635\u0631\n1247                         pass\n1248             finally:\n",
+      "col_offset": 20,
+      "end_col_offset": 28,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1245,
+      "line_range": [
+        1245,
+        1246,
+        1247
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1606                     cursor.close()\n1607                 except Exception:\n1608                     pass\n1609 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1607,
+      "line_range": [
+        1607,
+        1608
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1614                 cursor.close()\n1615             except Exception:\n1616                 pass\n1617 \n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1615,
+      "line_range": [
+        1615,
+        1616
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1896                         return\n1897                 except Exception:\n1898                     pass\n1899 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1897,
+      "line_range": [
+        1897,
+        1898
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1955                             return\n1956                 except Exception:\n1957                     pass\n1958 \n",
+      "col_offset": 16,
+      "end_col_offset": 24,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1956,
+      "line_range": [
+        1956,
+        1957
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1983                             return\n1984                     except Exception:\n1985                         pass\n1986 \n",
+      "col_offset": 20,
+      "end_col_offset": 28,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1984,
+      "line_range": [
+        1984,
+        1985
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "1995                             return\n1996                     except Exception:\n1997                         pass\n1998 \n",
+      "col_offset": 20,
+      "end_col_offset": 28,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 1996,
+      "line_range": [
+        1996,
+        1997
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3073                 app_signals.emit_ui_data_changed(table)\n3074             except Exception:\n3075                 pass\n3076             try:\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 3074,
+      "line_range": [
+        3074,
+        3075
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3129                 self._delta_pull_timer.stop()\n3130             except Exception:\n3131                 pass\n3132             self._delta_pull_timer = None\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 3130,
+      "line_range": [
+        3130,
+        3131
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    },
+    {
+      "code": "3137                 self._delta_thread.join(timeout=0.5)\n3138             except Exception:\n3139                 pass\n3140         self._delta_thread_stop = threading.Event()\n",
+      "col_offset": 12,
+      "end_col_offset": 20,
+      "filename": ".\\core\\unified_sync.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": {
+        "id": 703,
+        "link": "https://cwe.mitre.org/data/definitions/703.html"
+      },
+      "issue_severity": "LOW",
+      "issue_text": "Try, Except, Pass detected.",
+      "line_number": 3138,
+      "line_range": [
+        3138,
+        3139
+      ],
+      "more_info": "https://bandit.readthedocs.io/en/1.9.2/plugins/b110_try_except_pass.html",
+      "test_id": "B110",
+      "test_name": "try_except_pass"
+    }
+  ]
+}

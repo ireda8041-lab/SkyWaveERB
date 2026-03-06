@@ -134,6 +134,9 @@ class ExpenseService:
 
             # إرسال إشارة التحديث العامة
             app_signals.emit_data_changed("expenses")
+            app_signals.emit_data_changed("accounting")
+            if getattr(created_expense, "project_id", None):
+                app_signals.emit_data_changed("projects")
 
             # 🔔 إشعار
             notify_operation(
@@ -163,6 +166,7 @@ class ExpenseService:
         """
         logger.info("[ExpenseService] استلام طلب تعديل مصروف: %s", expense_data.category)
         try:
+            existing_expense = self.repo.get_expense_by_id(expense_id)
             result = self.repo.update_expense(expense_id, expense_data)
             if result:
                 # ⚡ إبطال الـ cache
@@ -171,6 +175,11 @@ class ExpenseService:
                 self.bus.publish("EXPENSE_UPDATED", {"expense": expense_data})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed("expenses")
+                app_signals.emit_data_changed("accounting")
+                if getattr(expense_data, "project_id", None) or getattr(
+                    existing_expense, "project_id", None
+                ):
+                    app_signals.emit_data_changed("projects")
                 # 🔔 إشعار
                 notify_operation(
                     "updated",
@@ -209,6 +218,9 @@ class ExpenseService:
                 self.bus.publish("EXPENSE_DELETED", {"id": expense_id, "expense": expense})
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed("expenses")
+                app_signals.emit_data_changed("accounting")
+                if getattr(expense, "project_id", None):
+                    app_signals.emit_data_changed("projects")
                 # 🔔 إشعار - تحويل expense_id لـ string
                 notify_operation("deleted", "expense", str(expense_id))
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")

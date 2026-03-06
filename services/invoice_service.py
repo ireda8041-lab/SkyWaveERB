@@ -69,6 +69,8 @@ class InvoiceService:
             self.bus.publish("INVOICE_CREATED", {"invoice": created_invoice})
             # ⚡ إرسال إشارة التحديث الفوري
             app_signals.emit_data_changed("invoices")
+            if getattr(created_invoice, "project_id", None):
+                app_signals.emit_data_changed("projects")
             # 🔔 إشعار
             notify_operation("created", "invoice", created_invoice.invoice_number)
             logger.info("[InvoiceService] تم إنشاء الفاتورة %s", created_invoice.invoice_number)
@@ -98,9 +100,11 @@ class InvoiceService:
             updated_invoice = self.repo.update_invoice(invoice_id, invoice_data)
             if updated_invoice:
                 # إرسال الحدث للروبوت المحاسبي
-                self.bus.publish("INVOICE_EDITED", {"invoice": updated_invoice})
+                self.bus.publish("INVOICE_UPDATED", {"invoice": updated_invoice})
                 # ⚡ إرسال إشارة التحديث الفوري
                 app_signals.emit_data_changed("invoices")
+                if getattr(updated_invoice, "project_id", None):
+                    app_signals.emit_data_changed("projects")
                 # 🔔 إشعار
                 notify_operation("updated", "invoice", updated_invoice.invoice_number)
                 logger.info("[InvoiceService] تم تعديل الفاتورة %s", updated_invoice.invoice_number)
@@ -137,6 +141,8 @@ class InvoiceService:
                 self.bus.publish("INVOICE_VOIDED", updated_invoice)
                 # ⚡ إرسال إشارة التحديث الفوري
                 app_signals.emit_data_changed("invoices")
+                if getattr(updated_invoice, "project_id", None):
+                    app_signals.emit_data_changed("projects")
                 # 🔔 إشعار
                 notify_operation("voided", "invoice", updated_invoice.invoice_number)
                 logger.info("[InvoiceService] تم إلغاء الفاتورة %s", updated_invoice.invoice_number)

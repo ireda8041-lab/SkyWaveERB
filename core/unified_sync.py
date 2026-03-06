@@ -20,6 +20,7 @@ from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from core.device_identity import get_stable_device_id
 from core.logger import get_logger
+from core.sqlite_identifiers import quote_identifier, quote_identifier_list
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -621,8 +622,11 @@ class UnifiedSyncManagerV3(QObject):
             return False
 
         columns = list(incoming.keys())
-        select_clause = ", ".join(columns)
-        cursor.execute(f"SELECT {select_clause} FROM {table_name} WHERE id = ?", (local_id,))
+        table_columns = self._sqlite_table_columns(cursor, table_name)
+        table_ref = self._sqlite_table_ref(table_name)
+        select_clause = self._sqlite_column_list_sql(columns, table_columns=table_columns)
+        select_current_sql = f"SELECT {select_clause} FROM {table_ref} WHERE id = ?"  # nosec B608
+        cursor.execute(select_current_sql, (local_id,))
         current_row = cursor.fetchone()
         if not current_row:
             return True
@@ -689,10 +693,26 @@ class UnifiedSyncManagerV3(QObject):
         cached = self._table_columns_cache.get(table)
         if cached is not None:
             return cached
-        cursor.execute(f"PRAGMA table_info({table})")
+        table_ref = self._sqlite_table_ref(table)
+        pragma_sql = f"PRAGMA table_info({table_ref})"  # nosec B608
+        cursor.execute(pragma_sql)
         columns = {row[1] for row in cursor.fetchall()}
         self._table_columns_cache[table] = columns
         return columns
+
+    def _sqlite_table_ref(self, table: str) -> str:
+        return quote_identifier(table, allowed=set(self.TABLES))
+
+    @staticmethod
+    def _sqlite_column_ref(column: str, *, allowed: set[str] | None = None) -> str:
+        return quote_identifier(column, allowed=allowed)
+
+    def _sqlite_column_list_sql(self, columns: list[str], *, table_columns: set[str]) -> str:
+        return ", ".join(quote_identifier_list(columns, allowed=table_columns))
+
+    def _sqlite_set_clause_sql(self, columns: list[str], *, table_columns: set[str]) -> str:
+        quoted_columns = quote_identifier_list(columns, allowed=table_columns)
+        return ", ".join(f"{column} = ?" for column in quoted_columns)
 
     def request_realtime_pull(self, table: str | None = None) -> bool:
         """
@@ -896,67 +916,9 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         try:
-            # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
-            cursor = self.repo.get_cursor()
-            try:
-                # ⚡ التحقق من وجود الجدول أولاً
-                cursor.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
-                )
-                if not cursor.fetchone():
-                    return  # الجدول غير موجود
-
-                cursor.execute(
-                    f"SELECT * FROM {table} WHERE sync_status != 'synced' OR sync_status IS NULL"
-                )
-                rows = cursor.fetchall()
-
-                if not rows:
-                    return
-
-                columns = [desc[0] for desc in cursor.description]
-                collection = self.repo.mongo_db[table]
-
-                updated_any = False
-                for row in rows:
-                    record = dict(zip(columns, row, strict=False))
-                    mongo_id = record.get("_mongo_id")
-
-                    # تنظيف البيانات
-                    clean_record = {
-                        k: v
-                        for k, v in record.items()
-                        if k not in ["id", "sync_status", "last_synced"]
-                    }
-
-                    if mongo_id:
-                        # تحديث
-                        from bson import ObjectId
-
-                        collection.update_one(
-                            {"_id": ObjectId(mongo_id)}, {"$set": clean_record}, upsert=True
-                        )
-                    else:
-                        # إضافة جديد
-                        result = collection.insert_one(clean_record)
-                        # تحديث الـ mongo_id محلياً
-                        cursor.execute(
-                            f"UPDATE {table} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
-                            (str(result.inserted_id), record.get("id")),
-                        )
-                        updated_any = True
-
-                    # تحديث حالة المزامنة
-                    cursor.execute(
-                        f"UPDATE {table} SET sync_status = 'synced' WHERE id = ?",
-                        (record.get("id"),),
-                    )
-                    updated_any = True
-                if updated_any:
-                    self.repo.sqlite_conn.commit()
-            finally:
-                cursor.close()
-
+            # Reuse the main delta push path so realtime sync keeps the
+            # same duplicate handling, delete semantics, and dirty_flag cleanup.
+            self.push_local_changes({table})
         except Exception as e:
             logger.debug("تجاهل خطأ مزامنة %s: %s", table, e)
 
@@ -1271,12 +1233,9 @@ class UnifiedSyncManagerV3(QObject):
             try:
                 for table in self.TABLES:
                     try:
-                        cursor.execute(
-                            f"""
-                            SELECT COUNT(*) FROM {table}
-                            WHERE sync_status != 'synced' OR sync_status IS NULL
-                        """
-                        )
+                        table_ref = self._sqlite_table_ref(table)
+                        pending_count_sql = f"SELECT COUNT(*) FROM {table_ref} WHERE sync_status != 'synced' OR sync_status IS NULL"  # nosec B608
+                        cursor.execute(pending_count_sql)
                         count = cursor.fetchone()[0]
                         if count > 0:
                             has_pending = True
@@ -1541,8 +1500,7 @@ class UnifiedSyncManagerV3(QObject):
 
             try:
                 # الحصول على أعمدة الجدول
-                cursor.execute(f"PRAGMA table_info({table_name})")
-                table_columns = {row[1] for row in cursor.fetchall()}
+                table_columns = self._sqlite_table_columns(cursor, table_name)
 
                 # جمع كل الـ mongo_ids من السحابة
                 cloud_mongo_ids = set()
@@ -1555,6 +1513,10 @@ class UnifiedSyncManagerV3(QObject):
                     mongo_id = str(cloud_item["_id"])
                     cloud_mongo_ids.add(mongo_id)
                     unique_value = cloud_item.get(unique_field)
+                    remote_sync_status = str(cloud_item.get("sync_status") or "").lower()
+                    remote_is_deleted = bool(cloud_item.get("is_deleted", False)) or (
+                        remote_sync_status == "deleted"
+                    )
 
                     # تحضير البيانات
                     item_data = self._prepare_cloud_data(cloud_item, table_name=table_name)
@@ -1581,6 +1543,17 @@ class UnifiedSyncManagerV3(QObject):
                     filtered = {k: v for k, v in item_data.items() if k in table_columns}
 
                     if local_id:
+                        if not remote_is_deleted:
+                            local_sync_status, local_is_deleted = self._get_local_sync_state(
+                                cursor, table_name, local_id
+                            )
+                            if local_is_deleted or local_sync_status == "deleted":
+                                logger.debug(
+                                    "⏭️ skip resurrecting locally deleted row %s/%s during cloud sync",
+                                    table_name,
+                                    local_id,
+                                )
+                                continue
                         # تحديث السجل فقط عند وجود فرق حقيقي لتقليل الحمل على SQLite والواجهة.
                         if self._should_update_local_record(cursor, table_name, local_id, filtered):
                             self._update_record(cursor, table_name, local_id, filtered)
@@ -1659,16 +1632,21 @@ class UnifiedSyncManagerV3(QObject):
         - Server data is the Single Source of Truth
         """
         try:
+            table_ref = self._sqlite_table_ref(table_name)
+
             # 1. البحث بـ _mongo_id أولاً
-            cursor.execute(f"SELECT id FROM {table_name} WHERE _mongo_id = ?", (mongo_id,))
+            mongo_lookup_sql = f"SELECT id FROM {table_ref} WHERE _mongo_id = ?"  # nosec B608
+            cursor.execute(mongo_lookup_sql, (mongo_id,))
             row = cursor.fetchone()
             if row:
                 return row[0]
 
             # 2. البحث بالحقل الفريد - وتحديث الـ mongo_id
             if unique_value and unique_field in table_columns:
+                unique_field_ref = self._sqlite_column_ref(unique_field, allowed=table_columns)
+                unique_lookup_sql = f"SELECT id, _mongo_id FROM {table_ref} WHERE {unique_field_ref} = ?"  # nosec B608
                 cursor.execute(
-                    f"SELECT id, _mongo_id FROM {table_name} WHERE {unique_field} = ?",
+                    unique_lookup_sql,
                     (unique_value,),
                 )
                 row = cursor.fetchone()
@@ -1699,15 +1677,19 @@ class UnifiedSyncManagerV3(QObject):
                         )
 
                         # Delete the local record
-                        cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (local_id,))
+                        delete_local_sql = f"DELETE FROM {table_ref} WHERE id = ?"  # nosec B608
+                        cursor.execute(delete_local_sql, (local_id,))
 
                         # Return None to signal that a new record should be inserted
                         return None
 
                     # ⚡ إصلاح: تحديث الـ mongo_id إذا كان مختلف (للجداول الأخرى)
                     if existing_mongo_id != mongo_id:
+                        update_mongo_id_sql = (
+                            f"UPDATE {table_ref} SET _mongo_id = ? WHERE id = ?"  # nosec B608
+                        )
                         cursor.execute(
-                            f"UPDATE {table_name} SET _mongo_id = ? WHERE id = ?",
+                            update_mongo_id_sql,
                             (mongo_id, local_id),
                         )
                     return local_id
@@ -1715,6 +1697,20 @@ class UnifiedSyncManagerV3(QObject):
             logger.debug("خطأ في البحث عن السجل: %s", e)
 
         return None
+
+    def _get_local_sync_state(self, cursor, table_name: str, local_id: int) -> tuple[str, bool]:
+        try:
+            table_ref = self._sqlite_table_ref(table_name)
+            state_lookup_sql = (
+                f"SELECT sync_status, is_deleted FROM {table_ref} WHERE id = ?"  # nosec B608
+            )
+            cursor.execute(state_lookup_sql, (local_id,))
+            row = cursor.fetchone()
+            if not row:
+                return "", False
+            return str(row[0] or "").lower(), bool(row[1])
+        except Exception:
+            return "", False
 
     def _delete_orphan_records(self, cursor, table_name: str, valid_mongo_ids: set) -> int:
         """
@@ -1725,7 +1721,11 @@ class UnifiedSyncManagerV3(QObject):
             return 0
 
         # جلب السجلات المحلية التي لها _mongo_id
-        cursor.execute(f"SELECT id, _mongo_id FROM {table_name} WHERE _mongo_id IS NOT NULL")
+        table_ref = self._sqlite_table_ref(table_name)
+        local_records_sql = (
+            f"SELECT id, _mongo_id FROM {table_ref} WHERE _mongo_id IS NOT NULL"  # nosec B608
+        )
+        cursor.execute(local_records_sql)
         local_records = cursor.fetchall()
 
         deleted = 0
@@ -1734,7 +1734,8 @@ class UnifiedSyncManagerV3(QObject):
             local_mongo_id = row[1]
 
             if local_mongo_id and local_mongo_id not in valid_mongo_ids:
-                cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (local_id,))
+                delete_orphan_sql = f"DELETE FROM {table_ref} WHERE id = ?"  # nosec B608
+                cursor.execute(delete_orphan_sql, (local_id,))
                 deleted += 1
                 logger.debug("حذف سجل يتيم: %s/%s", table_name, local_id)
 
@@ -1862,14 +1863,20 @@ class UnifiedSyncManagerV3(QObject):
         if not data:
             return
 
-        set_clause = ", ".join([f"{k}=?" for k in data.keys()])
+        table_ref = self._sqlite_table_ref(table_name)
+        table_columns = self._sqlite_table_columns(cursor, table_name)
+        set_clause = self._sqlite_set_clause_sql(list(data.keys()), table_columns=table_columns)
         values = list(data.values()) + [local_id]
-        cursor.execute(f"UPDATE {table_name} SET {set_clause} WHERE id=?", values)
+        update_sql = f"UPDATE {table_ref} SET {set_clause} WHERE id = ?"  # nosec B608
+        cursor.execute(update_sql, values)
 
     def _insert_record(self, cursor, table_name: str, data: dict):
         """إدراج سجل جديد مع التعامل مع التكرارات"""
         if not data:
             return
+
+        table_ref = self._sqlite_table_ref(table_name)
+        table_columns = self._sqlite_table_columns(cursor, table_name)
 
         # ⚡ معالجة خاصة للدفعات - فحص التكرار بـ (project_id + date + amount)
         if table_name == "payments":
@@ -1953,13 +1960,14 @@ class UnifiedSyncManagerV3(QObject):
                 except Exception:
                     pass
 
-        columns = ", ".join(data.keys())
+        columns = self._sqlite_column_list_sql(list(data.keys()), table_columns=table_columns)
         placeholders = ", ".join(["?" for _ in data])
 
         try:
-            cursor.execute(
-                f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})", list(data.values())
+            insert_sql = (
+                f"INSERT INTO {table_ref} ({columns}) VALUES ({placeholders})"  # nosec B608
             )
+            cursor.execute(insert_sql, list(data.values()))
         except Exception as e:
             # في حالة UNIQUE constraint - نحاول التحديث بدلاً من الإدراج
             if "UNIQUE constraint" in str(e):
@@ -1970,10 +1978,14 @@ class UnifiedSyncManagerV3(QObject):
 
                 if unique_value:
                     try:
-                        # تحديث السجل الموجود
-                        cursor.execute(
-                            f"SELECT id FROM {table_name} WHERE {unique_field} = ?", (unique_value,)
+                        unique_field_ref = self._sqlite_column_ref(
+                            unique_field, allowed=table_columns
                         )
+                        duplicate_lookup_sql = (
+                            f"SELECT id FROM {table_ref} WHERE {unique_field_ref} = ?"  # nosec B608
+                        )
+                        # تحديث السجل الموجود
+                        cursor.execute(duplicate_lookup_sql, (unique_value,))
                         row = cursor.fetchone()
                         if row:
                             self._update_record(cursor, table_name, row[0], data)
@@ -1985,9 +1997,10 @@ class UnifiedSyncManagerV3(QObject):
                 # محاولة البحث بـ mongo_id
                 if mongo_id:
                     try:
-                        cursor.execute(
-                            f"SELECT id FROM {table_name} WHERE _mongo_id = ?", (mongo_id,)
+                        mongo_lookup_sql = (
+                            f"SELECT id FROM {table_ref} WHERE _mongo_id = ?"  # nosec B608
                         )
+                        cursor.execute(mongo_lookup_sql, (mongo_id,))
                         row = cursor.fetchone()
                         if row:
                             self._update_record(cursor, table_name, row[0], data)
@@ -2016,223 +2029,25 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         logger.info("📤 جاري رفع التغييرات المحلية...")
-
-        for table in self.TABLES:
-            try:
-                self._push_table_changes(table)
-            except Exception as e:
-                logger.error("❌ خطأ في رفع %s: %s", table, e)
+        try:
+            self.push_local_changes()
+        except Exception as e:
+            logger.error("❌ خطأ في رفع التغييرات المحلية: %s", e)
 
     def _push_table_changes(self, table_name: str):
         """رفع تغييرات جدول واحد"""
-        # ⚡ فحص الاتصال قبل استخدام MongoDB
-        if self._shutdown:
-            return
-
-        if self.repo is None or not self.repo.online:
-            return
-
-        if self.repo.mongo_db is None or self.repo.mongo_client is None:
-            logger.debug("تم تخطي رفع %s - MongoDB client غير متاح", table_name)
-            return
-
-        # ⚡ إنشاء cursor جديد لتجنب Recursive cursor error
         try:
-            cursor = self.repo.get_cursor()
+            if self._shutdown:
+                return
+            if self.repo is None or not self.repo.online:
+                return
+            if self.repo.mongo_db is None or self.repo.mongo_client is None:
+                logger.debug("تم تخطي رفع %s - MongoDB client غير متاح", table_name)
+                return
+
+            self.push_local_changes({table_name})
         except Exception as e:
-            logger.debug("فشل إنشاء cursor: %s", e)
-            return
-
-        conn = self.repo.sqlite_conn
-        unique_field = self.UNIQUE_FIELDS.get(table_name, "name")
-
-        try:
-            # جلب السجلات غير المتزامنة
-            cursor.execute(
-                f"""
-                SELECT * FROM {table_name}
-                WHERE sync_status != 'synced' OR sync_status IS NULL
-            """
-            )
-            unsynced = cursor.fetchall()
-        except Exception as e:
-            logger.debug("فشل جلب السجلات غير المتزامنة: %s", e)
-            cursor.close()
-            return
-
-        if not unsynced:
-            cursor.close()
-            return
-
-        try:
-            collection = self.repo.mongo_db[table_name]
-        except Exception as e:
-            if "Cannot use MongoClient after close" in str(e):
-                logger.warning("⚠️ MongoDB client مغلق - تخطي رفع %s", table_name)
-            cursor.close()
-            return
-
-        pushed = 0
-
-        try:
-            for row in unsynced:
-                row_dict = dict(row)
-                local_id = row_dict.get("id")
-                mongo_id = row_dict.get("_mongo_id")
-                unique_value = row_dict.get(unique_field)
-                sync_status = row_dict.get("sync_status")
-
-                if sync_status == "deleted":
-                    try:
-                        if mongo_id:
-                            from bson import ObjectId
-
-                            collection.delete_one({"_id": ObjectId(mongo_id)})
-                        elif unique_value:
-                            collection.delete_one({unique_field: unique_value})
-                        cursor.execute(
-                            f"DELETE FROM {table_name} WHERE id = ?",
-                            (local_id,),
-                        )
-                        pushed += 1
-                    except Exception as e:
-                        logger.error("❌ فشل حذف %s/%s: %s", table_name, local_id, e)
-                    continue
-
-                cloud_data = self._prepare_data_for_cloud(row_dict)
-
-                try:
-                    if mongo_id:
-                        from bson import ObjectId
-
-                        collection.update_one({"_id": ObjectId(mongo_id)}, {"$set": cloud_data})
-                    else:
-                        # ⚡ فحص التكرار قبل الإدراج - معالجة خاصة للدفعات
-                        existing = None
-
-                        if table_name == "payments":
-                            # البحث بـ (project_id + date + amount)
-                            project_id = row_dict.get("project_id")
-                            date = row_dict.get("date", "")
-                            amount = row_dict.get("amount", 0)
-                            date_short = str(date)[:10] if date else ""
-
-                            if project_id and amount:
-                                existing = collection.find_one(
-                                    {
-                                        "project_id": project_id,
-                                        "amount": amount,
-                                        "date": {"$regex": f"^{date_short}"},
-                                    }
-                                )
-                        elif table_name == "expenses":
-                            project_id = str(row_dict.get("project_id") or "").strip()
-                            date_short = str(row_dict.get("date", "") or "")[:10]
-                            try:
-                                amount = round(float(row_dict.get("amount", 0) or 0.0), 2)
-                            except (TypeError, ValueError):
-                                amount = 0.0
-                            amount_min = amount - 0.01
-                            amount_max = amount + 0.01
-                            account_id = str(row_dict.get("account_id") or "").strip()
-                            payment_account_id = str(
-                                row_dict.get("payment_account_id") or account_id
-                            ).strip()
-                            category_norm = (
-                                " ".join(str(row_dict.get("category", "") or "").split())
-                                .strip()
-                                .casefold()
-                            )
-                            description_norm = (
-                                " ".join(str(row_dict.get("description", "") or "").split())
-                                .strip()
-                                .casefold()
-                            )
-
-                            if project_id and amount:
-                                try:
-                                    remote_candidates = list(
-                                        collection.find(
-                                            {
-                                                "project_id": project_id,
-                                                "amount": {"$gte": amount_min, "$lte": amount_max},
-                                                "account_id": account_id,
-                                                "payment_account_id": payment_account_id,
-                                            }
-                                        )
-                                    )
-                                except Exception:
-                                    remote_candidates = []
-
-                                for candidate in remote_candidates:
-                                    candidate_date_short = str(candidate.get("date", "") or "")[:10]
-                                    if candidate_date_short != date_short:
-                                        continue
-
-                                    candidate_category = (
-                                        " ".join(str(candidate.get("category", "") or "").split())
-                                        .strip()
-                                        .casefold()
-                                    )
-                                    candidate_description = (
-                                        " ".join(
-                                            str(candidate.get("description", "") or "").split()
-                                        )
-                                        .strip()
-                                        .casefold()
-                                    )
-
-                                    if (
-                                        candidate_category == category_norm
-                                        and candidate_description == description_norm
-                                    ):
-                                        existing = candidate
-                                        break
-                        elif unique_value:
-                            existing = collection.find_one({unique_field: unique_value})
-
-                        if existing:
-                            # ربط بالسجل الموجود
-                            mongo_id = str(existing["_id"])
-                            collection.update_one({"_id": existing["_id"]}, {"$set": cloud_data})
-                        else:
-                            # إدراج جديد
-                            result = collection.insert_one(cloud_data)
-                            mongo_id = str(result.inserted_id)
-
-                    # تحديث السجل المحلي
-                    cursor.execute(
-                        f"UPDATE {table_name} SET _mongo_id = ?, sync_status = 'synced' WHERE id = ?",
-                        (mongo_id, local_id),
-                    )
-                    pushed += 1
-
-                except Exception as e:
-                    # ⚡ تجاهل أخطاء التكرار
-                    if "duplicate key" in str(e).lower() or "E11000" in str(e):
-                        logger.debug("تجاهل سجل مكرر في %s: %s", table_name, e)
-                        # تحديث حالة المزامنة على أي حال
-                        cursor.execute(
-                            f"UPDATE {table_name} SET sync_status = 'synced' WHERE id = ?",
-                            (local_id,),
-                        )
-                    else:
-                        logger.error("❌ فشل رفع %s/%s: %s", table_name, local_id, e)
-
-            try:
-                conn.commit()
-            except Exception:
-                pass
-
-            if pushed > 0:
-                logger.info("📤 %s: رفع %s سجل", table_name, pushed)
-
-        finally:
-            # ⚡ إغلاق الـ cursor
-            try:
-                cursor.close()
-            except Exception:
-                pass
+            logger.error("❌ خطأ في رفع %s: %s", table_name, e)
 
     def _prepare_data_for_cloud(self, data: dict) -> dict:
         """تحضير البيانات للرفع للسحابة"""
@@ -2470,17 +2285,13 @@ class UnifiedSyncManagerV3(QObject):
             for table in tables:
                 try:
                     unique_field = self.UNIQUE_FIELDS.get(table, "name")
+                    table_ref = self._sqlite_table_ref(table)
+                    table_columns = self._sqlite_table_columns(cursor, table)
+                    unique_field_ref = self._sqlite_column_ref(unique_field, allowed=table_columns)
 
                     # البحث عن التكرارات
-                    cursor.execute(
-                        f"""
-                        SELECT {unique_field}, COUNT(*) as cnt, MIN(id) as keep_id
-                        FROM {table}
-                        WHERE {unique_field} IS NOT NULL
-                        GROUP BY {unique_field}
-                        HAVING cnt > 1
-                    """
-                    )
+                    duplicates_sql = f"SELECT {unique_field_ref}, COUNT(*) as cnt, MIN(id) as keep_id FROM {table_ref} WHERE {unique_field_ref} IS NOT NULL GROUP BY {unique_field_ref} HAVING cnt > 1"  # nosec B608
+                    cursor.execute(duplicates_sql)
                     duplicates = cursor.fetchall()
 
                     deleted = 0
@@ -2489,13 +2300,8 @@ class UnifiedSyncManagerV3(QObject):
                         keep_id = dup[2]
 
                         # حذف التكرارات (الاحتفاظ بالأقدم)
-                        cursor.execute(
-                            f"""
-                            DELETE FROM {table}
-                            WHERE {unique_field} = ? AND id != ?
-                        """,
-                            (unique_value, keep_id),
-                        )
+                        delete_duplicates_sql = f"DELETE FROM {table_ref} WHERE {unique_field_ref} = ? AND id != ?"  # nosec B608
+                        cursor.execute(delete_duplicates_sql, (unique_value, keep_id))
                         deleted += cursor.rowcount
 
                     conn.commit()
@@ -2531,7 +2337,9 @@ class UnifiedSyncManagerV3(QObject):
             # حذف البيانات المحلية (ما عدا المستخدمين)
             for table in self.TABLES:
                 try:
-                    cursor.execute(f"DELETE FROM {table}")
+                    table_ref = self._sqlite_table_ref(table)
+                    delete_table_sql = f"DELETE FROM {table_ref}"  # nosec B608
+                    cursor.execute(delete_table_sql)
                     logger.info("🗑️ تم مسح %s", table)
                 except Exception as e:
                     logger.error("❌ خطأ في مسح %s: %s", table, e)
@@ -2621,15 +2429,13 @@ class UnifiedSyncManagerV3(QObject):
         try:
             for table in self.TABLES:
                 try:
-                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    table_ref = self._sqlite_table_ref(table)
+                    total_count_sql = f"SELECT COUNT(*) FROM {table_ref}"  # nosec B608
+                    cursor.execute(total_count_sql)
                     total = cursor.fetchone()[0]
 
-                    cursor.execute(
-                        f"""
-                        SELECT COUNT(*) FROM {table}
-                        WHERE sync_status != 'synced' OR sync_status IS NULL
-                    """
-                    )
+                    pending_count_sql = f"SELECT COUNT(*) FROM {table_ref} WHERE sync_status != 'synced' OR sync_status IS NULL"  # nosec B608
+                    cursor.execute(pending_count_sql)
                     pending = cursor.fetchone()[0]
 
                     status["tables"][table] = {
@@ -2830,23 +2636,15 @@ class UnifiedSyncManagerV3(QObject):
                 try:
                     before_pushed = results["pushed"]
                     before_deleted = results["deleted"]
+                    table_ref = self._sqlite_table_ref(table)
                     # التحقق من وجود الجدول
                     if not self._sqlite_table_exists(cursor, table):
                         continue
 
                     # جلب كل السجلات المحلية غير المتزامنة
                     # ملاحظة: بعض العمليات تضبط sync_status فقط بدون dirty_flag.
-                    cursor.execute(
-                        f"""
-                        SELECT * FROM {table}
-                        WHERE dirty_flag = 1
-                           OR sync_status IS NULL
-                           OR sync_status IN ('new_offline', 'modified_offline', 'pending', 'deleted')
-                           OR _mongo_id IS NULL
-                        LIMIT ?
-                    """,
-                        (self._delta_push_batch_limit,),
-                    )
+                    dirty_records_sql = f"SELECT * FROM {table_ref} WHERE dirty_flag = 1 OR sync_status IS NULL OR sync_status IN ('new_offline', 'modified_offline', 'pending', 'deleted') OR _mongo_id IS NULL LIMIT ?"  # nosec B608
+                    cursor.execute(dirty_records_sql, (self._delta_push_batch_limit,))
                     dirty_records = cursor.fetchall()
 
                     if not dirty_records:
@@ -2932,7 +2730,10 @@ class UnifiedSyncManagerV3(QObject):
                                     continue
 
                                 # حذف محلياً بعد نجاح التعليم أو عدم وجود سجل في السحابة
-                                cursor.execute(f"DELETE FROM {table} WHERE id = ?", (local_id,))
+                                delete_local_sql = (
+                                    f"DELETE FROM {table_ref} WHERE id = ?"  # nosec B608
+                                )
+                                cursor.execute(delete_local_sql, (local_id,))
                                 results["deleted"] += 1
                             else:
                                 # Upsert إلى MongoDB
@@ -2961,30 +2762,16 @@ class UnifiedSyncManagerV3(QObject):
                                 else:
                                     result = collection.insert_one(clean_record)
                                     mongo_id = str(result.inserted_id)
-                                    cursor.execute(
-                                        f"UPDATE {table} SET _mongo_id = ? WHERE id = ?",
-                                        (mongo_id, local_id),
-                                    )
+                                    set_mongo_id_sql = f"UPDATE {table_ref} SET _mongo_id = ? WHERE id = ?"  # nosec B608
+                                    cursor.execute(set_mongo_id_sql, (mongo_id, local_id))
 
                                 # تحديث dirty_flag و sync_status
                                 if "last_modified" in columns:
-                                    cursor.execute(
-                                        f"""
-                                        UPDATE {table}
-                                        SET dirty_flag = 0, sync_status = 'synced', last_modified = ?
-                                        WHERE id = ?
-                                    """,
-                                        (server_now_iso, local_id),
-                                    )
+                                    mark_synced_sql = f"UPDATE {table_ref} SET dirty_flag = 0, sync_status = 'synced', last_modified = ? WHERE id = ?"  # nosec B608
+                                    cursor.execute(mark_synced_sql, (server_now_iso, local_id))
                                 else:
-                                    cursor.execute(
-                                        f"""
-                                        UPDATE {table}
-                                        SET dirty_flag = 0, sync_status = 'synced'
-                                        WHERE id = ?
-                                    """,
-                                        (local_id,),
-                                    )
+                                    mark_synced_sql = f"UPDATE {table_ref} SET dirty_flag = 0, sync_status = 'synced' WHERE id = ?"  # nosec B608
+                                    cursor.execute(mark_synced_sql, (local_id,))
                                 results["pushed"] += 1
 
                         except Exception as e:
@@ -3088,6 +2875,7 @@ class UnifiedSyncManagerV3(QObject):
 
                     # الحصول على أعمدة الجدول
                     table_columns = self._sqlite_table_columns(cursor, table)
+                    table_ref = self._sqlite_table_ref(table)
 
                     logo_clients = 0
 
@@ -3100,22 +2888,31 @@ class UnifiedSyncManagerV3(QObject):
                             )
 
                             # البحث عن السجل المحلي
-                            cursor.execute(
-                                f"SELECT id, last_modified FROM {table} WHERE _mongo_id = ?",
-                                (mongo_id,),
-                            )
+                            local_lookup_sql = f"SELECT id, last_modified, sync_status, is_deleted FROM {table_ref} WHERE _mongo_id = ?"  # nosec B608
+                            cursor.execute(local_lookup_sql, (mongo_id,))
                             local_row = cursor.fetchone()
                             local_id = local_row[0] if local_row else None
                             local_last_modified = (
                                 self._to_iso_timestamp(local_row[1]) if local_row else ""
                             )
+                            local_sync_status = str(local_row[2] or "").lower() if local_row else ""
+                            local_is_deleted = bool(local_row[3]) if local_row else False
 
                             if is_deleted:
                                 # حذف من MongoDB -> حذف محلياً
                                 if local_id:
-                                    cursor.execute(f"DELETE FROM {table} WHERE id = ?", (local_id,))
+                                    delete_local_sql = (
+                                        f"DELETE FROM {table_ref} WHERE id = ?"  # nosec B608
+                                    )
+                                    cursor.execute(delete_local_sql, (local_id,))
                                     results["deleted"] += 1
                             else:
+                                # لا نعيد إحياء صف محلي محذوف قبل أن تُدفَع حذفه إلى السحابة.
+                                if local_id and (
+                                    local_is_deleted or local_sync_status == "deleted"
+                                ):
+                                    continue
+
                                 # تحضير البيانات
                                 item_data = self._prepare_cloud_data(remote, table_name=table)
                                 if item_data.pop("__skip_sync__", False):
@@ -3149,19 +2946,20 @@ class UnifiedSyncManagerV3(QObject):
 
                                 if local_id:
                                     # تحديث السجل الموجود
-                                    set_clause = ", ".join([f"{k} = ?" for k in filtered.keys()])
-                                    values = list(filtered.values()) + [local_id]
-                                    cursor.execute(
-                                        f"UPDATE {table} SET {set_clause} WHERE id = ?", values
+                                    set_clause = self._sqlite_set_clause_sql(
+                                        list(filtered.keys()), table_columns=table_columns
                                     )
+                                    values = list(filtered.values()) + [local_id]
+                                    update_local_sql = f"UPDATE {table_ref} SET {set_clause} WHERE id = ?"  # nosec B608
+                                    cursor.execute(update_local_sql, values)
                                 else:
                                     # إدراج سجل جديد
-                                    cols = ", ".join(filtered.keys())
-                                    placeholders = ", ".join(["?" for _ in filtered])
-                                    cursor.execute(
-                                        f"INSERT INTO {table} ({cols}) VALUES ({placeholders})",
-                                        list(filtered.values()),
+                                    cols = self._sqlite_column_list_sql(
+                                        list(filtered.keys()), table_columns=table_columns
                                     )
+                                    placeholders = ", ".join(["?" for _ in filtered])
+                                    insert_local_sql = f"INSERT INTO {table_ref} ({cols}) VALUES ({placeholders})"  # nosec B608
+                                    cursor.execute(insert_local_sql, list(filtered.values()))
                                 results["pulled"] += 1
 
                         except Exception as e:

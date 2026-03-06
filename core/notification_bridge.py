@@ -124,9 +124,9 @@ class NotificationBridge(QObject):
 
             # إرسال الإشعار
             if action == "deleted":
-                notify_warning(message, title, entity_type=entity_type, action=action)
+                notify_warning(message, title, sync=False, entity_type=entity_type, action=action)
             else:
-                notify_success(message, title, entity_type=entity_type, action=action)
+                notify_success(message, title, sync=False, entity_type=entity_type, action=action)
 
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
@@ -175,4 +175,28 @@ def notify_operation(action: str, entity_type: str, entity_name: str):
         notify_operation('paid', 'payment', '5000 ج.م')
         notify_operation('deleted', 'client', 'أحمد محمد')
     """
+    # Primary path: signal-based bridge (keeps existing sync behavior).
     app_signals.emit_operation(action, entity_type, entity_name)
+
+    # Fallback: if bridge wasn't connected for any reason, still show local toast.
+    if NotificationBridge._connected:
+        return
+
+    try:
+        if QApplication.instance() is None:
+            return
+
+        from ui.notification_system import notify_success, notify_warning
+
+        action_text = NotificationBridge.ACTION_NAMES.get(action, action)
+        entity_text = NotificationBridge.ENTITY_NAMES.get(entity_type, entity_type)
+        icon = NotificationBridge.ACTION_ICONS.get(action, "📌")
+
+        message = f"{entity_name}"
+        title = f"{icon} {action_text} {entity_text}"
+        if action == "deleted":
+            notify_warning(message, title, sync=False, entity_type=entity_type, action=action)
+        else:
+            notify_success(message, title, sync=False, entity_type=entity_type, action=action)
+    except Exception as e:
+        safe_print(f"ERROR: [NotificationBridge] Fallback notify failed: {e}")

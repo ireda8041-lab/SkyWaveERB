@@ -38,6 +38,8 @@ except ImportError:
     PYMONGO_AVAILABLE = False
 
 from . import schemas
+from .sqlite_identifiers import quote_identifier
+from .text_utils import normalize_user_text
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -205,6 +207,17 @@ class Repository:
     - MongoDB للمزامنة (في background)
     """
 
+    _PROJECT_KEY_TRANSLATION = str.maketrans(
+        {
+            "أ": "ا",
+            "إ": "ا",
+            "آ": "ا",
+            "ى": "ي",
+            "ؤ": "و",
+            "ئ": "ي",
+        }
+    )
+
     def __init__(self):
         self.online = False
         self.mongo_client = None
@@ -326,6 +339,379 @@ class Repository:
                 if "sqlite_closed" not in str(e).lower():
                     safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
                 raise
+
+    def _table_exists(self, table_name: str) -> bool:
+        if not table_name or self.sqlite_conn is None:
+            return False
+        try:
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+                        (table_name,),
+                    )
+                    return cursor.fetchone() is not None
+                finally:
+                    cursor.close()
+        except Exception:
+            return False
+
+    def _table_sql(self, table_name: str) -> str:
+        if not table_name or self.sqlite_conn is None:
+            return ""
+        try:
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+                        (table_name,),
+                    )
+                    row = cursor.fetchone()
+                    return str(row[0] or "") if row else ""
+                finally:
+                    cursor.close()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _quote_sqlite_identifier(identifier: str, *, allowed: set[str] | None = None) -> str:
+        return quote_identifier(identifier, allowed=allowed)
+
+    def _migrate_projects_table_remove_global_name_unique(self) -> None:
+        table_sql = self._table_sql("projects").lower()
+        if "name text not null unique" not in table_sql:
+            return
+
+        safe_print("INFO: [Repository] إصلاح قيد UNIQUE القديم على projects.name ...")
+        self.sqlite_cursor.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.sqlite_cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS projects_migrated (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    _mongo_id TEXT,
+                    sync_status TEXT NOT NULL DEFAULT 'new_offline',
+                    created_at TEXT NOT NULL,
+                    last_modified TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    client_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    status_manually_set INTEGER DEFAULT 0,
+                    description TEXT,
+                    start_date TEXT,
+                    end_date TEXT,
+                    items TEXT,
+                    subtotal REAL DEFAULT 0.0,
+                    discount_rate REAL DEFAULT 0.0,
+                    discount_amount REAL DEFAULT 0.0,
+                    tax_rate REAL DEFAULT 0.0,
+                    tax_amount REAL DEFAULT 0.0,
+                    total_amount REAL DEFAULT 0.0,
+                    currency TEXT,
+                    project_notes TEXT,
+                    invoice_number TEXT,
+                    project_code TEXT,
+                    sequence_number INTEGER DEFAULT 0,
+                    cost_center_id TEXT,
+                    contract_type TEXT DEFAULT 'مرة واحدة',
+                    is_retainer INTEGER DEFAULT 0,
+                    renewal_cycle TEXT,
+                    next_renewal_date TEXT,
+                    milestones TEXT,
+                    total_estimated_cost REAL DEFAULT 0.0,
+                    estimated_profit REAL DEFAULT 0.0,
+                    profit_margin REAL DEFAULT 0.0,
+                    project_manager_id TEXT
+                )
+                """
+            )
+            self.sqlite_cursor.execute(
+                """
+                INSERT INTO projects_migrated (
+                    id, _mongo_id, sync_status, created_at, last_modified, name, client_id,
+                    status, status_manually_set, description, start_date, end_date, items,
+                    subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
+                    total_amount, currency, project_notes, invoice_number, project_code,
+                    sequence_number, cost_center_id, contract_type, is_retainer,
+                    renewal_cycle, next_renewal_date, milestones, total_estimated_cost,
+                    estimated_profit, profit_margin, project_manager_id
+                )
+                SELECT
+                    id, _mongo_id, sync_status, created_at, last_modified, name, client_id,
+                    status, status_manually_set, description, start_date, end_date, items,
+                    subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
+                    total_amount, currency, project_notes, invoice_number, project_code,
+                    sequence_number, cost_center_id, contract_type, is_retainer,
+                    renewal_cycle, next_renewal_date, milestones, total_estimated_cost,
+                    estimated_profit, profit_margin, project_manager_id
+                FROM projects
+                """
+            )
+            self.sqlite_cursor.execute("DROP TABLE projects")
+            self.sqlite_cursor.execute("ALTER TABLE projects_migrated RENAME TO projects")
+            self.sqlite_conn.commit()
+        finally:
+            self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
+
+    def _migrate_project_reference_tables_remove_name_foreign_keys(self) -> None:
+        tasks_sql = self._table_sql("tasks").lower()
+        milestones_sql = self._table_sql("project_milestones").lower()
+
+        needs_tasks_migration = "references projects(name)" in tasks_sql
+        needs_milestones_migration = "references projects(name)" in milestones_sql
+
+        if not needs_tasks_migration and not needs_milestones_migration:
+            return
+
+        safe_print("INFO: [Repository] إصلاح Foreign Keys القديمة المرتبطة بـ projects(name) ...")
+        self.sqlite_cursor.execute("PRAGMA foreign_keys=OFF")
+        try:
+            if needs_tasks_migration:
+                self.sqlite_cursor.execute("DROP TABLE IF EXISTS tasks_migrated")
+                self.sqlite_cursor.execute(
+                    """
+                    CREATE TABLE tasks_migrated (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        _mongo_id TEXT,
+                        sync_status TEXT NOT NULL DEFAULT 'new_offline',
+                        created_at TEXT NOT NULL,
+                        last_modified TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT,
+                        priority TEXT NOT NULL DEFAULT 'MEDIUM',
+                        status TEXT NOT NULL DEFAULT 'TODO',
+                        category TEXT NOT NULL DEFAULT 'GENERAL',
+                        due_date TEXT,
+                        due_time TEXT,
+                        completed_at TEXT,
+                        related_project_id TEXT,
+                        related_client_id TEXT,
+                        tags TEXT,
+                        reminder INTEGER DEFAULT 0,
+                        reminder_minutes INTEGER DEFAULT 30,
+                        assigned_to TEXT,
+                        is_archived INTEGER DEFAULT 0,
+                        is_deleted INTEGER DEFAULT 0,
+                        dirty_flag INTEGER DEFAULT 0,
+                        FOREIGN KEY (related_client_id) REFERENCES clients(id)
+                    )
+                    """
+                )
+                self.sqlite_cursor.execute(
+                    """
+                    INSERT INTO tasks_migrated (
+                        id, _mongo_id, sync_status, created_at, last_modified,
+                        title, description, priority, status, category,
+                        due_date, due_time, completed_at, related_project_id,
+                        related_client_id, tags, reminder, reminder_minutes,
+                        assigned_to, is_archived, is_deleted, dirty_flag
+                    )
+                    SELECT
+                        id, _mongo_id, sync_status, created_at, last_modified,
+                        title, description, priority, status, category,
+                        due_date, due_time, completed_at, related_project_id,
+                        related_client_id, tags, reminder, reminder_minutes,
+                        assigned_to, is_archived, is_deleted, dirty_flag
+                    FROM tasks
+                    """
+                )
+                self.sqlite_cursor.execute("DROP TABLE tasks")
+                self.sqlite_cursor.execute("ALTER TABLE tasks_migrated RENAME TO tasks")
+
+            if needs_milestones_migration:
+                self.sqlite_cursor.execute("DROP TABLE IF EXISTS project_milestones_migrated")
+                self.sqlite_cursor.execute(
+                    """
+                    CREATE TABLE project_milestones_migrated (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        percentage REAL DEFAULT 0.0,
+                        amount REAL DEFAULT 0.0,
+                        due_date TEXT,
+                        status TEXT DEFAULT 'قيد الانتظار',
+                        invoice_id TEXT,
+                        paid_date TEXT,
+                        notes TEXT,
+                        created_at TEXT NOT NULL
+                    )
+                    """
+                )
+                self.sqlite_cursor.execute(
+                    """
+                    INSERT INTO project_milestones_migrated (
+                        id, project_id, name, percentage, amount, due_date,
+                        status, invoice_id, paid_date, notes, created_at
+                    )
+                    SELECT
+                        id, project_id, name, percentage, amount, due_date,
+                        status, invoice_id, paid_date, notes, created_at
+                    FROM project_milestones
+                    """
+                )
+                self.sqlite_cursor.execute("DROP TABLE project_milestones")
+                self.sqlite_cursor.execute(
+                    "ALTER TABLE project_milestones_migrated RENAME TO project_milestones"
+                )
+
+            self.sqlite_conn.commit()
+        finally:
+            self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
+
+    def _migrate_invoice_numbers_table_use_project_ids(self) -> None:
+        table_sql = self._table_sql("invoice_numbers").lower()
+        if not table_sql:
+            return
+
+        has_project_id = "project_id" in table_sql
+        uses_legacy_name_unique = "project_name text not null unique" in table_sql
+        if has_project_id and not uses_legacy_name_unique:
+            return
+
+        safe_print("INFO: [Repository] إصلاح جدول invoice_numbers ليرتبط بـ project_id ...")
+        self.sqlite_cursor.execute("PRAGMA foreign_keys=OFF")
+        try:
+            self.sqlite_cursor.execute("DROP TABLE IF EXISTS invoice_numbers_migrated")
+            self.sqlite_cursor.execute(
+                """
+                CREATE TABLE invoice_numbers_migrated (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id TEXT UNIQUE,
+                    project_name TEXT NOT NULL,
+                    invoice_number TEXT NOT NULL UNIQUE,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+
+            self.sqlite_cursor.execute(
+                "SELECT id, project_name, invoice_number, created_at FROM invoice_numbers ORDER BY id"
+            )
+            legacy_rows = self.sqlite_cursor.fetchall()
+
+            for row in legacy_rows:
+                legacy_id = row[0]
+                project_name = str(row[1] or "").strip()
+                invoice_number = str(row[2] or "").strip()
+                created_at = str(row[3] or datetime.now().isoformat())
+                resolved_project_id = None
+                resolved_project_name = project_name
+
+                self.sqlite_cursor.execute(
+                    "SELECT id, name FROM projects WHERE invoice_number = ? ORDER BY id LIMIT 1",
+                    (invoice_number,),
+                )
+                matched_project = self.sqlite_cursor.fetchone()
+                if not matched_project and project_name:
+                    self.sqlite_cursor.execute(
+                        "SELECT id, name FROM projects WHERE name = ? ORDER BY id LIMIT 1",
+                        (project_name,),
+                    )
+                    matched_project = self.sqlite_cursor.fetchone()
+
+                if matched_project:
+                    resolved_project_id = str(matched_project[0])
+                    resolved_project_name = str(matched_project[1] or project_name)
+
+                self.sqlite_cursor.execute(
+                    """
+                    INSERT INTO invoice_numbers_migrated (
+                        id, project_id, project_name, invoice_number, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        legacy_id,
+                        resolved_project_id,
+                        resolved_project_name,
+                        invoice_number,
+                        created_at,
+                    ),
+                )
+
+            self.sqlite_cursor.execute(
+                """
+                SELECT invoice_number
+                FROM projects
+                WHERE invoice_number IS NOT NULL AND invoice_number != ''
+                GROUP BY invoice_number
+                HAVING COUNT(*) > 1
+                """
+            )
+            duplicate_invoice_rows = self.sqlite_cursor.fetchall()
+            for duplicate_row in duplicate_invoice_rows:
+                duplicate_invoice = str(duplicate_row[0] or "").strip()
+                if not duplicate_invoice:
+                    continue
+                self.sqlite_cursor.execute(
+                    "SELECT id FROM projects WHERE invoice_number = ? ORDER BY id",
+                    (duplicate_invoice,),
+                )
+                duplicate_project_rows = self.sqlite_cursor.fetchall()
+                for duplicate_project in duplicate_project_rows[1:]:
+                    self.sqlite_cursor.execute(
+                        "UPDATE projects SET invoice_number = '' WHERE id = ?",
+                        (duplicate_project[0],),
+                    )
+
+            self.sqlite_cursor.execute(
+                """
+                SELECT id, name, invoice_number, created_at
+                FROM projects
+                WHERE invoice_number IS NOT NULL AND invoice_number != ''
+                ORDER BY id
+                """
+            )
+            project_rows = self.sqlite_cursor.fetchall()
+            for project_row in project_rows:
+                project_id = str(project_row[0])
+                project_name = str(project_row[1] or "").strip()
+                invoice_number = str(project_row[2] or "").strip()
+                created_at = str(project_row[3] or datetime.now().isoformat())
+                if not invoice_number:
+                    continue
+
+                self.sqlite_cursor.execute(
+                    "SELECT invoice_number FROM invoice_numbers_migrated WHERE project_id = ?",
+                    (project_id,),
+                )
+                existing_by_project = self.sqlite_cursor.fetchone()
+                if existing_by_project:
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE invoice_numbers_migrated
+                        SET project_name = ?, invoice_number = ?
+                        WHERE project_id = ?
+                        """,
+                        (project_name, invoice_number, project_id),
+                    )
+                    continue
+
+                self.sqlite_cursor.execute(
+                    "SELECT project_id FROM invoice_numbers_migrated WHERE invoice_number = ?",
+                    (invoice_number,),
+                )
+                existing_by_invoice = self.sqlite_cursor.fetchone()
+                if existing_by_invoice:
+                    continue
+
+                self.sqlite_cursor.execute(
+                    """
+                    INSERT INTO invoice_numbers_migrated (
+                        project_id, project_name, invoice_number, created_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (project_id, project_name, invoice_number, created_at),
+                )
+
+            self.sqlite_cursor.execute("DROP TABLE invoice_numbers")
+            self.sqlite_cursor.execute(
+                "ALTER TABLE invoice_numbers_migrated RENAME TO invoice_numbers"
+            )
+            self.sqlite_conn.commit()
+        finally:
+            self.sqlite_cursor.execute("PRAGMA foreign_keys=ON")
 
     def invalidate_table_cache(self, table_name: str | None = None) -> None:
         """Invalidate repository caches for one table (or all tables when not provided)."""
@@ -634,8 +1020,7 @@ class Repository:
             invoice_id TEXT,
             paid_date TEXT,
             notes TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (project_id) REFERENCES projects(name)
+            created_at TEXT NOT NULL
         )
         """
         )
@@ -647,73 +1032,48 @@ class Repository:
             """
         CREATE TABLE IF NOT EXISTS invoice_numbers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_name TEXT NOT NULL UNIQUE,
+            project_id TEXT UNIQUE,
+            project_name TEXT NOT NULL,
             invoice_number TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL
         )
         """
         )
         self.sqlite_conn.commit()
+        self._migrate_invoice_numbers_table_use_project_ids()
 
         # ⚡ Migration: توليد أرقام فواتير للمشاريع القديمة اللي مش عندها invoice_number
-        try:
-            # جلب المشاريع اللي مش عندها رقم فاتورة
-            self.sqlite_cursor.execute(
+        if self._table_exists("projects") and self._table_exists("invoice_numbers"):
+            try:
+                # جلب المشاريع اللي مش عندها رقم فاتورة
+                self.sqlite_cursor.execute(
+                    """
+                    SELECT p.id, p.name FROM projects p
+                    WHERE p.invoice_number IS NULL OR p.invoice_number = ''
                 """
-                SELECT p.id, p.name FROM projects p
-                WHERE p.invoice_number IS NULL OR p.invoice_number = ''
-            """
-            )
-            projects_without_invoice = self.sqlite_cursor.fetchall()
-
-            if projects_without_invoice:
-                safe_print(
-                    f"INFO: [Repository] توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع..."
                 )
+                projects_without_invoice = self.sqlite_cursor.fetchall()
 
-                for row in projects_without_invoice:
-                    project_id = row[0]
-                    project_name = row[1]
-
-                    # أولاً: تحقق من وجود رقم محفوظ مسبقاً لهذا المشروع
-                    self.sqlite_cursor.execute(
-                        "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
-                        (project_name,),
-                    )
-                    existing = self.sqlite_cursor.fetchone()
-
-                    if existing:
-                        # استخدم الرقم المحفوظ
-                        invoice_number = existing[0]
-                        safe_print(f"  ✓ استخدام رقم محفوظ: {project_name} -> {invoice_number}")
-                    else:
-                        # ولّد رقم جديد
-                        self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
-                        max_id = self.sqlite_cursor.fetchone()[0] or 0
-                        new_seq = max_id + 1
-                        invoice_number = f"SW-{97161 + new_seq}"
-
-                        # احفظ الرقم الجديد
-                        self.sqlite_cursor.execute(
-                            "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
-                            (project_name, invoice_number, datetime.now().isoformat()),
-                        )
-                        safe_print(f"  + رقم جديد: {project_name} -> {invoice_number}")
-
-                    # حدّث المشروع
-                    self.sqlite_cursor.execute(
-                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                        (invoice_number, project_id),
+                if projects_without_invoice:
+                    safe_print(
+                        f"INFO: [Repository] توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع..."
                     )
 
-                self.sqlite_conn.commit()
-                safe_print(
-                    f"INFO: [Repository] ✅ تم توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع"
-                )
-        except Exception as e:
-            safe_print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
+                    for row in projects_without_invoice:
+                        project_id = row[0]
+                        project_name = row[1]
+                        invoice_number = self.ensure_invoice_number(str(project_id))
+                        if invoice_number:
+                            safe_print(
+                                f"  ✓ تم تثبيت رقم فاتورة: {project_name} -> {invoice_number}"
+                            )
 
-            traceback.print_exc()
+                    self.sqlite_conn.commit()
+                    safe_print(
+                        f"INFO: [Repository] ✅ تم توليد أرقام فواتير لـ {len(projects_without_invoice)} مشروع"
+                    )
+            except Exception as e:
+                safe_print(f"WARNING: [Repository] فشل توليد أرقام الفواتير: {e}")
 
         # جدول العملاء (clients)
         self.sqlite_cursor.execute(
@@ -831,7 +1191,7 @@ class Repository:
             sync_status TEXT NOT NULL DEFAULT 'new_offline',
             created_at TEXT NOT NULL,
             last_modified TEXT NOT NULL,
-            name TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
             client_id TEXT NOT NULL,
             status TEXT NOT NULL,
             status_manually_set INTEGER DEFAULT 0,
@@ -865,6 +1225,7 @@ class Repository:
             project_manager_id TEXT
         )"""
         )
+        self._migrate_projects_table_remove_global_name_unique()
 
         # جدول قيود اليومية (journal_entries)
         # (البنود 'lines' هتتخزن كـ JSON text)
@@ -1191,7 +1552,6 @@ class Repository:
             reminder_minutes INTEGER DEFAULT 30,
             assigned_to TEXT,
             is_archived INTEGER DEFAULT 0,
-            FOREIGN KEY (related_project_id) REFERENCES projects(name),
             FOREIGN KEY (related_client_id) REFERENCES clients(id)
         )"""
         )
@@ -1335,12 +1695,13 @@ class Repository:
         # هذا يجبر محرك المزامنة على رفعها إلى MongoDB
         safe_print("INFO: [Repository] 🔄 جاري تنشيط البيانات القديمة للمزامنة...")
 
+        allowed_sync_tables = {str(table).strip() for table in sync_tables}
         for table in sync_tables:
             try:
+                table_ref = self._quote_sqlite_identifier(table, allowed=allowed_sync_tables)
                 # تنشيط البيانات القديمة - وضع dirty_flag = 1 لكل الصفوف
-                self.sqlite_cursor.execute(
-                    f"UPDATE {table} SET dirty_flag = 1 WHERE dirty_flag IS NULL OR dirty_flag = 0"
-                )
+                update_dirty_sql = f"UPDATE {table_ref} SET dirty_flag = 1 WHERE dirty_flag IS NULL OR dirty_flag = 0"  # nosec B608
+                self.sqlite_cursor.execute(update_dirty_sql)
                 updated_count = self.sqlite_cursor.rowcount
                 if updated_count > 0:
                     safe_print(
@@ -1357,24 +1718,25 @@ class Repository:
 
         for table in sync_tables:
             try:
+                table_ref = self._quote_sqlite_identifier(table, allowed=allowed_sync_tables)
                 # تنظيف is_deleted: وضع 0 بدلاً من NULL
-                self.sqlite_cursor.execute(
-                    f"UPDATE {table} SET is_deleted = 0 WHERE is_deleted IS NULL"
+                reset_delete_flag_sql = (
+                    f"UPDATE {table_ref} SET is_deleted = 0 WHERE is_deleted IS NULL"  # nosec B608
                 )
+                self.sqlite_cursor.execute(reset_delete_flag_sql)
 
                 # تنظيف sync_status: وضع 'pending' بدلاً من NULL
-                self.sqlite_cursor.execute(
-                    f"UPDATE {table} SET sync_status = 'pending' WHERE sync_status IS NULL"
-                )
+                reset_sync_status_sql = f"UPDATE {table_ref} SET sync_status = 'pending' WHERE sync_status IS NULL"  # nosec B608
+                self.sqlite_cursor.execute(reset_sync_status_sql)
 
                 # تنظيف last_modified: وضع التاريخ الحالي بدلاً من NULL
                 now_iso = datetime.now().isoformat()
-                self.sqlite_cursor.execute(
-                    f"UPDATE {table} SET last_modified = ? WHERE last_modified IS NULL", (now_iso,)
-                )
+                reset_last_modified_sql = f"UPDATE {table_ref} SET last_modified = ? WHERE last_modified IS NULL"  # nosec B608
+                self.sqlite_cursor.execute(reset_last_modified_sql, (now_iso,))
             except sqlite3.OperationalError as e:
                 safe_print(f"WARNING: [Repository] فشل تنظيف {table}: {e}")
 
+        self._migrate_project_reference_tables_remove_name_foreign_keys()
         self.sqlite_conn.commit()
         safe_print("INFO: [Repository] ✅ Smart Migration & Sanitation complete!")
         # ==================== End Smart Migration ====================
@@ -1458,30 +1820,71 @@ class Repository:
                 "CREATE INDEX IF NOT EXISTS idx_payments_account ON payments(account_id)"
             )
 
-            # ⚡ Unique indexes لمنع التكرار
-            # منع تكرار العملاء بنفس الاسم (case insensitive)
-            try:
-                self.sqlite_cursor.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_name_unique ON clients(LOWER(name)) WHERE status != 'مؤرشف'"
-                )
-            except Exception:
-                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+            # إعادة بناء unique indexes بصيغة تستبعد الصفوف المحذوفة/المؤرشفة.
+            for index_name in (
+                "idx_clients_name_unique",
+                "idx_projects_name",
+                "idx_projects_name_client_unique",
+                "idx_clients_name",
+                "idx_services_name",
+                "idx_services_name_unique",
+                "idx_payments_unique",
+            ):
+                try:
+                    self.sqlite_cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
+                except Exception:
+                    pass
 
-            # منع تكرار المشاريع بنفس الاسم لنفس العميل
             try:
                 self.sqlite_cursor.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_client_unique ON projects(LOWER(name), client_id) WHERE status != 'مؤرشف'"
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_name_unique
+                    ON clients(LOWER(name))
+                    WHERE status != 'مؤرشف'
+                    AND (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    """
                 )
             except Exception:
-                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+                pass
 
-            # منع تكرار الدفعات (نفس المشروع + نفس التاريخ + نفس المبلغ)
             try:
                 self.sqlite_cursor.execute(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique ON payments(project_id, date, amount)"
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_client_unique
+                    ON projects(LOWER(name), client_id)
+                    WHERE status != 'مؤرشف'
+                    AND (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    """
                 )
             except Exception:
-                pass  # قد يفشل إذا كان هناك تكرارات موجودة
+                pass
+
+            try:
+                self.sqlite_cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_services_name_unique
+                    ON services(LOWER(name))
+                    WHERE status != 'مؤرشف'
+                    AND (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    """
+                )
+            except Exception:
+                pass
+
+            try:
+                self.sqlite_cursor.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique
+                    ON payments(project_id, substr(date, 1, 10), ROUND(amount, 2))
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    """
+                )
+            except Exception:
+                pass
 
             # Indexes لـ notifications
             self.sqlite_cursor.execute(
@@ -1937,7 +2340,11 @@ class Repository:
         # Fallback إلى MongoDB إذا فشل SQLite
         if self.online:
             try:
-                clients_data = list(self.mongo_db.clients.find({"status": active_status}))
+                clients_data = list(
+                    self.mongo_db.clients.find(
+                        self._merge_active_filter_mongo({"status": active_status})
+                    )
+                )
                 clients_list = []
                 for c in clients_data:
                     try:
@@ -1966,7 +2373,17 @@ class Repository:
         archived_status = schemas.ClientStatus.ARCHIVED.value
         if self.online:
             try:
-                clients_data = list(self.mongo_db.clients.find({"status": archived_status}))
+                clients_data = list(
+                    self.mongo_db.clients.find(
+                        {
+                            "status": archived_status,
+                            "$or": [
+                                {"sync_status": {"$exists": False}},
+                                {"sync_status": {"$ne": "deleted"}},
+                            ],
+                        }
+                    )
+                )
                 clients_list = []
                 for c in clients_data:
                     mongo_id = str(c.pop("_id"))
@@ -1995,7 +2412,9 @@ class Repository:
         if self.online:
             try:
                 lookup_id = self._to_objectid(client_id)
-                client_data = self.mongo_db.clients.find_one({"_id": lookup_id})
+                client_data = self.mongo_db.clients.find_one(
+                    self._merge_active_filter_mongo({"_id": lookup_id})
+                )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
                     if "has_logo" not in client_data:
@@ -2012,7 +2431,7 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM clients WHERE id = ? OR _mongo_id = ? OR name = ?",
+                f"SELECT * {self._is_active_filter_sql('clients')} AND (id = ? OR _mongo_id = ? OR name = ?)",
                 (client_id, client_id, client_id),
             )
             row = self.sqlite_cursor.fetchone()
@@ -2148,10 +2567,12 @@ class Repository:
             try:
                 # البحث بالرقم الأصلي أو المنظف
                 client_data = self.mongo_db.clients.find_one(
-                    {
-                        "$or": [{"phone": phone}, {"phone": clean_phone}],
-                        "status": {"$ne": schemas.ClientStatus.ARCHIVED.value},
-                    }
+                    self._merge_active_filter_mongo(
+                        {
+                            "$or": [{"phone": phone}, {"phone": clean_phone}],
+                            "status": {"$ne": schemas.ClientStatus.ARCHIVED.value},
+                        }
+                    )
                 )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
@@ -2165,7 +2586,7 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM clients WHERE (phone = ? OR phone = ?) AND status != ?",
+                f"SELECT * {self._is_active_filter_sql('clients')} AND (phone = ? OR phone = ?) AND status != ?",
                 (phone, clean_phone, schemas.ClientStatus.ARCHIVED.value),
             )
             row = self.sqlite_cursor.fetchone()
@@ -2187,11 +2608,13 @@ class Repository:
             try:
                 # البحث case insensitive في MongoDB
                 project_data = self.mongo_db.projects.find_one(
-                    {
-                        "client_id": client_id,
-                        "name": {"$regex": f"^{name_lower}$", "$options": "i"},
-                        "status": {"$ne": "مؤرشف"},
-                    }
+                    self._merge_active_filter_mongo(
+                        {
+                            "client_id": client_id,
+                            "name": {"$regex": f"^{name_lower}$", "$options": "i"},
+                            "status": {"$ne": schemas.ProjectStatus.ARCHIVED.value},
+                        }
+                    )
                 )
                 if project_data:
                     mongo_id = str(project_data.pop("_id"))
@@ -2212,8 +2635,8 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM projects WHERE client_id = ? AND LOWER(name) = ? AND status != ?",
-                (client_id, name_lower, "مؤرشف"),
+                f"SELECT * {self._is_active_filter_sql('projects')} AND client_id = ? AND LOWER(name) = ? AND status != ?",
+                (client_id, name_lower, schemas.ProjectStatus.ARCHIVED.value),
             )
             row = self.sqlite_cursor.fetchone()
             if row:
@@ -2235,47 +2658,618 @@ class Repository:
 
         return None
 
-    def _get_duplicate_payment(
-        self, project_id: str, date, amount: float, exclude_id: int = None
-    ) -> schemas.Payment | None:
-        """البحث عن دفعة مكررة (نفس المشروع + نفس التاريخ + نفس المبلغ) - محسّن"""
-        if not project_id:
+    @staticmethod
+    def _normalized_key(value: Any) -> str:
+        return normalize_user_text(str(value or "")).strip().casefold()
+
+    def _project_text_key(self, value: Any) -> str:
+        normalized = (
+            normalize_user_text(str(value or "")).strip().translate(self._PROJECT_KEY_TRANSLATION)
+        )
+        return normalized.casefold()
+
+    @staticmethod
+    def _date_key(value: Any) -> str:
+        text = str(value or "")
+        return text[:10] if text else ""
+
+    @staticmethod
+    def _amount_key(value: Any) -> float:
+        try:
+            return round(float(value or 0.0), 2)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _is_active_filter_sql(table_name: str) -> str:
+        # جميع الجداول المحاسبية الأساسية عندنا فيها sync_status و is_deleted
+        return (
+            f"FROM {table_name} "
+            "WHERE (sync_status != 'deleted' OR sync_status IS NULL) "
+            "AND (is_deleted = 0 OR is_deleted IS NULL)"
+        )
+
+    @staticmethod
+    def _active_filter_mongo() -> dict[str, Any]:
+        return {
+            "$and": [
+                {
+                    "$or": [
+                        {"sync_status": {"$exists": False}},
+                        {"sync_status": {"$ne": "deleted"}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"is_deleted": {"$exists": False}},
+                        {"is_deleted": {"$ne": True}},
+                    ]
+                },
+            ]
+        }
+
+    def _merge_active_filter_mongo(self, query: dict[str, Any] | None = None) -> dict[str, Any]:
+        active_filter = self._active_filter_mongo()
+        active_clauses = list(active_filter["$and"])
+        if not query:
+            return active_filter
+        if "$and" in query and len(query) == 1:
+            return {"$and": [*query["$and"], *active_clauses]}
+        return {"$and": [query, *active_clauses]}
+
+    def _get_active_project_rows(self) -> list[dict[str, Any]]:
+        try:
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        """
+                        SELECT id, name, COALESCE(client_id, '') AS client_id,
+                               COALESCE(_mongo_id, '') AS _mongo_id,
+                               COALESCE(project_code, '') AS project_code,
+                               COALESCE(invoice_number, '') AS invoice_number
+                        FROM projects
+                        WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                        """
+                    )
+                    return [dict(row) for row in cursor.fetchall()]
+                finally:
+                    cursor.close()
+        except Exception:
+            return []
+
+    def _resolve_project_row(self, project_ref: str, client_id: str = "") -> dict[str, Any] | None:
+        reference = normalize_user_text(project_ref)
+        if not reference:
             return None
 
-        date_str = date.isoformat() if hasattr(date, "isoformat") else str(date)
-        date_str_short = date_str[:10]  # YYYY-MM-DD فقط
+        rows = self._get_active_project_rows()
+        if not rows:
+            return None
 
-        # ⚡ تقريب المبلغ لتجنب مشاكل الـ floating point
+        client_key = self._project_text_key(client_id)
+        ref_key = self._project_text_key(reference)
+
+        def _pick(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+            if not candidates:
+                return None
+            if len(candidates) == 1:
+                return candidates[0]
+            if client_key:
+                by_client = [
+                    row
+                    for row in candidates
+                    if self._project_text_key(row.get("client_id")) == client_key
+                ]
+                if len(by_client) == 1:
+                    return by_client[0]
+            return None
+
+        # 1) Exact name
+        chosen = _pick([row for row in rows if str(row.get("name") or "") == reference])
+        if chosen:
+            return chosen
+
+        # 2) Numeric local ID
+        if reference.isdigit():
+            chosen = _pick([row for row in rows if str(row.get("id") or "") == reference])
+            if chosen:
+                return chosen
+
+        # 3) Mongo ID
+        chosen = _pick(
+            [row for row in rows if str(row.get("_mongo_id") or "").strip() == reference]
+        )
+        if chosen:
+            return chosen
+
+        # 4) Unique project code / invoice number
+        for field in ("project_code", "invoice_number"):
+            matches = [
+                row
+                for row in rows
+                if self._project_text_key(row.get(field, "")) == ref_key
+                and str(row.get(field) or "").strip()
+            ]
+            chosen = _pick(matches)
+            if chosen:
+                return chosen
+
+        # 5) Normalized name (whitespace/ar variants)
+        return _pick([row for row in rows if self._project_text_key(row.get("name")) == ref_key])
+
+    def _resolve_project_target_row(
+        self,
+        project_ref: Any,
+        client_id: str | None = "",
+        *,
+        local_id: Any = None,
+        mongo_id: Any = None,
+    ) -> dict[str, Any] | None:
+        """Resolve a project row from the most specific references first."""
+        seen: set[str] = set()
+        candidates: list[str] = []
+
+        for raw_value in (local_id, mongo_id, project_ref):
+            text = normalize_user_text(raw_value)
+            if text and text not in seen:
+                seen.add(text)
+                candidates.append(text)
+
+        for candidate in candidates:
+            resolved = self._resolve_project_row(candidate, client_id or "")
+            if resolved:
+                return resolved
+        return None
+
+    def resolve_project_name(self, project_ref: str | None, client_id: str | None = None) -> str:
+        """Resolve any project reference (name/id/mongo_id/normalized text) to canonical name."""
+        reference = normalize_user_text(project_ref)
+        if not reference:
+            return ""
+
+        resolved = self._resolve_project_target_row(reference, client_id or "")
+        if resolved:
+            return str(resolved.get("name") or "")
+        return ""
+
+    @staticmethod
+    def _stable_project_reference(project_row: dict[str, Any] | None, fallback: Any = "") -> str:
+        if project_row:
+            for field in ("id", "_mongo_id", "name"):
+                value = str(project_row.get(field) or "").strip()
+                if value:
+                    return value
+        normalized_fallback = normalize_user_text(fallback)
+        if normalized_fallback:
+            return normalized_fallback
+        return str(fallback or "").strip()
+
+    def _resolve_project_context(
+        self, project_ref: Any, client_id: str | None = None
+    ) -> tuple[dict[str, Any] | None, str, set[str], str]:
+        reference = normalize_user_text(project_ref)
+        if not reference:
+            return None, "", set(), ""
+
+        resolved = self._resolve_project_target_row(reference, client_id or "")
+        if not resolved:
+            return None, "", set(), ""
+
+        canonical_project_name = str(resolved.get("name") or "").strip()
+        aliases = self._project_reference_values(resolved)
+        target_client_id = str(resolved.get("client_id") or client_id or "").strip()
+        return resolved, canonical_project_name, aliases, target_client_id
+
+    @staticmethod
+    def _project_reference_values(project_row: dict[str, Any] | None) -> set[str]:
+        aliases: set[str] = set()
+        if not project_row:
+            return aliases
+
+        for field in ("name", "id", "_mongo_id", "project_code", "invoice_number"):
+            value = str(project_row.get(field) or "").strip()
+            if value:
+                aliases.add(value)
+        return aliases
+
+    def _project_aliases(
+        self, canonical_project_name: str, client_id: str | None = None
+    ) -> set[str]:
+        aliases: set[str] = set()
+        if canonical_project_name:
+            aliases.add(str(canonical_project_name).strip())
+
+        row = self._resolve_project_target_row(canonical_project_name, client_id or "")
+        if row:
+            aliases.update(self._project_reference_values(row))
+
+        # Remove empty members
+        return {item for item in aliases if item}
+
+    def _row_matches_project(
+        self, raw_project_ref: Any, canonical_project_name: str, aliases: set[str]
+    ) -> bool:
+        raw_text = str(raw_project_ref or "").strip()
+        if not raw_text:
+            return False
+        if raw_text in aliases:
+            return True
+        raw_key = self._project_text_key(raw_text)
+        if raw_key == self._project_text_key(canonical_project_name):
+            return True
+        return raw_key in {self._project_text_key(alias) for alias in aliases if alias}
+
+    def _row_matches_project_scope(
+        self,
+        raw_project_ref: Any,
+        canonical_project_name: str,
+        aliases: set[str],
+        *,
+        target_client_id: str | None = None,
+        row_client_id: Any = None,
+    ) -> bool:
+        if not self._row_matches_project(raw_project_ref, canonical_project_name, aliases):
+            return False
+
+        target_client_key = self._project_text_key(target_client_id)
+        if not target_client_key:
+            return True
+
+        row_client_key = self._project_text_key(row_client_id)
+        return not row_client_key or row_client_key == target_client_key
+
+    def _cascade_project_rename_sqlite(
+        self,
+        old_project_name: str,
+        new_project_name: str,
+        now_iso: str,
+        project_aliases: set[str],
+        project_record_id: str | int | None = None,
+    ) -> None:
+        old_name = str(old_project_name or "").strip()
+        new_name = str(new_project_name or "").strip()
+        if not old_name or not new_name or old_name == new_name:
+            return
+
+        reference_values = sorted(
+            {
+                str(value).strip()
+                for value in (set(project_aliases) | {old_name})
+                if str(value).strip() and str(value).strip() != new_name
+            }
+        )
+        if not reference_values:
+            return
+
+        placeholders = ", ".join("?" for _ in reference_values)
+        tracked_tables = (
+            ("payments", "project_id"),
+            ("expenses", "project_id"),
+            ("invoices", "project_id"),
+            ("tasks", "related_project_id"),
+        )
+        allowed_tables = {table_name for table_name, _ in tracked_tables}
+
+        for table_name, column_name in tracked_tables:
+            if not self._table_exists(table_name):
+                continue
+            table_ref = self._quote_sqlite_identifier(table_name, allowed=allowed_tables)
+            column_ref = self._quote_sqlite_identifier(column_name)
+            cascade_sql = f"UPDATE {table_ref} SET {column_ref} = ?, last_modified = ?, sync_status = 'modified_offline', dirty_flag = 1 WHERE {column_ref} IN ({placeholders})"  # nosec B608
+            self.sqlite_cursor.execute(cascade_sql, (new_name, now_iso, *reference_values))
+
+        if self._table_exists("project_milestones"):
+            milestones_ref = self._quote_sqlite_identifier("project_milestones")
+            project_id_ref = self._quote_sqlite_identifier("project_id")
+            milestones_sql = f"UPDATE {milestones_ref} SET {project_id_ref} = ? WHERE {project_id_ref} IN ({placeholders})"  # nosec B608
+            self.sqlite_cursor.execute(milestones_sql, (new_name, *reference_values))
+
+        if self._table_exists("invoice_numbers"):
+            project_row_id = str(project_record_id or "").strip()
+            if project_row_id:
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE invoice_numbers
+                    SET project_name = ?
+                    WHERE project_id = ? OR (project_id IS NULL AND project_name = ?)
+                    """,
+                    (new_name, project_row_id, old_name),
+                )
+            else:
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE invoice_numbers
+                    SET project_name = ?
+                    WHERE project_name = ?
+                    """,
+                    (new_name, old_name),
+                )
+
+    def _cascade_project_rename_mongo(
+        self,
+        old_project_name: str,
+        new_project_name: str,
+        now_dt: datetime,
+        project_aliases: set[str],
+    ) -> None:
+        if not self.online or self.mongo_db is None:
+            return
+
+        old_name = str(old_project_name or "").strip()
+        new_name = str(new_project_name or "").strip()
+        if not old_name or not new_name or old_name == new_name:
+            return
+
+        reference_values = sorted(
+            {
+                str(value).strip()
+                for value in (set(project_aliases) | {old_name})
+                if str(value).strip() and str(value).strip() != new_name
+            }
+        )
+        if not reference_values:
+            return
+
+        self.mongo_db.payments.update_many(
+            {"project_id": {"$in": reference_values}},
+            {"$set": {"project_id": new_name, "last_modified": now_dt}},
+        )
+        self.mongo_db.expenses.update_many(
+            {"project_id": {"$in": reference_values}},
+            {"$set": {"project_id": new_name, "last_modified": now_dt}},
+        )
+        self.mongo_db.invoices.update_many(
+            {"project_id": {"$in": reference_values}},
+            {"$set": {"project_id": new_name, "last_modified": now_dt}},
+        )
+        self.mongo_db.tasks.update_many(
+            {"related_project_id": {"$in": reference_values}},
+            {"$set": {"related_project_id": new_name, "last_modified": now_dt}},
+        )
+
+    def _delete_project_related_rows_sqlite(
+        self,
+        project_name: str,
+        now_iso: str,
+        project_aliases: set[str],
+        hard_delete: bool,
+        project_record_id: str | int | None = None,
+    ) -> None:
+        project_name = str(project_name or "").strip()
+        reference_values = sorted(
+            {
+                str(value).strip()
+                for value in (set(project_aliases) | {project_name})
+                if str(value).strip()
+            }
+        )
+        if not reference_values:
+            return
+
+        placeholders = ", ".join("?" for _ in reference_values)
+        tracked_tables = (
+            ("payments", "project_id"),
+            ("expenses", "project_id"),
+            ("invoices", "project_id"),
+            ("tasks", "related_project_id"),
+        )
+        allowed_tables = {table_name for table_name, _ in tracked_tables}
+
+        for table_name, column_name in tracked_tables:
+            if not self._table_exists(table_name):
+                continue
+            table_ref = self._quote_sqlite_identifier(table_name, allowed=allowed_tables)
+            column_ref = self._quote_sqlite_identifier(column_name)
+            if hard_delete:
+                delete_related_sql = (
+                    f"DELETE FROM {table_ref} WHERE {column_ref} IN ({placeholders})"  # nosec B608
+                )
+                self.sqlite_cursor.execute(delete_related_sql, tuple(reference_values))
+            else:
+                soft_delete_related_sql = f"UPDATE {table_ref} SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1 WHERE {column_ref} IN ({placeholders})"  # nosec B608
+                self.sqlite_cursor.execute(soft_delete_related_sql, (now_iso, *reference_values))
+
+        if self._table_exists("project_milestones"):
+            milestones_ref = self._quote_sqlite_identifier("project_milestones")
+            project_id_ref = self._quote_sqlite_identifier("project_id")
+            delete_milestones_sql = f"DELETE FROM {milestones_ref} WHERE {project_id_ref} IN ({placeholders})"  # nosec B608
+            self.sqlite_cursor.execute(delete_milestones_sql, tuple(reference_values))
+
+        if self._table_exists("invoice_numbers"):
+            project_row_id = str(project_record_id or "").strip()
+            if project_row_id:
+                self.sqlite_cursor.execute(
+                    "DELETE FROM invoice_numbers WHERE project_id = ? OR (project_id IS NULL AND project_name = ?)",
+                    (project_row_id, project_name),
+                )
+            else:
+                self.sqlite_cursor.execute(
+                    "DELETE FROM invoice_numbers WHERE project_name = ?",
+                    (project_name,),
+                )
+
+    def _delete_project_related_rows_mongo(
+        self, project_name: str, now_dt: datetime, project_aliases: set[str]
+    ) -> None:
+        if not self.online or self.mongo_db is None:
+            return
+
+        project_name = str(project_name or "").strip()
+        reference_values = sorted(
+            {
+                str(value).strip()
+                for value in (set(project_aliases) | {project_name})
+                if str(value).strip()
+            }
+        )
+        if not reference_values:
+            return
+
+        update_doc = {
+            "$set": {
+                "is_deleted": True,
+                "sync_status": "deleted",
+                "last_modified": now_dt,
+            }
+        }
+        self.mongo_db.payments.update_many({"project_id": {"$in": reference_values}}, update_doc)
+        self.mongo_db.expenses.update_many({"project_id": {"$in": reference_values}}, update_doc)
+        self.mongo_db.invoices.update_many({"project_id": {"$in": reference_values}}, update_doc)
+        self.mongo_db.tasks.update_many(
+            {"related_project_id": {"$in": reference_values}}, update_doc
+        )
+
+    def _payment_signature(self, row: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            self._project_text_key(row.get("project_id")),
+            self._date_key(row.get("date")),
+            self._amount_key(row.get("amount")),
+            self._normalized_key(row.get("client_id")),
+            self._normalized_key(row.get("account_id")),
+            self._normalized_key(row.get("method")),
+        )
+
+    def _expense_signature(self, row: dict[str, Any]) -> tuple[Any, ...]:
+        account_id = normalize_user_text(str(row.get("account_id") or "")).strip()
+        payment_account = normalize_user_text(str(row.get("payment_account_id") or "")).strip()
+        effective_payment_account = payment_account or account_id
+        return (
+            self._project_text_key(row.get("project_id")),
+            self._date_key(row.get("date")),
+            self._amount_key(row.get("amount")),
+            self._normalized_key(row.get("category")),
+            self._normalized_key(row.get("description")),
+            self._normalized_key(account_id),
+            self._normalized_key(effective_payment_account),
+        )
+
+    @staticmethod
+    def _prefer_row(existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        def _score(row: dict[str, Any]) -> tuple[int, int, str, int]:
+            mongo_weight = 0 if str(row.get("_mongo_id") or "").strip() else 1
+            synced_weight = (
+                0 if str(row.get("sync_status") or "").strip().lower() == "synced" else 1
+            )
+            created_at = str(row.get("created_at") or "")
+            row_id = int(row.get("id") or 0)
+            return (mongo_weight, synced_weight, created_at, row_id)
+
+        return candidate if _score(candidate) < _score(existing) else existing
+
+    def _dedupe_rows_by_signature(
+        self,
+        rows: list[dict[str, Any]],
+        signature_fn,
+    ) -> list[dict[str, Any]]:
+        deduped: dict[tuple[Any, ...], dict[str, Any]] = {}
+        order: list[tuple[Any, ...]] = []
+
+        for row in rows:
+            key = signature_fn(row)
+            if key not in deduped:
+                deduped[key] = row
+                order.append(key)
+                continue
+            deduped[key] = self._prefer_row(deduped[key], row)
+
+        return [deduped[key] for key in order]
+
+    def _get_duplicate_payment(
+        self,
+        project_id: str,
+        date,
+        amount: float,
+        exclude_id: int = None,
+        client_id: str | None = None,
+    ) -> schemas.Payment | None:
+        """البحث عن دفعة مكررة (نفس المشروع + نفس التاريخ + نفس المبلغ) - محسّن"""
+        normalized_project_ref = normalize_user_text(project_id) or str(project_id or "").strip()
+        if not normalized_project_ref:
+            return None
+
+        try:
+            existing_for_project = self.get_payments_for_project(
+                normalized_project_ref,
+                client_id=client_id,
+            )
+            target_date_short = self._date_key(
+                date.isoformat() if hasattr(date, "isoformat") else date
+            )
+            target_amount = self._amount_key(amount)
+            for existing in existing_for_project:
+                existing_id = getattr(existing, "id", None)
+                if exclude_id and existing_id and int(existing_id) == int(exclude_id):
+                    continue
+                existing_date = self._date_key(getattr(existing, "date", ""))
+                existing_amount = self._amount_key(getattr(existing, "amount", 0.0))
+                if (
+                    existing_date == target_date_short
+                    and abs(existing_amount - target_amount) <= 0.01
+                ):
+                    return existing
+        except Exception:
+            pass
+
+        date_str = date.isoformat() if hasattr(date, "isoformat") else str(date)
+        date_str_short = date_str[:10]
         amount_rounded = round(float(amount), 2)
-        # ⚡ نطاق البحث للمبلغ (±0.01 للتعامل مع floating point)
         amount_min = amount_rounded - 0.01
         amount_max = amount_rounded + 0.01
+        target_client_key = self._project_text_key(client_id)
 
-        # ⚡ البحث في SQLite أولاً (أسرع وأدق)
         try:
-            # ⚡ استخدام cursor منفصل لتجنب مشاكل الـ recursive cursor
             with self._lock:
                 temp_cursor = self.sqlite_conn.cursor()
                 try:
+                    sql = """
+                        SELECT * FROM payments
+                        WHERE project_id = ?
+                        AND (sync_status != 'deleted' OR sync_status IS NULL)
+                        AND (is_deleted = 0 OR is_deleted IS NULL)
+                        AND amount >= ? AND amount <= ?
+                        AND date LIKE ?
+                    """
+                    params: tuple[Any, ...]
+                    if target_client_key:
+                        sql += " AND (client_id = ? OR client_id IS NULL OR client_id = '')"
                     if exclude_id:
-                        temp_cursor.execute(
-                            """SELECT * FROM payments
-                               WHERE project_id = ?
-                               AND amount >= ? AND amount <= ?
-                               AND date LIKE ?
-                               AND id != ?
-                               LIMIT 1""",
-                            (project_id, amount_min, amount_max, f"{date_str_short}%", exclude_id),
-                        )
+                        sql += " AND id != ?"
+                        if target_client_key:
+                            params = (
+                                normalized_project_ref,
+                                amount_min,
+                                amount_max,
+                                f"{date_str_short}%",
+                                client_id,
+                                exclude_id,
+                            )
+                        else:
+                            params = (
+                                normalized_project_ref,
+                                amount_min,
+                                amount_max,
+                                f"{date_str_short}%",
+                                exclude_id,
+                            )
                     else:
-                        temp_cursor.execute(
-                            """SELECT * FROM payments
-                               WHERE project_id = ?
-                               AND amount >= ? AND amount <= ?
-                               AND date LIKE ?
-                               LIMIT 1""",
-                            (project_id, amount_min, amount_max, f"{date_str_short}%"),
-                        )
+                        if target_client_key:
+                            params = (
+                                normalized_project_ref,
+                                amount_min,
+                                amount_max,
+                                f"{date_str_short}%",
+                                client_id,
+                            )
+                        else:
+                            params = (
+                                normalized_project_ref,
+                                amount_min,
+                                amount_max,
+                                f"{date_str_short}%",
+                            )
+                    temp_cursor.execute(f"{sql} LIMIT 1", params)
                     row = temp_cursor.fetchone()
                     if row:
                         safe_print(
@@ -2287,15 +3281,20 @@ class Repository:
         except Exception as e:
             safe_print(f"WARNING: فشل البحث عن دفعة مكررة (SQLite): {e}")
 
-        # ⚡ البحث في MongoDB إذا لم نجد محلياً
         if self.online:
             try:
                 payment_data = self.mongo_db.payments.find_one(
-                    {
-                        "project_id": project_id,
-                        "amount": {"$gte": amount_rounded - 0.01, "$lte": amount_rounded + 0.01},
-                        "date": {"$regex": f"^{date_str_short}"},
-                    }
+                    self._merge_active_filter_mongo(
+                        {
+                            "project_id": normalized_project_ref,
+                            "amount": {
+                                "$gte": amount_rounded - 0.01,
+                                "$lte": amount_rounded + 0.01,
+                            },
+                            "date": {"$regex": f"^{date_str_short}"},
+                            **({"client_id": client_id} if target_client_key else {}),
+                        }
+                    )
                 )
                 if payment_data:
                     mongo_id = str(payment_data.pop("_id"))
@@ -2319,10 +3318,12 @@ class Repository:
             try:
                 # البحث case insensitive في MongoDB
                 client_data = self.mongo_db.clients.find_one(
-                    {
-                        "name": {"$regex": f"^{name_lower}$", "$options": "i"},
-                        "status": {"$ne": schemas.ClientStatus.ARCHIVED.value},
-                    }
+                    self._merge_active_filter_mongo(
+                        {
+                            "name": {"$regex": f"^{name_lower}$", "$options": "i"},
+                            "status": {"$ne": schemas.ClientStatus.ARCHIVED.value},
+                        }
+                    )
                 )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
@@ -2336,7 +3337,7 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM clients WHERE LOWER(name) = ? AND status != ?",
+                f"SELECT * {self._is_active_filter_sql('clients')} AND LOWER(name) = ? AND status != ?",
                 (name_lower, schemas.ClientStatus.ARCHIVED.value),
             )
             row = self.sqlite_cursor.fetchone()
@@ -2363,7 +3364,7 @@ class Repository:
             client_id_num = 0
 
         self.sqlite_cursor.execute(
-            "UPDATE clients SET status = ?, last_modified = ?, sync_status = 'modified_offline', is_deleted = 1, dirty_flag = 1 WHERE id = ? OR _mongo_id = ?",
+            "UPDATE clients SET status = ?, last_modified = ?, sync_status = 'modified_offline', is_deleted = 0, dirty_flag = 1 WHERE id = ? OR _mongo_id = ?",
             (archive_status, now_iso, client_id_num, client_id),
         )
         self.sqlite_conn.commit()
@@ -2378,7 +3379,13 @@ class Repository:
                             {"id": client_id_num},
                         ]
                     },
-                    {"$set": {"status": archive_status, "last_modified": now_dt}},
+                    {
+                        "$set": {
+                            "status": archive_status,
+                            "is_deleted": False,
+                            "last_modified": now_dt,
+                        }
+                    },
                 )
                 self.sqlite_cursor.execute(
                     "UPDATE clients SET sync_status = 'synced', dirty_flag = 0 WHERE id = ? OR _mongo_id = ?",
@@ -2520,7 +3527,9 @@ class Repository:
         """(جديدة) جلب عميل واحد بالاسم (بذكاء)"""
         if self.online:
             try:
-                client_data = self.mongo_db.clients.find_one({"name": name})
+                client_data = self.mongo_db.clients.find_one(
+                    self._merge_active_filter_mongo({"name": name})
+                )
                 if client_data:
                     mongo_id = str(client_data.pop("_id"))
                     if "has_logo" not in client_data:
@@ -2534,7 +3543,10 @@ class Repository:
                 safe_print(f"ERROR: فشل جلب العميل بالاسم (Mongo): {e}.")
 
         try:
-            self.sqlite_cursor.execute("SELECT * FROM clients WHERE name = ?", (name,))
+            self.sqlite_cursor.execute(
+                f"SELECT * {self._is_active_filter_sql('clients')} AND name = ?",
+                (name,),
+            )
             row = self.sqlite_cursor.fetchone()
             if row:
                 client = schemas.Client(**dict(row))
@@ -2542,6 +3554,38 @@ class Repository:
                 return client
         except Exception as e:
             safe_print(f"ERROR: فشل جلب العميل بالاسم (SQLite): {e}.")
+
+        return None
+
+    def _find_active_service_by_name(
+        self, service_name: str, exclude_id: str | int | None = None
+    ) -> schemas.Service | None:
+        normalized_name = normalize_user_text(service_name)
+        if not normalized_name:
+            return None
+
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    f"SELECT * {self._is_active_filter_sql('services')} AND LOWER(name) = ? AND status != ?",
+                    (normalized_name.lower(), schemas.ServiceStatus.ARCHIVED.value),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+        except Exception as e:
+            safe_print(f"WARNING: [Repo] فشل البحث عن خدمة مكررة: {e}")
+            return None
+
+        exclude_key = str(exclude_id) if exclude_id is not None else ""
+        for row in rows:
+            row_dict = dict(row)
+            row_local_id = str(row_dict.get("id") or "")
+            row_mongo_id = str(row_dict.get("_mongo_id") or "")
+            if exclude_key and exclude_key in {row_local_id, row_mongo_id}:
+                continue
+            return schemas.Service(**row_dict)
 
         return None
 
@@ -3522,7 +4566,7 @@ class Repository:
         """جلب كل الفواتير (بذكاء)"""
         if self.online:
             try:
-                invoices_data = list(self.mongo_db.invoices.find())
+                invoices_data = list(self.mongo_db.invoices.find(self._merge_active_filter_mongo()))
                 invoices_list = []
                 for inv in invoices_data:
                     mongo_id = str(inv.pop("_id"))
@@ -3825,9 +4869,28 @@ class Repository:
             now_dt = datetime.now()
             now_iso = now_dt.isoformat()
 
+            # توحيد مرجع المشروع إلى مرجع ثابت لتجنب خلط الأسماء المكررة.
+            requested_project_ref = str(getattr(payment_data, "project_id", "") or "")
+            requested_client_id = str(getattr(payment_data, "client_id", "") or "")
+            resolved_project = self._resolve_project_row(requested_project_ref, requested_client_id)
+            if resolved_project:
+                payment_data.project_id = self._stable_project_reference(
+                    resolved_project,
+                    requested_project_ref,
+                )
+                if not requested_client_id:
+                    payment_data.client_id = str(resolved_project.get("client_id") or "")
+            else:
+                normalized_ref = normalize_user_text(requested_project_ref)
+                if normalized_ref:
+                    payment_data.project_id = normalized_ref
+
             # ✅ فحص التكرار قبل الإضافة (نفس المشروع + نفس التاريخ + نفس المبلغ)
             existing_payment = self._get_duplicate_payment(
-                payment_data.project_id, payment_data.date, payment_data.amount
+                payment_data.project_id,
+                payment_data.date,
+                payment_data.amount,
+                client_id=payment_data.client_id,
             )
             if existing_payment:
                 safe_print(
@@ -3911,87 +4974,85 @@ class Repository:
 
         return payment_data
 
-    def get_payments_for_project(self, project_name: str) -> list[schemas.Payment]:
+    def get_payments_for_project(
+        self, project_name: str, client_id: str | None = None
+    ) -> list[schemas.Payment]:
         """
-        (جديدة) جلب كل الدفعات المرتبطة بمشروع (أونلاين أولاً)
-        ⚡ يستخدم cursor منفصل لتجنب مشكلة Recursive cursor
-        ⚡ يدعم البحث المرن للتعامل مع الاختلافات البسيطة في الأسماء
+        جلب كل الدفعات المرتبطة بمشروع مع دعم الربط القديم
+        (اسم مشروع / local id / mongo id / فروقات مسافات).
         """
-        safe_print(f"DEBUG: [Repo] جلب دفعات للمشروع: [{project_name}]")
+        requested = normalize_user_text(project_name)
+        if not requested:
+            return []
 
-        query_filter = {"project_id": project_name}
-        if self.online:
-            try:
-                data = list(self.mongo_db.payments.find(query_filter))
-                payments_list = []
-                for d in data:
-                    mongo_id = str(d.pop("_id"))
-                    d.pop("_mongo_id", None)
-                    d.pop("mongo_id", None)
-                    payments_list.append(schemas.Payment(**d, _mongo_id=mongo_id))
-                safe_print(f"DEBUG: [Repo] تم جلب {len(payments_list)} دفعة من MongoDB")
-                return payments_list
-            except Exception as e:
-                safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (Mongo): {e}")
+        resolved_project, canonical_project_name, aliases, target_client_id = (
+            self._resolve_project_context(requested, client_id)
+        )
+        if not resolved_project or not canonical_project_name:
+            # مرجع غير معروف أو غامض (مثلاً project_code مكرر) -> لا نغامر بربط خاطئ.
+            return []
 
-        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
         try:
             with self._lock:
-                temp_cursor = self.sqlite_conn.cursor()
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(f"SELECT * {self._is_active_filter_sql('payments')}")
+                    rows = [dict(row) for row in cursor.fetchall()]
+                finally:
+                    cursor.close()
 
-                # ⚡ محاولة 1: البحث الدقيق
-                temp_cursor.execute(
-                    """
-                    SELECT * FROM payments
-                    WHERE project_id = ?
-                    AND (sync_status != 'deleted' OR sync_status IS NULL)
-                    """,
-                    (project_name,),
+            matching_rows = [
+                row
+                for row in rows
+                if self._row_matches_project_scope(
+                    row.get("project_id"),
+                    canonical_project_name,
+                    aliases,
+                    target_client_id=target_client_id,
+                    row_client_id=row.get("client_id"),
                 )
-                rows = temp_cursor.fetchall()
-
-                # ⚡ محاولة 2: إذا لم يتم العثور على نتائج، جرب البحث المرن
-                if len(rows) == 0:
-                    safe_print(
-                        "DEBUG: [Repo] لم يتم العثور على دفعات بالبحث الدقيق، جاري البحث المرن..."
-                    )
-
-                    # تنظيف اسم المشروع (إزالة المسافات الزائدة والرموز الخاصة)
-                    clean_name = project_name.strip().replace("  ", " ")
-
-                    # البحث باستخدام LIKE
-                    temp_cursor.execute(
-                        "SELECT * FROM payments WHERE TRIM(project_id) = ? OR project_id LIKE ?",
-                        (clean_name, f"%{clean_name}%"),
-                    )
-                    rows = temp_cursor.fetchall()
-
-                    if len(rows) > 0:
-                        safe_print(f"DEBUG: [Repo] ✅ تم العثور على {len(rows)} دفعة بالبحث المرن")
-
-                temp_cursor.close()
-
-            payments = [schemas.Payment(**dict(row)) for row in rows]
-            safe_print(f"DEBUG: [Repo] تم جلب {len(payments)} دفعة من SQLite")
-
-            # 🔍 Debug: إذا لم يتم العثور على دفعات
-            if len(payments) == 0:
-                safe_print(f"WARNING: [Repo] لم يتم العثور على دفعات للمشروع [{project_name}]")
-                # جلب كل أسماء المشاريع اللي عندها دفعات (أول 5 فقط)
-                temp_cursor2 = self.sqlite_conn.cursor()
-                temp_cursor2.execute("SELECT DISTINCT project_id FROM payments LIMIT 5")
-                all_project_names = [row[0] for row in temp_cursor2.fetchall()]
-                temp_cursor2.close()
-                safe_print("DEBUG: [Repo] أمثلة من المشاريع اللي عندها دفعات:")
-                for pname in all_project_names:
-                    safe_print(f"  - [{pname}]")
-
-            return payments
+            ]
+            deduped_rows = self._dedupe_rows_by_signature(matching_rows, self._payment_signature)
+            deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+            return [schemas.Payment(**row) for row in deduped_rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (SQLite): {e}")
 
-            traceback.print_exc()
-            return []
+        if self.online:
+            try:
+                query_filter = (
+                    {"project_id": {"$in": list(aliases)}}
+                    if aliases
+                    else {"project_id": canonical_project_name}
+                )
+                data = list(
+                    self.mongo_db.payments.find(self._merge_active_filter_mongo(query_filter))
+                )
+                rows = []
+                for item in data:
+                    mongo_id = str(item.pop("_id"))
+                    item.pop("_mongo_id", None)
+                    item.pop("mongo_id", None)
+                    item["_mongo_id"] = mongo_id
+                    rows.append(item)
+                rows = [
+                    row
+                    for row in rows
+                    if self._row_matches_project_scope(
+                        row.get("project_id"),
+                        canonical_project_name,
+                        aliases,
+                        target_client_id=target_client_id,
+                        row_client_id=row.get("client_id"),
+                    )
+                ]
+                deduped_rows = self._dedupe_rows_by_signature(rows, self._payment_signature)
+                deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+                return [schemas.Payment(**row) for row in deduped_rows]
+            except Exception as e:
+                safe_print(f"ERROR: [Repo] فشل جلب دفعات المشروع (Mongo): {e}")
+
+        return []
 
     def get_all_payments(self) -> list[schemas.Payment]:
         """⚡ جلب كل الدفعات (SQLite أولاً للسرعة)"""
@@ -4010,7 +5071,12 @@ class Repository:
                 rows = cursor.fetchall()
             finally:
                 cursor.close()
-            payments = [schemas.Payment(**dict(row)) for row in rows]
+            deduped_rows = self._dedupe_rows_by_signature(
+                [dict(row) for row in rows],
+                self._payment_signature,
+            )
+            deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+            payments = [schemas.Payment(**row) for row in deduped_rows]
             safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
             return payments
         except Exception as e:
@@ -4021,19 +5087,32 @@ class Repository:
         # Fallback إلى MongoDB
         if self.online:
             try:
-                data = list(self.mongo_db.payments.find())
-                payments = []
+                data = list(self.mongo_db.payments.find(self._merge_active_filter_mongo()))
+                rows = []
                 for d in data:
                     mongo_id = str(d.pop("_id"))
                     d.pop("_mongo_id", None)
                     d.pop("mongo_id", None)
-                    payments.append(schemas.Payment(**d, _mongo_id=mongo_id))
+                    d["_mongo_id"] = mongo_id
+                    rows.append(d)
+                deduped_rows = self._dedupe_rows_by_signature(rows, self._payment_signature)
+                deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+                payments = [schemas.Payment(**row) for row in deduped_rows]
                 safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
                 return payments
             except Exception as e:
                 safe_print(f"ERROR: [Repo] فشل جلب الدفعات (Mongo): {e}")
 
         return []
+
+    def get_total_paid_for_project(self, project_name: str, client_id: str | None = None) -> float:
+        """إجمالي المدفوعات لمشروع بعد التطبيع وإزالة التكرار."""
+        try:
+            payments = self.get_payments_for_project(project_name, client_id=client_id)
+            return float(sum(float(getattr(payment, "amount", 0.0) or 0.0) for payment in payments))
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حساب إجمالي الدفعات للمشروع: {e}")
+            return 0.0
 
     def get_payments_by_account(
         self, account_code: str, start_iso: str, end_iso: str
@@ -4043,9 +5122,8 @@ class Repository:
             cursor = self.get_cursor()
             try:
                 cursor.execute(
-                    """
-                    SELECT * FROM payments
-                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    f"""
+                    SELECT * {self._is_active_filter_sql('payments')}
                     AND account_id = ? AND date >= ? AND date <= ?
                     ORDER BY date ASC
                 """,
@@ -4066,7 +5144,12 @@ class Repository:
             cursor = self.get_cursor()
             try:
                 cursor.execute(
-                    "SELECT COALESCE(SUM(amount), 0) FROM payments WHERE account_id = ? AND date < ?",
+                    """
+                    SELECT COALESCE(SUM(amount), 0) FROM payments
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    AND account_id = ? AND date < ?
+                    """,
                     (account_code, before_iso),
                 )
                 row = cursor.fetchone()
@@ -4096,6 +5179,40 @@ class Repository:
             # ⚡ جلب الحقول بأمان
             client_id = getattr(payment_data, "client_id", "") or ""
             project_id = getattr(payment_data, "project_id", "") or ""
+            existing_payment = self.get_payment_by_id(payment_id)
+            if existing_payment is not None and not client_id:
+                client_id = str(getattr(existing_payment, "client_id", "") or "")
+
+            resolved_project = self._resolve_project_row(project_id, client_id)
+            if resolved_project:
+                project_id = self._stable_project_reference(resolved_project, project_id)
+                if not client_id:
+                    client_id = str(resolved_project.get("client_id") or "")
+            else:
+                normalized_project = normalize_user_text(project_id)
+                if normalized_project:
+                    project_id = normalized_project
+            payment_data.project_id = project_id
+            payment_data.client_id = client_id
+
+            existing_local_id = None
+            if existing_payment is not None:
+                try:
+                    existing_local_id = int(getattr(existing_payment, "id", 0) or 0) or None
+                except (TypeError, ValueError):
+                    existing_local_id = None
+
+            duplicate_payment = self._get_duplicate_payment(
+                project_id,
+                payment_data.date,
+                payment_data.amount,
+                exclude_id=existing_local_id,
+                client_id=client_id,
+            )
+            if duplicate_payment is not None:
+                raise ValueError(
+                    f"يوجد دفعة بنفس البيانات (المبلغ: {payment_data.amount} - التاريخ: {payment_data.date})"
+                )
 
             sql = f"""
                 UPDATE payments SET
@@ -4112,7 +5229,7 @@ class Repository:
                 payment_data.method or "",
                 client_id,
                 project_id,
-                "modified",
+                "modified_offline",
             ) + where_params
 
             self.sqlite_cursor.execute(sql, params)
@@ -4143,10 +5260,10 @@ class Repository:
                         )
 
                     if result and result.modified_count > 0:
-                        self.sqlite_cursor.execute(
-                            f"UPDATE payments SET sync_status = ? {where_clause}",
-                            ("synced",) + where_params,
+                        sync_update_sql = (
+                            f"UPDATE payments SET sync_status = ? {where_clause}"  # nosec B608
                         )
+                        self.sqlite_cursor.execute(sync_update_sql, ("synced",) + where_params)
                         self.sqlite_conn.commit()
                 except Exception:
                     pass  # Ignore sync errors
@@ -4156,6 +5273,8 @@ class Repository:
             Repository._dashboard_cache_time = 0
 
             return True
+        except ValueError:
+            raise
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تعديل الدفعة: {e}")
 
@@ -4166,7 +5285,7 @@ class Repository:
         """جلب دفعة بالـ ID"""
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM payments WHERE id = ? OR _mongo_id = ?",
+                f"SELECT * {self._is_active_filter_sql('payments')} AND (id = ? OR _mongo_id = ?)",
                 (payment_id, str(payment_id)),
             )
             row = self.sqlite_cursor.fetchone()
@@ -4383,7 +5502,9 @@ class Repository:
         """(جديدة) جلب فاتورة واحدة برقمها"""
         if self.online:
             try:
-                data = self.mongo_db.invoices.find_one({"invoice_number": invoice_number})
+                data = self.mongo_db.invoices.find_one(
+                    self._merge_active_filter_mongo({"invoice_number": invoice_number})
+                )
                 if data:
                     mongo_id = str(data.pop("_id"))
                     data.pop("_mongo_id", None)
@@ -4394,7 +5515,8 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM invoices WHERE invoice_number = ?", (invoice_number,)
+                f"SELECT * {self._is_active_filter_sql('invoices')} AND invoice_number = ?",
+                (invoice_number,),
             )
             row = self.sqlite_cursor.fetchone()
             if row:
@@ -4411,7 +5533,9 @@ class Repository:
         # محاولة البحث بـ _mongo_id أولاً
         if self.online:
             try:
-                data = self.mongo_db.invoices.find_one({"_id": ObjectId(invoice_id)})
+                data = self.mongo_db.invoices.find_one(
+                    self._merge_active_filter_mongo({"_id": ObjectId(invoice_id)})
+                )
                 if data:
                     mongo_id = str(data.pop("_id"))
                     data.pop("_mongo_id", None)
@@ -4421,7 +5545,10 @@ class Repository:
 
         # محاولة البحث بـ id في SQLite
         try:
-            self.sqlite_cursor.execute("SELECT * FROM invoices WHERE id = ?", (invoice_id,))
+            self.sqlite_cursor.execute(
+                f"SELECT * {self._is_active_filter_sql('invoices')} AND id = ?",
+                (invoice_id,),
+            )
             row = self.sqlite_cursor.fetchone()
             if row:
                 row_dict = dict(row)
@@ -4480,10 +5607,8 @@ class Repository:
 
     def create_service(self, service_data: schemas.Service) -> schemas.Service:
         """(معدلة) إنشاء خدمة جديدة (بإصلاح حفظ الحالة في مونجو)"""
-        # ⚡ فحص التكرار قبل الإضافة
-        self.sqlite_cursor.execute("SELECT id FROM services WHERE name = ?", (service_data.name,))
-        existing = self.sqlite_cursor.fetchone()
-        if existing:
+        existing = self._find_active_service_by_name(service_data.name)
+        if existing is not None:
             safe_print(f"WARNING: الخدمة '{service_data.name}' موجودة بالفعل!")
             raise ValueError(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
 
@@ -4566,7 +5691,11 @@ class Repository:
         # Fallback إلى MongoDB
         if self.online:
             try:
-                services_data = list(self.mongo_db.services.find({"status": active_status}))
+                services_data = list(
+                    self.mongo_db.services.find(
+                        self._merge_active_filter_mongo({"status": active_status})
+                    )
+                )
                 services_list = []
                 for s in services_data:
                     mongo_id = str(s.pop("_id"))
@@ -4590,7 +5719,9 @@ class Repository:
         if self.online:
             try:
                 data = self.mongo_db.services.find_one(
-                    {"$or": [{"_id": self._to_objectid(service_id)}, {"_mongo_id": service_id}]}
+                    self._merge_active_filter_mongo(
+                        {"$or": [{"_id": self._to_objectid(service_id)}, {"_mongo_id": service_id}]}
+                    )
                 )
                 if data:
                     mongo_id = str(data.pop("_id"))
@@ -4602,7 +5733,8 @@ class Repository:
 
         try:
             self.sqlite_cursor.execute(
-                "SELECT * FROM services WHERE id = ? OR _mongo_id = ?", (service_id_num, service_id)
+                f"SELECT * {self._is_active_filter_sql('services')} AND (id = ? OR _mongo_id = ?)",
+                (service_id_num, service_id),
             )
             row = self.sqlite_cursor.fetchone()
             if row:
@@ -4626,6 +5758,12 @@ class Repository:
             service_id_num = int(service_id)
         except ValueError:
             service_id_num = 0
+
+        duplicate_service = self._find_active_service_by_name(
+            service_data.name, exclude_id=service_id
+        )
+        if duplicate_service is not None:
+            raise ValueError(f"الخدمة '{service_data.name}' موجودة بالفعل في النظام")
 
         sql = """
             UPDATE services SET
@@ -4757,7 +5895,11 @@ class Repository:
         archived_status = schemas.ServiceStatus.ARCHIVED.value
         if self.online:
             try:
-                services_data = list(self.mongo_db.services.find({"status": archived_status}))
+                services_data = list(
+                    self.mongo_db.services.find(
+                        self._merge_active_filter_mongo({"status": archived_status})
+                    )
+                )
                 services_list = []
                 for s in services_data:
                     mongo_id = str(s.pop("_id"))
@@ -4773,6 +5915,7 @@ class Repository:
             SELECT * FROM services
             WHERE status = ?
             AND (sync_status != 'deleted' OR sync_status IS NULL)
+            AND (is_deleted = 0 OR is_deleted IS NULL)
             """,
             (archived_status,),
         )
@@ -4782,35 +5925,44 @@ class Repository:
     # --- دوال التعامل مع المصروفات ---
 
     def create_expense(self, expense_data: schemas.Expense) -> schemas.Expense:
-        """إنشاء مصروف جديد (بذكاء)"""
-        now_dt = datetime.now()
-        now_iso = now_dt.isoformat()
-        expense_data.created_at = now_dt
-        expense_data.last_modified = now_dt
-        expense_data.sync_status = "new_offline"
+        """إنشاء مصروف جديد مع توحيد مرجع المشروع ومنع التكرار."""
+        with self._lock:
+            now_dt = datetime.now()
+            now_iso = now_dt.isoformat()
 
-        sql = """
-            INSERT INTO expenses (sync_status, created_at, last_modified, date, category, amount, description, account_id, payment_account_id, project_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            expense_data.sync_status,
-            now_iso,
-            now_iso,
-            expense_data.date.isoformat(),
-            expense_data.category,
-            expense_data.amount,
-            expense_data.description,
-            expense_data.account_id,
-            expense_data.payment_account_id,
-            expense_data.project_id,
-        )
+            self._normalize_expense_write_fields(expense_data)
+            if self._find_duplicate_expense(expense_data) is not None:
+                raise ValueError("يوجد مصروف بنفس البيانات لهذا المشروع")
 
-        self.sqlite_cursor.execute(sql, params)
-        self.sqlite_conn.commit()
-        local_id = self.sqlite_cursor.lastrowid
-        expense_data.id = local_id
-        safe_print(f"INFO: تم حفظ المصروف '{expense_data.category}' محلياً (ID: {local_id}).")
+            expense_data.created_at = now_dt
+            expense_data.last_modified = now_dt
+            expense_data.sync_status = "new_offline"
+
+            sql = """
+                INSERT INTO expenses (
+                    sync_status, created_at, last_modified, date, category, amount,
+                    description, account_id, payment_account_id, project_id, dirty_flag, is_deleted
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)
+            """
+            params = (
+                expense_data.sync_status,
+                now_iso,
+                now_iso,
+                expense_data.date.isoformat(),
+                expense_data.category,
+                expense_data.amount,
+                expense_data.description,
+                expense_data.account_id,
+                expense_data.payment_account_id,
+                expense_data.project_id,
+            )
+
+            self.sqlite_cursor.execute(sql, params)
+            self.sqlite_conn.commit()
+            local_id = self.sqlite_cursor.lastrowid
+            expense_data.id = local_id
+            safe_print(f"INFO: تم حفظ المصروف '{expense_data.category}' محلياً (ID: {local_id}).")
 
         if self.online:
             try:
@@ -4839,6 +5991,69 @@ class Repository:
 
         return expense_data
 
+    def _normalize_expense_write_fields(self, expense_data: schemas.Expense) -> None:
+        requested_project_ref = str(getattr(expense_data, "project_id", "") or "")
+        resolved_project = self._resolve_project_row(requested_project_ref)
+        if resolved_project:
+            expense_data.project_id = self._stable_project_reference(
+                resolved_project,
+                requested_project_ref,
+            )
+        else:
+            normalized_project = normalize_user_text(requested_project_ref)
+            expense_data.project_id = normalized_project if normalized_project else None
+
+        normalized_payment_account = normalize_user_text(
+            str(getattr(expense_data, "payment_account_id", "") or "")
+        )
+        if not normalized_payment_account:
+            normalized_payment_account = normalize_user_text(
+                str(getattr(expense_data, "account_id", "") or "")
+            )
+        expense_data.payment_account_id = normalized_payment_account or None
+
+    def _find_duplicate_expense(
+        self, expense_data: schemas.Expense, exclude_id: int | None = None
+    ) -> schemas.Expense | None:
+        project_ref = str(getattr(expense_data, "project_id", "") or "")
+        if not project_ref:
+            return None
+
+        new_signature = self._expense_signature(
+            {
+                "project_id": getattr(expense_data, "project_id", ""),
+                "date": (
+                    expense_data.date.isoformat() if getattr(expense_data, "date", None) else ""
+                ),
+                "amount": getattr(expense_data, "amount", 0.0),
+                "category": getattr(expense_data, "category", ""),
+                "description": getattr(expense_data, "description", ""),
+                "account_id": getattr(expense_data, "account_id", ""),
+                "payment_account_id": getattr(expense_data, "payment_account_id", ""),
+            }
+        )
+
+        for existing in self.get_expenses_for_project(project_ref):
+            existing_id = getattr(existing, "id", None)
+            if exclude_id and existing_id and int(existing_id) == int(exclude_id):
+                continue
+
+            existing_signature = self._expense_signature(
+                {
+                    "project_id": getattr(existing, "project_id", ""),
+                    "date": getattr(existing, "date", ""),
+                    "amount": getattr(existing, "amount", 0.0),
+                    "category": getattr(existing, "category", ""),
+                    "description": getattr(existing, "description", ""),
+                    "account_id": getattr(existing, "account_id", ""),
+                    "payment_account_id": getattr(existing, "payment_account_id", ""),
+                }
+            )
+            if existing_signature == new_signature:
+                return existing
+
+        return None
+
     def get_all_expenses(self) -> list[schemas.Expense]:
         """⚡ جلب كل المصروفات (SQLite أولاً للسرعة)"""
         # ⚡ جلب من SQLite أولاً (سريع جداً)
@@ -4856,7 +6071,12 @@ class Repository:
                 rows = cursor.fetchall()
             finally:
                 cursor.close()
-            expenses_list = [schemas.Expense(**dict(row)) for row in rows]
+            deduped_rows = self._dedupe_rows_by_signature(
+                [dict(row) for row in rows],
+                self._expense_signature,
+            )
+            deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+            expenses_list = [schemas.Expense(**row) for row in deduped_rows]
             safe_print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
             return expenses_list
         except Exception as e:
@@ -4865,13 +6085,17 @@ class Repository:
         # Fallback إلى MongoDB
         if self.online:
             try:
-                expenses_data = list(self.mongo_db.expenses.find())
-                expenses_list = []
+                expenses_data = list(self.mongo_db.expenses.find(self._merge_active_filter_mongo()))
+                rows = []
                 for exp in expenses_data:
                     mongo_id = str(exp.pop("_id"))
                     exp.pop("_mongo_id", None)
                     exp.pop("mongo_id", None)
-                    expenses_list.append(schemas.Expense(**exp, _mongo_id=mongo_id))
+                    exp["_mongo_id"] = mongo_id
+                    rows.append(exp)
+                deduped_rows = self._dedupe_rows_by_signature(rows, self._expense_signature)
+                deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+                expenses_list = [schemas.Expense(**row) for row in deduped_rows]
                 safe_print("INFO: تم جلب المصروفات من الأونلاين (MongoDB).")
                 return expenses_list
             except Exception as e:
@@ -4890,6 +6114,7 @@ class Repository:
                     """
                     SELECT * FROM expenses
                     WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
                     AND date >= ? AND date <= ?
                     AND (
                         payment_account_id = ?
@@ -4915,7 +6140,9 @@ class Repository:
                 cursor.execute(
                     """
                     SELECT COALESCE(SUM(amount), 0) FROM expenses
-                    WHERE date < ?
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    AND date < ?
                     AND (
                         payment_account_id = ?
                         OR (payment_account_id IS NULL AND account_id = ?)
@@ -4941,7 +6168,9 @@ class Repository:
                 cursor.execute(
                     """
                     SELECT * FROM expenses
-                    WHERE date >= ? AND date <= ?
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    AND date >= ? AND date <= ?
                     AND account_id = ?
                     AND payment_account_id IS NOT NULL
                     AND payment_account_id != ?
@@ -4965,7 +6194,9 @@ class Repository:
                 cursor.execute(
                     """
                     SELECT COALESCE(SUM(amount), 0) FROM expenses
-                    WHERE date < ?
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    AND date < ?
                     AND account_id = ?
                     AND payment_account_id IS NOT NULL
                     AND payment_account_id != ?
@@ -4995,7 +6226,10 @@ class Repository:
 
             cursor = self.get_cursor()
             try:
-                cursor.execute(f"SELECT * FROM expenses {where_clause}", where_params)
+                cursor.execute(
+                    f"SELECT * {self._is_active_filter_sql('expenses')} AND {where_clause[6:]}",
+                    where_params,
+                )
                 row = cursor.fetchone()
                 if row:
                     return schemas.Expense(**dict(row))
@@ -5021,15 +6255,29 @@ class Repository:
                 where_clause = "WHERE _mongo_id = ?"
                 where_params = (str(expense_id),)
 
+            existing_expense = self.get_expense_by_id(expense_id)
+
             # ⚡ جلب الحقول بأمان
             category = getattr(expense_data, "category", "") or ""
             description = getattr(expense_data, "description", "") or ""
+            self._normalize_expense_write_fields(expense_data)
             project_id = getattr(expense_data, "project_id", "") or ""
+            payment_account_id = getattr(expense_data, "payment_account_id", None)
+
+            existing_local_id = None
+            if existing_expense is not None:
+                try:
+                    existing_local_id = int(getattr(existing_expense, "id", 0) or 0) or None
+                except (TypeError, ValueError):
+                    existing_local_id = None
+
+            if self._find_duplicate_expense(expense_data, exclude_id=existing_local_id) is not None:
+                raise ValueError("يوجد مصروف بنفس البيانات لهذا المشروع")
 
             sql = f"""
                 UPDATE expenses SET
                     last_modified = ?, date = ?, category = ?, amount = ?,
-                    description = ?, account_id = ?, project_id = ?, sync_status = ?
+                    description = ?, account_id = ?, payment_account_id = ?, project_id = ?, sync_status = ?
                 {where_clause}
             """
             params = (
@@ -5039,8 +6287,9 @@ class Repository:
                 expense_data.amount,
                 description,
                 expense_data.account_id,
+                payment_account_id,
                 project_id,
-                "modified",
+                "modified_offline",
             ) + where_params
 
             self.sqlite_cursor.execute(sql, params)
@@ -5060,6 +6309,7 @@ class Repository:
                         "amount": expense_data.amount,
                         "description": description,
                         "account_id": expense_data.account_id,
+                        "payment_account_id": payment_account_id,
                         "project_id": project_id,
                         "sync_status": "synced",
                     }
@@ -5072,10 +6322,10 @@ class Repository:
                         )
 
                     if result and result.modified_count > 0:
-                        self.sqlite_cursor.execute(
-                            f"UPDATE expenses SET sync_status = ? {where_clause}",
-                            ("synced",) + where_params,
+                        sync_update_sql = (
+                            f"UPDATE expenses SET sync_status = ? {where_clause}"  # nosec B608
                         )
+                        self.sqlite_cursor.execute(sync_update_sql, ("synced",) + where_params)
                         self.sqlite_conn.commit()
                 except Exception:
                     pass  # Ignore sync errors
@@ -5085,6 +6335,8 @@ class Repository:
             Repository._dashboard_cache_time = 0
 
             return True
+        except ValueError:
+            raise
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تعديل المصروف: {e}")
             return False
@@ -5165,18 +6417,54 @@ class Repository:
 
     # --- دوال التعامل مع المشاريع ---
 
+    def _generate_unique_project_invoice_number(self) -> str:
+        max_num = 97161
+
+        self.sqlite_cursor.execute(
+            "SELECT invoice_number FROM invoice_numbers WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+        )
+        result1 = self.sqlite_cursor.fetchone()
+        if result1 and result1[0]:
+            try:
+                max_num = max(max_num, int(str(result1[0]).replace("SW-", "")))
+            except ValueError:
+                pass
+
+        self.sqlite_cursor.execute(
+            "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+        )
+        result2 = self.sqlite_cursor.fetchone()
+        if result2 and result2[0]:
+            try:
+                max_num = max(max_num, int(str(result2[0]).replace("SW-", "")))
+            except ValueError:
+                pass
+
+        invoice_number = f"SW-{max_num + 1}"
+        for _ in range(100):
+            self.sqlite_cursor.execute(
+                "SELECT COUNT(*) FROM invoice_numbers WHERE invoice_number = ?",
+                (invoice_number,),
+            )
+            used_in_table = self.sqlite_cursor.fetchone()[0] or 0
+            self.sqlite_cursor.execute(
+                "SELECT COUNT(*) FROM projects WHERE invoice_number = ?",
+                (invoice_number,),
+            )
+            used_in_projects = self.sqlite_cursor.fetchone()[0] or 0
+            if used_in_table == 0 and used_in_projects == 0:
+                return invoice_number
+            max_num += 1
+            invoice_number = f"SW-{max_num + 1}"
+
+        raise RuntimeError("invoice_number_generation_exhausted")
+
     def create_project(self, project_data: schemas.Project) -> schemas.Project:
         """(معدلة) إنشاء مشروع جديد (بالحقول المالية) مع فحص التكرار"""
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
 
-        # ✅ فحص التكرار قبل الإضافة
-        existing_project = self.get_project_by_number(project_data.name)
-        if existing_project:
-            safe_print(f"WARNING: المشروع '{project_data.name}' موجود بالفعل!")
-            raise ValueError(f"المشروع '{project_data.name}' موجود بالفعل في النظام")
-
-        # ✅ فحص تكرار بنفس العميل ونفس الاسم (case insensitive)
+        # ✅ فحص التكرار بنفس العميل ونفس الاسم (case insensitive)
         similar_project = self._get_similar_project(project_data.name, project_data.client_id)
         if similar_project:
             safe_print(f"WARNING: يوجد مشروع مشابه '{similar_project.name}' لنفس العميل!")
@@ -5226,92 +6514,35 @@ class Repository:
         local_id = self.sqlite_cursor.lastrowid
         project_data.id = local_id
 
-        # ⚡ توليد وحفظ رقم الفاتورة الثابت فوراً (في جدول منفصل للثبات)
+        # ⚡ توليد وحفظ رقم الفاتورة الثابت فوراً وربطه بهوية المشروع
         try:
-            # تحقق من وجود رقم محفوظ مسبقاً لهذا المشروع
+            invoice_number = self._generate_unique_project_invoice_number()
             self.sqlite_cursor.execute(
-                "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
-                (project_data.name,),
+                """
+                INSERT INTO invoice_numbers (project_id, project_name, invoice_number, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (str(local_id), project_data.name, invoice_number, datetime.now().isoformat()),
             )
-            existing = self.sqlite_cursor.fetchone()
-
-            if existing:
-                invoice_number = existing[0]
-            else:
-                # ⚡ جلب أعلى رقم فاتورة من كلا الجدولين لتجنب التكرار
-                max_num = 97161  # الرقم الأساسي
-
-                # من جدول invoice_numbers
-                self.sqlite_cursor.execute(
-                    "SELECT invoice_number FROM invoice_numbers WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
-                )
-                result1 = self.sqlite_cursor.fetchone()
-                if result1 and result1[0]:
-                    try:
-                        num1 = int(result1[0].replace("SW-", ""))
-                        max_num = max(max_num, num1)
-                    except ValueError:
-                        pass
-
-                # من جدول projects
-                self.sqlite_cursor.execute(
-                    "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
-                )
-                result2 = self.sqlite_cursor.fetchone()
-                if result2 and result2[0]:
-                    try:
-                        num2 = int(result2[0].replace("SW-", ""))
-                        max_num = max(max_num, num2)
-                    except ValueError:
-                        pass
-
-                # توليد الرقم الجديد
-                invoice_number = f"SW-{max_num + 1}"
-
-                # ⚡ التحقق من عدم وجود تكرار (مع حد أقصى للتكرارات)
-                max_iterations = 100
-                iteration = 0
-                while iteration < max_iterations:
-                    iteration += 1
-                    self.sqlite_cursor.execute(
-                        "SELECT COUNT(*) FROM projects WHERE invoice_number = ?", (invoice_number,)
-                    )
-                    if self.sqlite_cursor.fetchone()[0] == 0:
-                        break
-                    # إذا كان موجوداً، زد الرقم
-                    max_num += 1
-                    invoice_number = f"SW-{max_num + 1}"
-
-                # احفظ الرقم الجديد في جدول الأرقام الثابتة
-                self.sqlite_cursor.execute(
-                    "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
-                    (project_data.name, invoice_number, datetime.now().isoformat()),
-                )
-
-            # حدّث المشروع
             self.sqlite_cursor.execute(
-                "UPDATE projects SET invoice_number = ? WHERE id = ?", (invoice_number, local_id)
+                "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                (invoice_number, local_id),
             )
             self.sqlite_conn.commit()
             project_data.invoice_number = invoice_number
         except Exception as e:
             safe_print(f"WARNING: خطأ في توليد رقم الفاتورة: {e}")
-            # fallback: استخدم أعلى رقم + 1
+            invoice_number = f"SW-{97161 + int(local_id)}"
             self.sqlite_cursor.execute(
-                "SELECT invoice_number FROM projects WHERE invoice_number LIKE 'SW-%' ORDER BY invoice_number DESC LIMIT 1"
+                "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                (invoice_number, local_id),
             )
-            result = self.sqlite_cursor.fetchone()
-            if result and result[0]:
-                try:
-                    last_num = int(result[0].replace("SW-", ""))
-                    invoice_number = f"SW-{last_num + 1}"
-                except ValueError:
-                    invoice_number = f"SW-{97161 + int(local_id)}"
-            else:
-                invoice_number = f"SW-{97161 + int(local_id)}"
-
             self.sqlite_cursor.execute(
-                "UPDATE projects SET invoice_number = ? WHERE id = ?", (invoice_number, local_id)
+                """
+                INSERT OR IGNORE INTO invoice_numbers (project_id, project_name, invoice_number, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (str(local_id), project_data.name, invoice_number, datetime.now().isoformat()),
             )
             self.sqlite_conn.commit()
             project_data.invoice_number = invoice_number
@@ -5515,7 +6746,11 @@ class Repository:
                 elif exclude_status:
                     query_filter = {"status": {"$ne": exclude_status.value}}
 
-                data = list(self.mongo_db.projects.find(query_filter).sort("created_at", -1))
+                data = list(
+                    self.mongo_db.projects.find(self._merge_active_filter_mongo(query_filter)).sort(
+                        "created_at", -1
+                    )
+                )
                 data_list = []
                 for d in data:
                     try:
@@ -5541,64 +6776,48 @@ class Repository:
 
         return []
 
-    def get_project_by_number(self, project_name: str) -> schemas.Project | None:
+    def get_project_by_number(
+        self, project_name: str, client_id: str | None = None
+    ) -> schemas.Project | None:
         """(جديدة) جلب مشروع واحد باسمه"""
-        if self.online:
-            try:
-                data = self.mongo_db.projects.find_one({"name": project_name})
-                if data:
-                    mongo_id = str(data.pop("_id"))
-                    data.pop("_mongo_id", None)
-                    data.pop("mongo_id", None)
+        project_name = normalize_user_text(project_name)
+        if not project_name:
+            return None
+        resolved = self._resolve_project_target_row(project_name, client_id or "")
+        if not resolved:
+            return None
 
-                    # ⚡ معالجة items (JSON string -> list)
-                    items_value = data.get("items")
-                    if isinstance(items_value, str):
-                        try:
-                            data["items"] = json.loads(items_value)
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            data["items"] = []
-
-                    # ⚡ معالجة milestones (JSON string -> list)
-                    milestones_value = data.get("milestones")
-                    if isinstance(milestones_value, str):
-                        try:
-                            data["milestones"] = json.loads(milestones_value)
-                        except (json.JSONDecodeError, TypeError, ValueError):
-                            data["milestones"] = []
-
-                    return schemas.Project(**data, _mongo_id=mongo_id)
-            except Exception as e:
-                safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (Mongo): {e}")
-
+        row_dict = dict(resolved)
         try:
             with self._lock:
                 cursor = self.sqlite_conn.cursor()
                 try:
-                    cursor.execute("SELECT * FROM projects WHERE name = ?", (project_name,))
+                    cursor.execute(
+                        f"SELECT * {self._is_active_filter_sql('projects')} AND id = ?",
+                        (row_dict["id"],),
+                    )
                     row = cursor.fetchone()
                 finally:
                     cursor.close()
-            if row:
-                row_dict = dict(row)
-                items_value = row_dict.get("items")
-                if isinstance(items_value, str):
-                    try:
-                        row_dict["items"] = json.loads(items_value)
-                    except json.JSONDecodeError:
-                        row_dict["items"] = []
-                # ⚡ معالجة milestones (JSON string -> list)
-                milestones_value = row_dict.get("milestones")
-                if isinstance(milestones_value, str):
-                    try:
-                        row_dict["milestones"] = json.loads(milestones_value)
-                    except json.JSONDecodeError:
-                        row_dict["milestones"] = []
-                return schemas.Project(**row_dict)
+            if not row:
+                return None
+            row_dict = dict(row)
+            items_value = row_dict.get("items")
+            if isinstance(items_value, str):
+                try:
+                    row_dict["items"] = json.loads(items_value)
+                except json.JSONDecodeError:
+                    row_dict["items"] = []
+            milestones_value = row_dict.get("milestones")
+            if isinstance(milestones_value, str):
+                try:
+                    row_dict["milestones"] = json.loads(milestones_value)
+                except json.JSONDecodeError:
+                    row_dict["milestones"] = []
+            return schemas.Project(**row_dict)
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب المشروع {project_name} (SQLite): {e}")
-
-        return None
+            return None
 
     def update_project(
         self, project_name: str, project_data: schemas.Project
@@ -5611,6 +6830,32 @@ class Repository:
         now_dt = datetime.now()
         now_iso = now_dt.isoformat()
         items_json = json.dumps([item.model_dump() for item in project_data.items])
+        target_row = self._resolve_project_target_row(
+            project_name,
+            getattr(project_data, "client_id", ""),
+            local_id=getattr(project_data, "id", None),
+            mongo_id=getattr(project_data, "_mongo_id", None),
+        )
+        if not target_row:
+            return None
+
+        target_local_id = int(target_row["id"])
+        current_name = str(target_row.get("name") or project_name or "").strip()
+        current_client_id = str(
+            target_row.get("client_id") or getattr(project_data, "client_id", "") or ""
+        ).strip()
+        current_mongo_id = str(
+            target_row.get("_mongo_id") or getattr(project_data, "_mongo_id", None) or ""
+        ).strip()
+
+        project_data.id = target_local_id
+        if current_mongo_id:
+            project_data._mongo_id = current_mongo_id
+        if current_client_id and not getattr(project_data, "client_id", ""):
+            project_data.client_id = current_client_id
+
+        project_renamed = str(project_data.name or "").strip() != current_name
+        rename_aliases = self._project_reference_values(target_row) if project_renamed else set()
 
         # --- 1. تحديث SQLite ---
         try:
@@ -5623,7 +6868,7 @@ class Repository:
                     items = ?, subtotal = ?, discount_rate = ?, discount_amount = ?, tax_rate = ?,
                     tax_amount = ?, total_amount = ?, currency = ?, project_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
-                WHERE name = ?
+                WHERE id = ?
             """
             params = (
                 project_data.name,  # ✅ تحديث الاسم الجديد
@@ -5643,10 +6888,29 @@ class Repository:
                 project_data.currency.value,
                 project_data.project_notes,
                 now_iso,
-                project_name,  # WHERE clause - الاسم القديم
+                target_local_id,
             )
-            self.sqlite_cursor.execute(sql, params)
-            self.sqlite_conn.commit()
+            with self._lock:
+                self.sqlite_cursor.execute("BEGIN IMMEDIATE")
+                try:
+                    self.sqlite_cursor.execute(sql, params)
+                    if self.sqlite_cursor.rowcount == 0:
+                        self.sqlite_cursor.execute("ROLLBACK")
+                        return None
+
+                    if project_renamed:
+                        self._cascade_project_rename_sqlite(
+                            current_name,
+                            project_data.name,
+                            now_iso,
+                            rename_aliases,
+                            target_local_id,
+                        )
+
+                    self.sqlite_conn.commit()
+                except Exception:
+                    self.sqlite_cursor.execute("ROLLBACK")
+                    raise
             safe_print("SUCCESS: [Repo] ✅ تم تحديث المشروع في SQLite")
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث المشروع (SQLite): {e}")
@@ -5664,10 +6928,25 @@ class Repository:
                 update_dict["currency"] = project_data.currency.value
                 update_dict["last_modified"] = now_dt
 
-                self.mongo_db.projects.update_one({"name": project_name}, {"$set": update_dict})
+                if current_mongo_id:
+                    try:
+                        project_filter: dict[str, Any] = {"_id": ObjectId(current_mongo_id)}
+                    except Exception:
+                        project_filter = {"_mongo_id": current_mongo_id}
+                else:
+                    project_filter = {"name": current_name, "client_id": current_client_id}
+
+                self.mongo_db.projects.update_one(project_filter, {"$set": update_dict})
+                if project_renamed:
+                    self._cascade_project_rename_mongo(
+                        current_name,
+                        project_data.name,
+                        now_dt,
+                        rename_aliases,
+                    )
                 self.sqlite_cursor.execute(
-                    "UPDATE projects SET sync_status = 'synced', dirty_flag = 0 WHERE name = ?",
-                    (project_data.name,),
+                    "UPDATE projects SET sync_status = 'synced', dirty_flag = 0 WHERE id = ?",
+                    (target_local_id,),
                 )
                 self.sqlite_conn.commit()
             except Exception as e:
@@ -5684,13 +6963,20 @@ class Repository:
 
         return project_data
 
-    def delete_project(self, project_id: str) -> bool:
+    def delete_project(self, project_id: str, client_id: str | None = None) -> bool:
         """🗑️ حذف مشروع نهائياً من قاعدة البيانات"""
         safe_print(f"INFO: [Repo] 🗑️ جاري حذف المشروع: {project_id}")
 
         try:
-            # البحث عن المشروع بالاسم (get_project_by_number تبحث بالاسم)
-            project = self.get_project_by_number(project_id)
+            target_row = self._resolve_project_target_row(project_id, client_id or "")
+            if not target_row:
+                safe_print(f"WARNING: [Repo] المشروع غير موجود: {project_id}")
+                return False
+
+            project = self.get_project_by_number(
+                str(target_row.get("id") or project_id),
+                str(target_row.get("client_id") or client_id or ""),
+            )
 
             if not project:
                 safe_print(f"WARNING: [Repo] المشروع غير موجود: {project_id}")
@@ -5699,6 +6985,7 @@ class Repository:
             project_name = project.name
             mongo_id = getattr(project, "_mongo_id", None)
             local_id = getattr(project, "id", None)
+            project_aliases = self._project_reference_values(target_row)
 
             safe_print(
                 f"INFO: [Repo] وجدنا المشروع: {project_name}, mongo_id={mongo_id}, local_id={local_id}"
@@ -5725,23 +7012,16 @@ class Repository:
                             }
                         },
                     )
-                    self.mongo_db.payments.update_many(
-                        {"project_id": project_name},
-                        {
-                            "$set": {
-                                "is_deleted": True,
-                                "sync_status": "deleted",
-                                "last_modified": now_dt,
-                            }
-                        },
-                    )
+                    self._delete_project_related_rows_mongo(project_name, now_dt, project_aliases)
 
                     if getattr(result, "matched_count", 0) > 0:
-                        self.sqlite_cursor.execute(
-                            "DELETE FROM projects WHERE name = ?", (project_name,)
-                        )
-                        self.sqlite_cursor.execute(
-                            "DELETE FROM payments WHERE project_id = ?", (project_name,)
+                        self.sqlite_cursor.execute("DELETE FROM projects WHERE id = ?", (local_id,))
+                        self._delete_project_related_rows_sqlite(
+                            project_name,
+                            now_iso,
+                            project_aliases,
+                            hard_delete=True,
+                            project_record_id=project.id,
                         )
                         self.sqlite_conn.commit()
                         safe_print("INFO: [Repo] تم تعليم حذف المشروع والدفعات ثم حذفها محلياً")
@@ -5750,17 +7030,16 @@ class Repository:
                             """
                             UPDATE projects
                             SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                            WHERE name = ?
+                            WHERE id = ?
                             """,
-                            (now_iso, project_name),
+                            (now_iso, local_id),
                         )
-                        self.sqlite_cursor.execute(
-                            """
-                            UPDATE payments
-                            SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                            WHERE project_id = ?
-                            """,
-                            (now_iso, project_name),
+                        self._delete_project_related_rows_sqlite(
+                            project_name,
+                            now_iso,
+                            project_aliases,
+                            hard_delete=False,
+                            project_record_id=project.id,
                         )
                         self.sqlite_conn.commit()
                 except Exception as e:
@@ -5769,17 +7048,16 @@ class Repository:
                         """
                         UPDATE projects
                         SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                        WHERE name = ?
+                        WHERE id = ?
                         """,
-                        (now_iso, project_name),
+                        (now_iso, local_id),
                     )
-                    self.sqlite_cursor.execute(
-                        """
-                        UPDATE payments
-                        SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                        WHERE project_id = ?
-                        """,
-                        (now_iso, project_name),
+                    self._delete_project_related_rows_sqlite(
+                        project_name,
+                        now_iso,
+                        project_aliases,
+                        hard_delete=False,
+                        project_record_id=project.id,
                     )
                     self.sqlite_conn.commit()
             else:
@@ -5787,17 +7065,16 @@ class Repository:
                     """
                     UPDATE projects
                     SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                    WHERE name = ?
+                    WHERE id = ?
                     """,
-                    (now_iso, project_name),
+                    (now_iso, local_id),
                 )
-                self.sqlite_cursor.execute(
-                    """
-                    UPDATE payments
-                    SET sync_status = 'deleted', last_modified = ?, is_deleted = 1, dirty_flag = 1
-                    WHERE project_id = ?
-                    """,
-                    (now_iso, project_name),
+                self._delete_project_related_rows_sqlite(
+                    project_name,
+                    now_iso,
+                    project_aliases,
+                    hard_delete=False,
+                    project_record_id=project.id,
                 )
                 self.sqlite_conn.commit()
 
@@ -5820,12 +7097,12 @@ class Repository:
             traceback.print_exc()
             return False
 
-    def get_project_revenue(self, project_name: str) -> float:
+    def get_project_revenue(self, project_name: str, client_id: str | None = None) -> float:
         """(معدلة بالطريقة البسيطة) تحسب إجمالي إيرادات مشروع"""
         safe_print(f"INFO: [Repo] جاري حساب إيرادات مشروع: {project_name}")
         total_revenue = 0.0
         try:
-            invoices = self.get_invoices_for_project(project_name)
+            invoices = self.get_invoices_for_project(project_name, client_id=client_id)
             for inv in invoices:
                 total_revenue += inv.total_amount
             safe_print(f"INFO: [Repo] إيرادات المشروع (محسوبة): {total_revenue}")
@@ -5833,12 +7110,12 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل حساب إيرادات المشروع: {e}")
         return total_revenue
 
-    def get_project_expenses(self, project_name: str) -> float:
+    def get_project_expenses(self, project_name: str, client_id: str | None = None) -> float:
         """(معدلة بالطريقة البسيطة) تحسب إجمالي مصروفات مشروع"""
         safe_print(f"INFO: [Repo] جاري حساب مصروفات مشروع: {project_name}")
         total_expenses = 0.0
         try:
-            expenses = self.get_expenses_for_project(project_name)
+            expenses = self.get_expenses_for_project(project_name, client_id=client_id)
             for exp in expenses:
                 total_expenses += exp.amount
             safe_print(f"INFO: [Repo] مصروفات المشروع (محسوبة): {total_expenses}")
@@ -5846,37 +7123,74 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل حساب مصروفات المشروع: {e}")
         return total_expenses
 
-    def get_invoices_for_project(self, project_name: str) -> list[schemas.Invoice]:
-        """(معدلة) جلب كل الفواتير المرتبطة بمشروع (أونلاين أولاً)"""
-        safe_print(f"INFO: [Repo] جلب فواتير مشروع: {project_name}")
-        query_filter = {
-            "project_id": project_name,
-            "status": {"$ne": schemas.InvoiceStatus.VOID.value},
-        }
+    def get_invoices_for_project(
+        self, project_name: str, client_id: str | None = None
+    ) -> list[schemas.Invoice]:
+        """جلب كل الفواتير المرتبطة بمشروع مع دعم aliases واستبعاد الصفوف المحذوفة."""
+        requested = normalize_user_text(project_name)
+        if not requested:
+            return []
+
+        resolved_project, canonical_project_name, aliases, target_client_id = (
+            self._resolve_project_context(requested, client_id)
+        )
+        if not resolved_project or not canonical_project_name:
+            return []
+        safe_print(f"INFO: [Repo] جلب فواتير مشروع: {canonical_project_name}")
 
         if self.online:
             try:
-                data = list(self.mongo_db.invoices.find(query_filter))
+                query_filter = {
+                    "project_id": {"$in": list(aliases)} if aliases else canonical_project_name,
+                    "status": {"$ne": schemas.InvoiceStatus.VOID.value},
+                }
+                data = list(
+                    self.mongo_db.invoices.find(self._merge_active_filter_mongo(query_filter))
+                )
                 invoices_list = []
                 for d in data:
                     mongo_id = str(d.pop("_id"))
                     # حذف _mongo_id و mongo_id من البيانات لتجنب التكرار
                     d.pop("_mongo_id", None)
                     d.pop("mongo_id", None)
+                    if not self._row_matches_project_scope(
+                        d.get("project_id"),
+                        canonical_project_name,
+                        aliases,
+                        target_client_id=target_client_id,
+                        row_client_id=d.get("client_id"),
+                    ):
+                        continue
                     invoices_list.append(schemas.Invoice(**d, _mongo_id=mongo_id))
                 return invoices_list
             except Exception as e:
                 safe_print(f"ERROR: [Repo] فشل جلب فواتير المشروع (Mongo): {e}")
 
         try:
-            self.sqlite_cursor.execute(
-                "SELECT * FROM invoices WHERE project_id = ? AND status != ?",
-                (project_name, schemas.InvoiceStatus.VOID.value),
-            )
-            rows = self.sqlite_cursor.fetchall()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        f"SELECT * {self._is_active_filter_sql('invoices')} AND status != ?",
+                        (schemas.InvoiceStatus.VOID.value,),
+                    )
+                    rows = [dict(row) for row in cursor.fetchall()]
+                finally:
+                    cursor.close()
+
+            matching_rows = [
+                row
+                for row in rows
+                if self._row_matches_project_scope(
+                    row.get("project_id"),
+                    canonical_project_name,
+                    aliases,
+                    target_client_id=target_client_id,
+                    row_client_id=row.get("client_id"),
+                )
+            ]
             data_list = []
-            for row in rows:
-                row_dict = dict(row)
+            for row_dict in matching_rows:
                 row_dict["items"] = json.loads(row_dict["items"])
                 data_list.append(schemas.Invoice(**row_dict))
             return data_list
@@ -5884,45 +7198,76 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل جلب فواتير المشروع (SQLite): {e}")
             return []
 
-    def get_expenses_for_project(self, project_name: str) -> list[schemas.Expense]:
-        """(معدلة) جلب كل المصروفات المرتبطة بمشروع (أونلاين أولاً)"""
-        safe_print(f"INFO: [Repo] جلب مصروفات مشروع: {project_name}")
-        query_filter = {"project_id": project_name}
+    def get_expenses_for_project(
+        self, project_name: str, client_id: str | None = None
+    ) -> list[schemas.Expense]:
+        """جلب مصروفات مشروع مع توحيد المراجع وإزالة الصفوف المكررة."""
+        requested = normalize_user_text(project_name)
+        if not requested:
+            return []
 
-        if self.online:
-            try:
-                data = list(self.mongo_db.expenses.find(query_filter))
-                expenses_list = []
-                for d in data:
-                    mongo_id = str(d.pop("_id"))
-                    # حذف _mongo_id و mongo_id من البيانات لتجنب التكرار
-                    d.pop("_mongo_id", None)
-                    d.pop("mongo_id", None)
-                    expenses_list.append(schemas.Expense(**d, _mongo_id=mongo_id))
-                return expenses_list
-            except Exception as e:
-                safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (Mongo): {e}")
+        resolved_project, canonical_project_name, aliases, _ = self._resolve_project_context(
+            requested,
+            client_id,
+        )
+        if not resolved_project or not canonical_project_name:
+            return []
 
         try:
             with self._lock:
-                temp_cursor = self.sqlite_conn.cursor()
-                temp_cursor.execute("SELECT * FROM expenses WHERE project_id = ?", (project_name,))
-                rows = temp_cursor.fetchall()
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(f"SELECT * {self._is_active_filter_sql('expenses')}")
+                    rows = [dict(row) for row in cursor.fetchall()]
+                finally:
+                    cursor.close()
 
-                if len(rows) == 0:
-                    clean_name = project_name.strip().replace("  ", " ")
-                    temp_cursor.execute(
-                        "SELECT * FROM expenses WHERE TRIM(project_id) = ? OR project_id LIKE ?",
-                        (clean_name, f"%{clean_name}%"),
-                    )
-                    rows = temp_cursor.fetchall()
-
-                temp_cursor.close()
-
-            return [schemas.Expense(**dict(row)) for row in rows]
+            matching_rows = [
+                row
+                for row in rows
+                if self._row_matches_project(row.get("project_id"), canonical_project_name, aliases)
+            ]
+            deduped_rows = self._dedupe_rows_by_signature(matching_rows, self._expense_signature)
+            deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+            return [schemas.Expense(**row) for row in deduped_rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (SQLite): {e}")
-            return []
+
+        if self.online:
+            try:
+                query_filter = (
+                    {"project_id": {"$in": list(aliases)}}
+                    if aliases
+                    else {"project_id": canonical_project_name}
+                )
+                data = list(
+                    self.mongo_db.expenses.find(self._merge_active_filter_mongo(query_filter))
+                )
+                rows = []
+                for item in data:
+                    mongo_id = str(item.pop("_id"))
+                    item.pop("_mongo_id", None)
+                    item.pop("mongo_id", None)
+                    item["_mongo_id"] = mongo_id
+                    rows.append(item)
+                deduped_rows = self._dedupe_rows_by_signature(rows, self._expense_signature)
+                deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
+                return [schemas.Expense(**row) for row in deduped_rows]
+            except Exception as e:
+                safe_print(f"ERROR: [Repo] فشل جلب مصروفات المشروع (Mongo): {e}")
+
+        return []
+
+    def get_total_expenses_for_project(
+        self, project_name: str, client_id: str | None = None
+    ) -> float:
+        """إجمالي المصروفات لمشروع بعد التطبيع وإزالة التكرار."""
+        try:
+            expenses = self.get_expenses_for_project(project_name, client_id=client_id)
+            return float(sum(float(getattr(expense, "amount", 0.0) or 0.0) for expense in expenses))
+        except Exception as e:
+            safe_print(f"ERROR: [Repo] فشل حساب إجمالي المصروفات للمشروع: {e}")
+            return 0.0
 
     # --- دوال الداشبورد (جديدة) ---
 
@@ -5952,40 +7297,42 @@ class Repository:
         total_expenses = 0.0
         net_profit_cash = 0.0  # ⚡ تهيئة المتغير هنا لتجنب الخطأ
 
-        # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
-        cursor = self.get_cursor()
         try:
-            cursor.execute("SELECT SUM(amount) FROM payments")
-            result = cursor.fetchone()
-            total_collected = result[0] if result and result[0] else 0.0
-
-            cursor.execute("SELECT SUM(amount) FROM expenses")
-            result = cursor.fetchone()
-            total_expenses = result[0] if result and result[0] else 0.0
-
-            # حساب المتبقي لكل مشروع على حدة
-            cursor.execute(
-                "SELECT name, total_amount FROM projects WHERE status IN (?, ?, ?)",
-                (
-                    schemas.ProjectStatus.ACTIVE.value,
-                    schemas.ProjectStatus.PLANNING.value,
-                    schemas.ProjectStatus.ON_HOLD.value,
-                ),
+            payments = self.get_all_payments()
+            expenses = self.get_all_expenses()
+            total_collected = sum(
+                float(getattr(payment, "amount", 0.0) or 0.0) for payment in payments
             )
-            projects = cursor.fetchall()
+            total_expenses = sum(
+                float(getattr(expense, "amount", 0.0) or 0.0) for expense in expenses
+            )
 
-            for project in projects:
-                project_name = project[0]
-                project_total = project[1] or 0.0
-
-                # جلب الدفعات الخاصة بهذا المشروع فقط
-                cursor.execute(
-                    "SELECT SUM(amount) FROM payments WHERE project_id = ?", (project_name,)
+            paid_by_project: dict[str, float] = {}
+            for payment in payments:
+                canonical_project = self.resolve_project_name(
+                    getattr(payment, "project_id", ""),
+                    getattr(payment, "client_id", ""),
                 )
-                paid_result = cursor.fetchone()
-                project_paid = paid_result[0] if paid_result and paid_result[0] else 0.0
+                if not canonical_project:
+                    canonical_project = normalize_user_text(getattr(payment, "project_id", ""))
+                if not canonical_project:
+                    continue
+                paid_by_project[canonical_project] = paid_by_project.get(
+                    canonical_project, 0.0
+                ) + float(getattr(payment, "amount", 0.0) or 0.0)
 
-                # المتبقي = الإجمالي - المدفوع
+            projects = self.get_all_projects()
+            active_statuses = {
+                schemas.ProjectStatus.ACTIVE,
+                schemas.ProjectStatus.PLANNING,
+                schemas.ProjectStatus.ON_HOLD,
+            }
+            for project in projects:
+                if getattr(project, "status", None) not in active_statuses:
+                    continue
+                project_name = str(getattr(project, "name", "") or "")
+                project_total = float(getattr(project, "total_amount", 0.0) or 0.0)
+                project_paid = float(paid_by_project.get(project_name, 0.0))
                 project_remaining = project_total - project_paid
                 if project_remaining > 0:
                     total_outstanding += project_remaining
@@ -5998,8 +7345,6 @@ class Repository:
 
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حساب أرقام الداشبورد (SQLite): {e}")
-        finally:
-            cursor.close()  # ⚡ إغلاق الـ cursor
 
         result = {
             "total_collected": total_collected,
@@ -6693,6 +8038,19 @@ class Repository:
 
     # ==================== دوال التعامل مع المهام (Tasks) ====================
 
+    def _normalize_related_project_ref(self, project_ref: Any) -> str | None:
+        """Normalize task/project links to a stable project reference when possible."""
+        raw_ref = str(project_ref or "").strip()
+        if not raw_ref:
+            return None
+
+        resolved_project = self._resolve_project_row(raw_ref)
+        if resolved_project:
+            return self._stable_project_reference(resolved_project, raw_ref)
+
+        normalized = normalize_user_text(raw_ref)
+        return normalized or raw_ref
+
     def create_task(self, task_data: dict) -> dict:
         """
         إنشاء مهمة جديدة
@@ -6716,10 +8074,8 @@ class Repository:
         tags_json = json.dumps(task_data.get("tags", []), ensure_ascii=False)
 
         # تحويل القيم الفارغة إلى None لتجنب مشاكل FOREIGN KEY
-        related_project = task_data.get("related_project_id")
+        related_project = self._normalize_related_project_ref(task_data.get("related_project_id"))
         related_client = task_data.get("related_client_id")
-        if related_project == "":
-            related_project = None
         if related_client == "":
             related_client = None
 
@@ -6800,10 +8156,8 @@ class Repository:
         tags_json = json.dumps(task_data.get("tags", []), ensure_ascii=False)
 
         # تحويل القيم الفارغة إلى None لتجنب مشاكل FOREIGN KEY
-        related_project = task_data.get("related_project_id")
+        related_project = self._normalize_related_project_ref(task_data.get("related_project_id"))
         related_client = task_data.get("related_client_id")
-        if related_project == "":
-            related_project = None
         if related_client == "":
             related_client = None
 
@@ -6975,7 +8329,8 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        "SELECT * FROM tasks WHERE id = ? OR _mongo_id = ?", (task_id, task_id)
+                        f"SELECT * {self._is_active_filter_sql('tasks')} AND (id = ? OR _mongo_id = ?)",
+                        (task_id, task_id),
                     )
                     row = cursor.fetchone()
                 finally:
@@ -6997,11 +8352,7 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        """
-                        SELECT * FROM tasks
-                        WHERE sync_status != 'deleted' OR sync_status IS NULL
-                        ORDER BY created_at DESC
-                        """
+                        f"SELECT * {self._is_active_filter_sql('tasks')} ORDER BY created_at DESC"
                     )
                     rows = cursor.fetchall()
                 finally:
@@ -7023,12 +8374,7 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        """
-                        SELECT * FROM tasks
-                        WHERE status = ?
-                        AND (sync_status != 'deleted' OR sync_status IS NULL)
-                        ORDER BY created_at DESC
-                        """,
+                        f"SELECT * {self._is_active_filter_sql('tasks')} AND status = ? ORDER BY created_at DESC",
                         (status,),
                     )
                     rows = cursor.fetchall()
@@ -7044,44 +8390,38 @@ class Repository:
         جلب المهام المرتبطة بمشروع
         """
         try:
-            project_name = None
-            try:
-                if str(project_id).isdigit():
-                    with self._lock:
-                        cursor = self.sqlite_conn.cursor()
-                        try:
-                            cursor.execute(
-                                """
-                                SELECT name FROM projects
-                                WHERE id = ?
-                                AND (sync_status != 'deleted' OR sync_status IS NULL)
-                                """,
-                                (project_id,),
-                            )
-                            row = cursor.fetchone()
-                            project_name = row[0] if row else None
-                        finally:
-                            cursor.close()
-            except Exception:
-                project_name = None
+            requested_ref = str(project_id or "").strip()
+            if not requested_ref:
+                return []
+
+            resolved_project, canonical_project_name, aliases, _ = self._resolve_project_context(
+                requested_ref
+            )
+            if not resolved_project or not canonical_project_name:
+                return []
+            aliases.add(requested_ref)
+            normalized_ref = normalize_user_text(requested_ref)
+            if normalized_ref:
+                aliases.add(normalized_ref)
 
             with self._lock:
                 cursor = self.sqlite_conn.cursor()
                 try:
-                    if project_name and project_name != project_id:
-                        cursor.execute(
-                            "SELECT * FROM tasks WHERE related_project_id = ? OR related_project_id = ? ORDER BY created_at DESC",
-                            (project_id, project_name),
-                        )
-                    else:
-                        cursor.execute(
-                            "SELECT * FROM tasks WHERE related_project_id = ? ORDER BY created_at DESC",
-                            (project_id,),
-                        )
-                    rows = cursor.fetchall()
+                    cursor.execute(
+                        f"SELECT * {self._is_active_filter_sql('tasks')} ORDER BY created_at DESC"
+                    )
+                    rows = [dict(row) for row in cursor.fetchall()]
                 finally:
                     cursor.close()
-            return [self._row_to_task_dict(row) for row in rows]
+
+            matching_rows = [
+                row
+                for row in rows
+                if self._row_matches_project(
+                    row.get("related_project_id"), canonical_project_name, aliases
+                )
+            ]
+            return [self._row_to_task_dict(row) for row in matching_rows]
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب مهام المشروع: {e}")
             return []
@@ -7095,7 +8435,7 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        "SELECT * FROM tasks WHERE related_client_id = ? ORDER BY created_at DESC",
+                        f"SELECT * {self._is_active_filter_sql('tasks')} AND related_client_id = ? ORDER BY created_at DESC",
                         (client_id,),
                     )
                     rows = cursor.fetchall()
@@ -7116,8 +8456,8 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        """SELECT * FROM tasks
-                           WHERE due_date < ? AND status NOT IN ('COMPLETED', 'CANCELLED')
+                        f"""SELECT * {self._is_active_filter_sql('tasks')}
+                           AND due_date < ? AND status NOT IN ('COMPLETED', 'CANCELLED')
                            ORDER BY due_date ASC""",
                         (now_iso,),
                     )
@@ -7139,8 +8479,8 @@ class Repository:
                 cursor = self.sqlite_conn.cursor()
                 try:
                     cursor.execute(
-                        """SELECT * FROM tasks
-                           WHERE date(due_date) = date(?)
+                        f"""SELECT * {self._is_active_filter_sql('tasks')}
+                           AND date(due_date) = date(?)
                            ORDER BY due_time ASC""",
                         (today,),
                     )
@@ -7188,17 +8528,43 @@ class Repository:
         return str(uuid.uuid4())[:8]
 
     # ⚡ دوال أرقام الفواتير الثابتة
-    def get_invoice_number_for_project(self, project_name: str) -> str:
+    def get_invoice_number_for_project(
+        self, project_name: str, client_id: str | None = None
+    ) -> str:
         """
         جلب رقم الفاتورة الثابت للمشروع من جدول invoice_numbers
         """
         try:
+            project_row = self._resolve_project_row(project_name, client_id or "")
+            if project_row:
+                inline_invoice_number = str(project_row.get("invoice_number") or "").strip()
+                if inline_invoice_number:
+                    return inline_invoice_number
+
+                project_row_id = str(project_row.get("id") or "").strip()
+                if project_row_id:
+                    self.sqlite_cursor.execute(
+                        "SELECT invoice_number FROM invoice_numbers WHERE project_id = ?",
+                        (project_row_id,),
+                    )
+                    row = self.sqlite_cursor.fetchone()
+                    if row:
+                        return str(row[0])
+
+                canonical_project_name = str(project_row.get("name") or "").strip()
+            else:
+                canonical_project_name = self.resolve_project_name(
+                    project_name, client_id
+                ) or normalize_user_text(project_name)
+            if not canonical_project_name:
+                return ""
             self.sqlite_cursor.execute(
-                "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?", (project_name,)
+                "SELECT invoice_number FROM invoice_numbers WHERE project_name = ? ORDER BY id LIMIT 2",
+                (canonical_project_name,),
             )
-            row = self.sqlite_cursor.fetchone()
-            if row:
-                return str(row[0])
+            rows = self.sqlite_cursor.fetchall()
+            if len(rows) == 1:
+                return str(rows[0][0])
             return ""
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب رقم الفاتورة: {e}")
@@ -7216,31 +8582,85 @@ class Repository:
             safe_print(f"ERROR: [Repo] فشل جلب أرقام الفواتير: {e}")
             return {}
 
-    def ensure_invoice_number(self, project_name: str) -> str:
+    def ensure_invoice_number(self, project_name: str, client_id: str | None = None) -> str:
         """
         التأكد من وجود رقم فاتورة للمشروع، وإنشاء واحد جديد إذا لم يكن موجوداً
         """
         try:
-            # تحقق من وجود رقم محفوظ
-            existing = self.get_invoice_number_for_project(project_name)
-            if existing:
-                return str(existing)
+            project_row = self._resolve_project_row(project_name, client_id or "")
+            if not project_row:
+                return ""
 
-            # ولّد رقم جديد
-            self.sqlite_cursor.execute("SELECT MAX(id) FROM invoice_numbers")
-            max_id = self.sqlite_cursor.fetchone()[0] or 0
-            new_seq = max_id + 1
-            invoice_number = f"SW-{97161 + new_seq}"
+            project_row_id = str(project_row.get("id") or "").strip()
+            canonical_project_name = str(project_row.get("name") or "").strip()
+            if not project_row_id or not canonical_project_name:
+                return ""
 
-            # احفظ الرقم الجديد
+            existing = str(project_row.get("invoice_number") or "").strip()
+            if not existing:
+                self.sqlite_cursor.execute(
+                    "SELECT invoice_number FROM invoice_numbers WHERE project_id = ?",
+                    (project_row_id,),
+                )
+                row = self.sqlite_cursor.fetchone()
+                existing = str(row[0]).strip() if row and row[0] else ""
+
+            if not existing:
+                existing = self._generate_unique_project_invoice_number()
+
             self.sqlite_cursor.execute(
-                "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
-                (project_name, invoice_number, datetime.now().isoformat()),
+                "SELECT id FROM invoice_numbers WHERE project_id = ?",
+                (project_row_id,),
+            )
+            existing_row = self.sqlite_cursor.fetchone()
+            if existing_row:
+                self.sqlite_cursor.execute(
+                    """
+                    UPDATE invoice_numbers
+                    SET project_name = ?, invoice_number = ?
+                    WHERE project_id = ?
+                    """,
+                    (canonical_project_name, existing, project_row_id),
+                )
+            else:
+                self.sqlite_cursor.execute(
+                    "SELECT id FROM invoice_numbers WHERE invoice_number = ?",
+                    (existing,),
+                )
+                invoice_match = self.sqlite_cursor.fetchone()
+                if invoice_match:
+                    self.sqlite_cursor.execute(
+                        """
+                        UPDATE invoice_numbers
+                        SET project_id = ?, project_name = ?
+                        WHERE invoice_number = ?
+                        """,
+                        (project_row_id, canonical_project_name, existing),
+                    )
+                else:
+                    self.sqlite_cursor.execute(
+                        """
+                        INSERT INTO invoice_numbers (project_id, project_name, invoice_number, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            project_row_id,
+                            canonical_project_name,
+                            existing,
+                            datetime.now().isoformat(),
+                        ),
+                    )
+
+            self.sqlite_cursor.execute(
+                "UPDATE projects SET invoice_number = ? WHERE id = ?",
+                (existing, project_row_id),
             )
             self.sqlite_conn.commit()
 
-            safe_print(f"INFO: [Repo] تم إنشاء رقم فاتورة جديد: {project_name} -> {invoice_number}")
-            return str(invoice_number)
+            safe_print(
+                f"INFO: [Repo] تم تثبيت رقم الفاتورة: {canonical_project_name} -> {existing}"
+            )
+            return str(existing)
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل إنشاء رقم الفاتورة: {e}")
             return ""
@@ -7251,42 +8671,45 @@ class Repository:
         يُستدعى بعد كل sync للتأكد من عدم فقدان الأرقام
         """
         try:
-            # تحديث كل المشاريع بأرقام الفواتير المحفوظة
+            self.sqlite_cursor.execute(
+                """
+                UPDATE invoice_numbers
+                SET project_name = (
+                    SELECT projects.name FROM projects
+                    WHERE CAST(projects.id AS TEXT) = invoice_numbers.project_id
+                )
+                WHERE EXISTS (
+                    SELECT 1 FROM projects
+                    WHERE CAST(projects.id AS TEXT) = invoice_numbers.project_id
+                )
+                """
+            )
             self.sqlite_cursor.execute(
                 """
                 UPDATE projects SET invoice_number = (
                     SELECT inv.invoice_number FROM invoice_numbers inv
-                    WHERE inv.project_name = projects.name
+                    WHERE inv.project_id = CAST(projects.id AS TEXT)
                 )
                 WHERE EXISTS (
-                    SELECT 1 FROM invoice_numbers inv WHERE inv.project_name = projects.name
+                    SELECT 1 FROM invoice_numbers inv
+                    WHERE inv.project_id = CAST(projects.id AS TEXT)
                 )
-            """
+                """
             )
             updated = self.sqlite_cursor.rowcount
             self.sqlite_conn.commit()
 
-            # إنشاء أرقام للمشاريع الجديدة اللي مش عندها رقم
             self.sqlite_cursor.execute(
                 """
-                SELECT id, name FROM projects
+                SELECT id FROM projects
                 WHERE invoice_number IS NULL OR invoice_number = ''
-            """
+                """
             )
             new_projects = self.sqlite_cursor.fetchall()
 
             for row in new_projects:
-                project_id = row[0]
-                project_name = row[1]
-                invoice_number = self.ensure_invoice_number(project_name)
-                if invoice_number:
-                    self.sqlite_cursor.execute(
-                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                        (invoice_number, project_id),
-                    )
-
-            if new_projects:
-                self.sqlite_conn.commit()
+                if self.ensure_invoice_number(str(row[0])):
+                    updated += 1
 
             safe_print(
                 f"INFO: [Repo] ✅ تم استعادة أرقام الفواتير ({updated} محدث, {len(new_projects)} جديد)"

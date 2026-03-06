@@ -268,9 +268,18 @@ class SyncIndicator(QWidget):
 class ToastNotification(QWidget):
     """إشعار منبثق (Toast)"""
 
-    def __init__(self, title: str, message: str, duration: int = 3000, parent=None):
+    DEFAULT_DURATION_MS = 9000
+    MIN_DURATION_MS = 8000
+
+    def __init__(self, title: str, message: str, duration: int = DEFAULT_DURATION_MS, parent=None):
         super().__init__(parent)
-        self.duration = duration
+        try:
+            duration_ms = int(duration)
+        except (TypeError, ValueError):
+            duration_ms = self.DEFAULT_DURATION_MS
+        if duration_ms <= 0:
+            duration_ms = self.DEFAULT_DURATION_MS
+        self.duration = max(self.MIN_DURATION_MS, duration_ms)
         self.init_ui(title, message)
         self.setup_animation()
 
@@ -369,6 +378,8 @@ class StatusBarWidget(QWidget):
     logout_requested = pyqtSignal()
     # إشارة المزامنة الكاملة
     full_sync_requested = pyqtSignal()
+    DEFAULT_NOTIFICATION_DURATION_MS = 9000
+    MIN_NOTIFICATION_DURATION_MS = 8000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -609,9 +620,21 @@ class StatusBarWidget(QWidget):
         except Exception as e:
             safe_print(f"ERROR: [StatusBarWidget] فشل تحديث مؤشر المزامنة الفورية: {e}")
 
-    def show_notification(self, title: str, message: str, duration: int = 3000):
+    def show_notification(
+        self,
+        title: str,
+        message: str,
+        duration: int = DEFAULT_NOTIFICATION_DURATION_MS,
+    ):
         """عرض إشعار منبثق"""
-        notification = ToastNotification(title, message, duration, self)
+        try:
+            duration_ms = int(duration)
+        except (TypeError, ValueError):
+            duration_ms = self.DEFAULT_NOTIFICATION_DURATION_MS
+        if duration_ms <= 0:
+            duration_ms = self.DEFAULT_NOTIFICATION_DURATION_MS
+        duration_ms = max(self.MIN_NOTIFICATION_DURATION_MS, duration_ms)
+        notification = ToastNotification(title, message, duration_ms, self)
         notification.show_notification()
         self.notifications.append(notification)
 

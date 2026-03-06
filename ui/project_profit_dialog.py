@@ -399,6 +399,37 @@ class ProjectProfitDialog(QDialog):
         """
         )
 
+    @staticmethod
+    def _dedupe_expenses(expenses: list[schemas.Expense]) -> list[schemas.Expense]:
+        deduped: dict[tuple, schemas.Expense] = {}
+        for exp in expenses or []:
+            try:
+                amount = round(float(getattr(exp, "amount", 0.0) or 0.0), 2)
+            except (TypeError, ValueError):
+                amount = 0.0
+            key = (
+                "sig",
+                str(getattr(exp, "project_id", "") or "").strip().casefold(),
+                str(getattr(exp, "date", "") or "")[:10],
+                amount,
+                str(getattr(exp, "category", "") or "").strip().casefold(),
+                str(getattr(exp, "description", "") or "").strip().casefold(),
+                str(getattr(exp, "account_id", "") or "").strip().casefold(),
+                str(getattr(exp, "payment_account_id", "") or "").strip().casefold(),
+            )
+
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = exp
+                continue
+
+            existing_has_mongo = bool(str(getattr(existing, "_mongo_id", "") or "").strip())
+            current_has_mongo = bool(str(getattr(exp, "_mongo_id", "") or "").strip())
+            if current_has_mongo and not existing_has_mongo:
+                deduped[key] = exp
+
+        return list(deduped.values())
+
     def load_profit_data(self):
         """⚡ تحميل بيانات الربحية في الخلفية لمنع التجميد"""
         # عرض رسالة تحميل
@@ -437,7 +468,7 @@ class ProjectProfitDialog(QDialog):
 
                 profit_data = data["profit_data"]
                 payments = data["payments"]
-                expenses = data["expenses"]
+                expenses = self._dedupe_expenses(data["expenses"])
 
                 total_revenue = profit_data.get("total_revenue", 0.0)
                 total_paid = profit_data.get("total_paid", 0.0)

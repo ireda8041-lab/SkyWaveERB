@@ -8,6 +8,7 @@ from core import schemas
 from core.event_bus import EventBus
 from core.repository import Repository
 from core.signals import app_signals
+from core.text_utils import normalize_user_text
 from services.accounting_service import AccountingService
 
 # استيراد دالة الطباعة الآمنة
@@ -77,6 +78,17 @@ class ProjectService:
 
         self.bus.subscribe("CONVERT_TO_INVOICE", self.handle_convert_to_project)
         safe_print("INFO: 🏢 قسم المشاريع Enterprise (ProjectService) جاهز")
+
+    @staticmethod
+    def _normalize_project_name(value: str | None) -> str:
+        return normalize_user_text(value)
+
+    @staticmethod
+    def _project_name_key(value: str | None) -> str:
+        text = normalize_user_text(value)
+        return text.translate(
+            str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي", "ؤ": "و", "ئ": "ي"})
+        )
 
     # ==================== Smart Coding Engine ====================
     def generate_smart_project_code(self, client_name: str, service_type: str | None = None) -> str:
@@ -220,12 +232,13 @@ class ProjectService:
         milestone_id: str,
         new_status: schemas.MilestoneStatus,
         invoice_id: str | None = None,
+        client_id: str | None = None,
     ) -> bool:
         """
         تحديث حالة دفعة مرحلية
         """
         try:
-            project = self.repo.get_project_by_number(project_name)
+            project = self.repo.get_project_by_number(project_name, client_id)
             if not project:
                 return False
 
@@ -238,7 +251,7 @@ class ProjectService:
                         milestone.invoice_id = invoice_id
                     break
 
-            self.repo.update_project(project_name, project)
+            self.repo.update_project(self._project_ref(project, project_name), project)
             self.invalidate_cache()
             return True
 
@@ -290,7 +303,10 @@ class ProjectService:
                     continue
 
                 # جلب الدفعات
-                payments = self.repo.get_payments_for_project(project.name)
+                payments = self.repo.get_payments_for_project(
+                    self._project_ref(project, project.name),
+                    client_id=getattr(project, "client_id", None),
+                )
                 total_paid = sum(p.amount for p in payments) if payments else 0.0
 
                 safe_print(
@@ -398,6 +414,9 @@ class ProjectService:
 
             if "name" not in project_data or not project_data["name"]:
                 project_data["name"] = f"PROJ-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            project_data["name"] = self._normalize_project_name(project_data.get("name"))
+            if not project_data["name"]:
+                project_data["name"] = f"PROJ-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
 
             # ⚡ Enterprise: توليد الكود الذكي
             client_id = project_data.get("client_id", "")
@@ -462,6 +481,11 @@ class ProjectService:
         """⚡ تعديل مشروع (مع إبطال الـ cache)"""
         safe_print(f"INFO: [ProjectService] ⚡ تعديل مشروع: {project_name}")
         try:
+            project_ref = str(project_name or "")
+            incoming_name = self._normalize_project_name(new_data_dict.get("name", project_name))
+            if not incoming_name:
+                raise ValueError("اسم المشروع مطلوب")
+
             # (نفس لوجيك الحسابات - مع خصم البند)
             items_list = new_data_dict.get("items", [])
             subtotal: float = 0.0
@@ -497,9 +521,28 @@ class ProjectService:
             new_data_dict["total_amount"] = total_amount
             new_data_dict["items"] = processed_items
 
-            old_project = self.repo.get_project_by_number(project_name)
+            old_project = self.get_project_by_id(project_ref)
+            if not old_project and new_data_dict.get("client_id"):
+                old_project = self.repo.get_project_by_number(
+                    project_ref, new_data_dict.get("client_id")
+                )
             if not old_project:
                 raise ValueError("المشروع الأصلي غير موجود")
+
+            # الفروقات الشكلية فقط (مسافات/أشكال ألف) لا تعتبر إعادة تسمية فعلية.
+            if self._project_name_key(incoming_name) == self._project_name_key(old_project.name):
+                new_data_dict["name"] = old_project.name
+            else:
+                new_data_dict["name"] = incoming_name
+
+            target_client_id = str(new_data_dict.get("client_id") or old_project.client_id or "")
+            conflicting_project = self.repo.get_project_by_number(
+                new_data_dict["name"], target_client_id
+            )
+            if conflicting_project and str(conflicting_project.id or "") != str(
+                old_project.id or ""
+            ):
+                raise ValueError("يوجد مشروع آخر بنفس الاسم لهذا العميل")
 
             # ⚡ تحديد لو المستخدم غير الحالة يدوياً
             new_status = new_data_dict.get("status")
@@ -512,24 +555,48 @@ class ProjectService:
 
             updated_project_schema = old_project.model_copy(update=new_data_dict)
 
-            saved_project = self.repo.update_project(project_name, updated_project_schema)
+            saved_project = self.repo.update_project(project_ref, updated_project_schema)
+            if saved_project is None:
+                raise ValueError("تعذر حفظ تعديلات المشروع")
+
+            target_project_name = saved_project.name
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بناءً على الدفعات (لو مش معينة يدوياً)
             if not new_data_dict.get("status_manually_set", False):
-                self._auto_update_project_status(project_name, force_update=False)
+                self._auto_update_project_status(
+                    self._project_ref(saved_project, target_project_name),
+                    client_id=getattr(saved_project, "client_id", None),
+                    force_update=False,
+                )
 
             # ⚡ إبطال الـ cache وإبلاغ الروبوت المحاسبي
             self.invalidate_cache()
-            self.bus.publish("PROJECT_EDITED", {"project": saved_project})
+            self.bus.publish("PROJECT_UPDATED", {"project": saved_project})
+            project_renamed = target_project_name != old_project.name
             app_signals.emit_data_changed("projects")
+            if project_renamed:
+                # Rename cascades can affect linked table views by project reference.
+                app_signals.emit_data_changed("payments")
+                app_signals.emit_data_changed("expenses")
+                app_signals.emit_data_changed("invoices")
+            app_signals.emit_data_changed("accounting")
 
             # 🔔 إشعار
-            notify_operation("updated", "project", project_name)
+            notify_operation("updated", "project", target_project_name)
 
-            safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع {project_name}")
+            if target_project_name != old_project.name:
+                safe_print(
+                    f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع وإعادة ربط البيانات: {old_project.name} -> {target_project_name}"
+                )
+            else:
+                safe_print(f"SUCCESS: [ProjectService] ✅ تم تعديل المشروع {target_project_name}")
 
             # إعادة جلب المشروع بعد تحديث الحالة
-            return self.repo.get_project_by_number(project_name)
+            refreshed_project = self.repo.get_project_by_number(
+                str(saved_project.id or target_project_name),
+                getattr(saved_project, "client_id", None),
+            )
+            return refreshed_project or saved_project
         except Exception as e:
             safe_print(f"ERROR: [ProjectService] فشل تعديل المشروع: {e}")
             raise
@@ -538,8 +605,8 @@ class ProjectService:
         """🗑️ حذف مشروع نهائياً"""
         safe_print(f"INFO: [ProjectService] 🗑️ حذف مشروع: {project_id}")
         try:
-            # جلب المشروع بالاسم (get_project_by_number تبحث بالاسم)
-            project = self.repo.get_project_by_number(project_id)
+            project_ref = str(project_id or "")
+            project = self.get_project_by_id(project_ref)
 
             if not project:
                 safe_print(f"WARNING: [ProjectService] المشروع غير موجود: {project_id}")
@@ -548,7 +615,10 @@ class ProjectService:
             project_name = project.name
 
             # حذف المشروع من قاعدة البيانات
-            success = self.repo.delete_project(project_name)
+            delete_ref = str(getattr(project, "id", "") or project_name)
+            success = self.repo.delete_project(
+                delete_ref, client_id=getattr(project, "client_id", None)
+            )
 
             if success:
                 # إبطال الـ cache
@@ -557,6 +627,11 @@ class ProjectService:
                 # إرسال إشارة التحديث
                 self.bus.publish("PROJECT_DELETED", {"project_name": project_name})
                 app_signals.emit_data_changed("projects")
+                app_signals.emit_data_changed("payments")
+                app_signals.emit_data_changed("expenses")
+                app_signals.emit_data_changed("invoices")
+                app_signals.emit_data_changed("tasks")
+                app_signals.emit_data_changed("accounting")
 
                 # 🔔 إشعار
                 notify_operation("deleted", "project", project_name)
@@ -608,6 +683,16 @@ class ProjectService:
             raise ValueError("يجب تحديد المشروع")
 
         try:
+            canonical_project_name = (
+                self.repo.resolve_project_name(project.name)
+                if hasattr(self.repo, "resolve_project_name")
+                else project.name
+            )
+            if canonical_project_name and canonical_project_name != project.name:
+                safe_print(
+                    f"INFO: [ProjectService] تصحيح اسم المشروع للدفعة: {project.name} -> {canonical_project_name}"
+                )
+
             # تحديد طريقة الدفع من الحساب
             payment_method = method or self._get_payment_method_from_account(account_id)
 
@@ -616,7 +701,7 @@ class ProjectService:
             if not client_id:
                 safe_print(f"WARNING: [ProjectService] المشروع {project.name} ليس له client_id!")
                 # محاولة جلب client_id من قاعدة البيانات
-                db_project = self.repo.get_project_by_number(project.name)
+                db_project = self.repo.get_project_by_number(canonical_project_name or project.name)
                 if db_project is not None and db_project.client_id:
                     client_id = db_project.client_id
                     safe_print(
@@ -624,7 +709,7 @@ class ProjectService:
                     )
 
             payment_data = schemas.Payment(
-                project_id=project.name,
+                project_id=canonical_project_name or project.name,
                 client_id=client_id or "",
                 date=date,
                 amount=amount,
@@ -643,19 +728,24 @@ class ProjectService:
             )
 
             # ⚡ إبلاغ الروبوت المحاسبي (ينشئ القيد تلقائياً)
-            safe_print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECEIVED...")
-            subscribers = self.bus.get_subscriber_count("PAYMENT_RECEIVED")
-            safe_print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECEIVED: {subscribers}")
+            safe_print("DEBUG: [ProjectService] جاري نشر حدث PAYMENT_RECORDED...")
+            subscribers = self.bus.get_subscriber_count("PAYMENT_RECORDED")
+            safe_print(f"DEBUG: [ProjectService] عدد المشتركين في PAYMENT_RECORDED: {subscribers}")
+            linked_project = self.repo.get_project_by_number(canonical_project_name or project.name)
+            if linked_project is None:
+                linked_project = project
 
             result = self.bus.publish(
-                "PAYMENT_RECEIVED", {"payment": created_payment, "project": project}
+                "PAYMENT_RECORDED", {"payment": created_payment, "project": linked_project}
             )
             safe_print(
                 f"DEBUG: [ProjectService] تم نشر الحدث - عدد المستمعين الذين تم إخطارهم: {result}"
             )
 
             # ⚡ تحديث حالة المشروع أوتوماتيك بعد الدفعة
-            self._auto_update_project_status(project.name, force_update=True)
+            self._auto_update_project_status(
+                canonical_project_name or project.name, force_update=True
+            )
 
             # ⚡ إبطال الـ cache لضمان تحديث البيانات
             self.invalidate_cache()
@@ -670,7 +760,11 @@ class ProjectService:
 
             # 🔔 إشعار (مع حماية من الأخطاء)
             try:
-                notify_operation("paid", "payment", f"{amount:,.0f} ج.م - {project.name}")
+                notify_operation(
+                    "paid",
+                    "payment",
+                    f"{amount:,.0f} ج.م - {canonical_project_name or project.name}",
+                )
             except Exception as notify_err:
                 safe_print(f"WARNING: [ProjectService] فشل إرسال الإشعار: {notify_err}")
 
@@ -737,13 +831,33 @@ class ProjectService:
             True إذا نجح التعديل، False خلاف ذلك
         """
         try:
-            project_name = payment_data.project_id
+            project_name = (
+                self.repo.resolve_project_name(payment_data.project_id)
+                if hasattr(self.repo, "resolve_project_name")
+                else payment_data.project_id
+            )
+            if not project_name:
+                existing_payment = self.repo.get_payment_by_id(payment_id)
+                if existing_payment is not None:
+                    project_name = (
+                        self.repo.resolve_project_name(getattr(existing_payment, "project_id", ""))
+                        if hasattr(self.repo, "resolve_project_name")
+                        else getattr(existing_payment, "project_id", "")
+                    )
+            if project_name and project_name != payment_data.project_id:
+                safe_print(
+                    f"INFO: [ProjectService] تصحيح project_id أثناء تعديل الدفعة: {payment_data.project_id} -> {project_name}"
+                )
+                payment_data.project_id = project_name
             project = self.repo.get_project_by_number(project_name)
 
             # ⚡ التحقق من صحة البيانات
             if payment_data.amount <= 0:
                 safe_print("ERROR: [ProjectService] مبلغ الدفعة يجب أن يكون أكبر من صفر")
                 return False
+
+            if project and getattr(project, "client_id", None):
+                payment_data.client_id = project.client_id
 
             # تحديث طريقة الدفع من الحساب
             if payment_data.account_id:
@@ -791,6 +905,17 @@ class ProjectService:
         try:
             # ⚡ جلب بيانات الدفعة قبل الحذف (مهم للقيد العكسي)
             payment = self.repo.get_payment_by_id(payment_id)
+            canonical_project_name = (
+                self.repo.resolve_project_name(project_name)
+                if hasattr(self.repo, "resolve_project_name")
+                else project_name
+            )
+            if (not canonical_project_name) and payment is not None:
+                canonical_project_name = (
+                    self.repo.resolve_project_name(getattr(payment, "project_id", ""))
+                    if hasattr(self.repo, "resolve_project_name")
+                    else getattr(payment, "project_id", "")
+                )
 
             if not payment:
                 safe_print(f"WARNING: [ProjectService] لم يتم العثور على الدفعة: {payment_id}")
@@ -802,11 +927,17 @@ class ProjectService:
                 # ✅ إبلاغ الروبوت المحاسبي بحذف الدفعة (ينشئ قيد عكسي تلقائياً)
                 self.bus.publish(
                     "PAYMENT_DELETED",
-                    {"payment_id": payment_id, "payment": payment, "project_name": project_name},
+                    {
+                        "payment_id": payment_id,
+                        "payment": payment,
+                        "project_name": canonical_project_name or project_name,
+                    },
                 )
 
                 # ⚡ تحديث حالة المشروع أوتوماتيك
-                self._auto_update_project_status(project_name, force_update=True)
+                self._auto_update_project_status(
+                    canonical_project_name or project_name, force_update=True
+                )
                 self.invalidate_cache()
                 app_signals.emit_data_changed("projects")
                 app_signals.emit_data_changed("payments")
@@ -816,7 +947,7 @@ class ProjectService:
                 notify_operation("deleted", "payment", f"{payment.amount:,.0f} ج.م")
 
                 safe_print(
-                    f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {project_name}"
+                    f"SUCCESS: [ProjectService] ✅ تم حذف الدفعة وتحديث حالة المشروع {canonical_project_name or project_name}"
                 )
 
             return result
@@ -844,15 +975,21 @@ class ProjectService:
     def _auto_update_project_status(self, project_name: str, force_update: bool = False):
         """⚡ تحديث حالة المشروع أوتوماتيك بناءً على الدفعات (مع احترام التعديل اليدوي)"""
         try:
-            project = self.repo.get_project_by_number(project_name)
+            canonical_project_name = (
+                self.repo.resolve_project_name(project_name)
+                if hasattr(self.repo, "resolve_project_name")
+                else project_name
+            )
+            target_name = canonical_project_name or project_name
+            project = self.repo.get_project_by_number(target_name)
             if not project:
-                safe_print(f"WARNING: [ProjectService] لم يتم العثور على المشروع: {project_name}")
+                safe_print(f"WARNING: [ProjectService] لم يتم العثور على المشروع: {target_name}")
                 return
 
             # تجاهل المشاريع المؤرشفة
             if project.status == schemas.ProjectStatus.ARCHIVED:
                 safe_print(
-                    f"INFO: [ProjectService] المشروع {project_name} مؤرشف - لن يتم تحديث حالته"
+                    f"INFO: [ProjectService] المشروع {target_name} مؤرشف - لن يتم تحديث حالته"
                 )
                 return
 
@@ -860,30 +997,20 @@ class ProjectService:
             status_manually_set = getattr(project, "status_manually_set", False)
             if status_manually_set and not force_update:
                 safe_print(
-                    f"INFO: [ProjectService] المشروع {project_name} حالته معينة يدوياً - لن يتم تحديثها أوتوماتيك"
+                    f"INFO: [ProjectService] المشروع {target_name} حالته معينة يدوياً - لن يتم تحديثها أوتوماتيك"
                 )
                 return
 
-            # جلب الدفعات من قاعدة البيانات (Online أو Offline)
+            # جلب إجمالي الدفعات بمسار سريع لتقليل زمن الحفظ.
             total_paid = 0.0
             try:
-                payments = self.repo.get_payments_for_project(project_name)
-                total_paid = sum(p.amount for p in payments) if payments else 0.0
+                if hasattr(self.repo, "get_total_paid_for_project"):
+                    total_paid = float(self.repo.get_total_paid_for_project(target_name) or 0.0)
+                else:
+                    payments = self.repo.get_payments_for_project(target_name)
+                    total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
             except Exception as e:
-                safe_print(f"WARNING: [ProjectService] فشل جلب الدفعات: {e}")
-                # محاولة من SQLite مباشرة - cursor منفصل
-                try:
-                    cursor = self.repo.get_cursor()
-                    try:
-                        cursor.execute(
-                            "SELECT SUM(amount) FROM payments WHERE project_id = ?", (project_name,)
-                        )
-                        result = cursor.fetchone()
-                        total_paid = result[0] if result and result[0] else 0.0
-                    finally:
-                        cursor.close()
-                except Exception:
-                    pass  # تجاهل أخطاء جلب الدفعات
+                safe_print(f"WARNING: [ProjectService] فشل جلب إجمالي الدفعات: {e}")
 
             # تحديد الحالة الجديدة بناءً على الدفعات
             new_status = None
@@ -897,11 +1024,11 @@ class ProjectService:
             # تحديث الحالة إذا تغيرت
             if new_status and project.status != new_status:
                 safe_print(
-                    f"INFO: [ProjectService] ⚡ تحديث حالة {project_name}: {project.status.value} -> {new_status.value} (paid: {total_paid:,.2f} / total: {project.total_amount:,.2f})"
+                    f"INFO: [ProjectService] ⚡ تحديث حالة {target_name}: {project.status.value} -> {new_status.value} (paid: {total_paid:,.2f} / total: {project.total_amount:,.2f})"
                 )
                 project.status = new_status
                 project.status_manually_set = False  # الحالة أصبحت أوتوماتيك
-                self.repo.update_project(project_name, project)
+                self.repo.update_project(target_name, project)
                 self.invalidate_cache()
                 app_signals.emit_data_changed("projects")
 
@@ -934,7 +1061,14 @@ class ProjectService:
     def get_project_profitability(self, project_name: str) -> dict:
         """⚡ حساب ربحية المشروع - محسّن للسرعة القصوى"""
         try:
-            project = self.repo.get_project_by_number(project_name)
+            canonical_project_name = (
+                self.repo.resolve_project_name(project_name)
+                if hasattr(self.repo, "resolve_project_name")
+                else project_name
+            )
+            target_name = canonical_project_name or project_name
+
+            project = self.repo.get_project_by_number(target_name)
             if not project:
                 return {
                     "total_revenue": 0,
@@ -946,11 +1080,17 @@ class ProjectService:
 
             total_revenue = float(project.total_amount or 0.0)
 
-            payments = self.repo.get_payments_for_project(project_name)
-            total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
+            if hasattr(self.repo, "get_total_paid_for_project"):
+                total_paid = float(self.repo.get_total_paid_for_project(target_name) or 0.0)
+            else:
+                payments = self.repo.get_payments_for_project(target_name)
+                total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
 
-            expenses = self.repo.get_expenses_for_project(project_name)
-            total_expenses = sum(float(getattr(e, "amount", 0.0) or 0.0) for e in expenses)
+            if hasattr(self.repo, "get_total_expenses_for_project"):
+                total_expenses = float(self.repo.get_total_expenses_for_project(target_name) or 0.0)
+            else:
+                expenses = self.repo.get_expenses_for_project(target_name)
+                total_expenses = sum(float(getattr(e, "amount", 0.0) or 0.0) for e in expenses)
 
             net_profit = total_revenue - total_expenses
             balance_due = max(0, total_revenue - total_paid)

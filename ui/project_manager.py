@@ -2,6 +2,7 @@
 import os
 import traceback
 from datetime import datetime
+from typing import Any
 
 from PyQt6.QtCore import QDate, Qt, QTimer
 from PyQt6.QtGui import QAction, QColor
@@ -1868,11 +1869,14 @@ class ProjectEditorDialog(QDialog):
     def _save_project_impl(self, should_close: bool):
         selected_client = self.client_combo.currentData()
         selected_status = self.status_combo.currentData()
+        normalized_project_name = normalize_user_text(self.name_input.text())
 
         # التحقق من اسم المشروع
-        if not self.name_input.text():
+        if not normalized_project_name:
             QMessageBox.warning(self, "خطأ", "اسم المشروع مطلوب")
             return
+        if normalized_project_name != self.name_input.text():
+            self.name_input.setText(normalized_project_name)
 
         # التحقق من العميل - إذا كان مكتوباً ولكن غير محدد
         if not selected_client:
@@ -1901,7 +1905,7 @@ class ProjectEditorDialog(QDialog):
             discount_rate = discount_value
 
         project_data = {
-            "name": self.name_input.text(),
+            "name": normalized_project_name,
             "client_id": selected_client.name,
             "status": selected_status,
             "description": "",  # الوصف في notes_input دلوقتي
@@ -1967,7 +1971,10 @@ class ProjectEditorDialog(QDialog):
 
         try:
             if self.is_editing:
-                self.project_service.update_project(self.project_to_edit.name, project_data)
+                project_ref = str(
+                    getattr(self.project_to_edit, "id", "") or self.project_to_edit.name
+                )
+                self.project_service.update_project(project_ref, project_data)
             else:
                 self.project_service.create_project(project_data, payment_data)
 
@@ -3085,6 +3092,80 @@ class ProjectManagerTab(QWidget):
             self._preview_debounce_timer.timeout.connect(self.on_project_selection_changed)
         self._preview_debounce_timer.start(120)
 
+    @staticmethod
+    def _preview_text_key(value) -> str:
+        return normalize_user_text(str(value or "")).strip().casefold()
+
+    def _payment_preview_key(self, payment) -> tuple:
+        date_short = str(getattr(payment, "date", "") or "")[:10]
+        try:
+            amount = round(float(getattr(payment, "amount", 0.0) or 0.0), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+
+        return (
+            "sig",
+            self._preview_text_key(getattr(payment, "project_id", "")),
+            date_short,
+            amount,
+            self._preview_text_key(getattr(payment, "client_id", "")),
+            self._preview_text_key(getattr(payment, "account_id", "")),
+            self._preview_text_key(getattr(payment, "method", "")),
+        )
+
+    def _dedupe_preview_payments(self, payments: list) -> list:
+        deduped: dict[tuple, Any] = {}
+        for payment in payments:
+            key = self._payment_preview_key(payment)
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = payment
+                continue
+
+            existing_has_mongo = bool(str(getattr(existing, "_mongo_id", "") or "").strip())
+            current_has_mongo = bool(str(getattr(payment, "_mongo_id", "") or "").strip())
+            if current_has_mongo and not existing_has_mongo:
+                deduped[key] = payment
+
+        return list(deduped.values())
+
+    def _expense_preview_key(self, expense) -> tuple:
+        date_short = str(getattr(expense, "date", "") or "")[:10]
+        try:
+            amount = round(float(getattr(expense, "amount", 0.0) or 0.0), 2)
+        except (TypeError, ValueError):
+            amount = 0.0
+        account_id = self._preview_text_key(getattr(expense, "account_id", ""))
+        payment_account_id = self._preview_text_key(getattr(expense, "payment_account_id", ""))
+        effective_payment_account = payment_account_id or account_id
+
+        return (
+            "sig",
+            self._preview_text_key(getattr(expense, "project_id", "")),
+            date_short,
+            amount,
+            self._preview_text_key(getattr(expense, "category", "")),
+            self._preview_text_key(getattr(expense, "description", "")),
+            account_id,
+            effective_payment_account,
+        )
+
+    def _dedupe_preview_expenses(self, expenses: list) -> list:
+        deduped: dict[tuple, Any] = {}
+        for expense in expenses:
+            key = self._expense_preview_key(expense)
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = expense
+                continue
+
+            existing_has_mongo = bool(str(getattr(existing, "_mongo_id", "") or "").strip())
+            current_has_mongo = bool(str(getattr(expense, "_mongo_id", "") or "").strip())
+            if current_has_mongo and not existing_has_mongo:
+                deduped[key] = expense
+
+        return list(deduped.values())
+
     def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
         """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى مع بيانات حديثة"""
 
@@ -3100,6 +3181,16 @@ class ProjectManagerTab(QWidget):
         if not hasattr(self, "_preview_cache_connected"):
 
             def _invalidate(_data_type: str):
+                table_name = str(_data_type or "").strip().lower()
+                if table_name and table_name not in {
+                    "projects",
+                    "payments",
+                    "expenses",
+                    "tasks",
+                    "invoices",
+                    "clients",
+                }:
+                    return
                 if hasattr(self, "_preview_cache"):
                     self._preview_cache.clear()
 
@@ -3149,18 +3240,8 @@ class ProjectManagerTab(QWidget):
                 expenses = data.get("expenses", [])
                 tasks = data.get("tasks", [])
 
-                unique_payments = list(
-                    {
-                        (getattr(p, "_mongo_id", None) or getattr(p, "id", None) or id(p)): p
-                        for p in payments
-                    }.values()
-                )
-                unique_expenses = list(
-                    {
-                        (getattr(e, "_mongo_id", None) or getattr(e, "id", None) or id(e)): e
-                        for e in expenses
-                    }.values()
-                )
+                unique_payments = self._dedupe_preview_payments(payments)
+                unique_expenses = self._dedupe_preview_expenses(expenses)
                 unique_tasks = list({(getattr(t, "id", None) or id(t)): t for t in tasks}.values())
 
                 self._populate_payments_table_fast(unique_payments)
@@ -3173,8 +3254,10 @@ class ProjectManagerTab(QWidget):
         # ⚡ تحميل كل البيانات في طلب واحد (أسرع) - مع تجاوز الـ cache
         def fetch_all_data():
             try:
-                payments = self.project_service.get_payments_for_project(project_name) or []
-                expenses = self.project_service.get_expenses_for_project(project_name) or []
+                raw_payments = self.project_service.get_payments_for_project(project_name) or []
+                raw_expenses = self.project_service.get_expenses_for_project(project_name) or []
+                payments = self._dedupe_preview_payments(raw_payments)
+                expenses = self._dedupe_preview_expenses(raw_expenses)
                 project = self.project_service.repo.get_project_by_number(project_name)
 
                 total_revenue = float(project.total_amount or 0.0) if project else 0.0
@@ -3260,18 +3343,8 @@ class ProjectManagerTab(QWidget):
             tasks = data.get("tasks", [])
 
             # فلترة التكرار بناءً على الـ ID (Mongo ID أو SQLite ID)
-            unique_payments = list(
-                {
-                    (getattr(p, "_mongo_id", None) or getattr(p, "id", None) or id(p)): p
-                    for p in payments
-                }.values()
-            )
-            unique_expenses = list(
-                {
-                    (getattr(e, "_mongo_id", None) or getattr(e, "id", None) or id(e)): e
-                    for e in expenses
-                }.values()
-            )
+            unique_payments = self._dedupe_preview_payments(payments)
+            unique_expenses = self._dedupe_preview_expenses(expenses)
             unique_tasks = list({(getattr(t, "id", None) or id(t)): t for t in tasks}.values())
 
             self._populate_payments_table_fast(unique_payments)
@@ -4160,7 +4233,8 @@ class ProjectManagerTab(QWidget):
         try:
             # حذف المشروع باستخدام الاسم مباشرة
             safe_print(f"INFO: [ProjectManager] جاري حذف المشروع: {project_name}")
-            success = self.project_service.delete_project(project_name)
+            project_ref = str(getattr(self.selected_project, "id", "") or project_name)
+            success = self.project_service.delete_project(project_ref)
 
             if success:
                 self.selected_project = None

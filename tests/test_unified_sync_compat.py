@@ -3,6 +3,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 import core.realtime_sync as realtime_mod
 from core.realtime_sync import RealtimeSyncManager, ensure_replica_set_uri, is_local_mongo_uri
 from core.unified_sync import UnifiedSyncManagerV3
@@ -93,6 +95,56 @@ class _FakeRepoWithSqlite:
 
     def get_cursor(self):
         return self.sqlite_conn.cursor()
+
+
+def test_sqlite_identifier_guards_block_invalid_table_and_column_names(tmp_path):
+    repo = _FakeRepoWithSqlite(db_path=tmp_path / "guarded_sync.db", remote_clients=[])
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        ("Guarded Client", "2026-02-09T10:00:00", "2026-02-09T10:05:00", "synced", 0, 0),
+    )
+    repo.sqlite_conn.commit()
+
+    with pytest.raises(ValueError):
+        manager._sqlite_table_columns(cursor, 'clients"; DROP TABLE clients; --')
+
+    with pytest.raises(ValueError):
+        manager._should_update_local_record(
+            cursor,
+            "clients",
+            1,
+            {"name": "Guarded Client", 'name"; DROP TABLE clients; --': "boom"},
+        )
+
+
+def test_get_sync_status_counts_rows_for_validated_tables(tmp_path):
+    repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_status.db", remote_clients=[])
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.executemany(
+        """
+        INSERT INTO clients (name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
+            ("Synced Client", "2026-02-09T10:00:00", "2026-02-09T10:05:00", "synced", 0, 0),
+            ("Pending Client", "2026-02-09T10:10:00", "2026-02-09T10:15:00", "pending", 1, 0),
+        ],
+    )
+    repo.sqlite_conn.commit()
+
+    status = manager.get_sync_status()
+
+    assert status["tables"]["clients"] == {"total": 2, "pending": 1, "synced": 1}
 
 
 def test_sync_now_compat_success_updates_metrics():
@@ -222,6 +274,57 @@ def test_pull_remote_changes_emits_ui_table_signal_for_changed_tables(tmp_path, 
     assert "clients" in seen
 
 
+def test_pull_remote_changes_does_not_resurrect_locally_deleted_rows(tmp_path):
+    ts = datetime(2026, 2, 9, 12, 50, 0)
+    repo = _FakeRepoWithSqlite(
+        db_path=tmp_path / "sync_pull_deleted_local.db",
+        remote_clients=[
+            {
+                "_id": "mongo-client-deleted-local",
+                "name": "Deleted Local",
+                "created_at": ts,
+                "last_modified": ts,
+                "is_deleted": False,
+            }
+        ],
+    )
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (_mongo_id, name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-client-deleted-local",
+            "Deleted Local",
+            "2026-02-09T10:00:00",
+            "2026-02-09T10:05:00",
+            "deleted",
+            1,
+            1,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    result = manager.pull_remote_changes()
+
+    assert result["success"] is True
+    assert result["pulled"] == 0
+
+    cursor.execute(
+        "SELECT sync_status, dirty_flag, is_deleted FROM clients WHERE _mongo_id = ?",
+        ("mongo-client-deleted-local",),
+    )
+    row = cursor.fetchone()
+    assert row is not None
+    assert row["sync_status"] == "deleted"
+    assert row["dirty_flag"] == 1
+    assert row["is_deleted"] == 1
+
+
 def test_push_local_changes_includes_modified_offline_without_dirty_flag(tmp_path):
     repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_push_modified.db", remote_clients=[])
     manager = UnifiedSyncManagerV3(repo)
@@ -296,6 +399,118 @@ def test_push_local_changes_handles_deleted_status_without_dirty_flag(tmp_path):
     local = repo.sqlite_conn.cursor()
     local.execute("SELECT COUNT(*) FROM clients WHERE name = ?", ("To Delete",))
     assert local.fetchone()[0] == 0
+
+
+def test_sync_single_table_to_cloud_removes_local_deleted_rows(tmp_path):
+    repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_realtime_deleted.db", remote_clients=[])
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (_mongo_id, name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-client-rt-delete",
+            "Realtime Delete",
+            "2026-02-09T10:00:00",
+            "2026-02-09T10:05:00",
+            "deleted",
+            1,
+            1,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    manager._sync_single_table_to_cloud("clients")
+
+    local = repo.sqlite_conn.cursor()
+    local.execute("SELECT COUNT(*) FROM clients WHERE name = ?", ("Realtime Delete",))
+    assert local.fetchone()[0] == 0
+    assert len(repo.mongo_db["clients"].updated) >= 1
+
+
+def test_sync_table_from_cloud_does_not_resurrect_locally_deleted_rows(tmp_path):
+    ts = datetime(2026, 2, 9, 12, 55, 0)
+    repo = _FakeRepoWithSqlite(
+        db_path=tmp_path / "sync_full_deleted_local.db",
+        remote_clients=[
+            {
+                "_id": "mongo-client-full-sync-deleted-local",
+                "name": "Deleted In Full Sync",
+                "created_at": ts,
+                "last_modified": ts,
+                "is_deleted": False,
+            }
+        ],
+    )
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (_mongo_id, name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-client-full-sync-deleted-local",
+            "Deleted In Full Sync",
+            "2026-02-09T10:00:00",
+            "2026-02-09T10:05:00",
+            "deleted",
+            1,
+            1,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    stats = manager._sync_table_from_cloud("clients")
+
+    assert stats["updated"] == 0
+
+    cursor.execute(
+        "SELECT sync_status, dirty_flag, is_deleted FROM clients WHERE _mongo_id = ?",
+        ("mongo-client-full-sync-deleted-local",),
+    )
+    row = cursor.fetchone()
+    assert row is not None
+    assert row["sync_status"] == "deleted"
+    assert row["dirty_flag"] == 1
+    assert row["is_deleted"] == 1
+
+
+def test_push_pending_changes_uses_main_push_logic(tmp_path):
+    repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_pending_deleted.db", remote_clients=[])
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (_mongo_id, name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-client-pending-delete",
+            "Pending Delete",
+            "2026-02-09T10:00:00",
+            "2026-02-09T10:05:00",
+            "deleted",
+            1,
+            1,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    manager._push_pending_changes()
+
+    local = repo.sqlite_conn.cursor()
+    local.execute("SELECT COUNT(*) FROM clients WHERE name = ?", ("Pending Delete",))
+    assert local.fetchone()[0] == 0
+    assert len(repo.mongo_db["clients"].updated) >= 1
 
 
 def test_request_realtime_pull_deduplicates_fast_events():

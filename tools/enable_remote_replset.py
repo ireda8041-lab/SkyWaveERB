@@ -6,6 +6,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pymongo import MongoClient
@@ -153,7 +154,11 @@ def main() -> int:
 
     _safe_print("Connecting to Mongo admin...")
     try:
-        client = MongoClient(args.admin_uri, serverSelectionTimeoutMS=10000, connectTimeoutMS=10000)
+        client: MongoClient[dict[str, Any]] = MongoClient(
+            args.admin_uri,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+        )
         client.admin.command("ping")
     except Exception as exc:
         _safe_print(f"ERROR: could not connect to Mongo admin endpoint: {exc}")

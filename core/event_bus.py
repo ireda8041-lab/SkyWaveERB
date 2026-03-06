@@ -61,14 +61,18 @@ class EventBus:
         "CLIENT_DELETED",
         "PROJECT_CREATED",
         "PROJECT_UPDATED",
+        "PROJECT_EDITED",
         "PROJECT_DELETED",
         "INVOICE_CREATED",
         "INVOICE_UPDATED",
+        "INVOICE_EDITED",
         "INVOICE_VOIDED",
         "EXPENSE_CREATED",
         "EXPENSE_UPDATED",
         "EXPENSE_DELETED",
         "PAYMENT_RECORDED",
+        "PAYMENT_RECEIVED",
+        "PAYMENT_UPDATED",
         "PAYMENT_DELETED",
         "SYNC_STARTED",
         "SYNC_COMPLETED",
@@ -76,11 +80,21 @@ class EventBus:
         "NOTIFICATION_CREATED",
     }
 
+    LEGACY_EVENT_ALIASES: dict[str, str] = {
+        "PROJECT_EDITED": "PROJECT_UPDATED",
+        "INVOICE_EDITED": "INVOICE_UPDATED",
+        "PAYMENT_RECEIVED": "PAYMENT_RECORDED",
+    }
+
     def __init__(self) -> None:
         """تهيئة نظام الأحداث"""
         self._handlers: dict[str, list[Callable[[Any], None]]] = defaultdict(list)
         self._lock: Lock = Lock()
         logger.info("تم تهيئة EventBus")
+
+    @classmethod
+    def _normalize_event_name(cls, event_name: str) -> str:
+        return cls.LEGACY_EVENT_ALIASES.get(event_name, event_name)
 
     @property
     def listeners(self) -> dict[str, list[Callable]]:
@@ -100,12 +114,13 @@ class EventBus:
             ...     safe_print(f"فاتورة جديدة: {data['invoice_number']}")
             >>> bus.subscribe('INVOICE_CREATED', on_invoice_created)
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            if listener_func not in self._handlers[event_name]:
-                self._handlers[event_name].append(listener_func)
-                logger.debug("تم اشتراك مستمع جديد في حدث: %s", event_name)
+            if listener_func not in self._handlers[normalized_event_name]:
+                self._handlers[normalized_event_name].append(listener_func)
+                logger.debug("تم اشتراك مستمع جديد في حدث: %s", normalized_event_name)
             else:
-                logger.warning("المستمع مشترك بالفعل في حدث: %s", event_name)
+                logger.warning("المستمع مشترك بالفعل في حدث: %s", normalized_event_name)
 
     def unsubscribe(self, event_name: str, listener_func: Callable[[Any], None]) -> bool:
         """
@@ -118,14 +133,15 @@ class EventBus:
         Returns:
             True إذا تم إلغاء الاشتراك بنجاح
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            if event_name in self._handlers:
+            if normalized_event_name in self._handlers:
                 try:
-                    self._handlers[event_name].remove(listener_func)
-                    logger.debug("تم إلغاء اشتراك مستمع من حدث: %s", event_name)
+                    self._handlers[normalized_event_name].remove(listener_func)
+                    logger.debug("تم إلغاء اشتراك مستمع من حدث: %s", normalized_event_name)
                     return True
                 except ValueError:
-                    logger.warning("المستمع غير مشترك في حدث: %s", event_name)
+                    logger.warning("المستمع غير مشترك في حدث: %s", normalized_event_name)
                     return False
             return False
 
@@ -140,13 +156,14 @@ class EventBus:
         Returns:
             عدد المستمعين الذين تم إخطارهم بنجاح
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            handlers = list(self._handlers.get(event_name, []))
+            handlers = list(self._handlers.get(normalized_event_name, []))
 
         if not handlers:
             return 0
 
-        logger.info("جاري نشر حدث: %s (%s مستمع)", event_name, len(handlers))
+        logger.info("جاري نشر حدث: %s (%s مستمع)", normalized_event_name, len(handlers))
 
         success_count = 0
         for listener_func in handlers:
@@ -169,8 +186,9 @@ class EventBus:
         Returns:
             True إذا كان هناك مشتركين
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            return len(self._handlers.get(event_name, [])) > 0
+            return len(self._handlers.get(normalized_event_name, [])) > 0
 
     def get_subscriber_count(self, event_name: str) -> int:
         """
@@ -182,8 +200,9 @@ class EventBus:
         Returns:
             عدد المشتركين
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            return len(self._handlers.get(event_name, []))
+            return len(self._handlers.get(normalized_event_name, []))
 
     def clear_event(self, event_name: str) -> None:
         """
@@ -192,10 +211,11 @@ class EventBus:
         Args:
             event_name: اسم الحدث
         """
+        normalized_event_name = self._normalize_event_name(event_name)
         with self._lock:
-            if event_name in self._handlers:
-                del self._handlers[event_name]
-                logger.info("تم مسح جميع المشتركين لحدث: %s", event_name)
+            if normalized_event_name in self._handlers:
+                del self._handlers[normalized_event_name]
+                logger.info("تم مسح جميع المشتركين لحدث: %s", normalized_event_name)
 
     def clear_all(self) -> None:
         """مسح جميع المشتركين لجميع الأحداث"""

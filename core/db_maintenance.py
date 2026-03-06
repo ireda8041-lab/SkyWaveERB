@@ -8,6 +8,8 @@ import sqlite3
 import time
 from datetime import datetime
 
+from core.sqlite_identifiers import quote_expression, quote_expression_list, quote_identifier
+
 # استيراد دالة الطباعة الآمنة
 try:
     from core.safe_print import safe_print
@@ -152,11 +154,11 @@ class DatabaseMaintenance:
             # ⚡ تشغيل كل العمليات في transaction واحد للسرعة
             self.cursor.execute("BEGIN TRANSACTION")
 
-            # 1. إضافة القيود
-            self._add_unique_constraints()
-
-            # 2. حذف التكرارات
+            # 1. حذف التكرارات أولاً حتى تنجح القيود الفريدة الجديدة.
             self._remove_duplicates()
+
+            # 2. إضافة القيود
+            self._add_unique_constraints()
 
             # 3. إصلاح أرقام الفواتير
             self._fix_invoice_numbers()
@@ -195,23 +197,60 @@ class DatabaseMaintenance:
         """إضافة قيود unique لمنع التكرار"""
         safe_print("📋 [1/5] إضافة قيود Unique...")
 
+        for idx_name in [
+            "idx_projects_name",
+            "idx_clients_name",
+            "idx_services_name",
+            "idx_clients_name_unique",
+            "idx_projects_name_client_unique",
+            "idx_services_name_unique",
+            "idx_payments_unique",
+        ]:
+            try:
+                self.cursor.execute(f"DROP INDEX IF EXISTS {idx_name}")
+            except Exception:
+                pass
+
         constraints = [
-            ("idx_projects_name", "projects", "name"),
-            ("idx_projects_invoice", "projects", "invoice_number"),
-            ("idx_clients_name", "clients", "name"),
-            ("idx_services_name", "services", "name"),
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_name_unique
+            ON clients(LOWER(name))
+            WHERE status != 'مؤرشف'
+            AND (sync_status != 'deleted' OR sync_status IS NULL)
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_name_client_unique
+            ON projects(LOWER(name), client_id)
+            WHERE status != 'مؤرشف'
+            AND (sync_status != 'deleted' OR sync_status IS NULL)
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_services_name_unique
+            ON services(LOWER(name))
+            WHERE status != 'مؤرشف'
+            AND (sync_status != 'deleted' OR sync_status IS NULL)
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_invoice
+            ON projects(invoice_number)
+            WHERE invoice_number IS NOT NULL AND invoice_number != ''
+            """,
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique
+            ON payments(project_id, substr(date, 1, 10), ROUND(amount, 2))
+            WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+            AND (is_deleted = 0 OR is_deleted IS NULL)
+            """,
         ]
 
-        for idx_name, table, column in constraints:
+        for sql in constraints:
             try:
-                self.cursor.execute(
-                    f"""
-                    CREATE UNIQUE INDEX IF NOT EXISTS {idx_name}
-                    ON {table}({column})
-                """
-                )
+                self.cursor.execute(sql)
             except Exception:
-                pass  # Index already exists
+                pass
 
         # Unique indexes for MongoDB IDs
         for table in ["projects", "clients", "services", "payments"]:
@@ -250,6 +289,41 @@ class DatabaseMaintenance:
         self.db.commit()
         safe_print("  ✅ تم إضافة القيود")
 
+    def _table_columns(self, table_name: str) -> set[str]:
+        table_ref = self._quote_sqlite_identifier(table_name)
+        pragma_sql = f"PRAGMA table_info({table_ref})"  # nosec B608
+        self.cursor.execute(pragma_sql)
+        return {row[1] for row in self.cursor.fetchall()}
+
+    @staticmethod
+    def _quote_sqlite_identifier(identifier: str, *, allowed: set[str] | None = None) -> str:
+        return quote_identifier(identifier, allowed=allowed)
+
+    @staticmethod
+    def _quote_sqlite_expression(
+        expression: str, *, allowed_identifiers: set[str] | None = None
+    ) -> str:
+        return quote_expression(expression, allowed_identifiers=allowed_identifiers)
+
+    def _active_scope_clause(self, table_name: str) -> tuple[list[str], list]:
+        columns = self._table_columns(table_name)
+        clauses: list[str] = []
+        params: list = []
+
+        if "sync_status" in columns:
+            sync_status_ref = self._quote_sqlite_identifier("sync_status", allowed=columns)
+            clauses.append(f"({sync_status_ref} != ? OR {sync_status_ref} IS NULL)")
+            params.append("deleted")
+        if "is_deleted" in columns:
+            is_deleted_ref = self._quote_sqlite_identifier("is_deleted", allowed=columns)
+            clauses.append(f"({is_deleted_ref} = 0 OR {is_deleted_ref} IS NULL)")
+        if table_name in {"clients", "projects", "services"} and "status" in columns:
+            status_ref = self._quote_sqlite_identifier("status", allowed=columns)
+            clauses.append(f"{status_ref} != ?")
+            params.append("مؤرشف")
+
+        return clauses, params
+
     def _remove_duplicates(self):
         """حذف السجلات المكررة - يحتفظ بالسجل الذي له _mongo_id أو الأقدم"""
         safe_print("📋 [2/5] حذف التكرارات...")
@@ -258,9 +332,9 @@ class DatabaseMaintenance:
 
         # تعريف الجداول والحقول الفريدة
         tables_config = {
-            "projects": "name",
-            "clients": "name",
-            "services": "name",
+            "projects": ("LOWER(name)", "client_id"),
+            "clients": ("LOWER(name)",),
+            "services": ("LOWER(name)",),
             "accounts": "code",
             "invoices": "invoice_number",
             "currencies": "code",
@@ -284,10 +358,14 @@ class DatabaseMaintenance:
             self.cursor.execute(
                 """
                 DELETE FROM payments
-                WHERE id NOT IN (
+                WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+                AND id NOT IN (
                     SELECT MIN(CASE WHEN _mongo_id IS NOT NULL THEN id ELSE id + 1000000 END)
                     FROM payments
-                    GROUP BY project_id, date, amount
+                    WHERE (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    GROUP BY project_id, substr(date, 1, 10), ROUND(amount, 2)
                 )
             """
             )
@@ -305,21 +383,34 @@ class DatabaseMaintenance:
         else:
             safe_print(f"  ✅ تم حذف {total_deleted} سجل مكرر")
 
-    def _remove_table_duplicates_smart(self, table_name: str, unique_field: str) -> int:
+    def _remove_table_duplicates_smart(
+        self, table_name: str, unique_field: str | tuple[str, ...]
+    ) -> int:
         """
         حذف التكرارات من جدول معين بذكاء
         يحتفظ بالسجل الذي له _mongo_id، وإلا الأقدم
         """
+        unique_fields = (unique_field,) if isinstance(unique_field, str) else unique_field
+        columns = self._table_columns(table_name)
+        table_ref = self._quote_sqlite_identifier(table_name)
+        quoted_unique_fields = quote_expression_list(unique_fields, allowed_identifiers=columns)
+        group_by = ", ".join(quoted_unique_fields)
+        non_empty_checks = [
+            f"{field} IS NOT NULL AND {field} != ''" for field in quoted_unique_fields
+        ]
+        active_clauses, active_params = self._active_scope_clause(table_name)
+        where_clauses = [*non_empty_checks, *active_clauses]
+        where_sql = " AND ".join(where_clauses)
+
         # البحث عن التكرارات
-        self.cursor.execute(
-            f"""
-            SELECT {unique_field}, COUNT(*) as cnt
-            FROM {table_name}
-            WHERE {unique_field} IS NOT NULL AND {unique_field} != ''
-            GROUP BY {unique_field}
+        duplicates_sql = f"""
+            SELECT {group_by}, COUNT(*) as cnt
+            FROM {table_ref}
+            WHERE {where_sql}
+            GROUP BY {group_by}
             HAVING cnt > 1
-        """
-        )
+        """  # nosec B608
+        self.cursor.execute(duplicates_sql, active_params)
         duplicates = self.cursor.fetchall()
 
         if not duplicates:
@@ -327,26 +418,27 @@ class DatabaseMaintenance:
 
         deleted = 0
         for dup in duplicates:
-            unique_value = dup[0]
+            unique_values = dup[: len(unique_fields)]
 
             # الحصول على كل السجلات المكررة مرتبة
             # الأولوية: 1. له _mongo_id  2. الأقدم (أقل id)
-            self.cursor.execute(
-                f"""
-                SELECT id, _mongo_id FROM {table_name}
-                WHERE {unique_field} = ?
+            match_sql = " AND ".join(f"{field} = ?" for field in quoted_unique_fields)
+            ordered_matches_sql = f"""
+                SELECT id, _mongo_id FROM {table_ref}
+                WHERE {match_sql}
+                {"AND " + " AND ".join(active_clauses) if active_clauses else ""}
                 ORDER BY
                     CASE WHEN _mongo_id IS NOT NULL AND _mongo_id != '' THEN 0 ELSE 1 END,
                     id ASC
-            """,
-                (unique_value,),
-            )
+            """  # nosec B608
+            self.cursor.execute(ordered_matches_sql, (*unique_values, *active_params))
             records = self.cursor.fetchall()
 
             # الاحتفاظ بالأول وحذف الباقي
             records[0][0]
             for record in records[1:]:
-                self.cursor.execute(f"DELETE FROM {table_name} WHERE id = ?", (record[0],))
+                delete_duplicate_sql = f"DELETE FROM {table_ref} WHERE id = ?"  # nosec B608
+                self.cursor.execute(delete_duplicate_sql, (record[0],))
                 deleted += 1
 
         return deleted
@@ -356,6 +448,8 @@ class DatabaseMaintenance:
         safe_print("📋 [3/5] إصلاح أرقام الفواتير...")
 
         try:
+            invoice_number_columns = self._table_columns("invoice_numbers")
+            has_project_id = "project_id" in invoice_number_columns
             self.cursor.execute(
                 """
                 SELECT id, name FROM projects
@@ -371,15 +465,35 @@ class DatabaseMaintenance:
             fixed_count = 0
             for project_id, project_name in projects_without_invoice:
                 try:
-                    # تحقق من وجود رقم محفوظ
-                    self.cursor.execute(
-                        "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
-                        (project_name,),
-                    )
+                    if has_project_id:
+                        self.cursor.execute(
+                            """
+                            SELECT invoice_number
+                            FROM invoice_numbers
+                            WHERE project_id = ? OR (project_id IS NULL AND project_name = ?)
+                            ORDER BY id
+                            LIMIT 1
+                            """,
+                            (str(project_id), project_name),
+                        )
+                    else:
+                        self.cursor.execute(
+                            "SELECT invoice_number FROM invoice_numbers WHERE project_name = ?",
+                            (project_name,),
+                        )
                     existing = self.cursor.fetchone()
 
                     if existing:
                         invoice_number = existing[0]
+                        if has_project_id:
+                            self.cursor.execute(
+                                """
+                                UPDATE invoice_numbers
+                                SET project_id = ?, project_name = ?
+                                WHERE invoice_number = ?
+                                """,
+                                (str(project_id), project_name, invoice_number),
+                            )
                     else:
                         # ولّد رقم جديد
                         self.cursor.execute("SELECT MAX(id) FROM invoice_numbers")
@@ -388,10 +502,25 @@ class DatabaseMaintenance:
                         invoice_number = f"SW-{97161 + new_seq}"
 
                         # احفظ الرقم الجديد
-                        self.cursor.execute(
-                            "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
-                            (project_name, invoice_number, datetime.now().isoformat()),
-                        )
+                        if has_project_id:
+                            self.cursor.execute(
+                                """
+                                INSERT INTO invoice_numbers (
+                                    project_id, project_name, invoice_number, created_at
+                                ) VALUES (?, ?, ?, ?)
+                                """,
+                                (
+                                    str(project_id),
+                                    project_name,
+                                    invoice_number,
+                                    datetime.now().isoformat(),
+                                ),
+                            )
+                        else:
+                            self.cursor.execute(
+                                "INSERT INTO invoice_numbers (project_name, invoice_number, created_at) VALUES (?, ?, ?)",
+                                (project_name, invoice_number, datetime.now().isoformat()),
+                            )
 
                     # حدّث المشروع
                     self.cursor.execute(

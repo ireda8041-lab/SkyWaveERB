@@ -118,8 +118,9 @@ class InvoicePreviewDialog(QDialog):
         try:
             pdf_path = Path(self.exports_dir) / f"{self.file_basename}.pdf"
             if WEB_ENGINE_AVAILABLE and self.web_view:
+                # PyQt6 overload الصحيح: callback فقط، ثم نحفظ البيانات بأنفسنا.
                 self.web_view.page().printToPdf(
-                    str(pdf_path), lambda ok: self._on_pdf_saved(ok, pdf_path)
+                    lambda pdf_data, target=pdf_path: self._on_pdf_data_ready(pdf_data, target)
                 )
             else:
                 printer = QPrinter(QPrinter.PrinterMode.HighResolution)
@@ -127,6 +128,19 @@ class InvoicePreviewDialog(QDialog):
                 printer.setOutputFileName(str(pdf_path))
                 self.text_view.document().print(printer)
                 self._on_pdf_saved(True, pdf_path)
+        except Exception as e:
+            QMessageBox.warning(self, "خطأ", f"تعذر حفظ PDF: {e}")
+
+    def _on_pdf_data_ready(self, pdf_data, pdf_path: Path):
+        try:
+            pdf_bytes = bytes(pdf_data) if pdf_data is not None else b""
+            if not pdf_bytes:
+                self._on_pdf_saved(False, pdf_path)
+                return
+
+            pdf_path.parent.mkdir(parents=True, exist_ok=True)
+            pdf_path.write_bytes(pdf_bytes)
+            self._on_pdf_saved(True, pdf_path)
         except Exception as e:
             QMessageBox.warning(self, "خطأ", f"تعذر حفظ PDF: {e}")
 

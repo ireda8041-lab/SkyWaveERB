@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from pymongo import MongoClient
 
@@ -28,7 +29,7 @@ def resolve_uri() -> str:
 def main() -> int:
     uri = resolve_uri()
     db_name = os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
-    client = MongoClient(uri, serverSelectionTimeoutMS=8000)
+    client: MongoClient[dict[str, Any]] = MongoClient(uri, serverSelectionTimeoutMS=8000)
     db = client[db_name]
 
     try:

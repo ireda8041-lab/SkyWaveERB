@@ -36,6 +36,26 @@ class LoggerSetup:
     _logger_initialized = False
 
     @staticmethod
+    def _get_log_dir_candidates() -> list[str]:
+        """Return candidate log directories ordered by priority."""
+        candidates: list[str] = []
+
+        env_log_dir = os.environ.get("SKYWAVE_LOG_DIR")
+        if env_log_dir:
+            candidates.append(env_log_dir)
+
+        candidates.append(LoggerSetup.LOG_DIR)
+        candidates.append(os.path.join(os.getcwd(), "logs"))
+
+        # إزالة التكرار مع الحفاظ على الترتيب
+        unique_candidates: list[str] = []
+        for path in candidates:
+            normalized = os.path.abspath(path)
+            if normalized not in unique_candidates:
+                unique_candidates.append(normalized)
+        return unique_candidates
+
+    @staticmethod
     def setup_logger(
         log_level: int = logging.INFO,  # ⚡ تغيير من DEBUG إلى INFO للسرعة
         log_to_console: bool = True,
@@ -71,25 +91,43 @@ class LoggerSetup:
 
         # 1. File Handler (التسجيل في ملف)
         if log_to_file:
-            # إنشاء مجلد logs إذا لم يكن موجوداً
-            os.makedirs(LoggerSetup.LOG_DIR, exist_ok=True)
+            file_handler_added = False
+            for candidate_dir in LoggerSetup._get_log_dir_candidates():
+                try:
+                    os.makedirs(candidate_dir, exist_ok=True)
+                    log_file_path = os.path.join(candidate_dir, LoggerSetup.LOG_FILE)
 
-            log_file_path = os.path.join(LoggerSetup.LOG_DIR, LoggerSetup.LOG_FILE)
+                    file_handler = RotatingFileHandler(
+                        log_file_path,
+                        maxBytes=LoggerSetup.MAX_LOG_SIZE,
+                        backupCount=LoggerSetup.BACKUP_COUNT,
+                        encoding="utf-8",
+                    )
+                    file_handler.setLevel(logging.INFO)  # ⚡ تغيير من DEBUG إلى INFO للسرعة
+                    file_handler.setFormatter(formatter)
+                    logger.addHandler(file_handler)
 
-            file_handler = RotatingFileHandler(
-                log_file_path,
-                maxBytes=LoggerSetup.MAX_LOG_SIZE,
-                backupCount=LoggerSetup.BACKUP_COUNT,
-                encoding="utf-8",
-            )
-            file_handler.setLevel(logging.INFO)  # ⚡ تغيير من DEBUG إلى INFO للسرعة
-            file_handler.setFormatter(formatter)
-            logger.addHandler(file_handler)
+                    LoggerSetup.LOG_DIR = candidate_dir
+                    file_handler_added = True
 
-            try:
-                safe_print(f"[OK] تم إعداد التسجيل في الملف: {log_file_path}")
-            except UnicodeEncodeError:
-                pass  # تجاهل خطأ الترميز في الكونسول
+                    try:
+                        safe_print(f"[OK] تم إعداد التسجيل في الملف: {log_file_path}")
+                    except UnicodeEncodeError:
+                        pass  # تجاهل خطأ الترميز في الكونسول
+                    break
+                except (PermissionError, OSError) as exc:
+                    try:
+                        safe_print(
+                            f"WARNING: [Logger] تعذر استخدام مسار السجل '{candidate_dir}': {exc}"
+                        )
+                    except UnicodeEncodeError:
+                        pass
+
+            if not file_handler_added:
+                try:
+                    safe_print("WARNING: [Logger] سيتم المتابعة بدون تسجيل ملف (Console فقط)")
+                except UnicodeEncodeError:
+                    pass
 
         # 2. Console Handler (التسجيل في الكونسول)
         if log_to_console:
@@ -168,22 +206,30 @@ class LoggerSetup:
         مفيد للتتبع المفصل.
         """
         session_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_log_file = os.path.join(LoggerSetup.LOG_DIR, f"session_{session_time}.log")
-
         logger = logging.getLogger("SkyWaveERP")
 
-        session_handler = logging.FileHandler(session_log_file, encoding="utf-8")
-        session_handler.setLevel(logging.DEBUG)
+        for candidate_dir in LoggerSetup._get_log_dir_candidates():
+            try:
+                os.makedirs(candidate_dir, exist_ok=True)
+                session_log_file = os.path.join(candidate_dir, f"session_{session_time}.log")
 
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
-        session_handler.setFormatter(formatter)
+                session_handler = logging.FileHandler(session_log_file, encoding="utf-8")
+                session_handler.setLevel(logging.DEBUG)
 
-        logger.addHandler(session_handler)
-        logger.info("تم إنشاء ملف log للجلسة: %s", session_log_file)
+                formatter = logging.Formatter(
+                    "%(asctime)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+                )
+                session_handler.setFormatter(formatter)
 
-        return session_log_file
+                logger.addHandler(session_handler)
+                LoggerSetup.LOG_DIR = candidate_dir
+                logger.info("تم إنشاء ملف log للجلسة: %s", session_log_file)
+                return session_log_file
+            except (PermissionError, OSError) as exc:
+                logger.warning("تعذر إنشاء ملف جلسة في '%s': %s", candidate_dir, exc)
+
+        logger.warning("فشل إنشاء ملف log للجلسة بسبب الصلاحيات")
+        return None
 
     @staticmethod
     def cleanup_old_logs(days: int = 30):
