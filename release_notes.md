@@ -1,15 +1,13 @@
-## Release Notes - v2.2.9 (2026-03-03)
+## Release Notes - v2.2.10 (2026-03-08)
 
-### Stability and Freeze Fixes
-- MongoDB connection checks in sync manager are now non-blocking and no longer stall the UI thread.
-- Online state checks use cached probe status on UI paths, with bounded background probes for safety.
-- Main window refresh behavior was tuned with stronger debounce/cooldown settings under sync bursts.
+### Payments and Linking
+- Payment edit flow now includes fast project reassignment with searchable results by project name, client name, and invoice number.
+- Payments now persist invoice numbers to make lookup, review, and later corrections much easier.
 
-### Sync and Notification Performance
-- Notification polling now uses adaptive idle backoff to reduce unnecessary background pressure.
-- Full-sync completion no longer triggers redundant full-tab refresh flow.
-- Sync-triggered UI updates are smoother when rapid changes arrive from realtime/delta channels.
+### UI and Workflow Quality
+- Notification cards and dashboard activity details were refined to present operations more clearly and cleanly.
+- Dashboard layout received polish updates to keep controls and summaries more stable during daily use.
 
-### Update Reliability
-- `auto_updater.py` now correctly parses GitHub Releases API payloads (`tag_name`, assets, release body).
-- Version metadata updated for `v2.2.9` and release download path prepared for installer rollout.
+### Release Readiness
+- Version metadata, installer metadata, and release download path were updated for `v2.2.10`.
+- A fresh Windows executable and installer were rebuilt and verified before publication.

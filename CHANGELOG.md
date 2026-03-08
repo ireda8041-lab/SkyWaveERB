@@ -255,3 +255,15 @@
 - `ðŸ” Security` Ù„Ù„ØªØ­Ø³ÙŠÙ†Ø§Øª Ø§Ù„Ø£Ù…Ù†ÙŠØ©
 
 
+## [2.2.10] - 2026-03-08
+
+### Fixed
+- Payment editing now supports reliable project reassignment with fast search by project, client, and invoice data.
+- Payments keep `invoice_number` metadata to make tracking and later edits safer and easier.
+- Dashboard activity rendering and notification details were tightened to avoid misleading or weakly formatted UI output.
+
+### Changed
+- Refined dashboard and notification UI polish for clearer operational context and cleaner layout behavior.
+- Rebuilt the Windows release package and installer for the updated version.
+
+---
