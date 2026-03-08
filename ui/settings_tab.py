@@ -119,6 +119,9 @@ class SettingsTab(QWidget):
         self._note_templates_all: list[dict] = []
         self._note_templates_page_start = 0
         self._manual_sync_watchdog: QTimer | None = None
+        self._dirty_sections: set[str] = set()
+        self._company_logo_cache_key: tuple[str, str, int] | None = None
+        self._company_logo_scaled_cache: QPixmap | None = None
         self.manual_sync_finished.connect(self._on_manual_sync_completed)
 
         main_layout = QVBoxLayout()
@@ -265,7 +268,7 @@ class SettingsTab(QWidget):
 
         # ربط تغيير التاب الفرعي لتحميل البيانات
         self.tabs.currentChanged.connect(self._on_sub_tab_changed)
-        app_signals.safe_connect(app_signals.system_changed, self.load_settings_data)
+        app_signals.safe_connect(app_signals.system_changed, self._on_system_settings_changed)
 
         self._apply_tabs_responsive()
 
@@ -322,34 +325,83 @@ class SettingsTab(QWidget):
                 self.tabs.setCurrentIndex(i)
                 return
 
+    def _current_section_key(self) -> str:
+        current_widget = self.tabs.currentWidget()
+        if current_widget is self.company_tab:
+            return "company"
+        if current_widget is self.currency_tab:
+            return "currencies"
+        if current_widget is self.users_tab:
+            return "users"
+        if current_widget is self.default_accounts_tab:
+            return "default_accounts"
+        if current_widget is self.payment_methods_tab:
+            return "payment_methods"
+        if current_widget is self.project_notes_tab:
+            return "project_notes"
+        if current_widget is self.backup_tab:
+            return "backup"
+        if current_widget is self.sync_tab:
+            return "sync"
+        return "other"
+
+    def _clear_dirty_section(self, section_key: str) -> None:
+        self._dirty_sections.discard(section_key)
+
+    def mark_data_changed(self, table_name: str) -> None:
+        section_map = {
+            "currencies": "currencies",
+            "users": "users",
+            "system": "company",
+            "system_settings": "company",
+            "payment_methods": "payment_methods",
+            "project_note_templates": "project_notes",
+        }
+        section_key = section_map.get(str(table_name or "").strip())
+        if section_key:
+            self._dirty_sections.add(section_key)
+
+    def load_active_subtab_data(self, force_reload: bool = False) -> None:
+        section_key = self._current_section_key()
+        is_dirty = section_key in self._dirty_sections
+
+        if section_key == "company":
+            if (
+                force_reload
+                or is_dirty
+                or (not self._ensure_company_ui())
+                or not self.company_name_input.text()
+            ):
+                self.load_settings_data()
+        elif section_key == "currencies":
+            if force_reload or is_dirty or self.currencies_table.rowCount() == 0:
+                self.load_currencies()
+        elif section_key == "users":
+            if force_reload or is_dirty or self.users_table.rowCount() == 0:
+                self.load_users()
+        elif section_key == "default_accounts":
+            if force_reload or is_dirty or self.default_treasury_combo.count() == 0:
+                self.load_default_accounts()
+        elif section_key == "payment_methods":
+            if force_reload or is_dirty or self.payment_methods_table.rowCount() == 0:
+                self.load_payment_methods()
+        elif section_key == "project_notes":
+            if force_reload or is_dirty or self.note_templates_table.rowCount() == 0:
+                self.load_note_templates()
+        elif section_key == "backup":
+            if force_reload or is_dirty:
+                self.load_db_stats()
+
+    def _on_system_settings_changed(self) -> None:
+        self.mark_data_changed("system_settings")
+        if self._current_section_key() == "company":
+            QTimer.singleShot(0, lambda: self.load_active_subtab_data(force_reload=True))
+
     def _on_sub_tab_changed(self, index):
         """معالج تغيير التاب الفرعي - محسّن لتجنب التحميل المتكرر"""
         tab_text = self.tabs.tabText(index)
         safe_print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
-
-        # ⚡ تحميل البيانات فقط إذا كان الجدول فارغاً (لتجنب التحميل المتكرر)
-        if "المستخدمين" in tab_text:
-            if self.users_table.rowCount() == 0:
-                self.load_users()
-        elif "بيانات الشركة" in tab_text:
-            # تحميل بيانات الشركة فقط إذا كانت الحقول فارغة
-            try:
-                if not self._ensure_company_ui() or not self.company_name_input.text():
-                    self.load_settings_data()
-            except Exception:
-                pass
-        elif "العملات" in tab_text:
-            if self.currencies_table.rowCount() == 0:
-                self.load_currencies()
-        elif "الحسابات الافتراضية" in tab_text:
-            if self.default_treasury_combo.count() == 0:
-                self.load_default_accounts()
-        elif "طرق الدفع" in tab_text:
-            if self.payment_methods_table.rowCount() == 0:
-                self.load_payment_methods()
-        elif "ملاحظات المشاريع" in tab_text:
-            if self.note_templates_table.rowCount() == 0:
-                self.load_note_templates()
+        self.load_active_subtab_data(force_reload=False)
 
     def setup_company_tab(self):
         """إعداد تاب بيانات الشركة - تصميم احترافي متجاوب محسّن"""
@@ -1418,31 +1470,46 @@ class SettingsTab(QWidget):
             self.company_vat_input.setText(settings.get("company_vat", ""))
 
             logo_path = settings.get("company_logo_path", "")
+            logo_key = (
+                str(settings.get("settings_last_modified") or ""),
+                str(logo_path or ""),
+                len(str(settings.get("company_logo_data") or "")),
+            )
 
-            # ⚡ أولاً: محاولة تحميل من Base64 (للمزامنة بين الأجهزة)
-            pixmap = self.settings_service.get_logo_as_pixmap()
-            if pixmap and not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    120,
-                    120,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                self.logo_preview.setPixmap(scaled)
-                self.logo_preview.setProperty("logo_path", logo_path)
-            elif logo_path and os.path.exists(logo_path):
-                # ثانياً: تحميل من المسار المحلي
-                pixmap = QPixmap(logo_path)
-                if not pixmap.isNull():
+            scaled = None
+            if (
+                self._company_logo_cache_key == logo_key
+                and self._company_logo_scaled_cache is not None
+            ):
+                scaled = self._company_logo_scaled_cache
+            else:
+                # ⚡ أولاً: محاولة تحميل من Base64 (للمزامنة بين الأجهزة)
+                pixmap = self.settings_service.get_logo_as_pixmap()
+                if pixmap and not pixmap.isNull():
                     scaled = pixmap.scaled(
                         120,
                         120,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )
-                    self.logo_preview.setPixmap(scaled)
-                    self.logo_preview.setProperty("logo_path", logo_path)
+                elif logo_path and os.path.exists(logo_path):
+                    # ثانياً: تحميل من المسار المحلي
+                    pixmap = QPixmap(logo_path)
+                    if not pixmap.isNull():
+                        scaled = pixmap.scaled(
+                            120,
+                            120,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
+                self._company_logo_cache_key = logo_key
+                self._company_logo_scaled_cache = scaled
+
+            if scaled and not scaled.isNull():
+                self.logo_preview.setPixmap(scaled)
+                self.logo_preview.setProperty("logo_path", logo_path)
             else:
+                self.logo_preview.setPixmap(QPixmap())
                 self.logo_preview.setText("📷\nلا يوجد شعار")
 
             self._company_settings_snapshot = {
@@ -1457,6 +1524,7 @@ class SettingsTab(QWidget):
             }
 
             self._on_company_form_changed()
+            self._clear_dirty_section("company")
             safe_print("INFO: [SettingsTab] ✅ تم تحميل الإعدادات")
         except Exception as e:
             safe_print(f"ERROR: [SettingsTab] فشل تحميل الإعدادات: {e}")
@@ -1579,6 +1647,7 @@ class SettingsTab(QWidget):
             try:
                 self._currencies_all = currencies
                 self._render_currencies_page()
+                self._clear_dirty_section("currencies")
             finally:
                 self.currencies_table.setUpdatesEnabled(True)
 
@@ -2194,6 +2263,7 @@ class SettingsTab(QWidget):
 🔄 حالة الاتصال بالأونلاين: {connection_status}
                 """
                 self.db_stats_label.setText(stats_text)
+                self._clear_dirty_section("backup")
             except Exception as e:
                 self.db_stats_label.setText(f"❌ خطأ في عرض الإحصائيات: {e}")
 
@@ -2458,6 +2528,7 @@ class SettingsTab(QWidget):
                     self.default_client_combo,
                     settings.get("default_client_account", "1140"),
                 )
+                self._clear_dirty_section("default_accounts")
             except Exception as e:
                 safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
                 QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
@@ -2562,6 +2633,7 @@ class SettingsTab(QWidget):
                 self._users_all = users
 
                 self._render_users_page()
+                self._clear_dirty_section("users")
                 safe_print(f"INFO: [SettingsTab] ✅ تم تحميل {len(users)} مستخدم")
             except Exception as e:
                 safe_print(f"ERROR: [SettingsTab] فشل ملء جدول المستخدمين: {e}")
@@ -3809,8 +3881,7 @@ class SettingsTab(QWidget):
 
             self._payment_methods_all = payment_methods
             self._render_payment_methods_page()
-
-            self.settings_service.update_setting("payment_methods", payment_methods)
+            self._clear_dirty_section("payment_methods")
 
             safe_print(f"INFO: [SettingsTab] تم تحميل {len(payment_methods)} طريقة دفع")
             self._update_payment_method_preview()
@@ -4170,6 +4241,7 @@ class SettingsTab(QWidget):
 
             self._note_templates_all = note_templates
             self._render_note_templates_page()
+            self._clear_dirty_section("project_notes")
 
             safe_print(f"INFO: [SettingsTab] تم تحميل {len(note_templates)} قالب ملاحظات")
             self._update_note_template_preview()

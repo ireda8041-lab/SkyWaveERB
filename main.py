@@ -190,7 +190,7 @@ class SkyWaveERPApp:
             template_service=self.template_service,  # ✅ تمرير template_service
         )
 
-        self.export_service = ExportService()
+        self.export_service = ExportService(repository=self.repository)
 
         # Authentication Service
         self.auth_service = AuthService(repository=self.repository)
@@ -618,12 +618,12 @@ class SkyWaveERPApp:
         def _trace_quit_signals():
             try:
                 stack_text = "".join(traceback.format_stack(limit=20))
-                logger.warning("[MainApp] aboutToQuit received. Call stack:\n%s", stack_text)
+                logger.debug("[MainApp] aboutToQuit received. Call stack:\n%s", stack_text)
             except Exception:
-                logger.warning("[MainApp] aboutToQuit received.")
+                logger.debug("[MainApp] aboutToQuit received.")
 
         app.aboutToQuit.connect(_trace_quit_signals)
-        app.lastWindowClosed.connect(lambda: logger.warning("[MainApp] lastWindowClosed emitted."))
+        app.lastWindowClosed.connect(lambda: logger.debug("[MainApp] lastWindowClosed emitted."))
 
         # ✅ ربط إشارة الإغلاق لتنظيف الموارد
         app.aboutToQuit.connect(self._cleanup_on_exit)

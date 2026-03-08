@@ -717,16 +717,10 @@ class MainWindow(QMainWindow):
                     self.todo_tab.load_tasks()
             elif tab_name == "🔧 الإعدادات":
                 if hasattr(self, "settings_tab"):
-                    # ⚡ تحميل البيانات بشكل سريع بدون انتظار
                     try:
-                        self.settings_tab.load_settings_data()
+                        self.settings_tab.load_active_subtab_data(force_reload=False)
                     except Exception as e:
-                        safe_print(f"WARNING: فشل تحميل بيانات الشركة: {e}")
-
-                    try:
-                        self.settings_tab.load_users()
-                    except Exception as e:
-                        safe_print(f"WARNING: فشل تحميل المستخدمين: {e}")
+                        safe_print(f"WARNING: فشل تحديث تبويب الإعدادات الحالي: {e}")
 
         except Exception as e:
             safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
@@ -913,6 +907,8 @@ class MainWindow(QMainWindow):
             }
 
             target_tabs = list(mapping.get(table_name, []))
+            if "🔧 الإعدادات" in target_tabs and hasattr(self, "settings_tab"):
+                self.settings_tab.mark_data_changed(table_name)
 
             # ⚡ Dashboard يُحدث دائماً (لكن بحذر)
             dashboard_related_tables = {
@@ -1317,6 +1313,7 @@ class MainWindow(QMainWindow):
         self.shortcuts_manager.export_excel.connect(self._on_export_excel)
         self.shortcuts_manager.print_current.connect(self._on_print_current)
         self.shortcuts_manager.save_data.connect(self._on_save_data)
+        self.shortcuts_manager.close_dialog.connect(self._on_close_dialog)
 
     def _on_new_project(self):
         """معالج اختصار مشروع جديد"""
@@ -1390,6 +1387,70 @@ class MainWindow(QMainWindow):
         """معالج اختصار عرض المساعدة"""
         dialog = ShortcutsHelpDialog(self.shortcuts_manager, self)
         dialog.exec()
+
+    @staticmethod
+    def _dismiss_escape_target(widget) -> bool:
+        if widget is None:
+            return False
+
+        for method_name in ("reject", "close", "hide"):
+            if hasattr(widget, method_name):
+                try:
+                    getattr(widget, method_name)()
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    def _on_close_dialog(self):
+        """معالج اختصار Esc: يغلق العناصر المؤقتة أو ينظف التركيز الحالي."""
+        active_popup = QApplication.activePopupWidget()
+        if active_popup is not None and active_popup is not self:
+            if MainWindow._dismiss_escape_target(active_popup):
+                return
+
+        active_modal = QApplication.activeModalWidget()
+        if active_modal is not None and active_modal is not self:
+            if MainWindow._dismiss_escape_target(active_modal):
+                return
+
+        current_tab = self.tabs.currentWidget() if hasattr(self, "tabs") else None
+        for method_name in (
+            "handle_escape",
+            "on_escape",
+            "cancel_edit",
+            "cancel_selection",
+            "close_preview",
+        ):
+            if current_tab is not None and hasattr(current_tab, method_name):
+                try:
+                    getattr(current_tab, method_name)()
+                    return
+                except Exception:
+                    continue
+
+        focus_widget = QApplication.focusWidget()
+        if focus_widget is not None and focus_widget is not self:
+            try:
+                if hasattr(focus_widget, "deselect"):
+                    focus_widget.deselect()
+            except Exception:
+                pass
+            try:
+                if hasattr(focus_widget, "clearFocus"):
+                    focus_widget.clearFocus()
+                    return
+            except Exception:
+                pass
+
+        if current_tab is not None and hasattr(current_tab, "findChildren"):
+            try:
+                for table in current_tab.findChildren(QTableWidget):
+                    if table.isVisible() and table.selectedItems():
+                        table.clearSelection()
+                        return
+            except Exception:
+                pass
 
     def _on_new_payment(self):
         """معالج اختصار دفعة جديدة"""
@@ -1685,6 +1746,9 @@ class MainWindow(QMainWindow):
             if not target_tab:
                 safe_print(f"⚠️ [MainWindow] جدول غير معروف: {table_name}")
                 return
+
+            if target_tab == "🔧 الإعدادات" and hasattr(self, "settings_tab"):
+                self.settings_tab.mark_data_changed(table_name)
 
             # Get currently visible tab
             current_tab = self.tabs.tabText(self.tabs.currentIndex())

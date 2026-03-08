@@ -268,8 +268,8 @@ class SyncIndicator(QWidget):
 class ToastNotification(QWidget):
     """إشعار منبثق (Toast)"""
 
-    DEFAULT_DURATION_MS = 9000
-    MIN_DURATION_MS = 8000
+    DEFAULT_DURATION_MS = 10000
+    MIN_DURATION_MS = 10000
 
     def __init__(self, title: str, message: str, duration: int = DEFAULT_DURATION_MS, parent=None):
         super().__init__(parent)
@@ -378,8 +378,8 @@ class StatusBarWidget(QWidget):
     logout_requested = pyqtSignal()
     # إشارة المزامنة الكاملة
     full_sync_requested = pyqtSignal()
-    DEFAULT_NOTIFICATION_DURATION_MS = 9000
-    MIN_NOTIFICATION_DURATION_MS = 8000
+    DEFAULT_NOTIFICATION_DURATION_MS = 10000
+    MIN_NOTIFICATION_DURATION_MS = 10000
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -585,38 +585,16 @@ class StatusBarWidget(QWidget):
         self.full_sync_requested.emit()
 
     def set_realtime_sync_status(self, is_active: bool):
-        """تحديث حالة المزامنة الفورية"""
+        """تحديث حالة المزامنة الفورية بدون إظهار عنصر مستقل في الشريط السفلي"""
         try:
-            if is_active:
-                # إضافة مؤشر المزامنة الفورية
-                if not hasattr(self, "realtime_indicator"):
-                    self.realtime_indicator = QLabel("🔄 مزامنة فورية")
-                    self.realtime_indicator.setFont(get_cairo_font(10))
-                    self.realtime_indicator.setStyleSheet(
-                        """
-                        QLabel {
-                            color: #10B981;
-                            background: rgba(16, 185, 129, 0.1);
-                            border: 1px solid rgba(16, 185, 129, 0.3);
-                            border-radius: 12px;
-                            padding: 4px 8px;
-                            font-weight: bold;
-                        }
-                    """
-                    )
-                    self.realtime_indicator.setToolTip(
-                        "المزامنة الفورية نشطة - التحديثات تظهر فوراً على جميع الأجهزة"
-                    )
-
-                    # إضافة المؤشر بجانب مؤشر المزامنة العادي
-                    layout = self.layout()
-                    layout.insertWidget(2, self.realtime_indicator)
-
-                self.realtime_indicator.setVisible(True)
-            else:
-                # إخفاء مؤشر المزامنة الفورية
-                if hasattr(self, "realtime_indicator"):
-                    self.realtime_indicator.setVisible(False)
+            indicator = getattr(self, "realtime_indicator", None)
+            if indicator is not None:
+                layout = self.layout()
+                if layout is not None:
+                    layout.removeWidget(indicator)
+                indicator.hide()
+                indicator.deleteLater()
+                self.realtime_indicator = None
         except Exception as e:
             safe_print(f"ERROR: [StatusBarWidget] فشل تحديث مؤشر المزامنة الفورية: {e}")
 

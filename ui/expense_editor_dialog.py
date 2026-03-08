@@ -88,6 +88,17 @@ class ExpenseEditorDialog(QDialog):
         if self.pre_selected_project_id and hasattr(self, "project_combo"):
             self._select_pre_selected_project()
 
+    @staticmethod
+    def _project_ref(project: schemas.Project | None) -> str:
+        if project is None:
+            return ""
+        for field in ("_mongo_id", "id", "name"):
+            value = getattr(project, field, None)
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
+
     def load_data(self):
         """جلب الحسابات والمشاريع والفئات من قاعدة البيانات"""
         all_accounts = self.accounting_service.repo.get_all_accounts()
@@ -363,20 +374,21 @@ class ExpenseEditorDialog(QDialog):
     def _select_pre_selected_project(self):
         """تحديد المشروع المسبق في القائمة"""
         try:
+            if self.pre_selected_project_id:
+                for i in range(self.project_combo.count()):
+                    project = self.project_combo.itemData(i)
+                    if project and self._project_ref(project) == self.pre_selected_project_id:
+                        self.project_combo.setCurrentIndex(i)
+                        return
+
+            if not self.pre_selected_project_name:
+                return
+
             for i in range(self.project_combo.count()):
                 project = self.project_combo.itemData(i)
-                if project:
-                    project_id = getattr(project, "_mongo_id", None) or str(
-                        getattr(project, "id", "")
-                    )
-                    project_name = getattr(project, "name", "")
-
-                    if (
-                        project_id == self.pre_selected_project_id
-                        or project_name == self.pre_selected_project_name
-                    ):
-                        self.project_combo.setCurrentIndex(i)
-                        break
+                if project and getattr(project, "name", "") == self.pre_selected_project_name:
+                    self.project_combo.setCurrentIndex(i)
+                    return
         except Exception:
             pass  # تجاهل الأخطاء في التحديد المسبق
 
@@ -394,9 +406,15 @@ class ExpenseEditorDialog(QDialog):
         exp = self.expense_to_edit
 
         if exp.project_id:
+            expected_project_ref = str(exp.project_id).strip()
             for i in range(self.project_combo.count()):
                 project = self.project_combo.itemData(i)
-                if project and hasattr(project, "name") and project.name == exp.project_id:
+                if not project:
+                    continue
+                if (
+                    self._project_ref(project) == expected_project_ref
+                    or getattr(project, "name", "") == expected_project_ref
+                ):
                     self.project_combo.setCurrentIndex(i)
                     break
 
@@ -454,7 +472,7 @@ class ExpenseEditorDialog(QDialog):
             description=self.description_input.toPlainText(),
             account_id=selected_payment_code,
             payment_account_id=selected_payment_code,
-            project_id=selected_project.name if selected_project else None,
+            project_id=self._project_ref(selected_project) if selected_project else None,
         )
 
         try:

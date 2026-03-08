@@ -15,12 +15,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from core import schemas
 from core.logger import get_logger
 from core.signals import app_signals
+from core.text_utils import normalize_user_text
 
 if TYPE_CHECKING:
     from core.event_bus import EventBus
@@ -66,6 +68,77 @@ class ExpenseService:
         """⚡ إبطال الـ cache"""
         self._cached_expenses = None
         self._cache_time = 0
+
+    @staticmethod
+    def _normalized_project_ref(value: str | None) -> str:
+        return normalize_user_text(str(value or "")).strip()
+
+    def _ambiguous_project_names(self) -> set[str]:
+        if not hasattr(self.repo, "get_all_projects"):
+            return set()
+
+        counts: dict[str, int] = {}
+        try:
+            for project in self.repo.get_all_projects():
+                normalized_name = self._normalized_project_ref(getattr(project, "name", None))
+                if normalized_name:
+                    counts[normalized_name] = counts.get(normalized_name, 0) + 1
+        except Exception:
+            return set()
+
+        return {name for name, count in counts.items() if count > 1}
+
+    @staticmethod
+    def _expense_disambiguator(expense: schemas.Expense) -> str:
+        for field in ("id", "_mongo_id"):
+            value = getattr(expense, field, None)
+            text = str(value or "").strip()
+            if text:
+                return text
+
+        signature = "|".join(
+            [
+                expense.date.isoformat() if getattr(expense, "date", None) else "",
+                str(getattr(expense, "category", "") or ""),
+                str(getattr(expense, "amount", "") or ""),
+                str(getattr(expense, "description", "") or ""),
+                str(getattr(expense, "account_id", "") or ""),
+                str(getattr(expense, "payment_account_id", "") or ""),
+            ]
+        )
+        return hashlib.sha1(signature.encode("utf-8")).hexdigest()[:8]
+
+    def _expense_project_bucket(
+        self,
+        expense: schemas.Expense,
+        *,
+        ambiguous_project_names: set[str] | None = None,
+    ) -> str:
+        project_ref = str(getattr(expense, "project_id", "") or "").strip()
+        if not project_ref:
+            return "بدون مشروع"
+
+        ambiguous_names = ambiguous_project_names or set()
+        normalized_ref = self._normalized_project_ref(project_ref)
+
+        try:
+            if hasattr(self.repo, "get_project_by_number"):
+                project = self.repo.get_project_by_number(project_ref)
+                if project is not None:
+                    for field in ("_mongo_id", "id", "name"):
+                        value = getattr(project, field, None)
+                        text = str(value or "").strip()
+                        if text:
+                            return text
+        except Exception:
+            pass
+
+        if normalized_ref and normalized_ref in ambiguous_names:
+            # لا نملك scope كافياً لربط السجل بمشروع محدد، لذلك نتجنب دمج
+            # عدة مصروفات legacy لمشاريع مختلفة تحت bucket واحد مضلل.
+            return f"{project_ref} [ambiguous:{self._expense_disambiguator(expense)}]"
+
+        return project_ref
 
     def get_all_expenses(self) -> list[schemas.Expense]:
         """
@@ -209,6 +282,15 @@ class ExpenseService:
         try:
             # ⚡ جلب بيانات المصروف قبل الحذف لمعرفة الحساب
             expense = self.repo.get_expense_by_id(expense_id)
+            expense_label = str(expense_id)
+            if expense is not None:
+                expense_amount = float(getattr(expense, "amount", 0) or 0)
+                expense_category = str(getattr(expense, "category", "") or "").strip()
+                expense_label = (
+                    f"{expense_amount:,.0f} ج.م - {expense_category}"
+                    if expense_category
+                    else f"{expense_amount:,.0f} ج.م"
+                )
 
             result = self.repo.delete_expense(expense_id)
             if result:
@@ -221,8 +303,7 @@ class ExpenseService:
                 app_signals.emit_data_changed("accounting")
                 if getattr(expense, "project_id", None):
                     app_signals.emit_data_changed("projects")
-                # 🔔 إشعار - تحويل expense_id لـ string
-                notify_operation("deleted", "expense", str(expense_id))
+                notify_operation("deleted", "expense", expense_label)
                 logger.info("[ExpenseService] تم حذف المصروف بنجاح")
             return result
         except Exception as e:
@@ -298,9 +379,13 @@ class ExpenseService:
                 by_category[category] = by_category.get(category, 0) + expense.amount
 
             # تصنيف حسب المشروع
+            ambiguous_project_names = self._ambiguous_project_names()
             by_project: dict[str, float] = {}
             for expense in expenses:
-                project_id = expense.project_id or "بدون مشروع"
+                project_id = self._expense_project_bucket(
+                    expense,
+                    ambiguous_project_names=ambiguous_project_names,
+                )
                 by_project[project_id] = by_project.get(project_id, 0) + expense.amount
 
             stats = {

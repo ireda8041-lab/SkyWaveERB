@@ -938,12 +938,28 @@ class PrintingService:
             # جلب الدفعات من قاعدة البيانات
 
             if hasattr(self, "repo") and self.repo is not None:
-                payments = self.repo.get_payments_for_project(project.name)
+                project_ref = str(
+                    getattr(project, "id", None)
+                    or getattr(project, "_mongo_id", None)
+                    or project.name
+                )
+                payments = self.repo.get_payments_for_project(
+                    project_ref,
+                    client_id=getattr(project, "client_id", None),
+                )
                 amount_paid = sum(payment.amount for payment in payments)
             else:
                 # إنشاء repository مؤقت لجلب الدفعات
                 temp_repo = Repository()
-                payments = temp_repo.get_payments_for_project(project.name)
+                project_ref = str(
+                    getattr(project, "id", None)
+                    or getattr(project, "_mongo_id", None)
+                    or project.name
+                )
+                payments = temp_repo.get_payments_for_project(
+                    project_ref,
+                    client_id=getattr(project, "client_id", None),
+                )
                 amount_paid = sum(payment.amount for payment in payments)
         except Exception as e:
             safe_print(f"WARNING: [PrintingService] فشل جلب الدفعات: {e}")

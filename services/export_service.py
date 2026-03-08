@@ -9,7 +9,7 @@ import platform
 import subprocess
 import sys
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -33,11 +33,15 @@ except ImportError:
         "WARNING: [ExportService] pandas not available. Install with: pip install pandas openpyxl"
     )
 
+if TYPE_CHECKING:
+    from core.repository import Repository
+
 
 class ExportService:
     """خدمة التصدير الشاملة"""
 
-    def __init__(self):
+    def __init__(self, repository: "Repository | None" = None):
+        self.repo = repository
         # ⚡ حفظ التصدير في مجلد exports داخل مسار التثبيت
         if getattr(sys, "frozen", False):
             # البرنامج مجمع (EXE) - مسار التثبيت هو مجلد الـ EXE
@@ -54,6 +58,34 @@ class ExportService:
         if not os.path.exists(self.export_folder):
             os.makedirs(self.export_folder)
             safe_print(f"INFO: [ExportService] Created exports folder: {self.export_folder}")
+
+    def _resolve_client_display_name(self, client_ref: str | None) -> str:
+        client_text = str(client_ref or "").strip()
+        if not client_text or self.repo is None:
+            return client_text
+
+        try:
+            client = self.repo.get_client_by_id(client_text)
+            if client and getattr(client, "name", None):
+                return str(client.name)
+        except Exception:
+            pass
+
+        return client_text
+
+    def _resolve_project_display_name(self, project_ref: str | None) -> str:
+        project_text = str(project_ref or "").strip()
+        if not project_text or self.repo is None:
+            return project_text
+
+        try:
+            project = self.repo.get_project_by_number(project_text)
+            if project and getattr(project, "name", None):
+                return str(project.name)
+        except Exception:
+            pass
+
+        return project_text
 
     def export_to_excel(
         self, data: list[dict[str, Any]], filename: str | None = None, sheet_name: str = "البيانات"
@@ -239,7 +271,7 @@ class ExportService:
             data.append(
                 {
                     "اسم المشروع": project.name,
-                    "العميل": project.client_id or "",
+                    "العميل": self._resolve_client_display_name(getattr(project, "client_id", "")),
                     "الحالة": (
                         project.status.value
                         if hasattr(project.status, "value")
@@ -273,7 +305,9 @@ class ExportService:
                     "الفئة": expense.category or "",
                     "المبلغ": expense.amount or 0,
                     "الوصف": expense.description or "",
-                    "المشروع": expense.project_id or "",
+                    "المشروع": self._resolve_project_display_name(
+                        getattr(expense, "project_id", "")
+                    ),
                     "حساب المصروف": expense.account_id or "",
                     "حساب الدفع": expense.payment_account_id or "",
                 }

@@ -11,12 +11,14 @@ import queue
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
 
 from PyQt6.QtCore import (
     QEasingCurve,
+    QEvent,
     QObject,
     QPoint,
     QPropertyAnimation,
@@ -30,9 +32,9 @@ from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QGraphicsDropShadowEffect,
-    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QMainWindow,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -63,6 +65,25 @@ DEVICE_ID = get_stable_device_id()
 safe_print(f"INFO: [NotificationSystem] Device ID: {DEVICE_ID}")
 
 
+@dataclass(slots=True)
+class NotificationToastPayload:
+    message: str
+    notification_type: NotificationType = NotificationType.INFO
+    title: str | None = None
+    duration: int | None = None
+    sync: bool = True
+    entity_type: str | None = None
+    action: str | None = None
+    source_device: str | None = None
+    transport_only: bool = False
+    silent: bool = False
+    persistent: bool = False
+
+    @property
+    def is_remote(self) -> bool:
+        return bool(self.source_device and self.source_device != DEVICE_ID)
+
+
 class ToastNotification(QWidget):
     """إشعار Toast منبثق - تصميم عصري وجميل"""
 
@@ -74,13 +95,20 @@ class ToastNotification(QWidget):
         notification_type: NotificationType = NotificationType.INFO,
         title: str = None,
         duration: int = 12000,
+        entity_type: str | None = None,
+        action: str | None = None,
         source_device: str = None,
+        persistent: bool = False,
+        owner_window=None,
         parent=None,
     ):
         super().__init__(parent)
         self.message = message
         self.notification_type = notification_type
         self.title = title
+        self.entity_type = str(entity_type or "").strip() or None
+        self.action = str(action or "").strip() or None
+        self._persistent = bool(persistent)
         try:
             normalized_duration = int(duration)
         except (TypeError, ValueError):
@@ -90,7 +118,7 @@ class ToastNotification(QWidget):
         if normalized_duration == 0:
             self.duration = 0
         else:
-            self.duration = max(9000, normalized_duration)
+            self.duration = max(10000, normalized_duration)
         self.source_device = source_device
         self._remaining_duration_ms = self.duration
         self._is_closing = False
@@ -102,9 +130,43 @@ class ToastNotification(QWidget):
         self._last_restore_attempt_mono = 0.0
         self._logged_external_close_once = False
         self._logged_external_hide_once = False
+        self._owner_window = owner_window
+        if owner_window is not None:
+            try:
+                owner_window.destroyed.connect(self._clear_owner_window)
+            except Exception:
+                self._owner_window = None
 
         self._setup_ui()
         self._setup_animation()
+
+    def _clear_owner_window(self, *_args):
+        self._owner_window = None
+
+    def owner_window(self):
+        owner = getattr(self, "_owner_window", None)
+        if owner is None:
+            return None
+        try:
+            owner.isVisible()
+        except RuntimeError:
+            self._owner_window = None
+            return None
+        return owner
+
+    def _is_prominent_notification(self) -> bool:
+        return self._persistent or self.notification_type in (
+            NotificationType.WARNING,
+            NotificationType.ERROR,
+        )
+
+    @staticmethod
+    def _format_display_time(value: datetime | None = None) -> str:
+        display_dt = value or datetime.now()
+        hour_text = display_dt.strftime("%I").lstrip("0") or "12"
+        minute_text = display_dt.strftime("%M")
+        meridiem = "ص" if display_dt.hour < 12 else "م"
+        return f"{hour_text}:{minute_text} {meridiem}"
 
     def _theme(self) -> dict:
         themes = {
@@ -135,22 +197,218 @@ class ToastNotification(QWidget):
         }
         return themes.get(self.notification_type, themes[NotificationType.INFO])
 
-    def _setup_ui(self):
+    @staticmethod
+    def _normalized_key(value: str | None) -> str:
+        return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+    @classmethod
+    def _entity_display_name(cls, entity_type: str | None) -> str | None:
+        normalized = cls._normalized_key(entity_type)
+        if not normalized:
+            return None
+        labels = {
+            "client": "عميل",
+            "clients": "عميل",
+            "project": "مشروع",
+            "projects": "مشروع",
+            "invoice": "فاتورة",
+            "invoices": "فاتورة",
+            "payment": "دفعة",
+            "payments": "دفعة",
+            "expense": "مصروف",
+            "expenses": "مصروف",
+            "service": "خدمة",
+            "services": "خدمة",
+            "quotation": "عرض سعر",
+            "quotations": "عرض سعر",
+            "task": "مهمة",
+            "tasks": "مهمة",
+            "todo": "مهمة",
+            "account": "حساب",
+            "accounts": "حساب",
+            "user": "مستخدم",
+            "users": "مستخدم",
+            "notification": "إشعار",
+            "notifications": "إشعار",
+            "currency": "عملة",
+            "currencies": "عملة",
+            "settings": "إعدادات",
+            "system_settings": "إعدادات",
+        }
+        return labels.get(normalized) or normalized.replace("_", " ")
+
+    @classmethod
+    def _entity_subject_name(cls, entity_type: str | None) -> str | None:
+        normalized = cls._normalized_key(entity_type)
+        if not normalized:
+            return None
+        labels = {
+            "client": "العميل",
+            "clients": "العميل",
+            "project": "المشروع",
+            "projects": "المشروع",
+            "invoice": "الفاتورة",
+            "invoices": "الفاتورة",
+            "payment": "الدفعة",
+            "payments": "الدفعة",
+            "expense": "المصروف",
+            "expenses": "المصروف",
+            "service": "الخدمة",
+            "services": "الخدمة",
+            "quotation": "عرض السعر",
+            "quotations": "عرض السعر",
+            "task": "المهمة",
+            "tasks": "المهمة",
+            "todo": "المهمة",
+            "account": "الحساب",
+            "accounts": "الحساب",
+            "user": "المستخدم",
+            "users": "المستخدم",
+            "notification": "الإشعار",
+            "notifications": "الإشعار",
+            "currency": "العملة",
+            "currencies": "العملة",
+            "settings": "الإعدادات",
+            "system_settings": "الإعدادات",
+        }
+        return labels.get(normalized) or cls._entity_display_name(entity_type)
+
+    @classmethod
+    def _action_display_name(cls, action: str | None) -> str | None:
+        normalized = cls._normalized_key(action)
+        if not normalized:
+            return None
+        labels = {
+            "create": "إنشاء",
+            "created": "إنشاء",
+            "add": "إضافة",
+            "added": "إضافة",
+            "update": "تعديل",
+            "updated": "تعديل",
+            "edit": "تعديل",
+            "edited": "تعديل",
+            "modify": "تعديل",
+            "modified": "تعديل",
+            "save": "حفظ",
+            "saved": "حفظ",
+            "delete": "حذف",
+            "deleted": "حذف",
+            "remove": "حذف",
+            "removed": "حذف",
+            "archive": "أرشفة",
+            "archived": "أرشفة",
+            "restore": "استعادة",
+            "restored": "استعادة",
+            "sync": "مزامنة",
+            "synced": "مزامنة",
+            "send": "إرسال",
+            "sent": "إرسال",
+            "pay": "تحصيل",
+            "paid": "تحصيل",
+            "complete": "إكمال",
+            "completed": "إكمال",
+            "approve": "اعتماد",
+            "approved": "اعتماد",
+            "reject": "رفض",
+            "rejected": "رفض",
+            "due": "استحقاق",
+            "overdue": "استحقاق",
+        }
+        return labels.get(normalized) or normalized.replace("_", " ")
+
+    def _build_operation_sentence(self) -> str | None:
+        action_key = self._normalized_key(self.action)
+        entity_subject = self._entity_subject_name(self.entity_type)
+        if action_key and entity_subject:
+            templates = {
+                "create": "تم إنشاء {entity} بنجاح",
+                "created": "تم إنشاء {entity} بنجاح",
+                "add": "تمت إضافة {entity} بنجاح",
+                "added": "تمت إضافة {entity} بنجاح",
+                "update": "تم تعديل بيانات {entity} بنجاح",
+                "updated": "تم تعديل بيانات {entity} بنجاح",
+                "edit": "تم تعديل بيانات {entity} بنجاح",
+                "edited": "تم تعديل بيانات {entity} بنجاح",
+                "modify": "تم تعديل بيانات {entity} بنجاح",
+                "modified": "تم تعديل بيانات {entity} بنجاح",
+                "save": "تم حفظ {entity} بنجاح",
+                "saved": "تم حفظ {entity} بنجاح",
+                "delete": "تم حذف {entity}",
+                "deleted": "تم حذف {entity}",
+                "remove": "تم حذف {entity}",
+                "removed": "تم حذف {entity}",
+                "archive": "تمت أرشفة {entity}",
+                "archived": "تمت أرشفة {entity}",
+                "restore": "تمت استعادة {entity}",
+                "restored": "تمت استعادة {entity}",
+                "sync": "تمت مزامنة {entity}",
+                "synced": "تمت مزامنة {entity}",
+                "send": "تم إرسال {entity}",
+                "sent": "تم إرسال {entity}",
+                "pay": "تم تحصيل {entity}",
+                "paid": "تم تحصيل {entity}",
+                "complete": "تم إكمال {entity}",
+                "completed": "تم إكمال {entity}",
+                "approve": "تم اعتماد {entity}",
+                "approved": "تم اعتماد {entity}",
+                "reject": "تم رفض {entity}",
+                "rejected": "تم رفض {entity}",
+                "due": "تم تسجيل استحقاق {entity}",
+                "overdue": "تم تسجيل استحقاق {entity}",
+            }
+            template = templates.get(action_key)
+            if template:
+                return template.format(entity=entity_subject)
+
+        action_text = self._action_display_name(self.action)
+        if action_text and entity_subject:
+            return f"تم تنفيذ إجراء {action_text} على {entity_subject}"
+        if action_text:
+            return f"تم تنفيذ الإجراء: {action_text}"
+        if entity_subject:
+            return f"تم تحديث بيانات {entity_subject}"
+        return None
+
+    def _build_operation_details(self) -> str | None:
+        return self._build_operation_sentence()
+
+    def _setup_enterprise_ui(self):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
-            | Qt.WindowType.Tool
             | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.setFixedWidth(380)
 
         theme = self._theme()
         accent = theme["accent"]
         accent_dark = theme["accent_dark"]
+        prominent = self._is_prominent_notification()
+        surface_palette = {
+            NotificationType.SUCCESS: ("#122635", "#0c1825", "تم"),
+            NotificationType.ERROR: ("#291522", "#111827", "خطأ"),
+            NotificationType.WARNING: ("#2b2012", "#111827", "تحذير"),
+            NotificationType.INFO: ("#10243b", "#0c1726", "معلومة"),
+        }
+        surface_start, surface_end, type_label_text = surface_palette.get(
+            self.notification_type,
+            surface_palette[NotificationType.INFO],
+        )
+        toast_width = 432 if prominent else 404
+        icon_size = 36 if prominent else 32
+        icon_radius = icon_size // 2
+        title_font_size = 15 if prominent else 14
+        message_font_size = 12 if prominent else 11
+        progress_height = 3 if prominent else 2
+        accent_width = 4 if prominent else 3
+        bottom_margin = 14 if prominent else 12
+        self.setFixedWidth(toast_width)
 
         self._container = QWidget()
         self._container.setObjectName("notif_container")
@@ -158,17 +416,17 @@ class ToastNotification(QWidget):
             f"""
             QWidget#notif_container {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {COLORS['bg_medium']}, stop:1 {COLORS['bg_dark']});
-                border: 1px solid {accent}88;
-                border-radius: 14px;
+                    stop:0 {surface_start}, stop:0.58 #101c2d, stop:1 {surface_end});
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 18px;
             }}
         """
         )
 
         shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QColor(0, 0, 0, 170))
+        shadow.setBlurRadius(30)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(0, 0, 0, 145))
         self._container.setGraphicsEffect(shadow)
 
         card_layout = QVBoxLayout(self._container)
@@ -176,130 +434,176 @@ class ToastNotification(QWidget):
         card_layout.setSpacing(0)
 
         body_layout = QHBoxLayout()
-        body_layout.setContentsMargins(0, 0, 10, 0)
+        body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
 
         color_bar = QWidget()
-        color_bar.setFixedWidth(6)
+        color_bar.setFixedWidth(accent_width)
         color_bar.setStyleSheet(
             f"""
             background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                 stop:0 {accent}, stop:1 {accent_dark});
-            border-radius: 14px 0 0 14px;
+            border-top-right-radius: 18px;
+            border-bottom-right-radius: 18px;
         """
         )
         body_layout.addWidget(color_bar)
 
         content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(12, 10, 10, 8)
-        content_layout.setSpacing(10)
+        content_layout.setContentsMargins(18, 16, 16, bottom_margin)
+        content_layout.setSpacing(14)
 
         icon_container = QWidget()
-        icon_container.setFixedSize(36, 36)
+        icon_container.setObjectName("notif_icon_shell")
+        icon_container.setFixedSize(icon_size, icon_size)
         icon_container.setStyleSheet(
             f"""
-            background: {accent}2B;
-            border: 1px solid {accent}66;
-            border-radius: 18px;
+            QWidget#notif_icon_shell {{
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: {icon_radius}px;
+            }}
         """
         )
         icon_layout = QVBoxLayout(icon_container)
         icon_layout.setContentsMargins(0, 0, 0, 0)
+
         icon_label = QLabel(theme["icon"])
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_label.setStyleSheet(
             f"""
             color: {accent};
             background: transparent;
-            font-size: 16px;
+            font-size: {15 if prominent else 14}px;
             font-weight: 700;
             font-family: 'Cairo';
         """
         )
         icon_layout.addWidget(icon_label)
-        content_layout.addWidget(icon_container)
+        content_layout.addWidget(
+            icon_container,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+        )
 
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(5)
         text_layout.setContentsMargins(0, 0, 0, 0)
 
         title_text = (self.title or theme["title_fallback"]).strip()
         if self.source_device and self.source_device != DEVICE_ID:
             title_text += " (جهاز آخر)"
 
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(0, 0, 0, 0)
-        header_row.setSpacing(8)
+        utility_widget = QWidget()
+        utility_widget.setStyleSheet("background: transparent;")
+        utility_widget.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
-        title_label = QLabel(title_text)
-        title_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        title_label.setStyleSheet(
+        utility_row = QHBoxLayout(utility_widget)
+        utility_row.setContentsMargins(0, 0, 0, 0)
+        utility_row.setSpacing(6)
+
+        type_badge = QLabel(type_label_text)
+        type_badge.setObjectName("notif_type_badge")
+        type_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        type_badge.setStyleSheet(
             f"""
-            color: {COLORS['text_primary']};
+            color: {accent};
             background: transparent;
-            font-size: 12px;
+            border: none;
+            padding: 0;
+            font-size: {10 if prominent else 9}px;
             font-weight: 700;
             font-family: 'Cairo';
         """
         )
-        header_row.addWidget(title_label, 1)
+        utility_row.addWidget(type_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
 
-        time_label = QLabel(datetime.now().strftime("%H:%M"))
+        separator_label = QLabel("\u2022")
+        separator_label.setObjectName("notif_meta_separator")
+        separator_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        separator_label.setStyleSheet(
+            """
+            color: rgba(255, 255, 255, 0.35);
+            background: transparent;
+            border: none;
+            font-size: 8px;
+            font-weight: 700;
+        """
+        )
+        utility_row.addWidget(separator_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        time_label = QLabel(self._format_display_time())
+        time_label.setObjectName("notif_time_label")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         time_label.setStyleSheet(
             f"""
             color: {COLORS['text_secondary']};
             background: transparent;
-            font-size: 10px;
+            border: none;
+            padding: 0;
+            font-size: 9px;
+            font-weight: 700;
             font-family: 'Cairo';
         """
         )
-        header_row.addWidget(time_label, alignment=Qt.AlignmentFlag.AlignLeft)
-        text_layout.addLayout(header_row)
+        utility_row.addWidget(time_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+        utility_row.addStretch(1)
+        text_layout.addWidget(utility_widget)
+
+        title_label = QLabel(title_text)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        title_label.setWordWrap(True)
+        title_label.setStyleSheet(
+            f"""
+            color: {COLORS['text_primary']};
+            background: transparent;
+            font-size: {title_font_size}px;
+            font-weight: 700;
+            font-family: 'Cairo';
+            line-height: 1.15;
+        """
+        )
+        text_layout.addWidget(title_label)
+
+        operation_details = self._build_operation_details()
+        if operation_details:
+            details_label = QLabel(operation_details)
+            details_label.setObjectName("notif_operation_details")
+            details_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+            details_label.setWordWrap(True)
+            details_label.setStyleSheet(
+                """
+                color: rgba(255, 255, 255, 0.62);
+                background: transparent;
+                font-size: 10px;
+                font-weight: 600;
+                font-family: 'Cairo';
+            """
+            )
+            text_layout.addWidget(details_label)
 
         msg_label = QLabel((self.message or "").strip())
+        msg_label.setObjectName("notif_message_label")
         msg_label.setWordWrap(True)
         msg_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
         msg_label.setStyleSheet(
             f"""
-            color: {COLORS['text_secondary']};
+            color: rgba(255, 255, 255, 0.82);
             background: transparent;
-            font-size: 11px;
+            font-size: {message_font_size}px;
             font-family: 'Cairo';
         """
         )
         text_layout.addWidget(msg_label)
         content_layout.addLayout(text_layout, 1)
 
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: transparent;
-                color: {COLORS['text_secondary']};
-                border: none;
-                border-radius: 12px;
-                font-size: 18px;
-                font-weight: 700;
-            }}
-            QPushButton:hover {{
-                background: {COLORS['bg_light']}88;
-                color: {COLORS['text_primary']};
-            }}
-        """
-        )
-        close_btn.clicked.connect(lambda: self._request_close("button"))
-        content_layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignTop)
-
         body_layout.addLayout(content_layout, 1)
         card_layout.addLayout(body_layout)
 
         self._progress_track = QWidget()
-        self._progress_track.setFixedHeight(3)
+        self._progress_track.setFixedHeight(progress_height)
         self._progress_track.setStyleSheet(
-            f"""
-            background: {accent}1F;
+            """
+            background: rgba(255, 255, 255, 0.08);
             border-radius: 2px;
         """
         )
@@ -314,38 +618,292 @@ class ToastNotification(QWidget):
         card_layout.addWidget(self._progress_track)
 
         root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.addWidget(self._container)
 
-        self.opacity_effect = QGraphicsOpacityEffect(self)
-        self.setGraphicsEffect(self.opacity_effect)
-        self.opacity_effect.setOpacity(0)
+    def _setup_ui(self):
+        self._setup_enterprise_ui()
+        return
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
+        self.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setFixedWidth(408)
+
+        theme = self._theme()
+        accent = theme["accent"]
+        accent_dark = theme["accent_dark"]
+        prominent = self._is_prominent_notification()
+        surface_palette = {
+            NotificationType.SUCCESS: ("#0d2f24", "#091f19", "تم"),
+            NotificationType.ERROR: ("#34111a", "#220c13", "خطأ"),
+            NotificationType.WARNING: ("#3a2208", "#261606", "تحذير"),
+            NotificationType.INFO: ("#0d2f5f", "#091a34", "معلومة"),
+        }
+        surface_start, surface_end, type_label_text = surface_palette.get(
+            self.notification_type,
+            surface_palette[NotificationType.INFO],
+        )
+        toast_width = 420 if prominent else 392
+        icon_size = 40 if prominent else 34
+        icon_radius = icon_size // 2
+        title_font_size = 15 if prominent else 13
+        message_font_size = 12 if prominent else 11
+        progress_height = 3 if prominent else 2
+        bottom_margin = 12 if prominent else 10
+        self.setFixedWidth(toast_width)
+
+        self._container = QWidget()
+        self._container.setObjectName("notif_container")
+        self._container.setStyleSheet(
+            f"""
+            QWidget#notif_container {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 {surface_start}, stop:0.52 #0b2446, stop:1 {surface_end});
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 16px;
+            }}
+        """
+        )
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(26)
+        shadow.setOffset(0, 8)
+        shadow.setColor(QColor(0, 0, 0, 150))
+        self._container.setGraphicsEffect(shadow)
+
+        card_layout = QVBoxLayout(self._container)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
+
+        body_layout = QHBoxLayout()
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+
+        color_bar = QWidget()
+        color_bar.setFixedWidth(4)
+        color_bar.setStyleSheet(
+            f"""
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                stop:0 {accent}, stop:1 {accent_dark});
+            border-radius: 16px 0 0 16px;
+        """
+        )
+        body_layout.addWidget(color_bar)
+
+        content_layout = QHBoxLayout()
+        content_layout.setContentsMargins(16, 14, 14, bottom_margin)
+        content_layout.setSpacing(12)
+
+        icon_container = QWidget()
+        icon_container.setFixedSize(icon_size, icon_size)
+        icon_container.setStyleSheet(
+            f"""
+            background: qradialgradient(cx:0.5, cy:0.45, radius:0.9,
+                stop:0 rgba(255, 255, 255, 0.10), stop:1 {accent_dark}22);
+            border: 1px solid {accent}3A;
+            border-radius: {icon_radius}px;
+        """
+        )
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_label = QLabel(theme["icon"])
+        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_label.setStyleSheet(
+            f"""
+            color: {accent};
+            background: transparent;
+            font-size: {16 if prominent else 15}px;
+            font-weight: 700;
+            font-family: 'Cairo';
+        """
+        )
+        icon_layout.addWidget(icon_label)
+        content_layout.addWidget(
+            icon_container,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+        )
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(6)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+
+        title_text = (self.title or theme["title_fallback"]).strip()
+        if self.source_device and self.source_device != DEVICE_ID:
+            title_text += " (جهاز آخر)"
+
+        header_widget = QWidget()
+        header_widget.setStyleSheet("background: transparent;")
+        header_widget.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+
+        header_row = QHBoxLayout(header_widget)
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+
+        title_label = QLabel(title_text)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        title_label.setWordWrap(True)
+        title_label.setStyleSheet(
+            f"""
+            color: {COLORS['text_primary']};
+            background: transparent;
+            font-size: {title_font_size}px;
+            font-weight: 700;
+            font-family: 'Cairo';
+            line-height: 1.15;
+        """
+        )
+        header_row.addWidget(title_label, 1)
+
+        close_btn = QPushButton("\u00D7")
+        close_btn.setFixedSize(18, 18)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                background: transparent;
+                color: {COLORS['text_secondary']};
+                border: none;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 0;
+            }}
+            QPushButton:hover {{
+                background: transparent;
+                color: {COLORS['text_primary']};
+            }}
+        """
+        )
+        close_btn.clicked.connect(lambda: self._request_close("button"))
+        header_row.addWidget(
+            close_btn,
+            alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
+        text_layout.addWidget(header_widget)
+
+        meta_widget = QWidget()
+        meta_widget.setStyleSheet("background: transparent;")
+        meta_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+
+        meta_row = QHBoxLayout(meta_widget)
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.setSpacing(6)
+
+        type_badge = QLabel(type_label_text)
+        type_badge.setObjectName("notif_type_badge")
+        type_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        type_badge.setStyleSheet(
+            f"""
+            color: {accent};
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-size: 10px;
+            font-weight: 700;
+            font-family: 'Cairo';
+        """
+        )
+        meta_row.addWidget(type_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        separator_label = QLabel("\u2022")
+        separator_label.setObjectName("notif_meta_separator")
+        separator_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        separator_label.setStyleSheet(
+            """
+            color: rgba(255, 255, 255, 0.35);
+            background: transparent;
+            border: none;
+            font-size: 8px;
+            font-weight: 700;
+        """
+        )
+        meta_row.addWidget(separator_label, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        time_label = QLabel(self._format_display_time())
+        time_label.setObjectName("notif_time_label")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        time_label.setStyleSheet(
+            f"""
+            color: {COLORS['text_secondary']};
+            background: transparent;
+            border: none;
+            padding: 0;
+            font-size: 10px;
+            font-weight: 700;
+            font-family: 'Cairo';
+        """
+        )
+        meta_row.addWidget(
+            time_label,
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        meta_row.addStretch(1)
+        text_layout.addWidget(meta_widget)
+
+        msg_label = QLabel((self.message or "").strip())
+        msg_label.setWordWrap(True)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        msg_label.setStyleSheet(
+            f"""
+            color: rgba(255, 255, 255, 0.90);
+            background: transparent;
+            font-size: {message_font_size}px;
+            font-family: 'Cairo';
+        """
+        )
+        text_layout.addWidget(msg_label)
+        content_layout.addLayout(text_layout, 1)
+
+        body_layout.addLayout(content_layout, 1)
+        card_layout.addLayout(body_layout)
+
+        self._progress_track = QWidget()
+        self._progress_track.setFixedHeight(progress_height)
+        self._progress_track.setStyleSheet(
+            """
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 2px;
+        """
+        )
+        self._progress_fill = QWidget(self._progress_track)
+        self._progress_fill.setStyleSheet(
+            f"""
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 {accent}, stop:1 {accent_dark});
+            border-radius: 2px;
+        """
+        )
+        card_layout.addWidget(self._progress_track)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(12, 12, 12, 12)
+        root_layout.addWidget(self._container)
 
     def _setup_animation(self):
-        self.fade_in = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_in.setDuration(220)
-        self.fade_in.setStartValue(0)
-        self.fade_in.setEndValue(1)
-        self.fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-
         self.slide_in = QPropertyAnimation(self, b"pos")
         self.slide_in.setDuration(220)
         self.slide_in.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        self.fade_out = QPropertyAnimation(self.opacity_effect, b"opacity")
-        self.fade_out.setDuration(180)
-        self.fade_out.setStartValue(1)
-        self.fade_out.setEndValue(0)
-        self.fade_out.setEasingCurve(QEasingCurve.Type.InQuad)
-        self.fade_out.finished.connect(self._on_fade_out_finished)
-
         self.slide_out = QPropertyAnimation(self, b"pos")
         self.slide_out.setDuration(180)
         self.slide_out.setEasingCurve(QEasingCurve.Type.InQuad)
+        self.slide_out.finished.connect(self._on_close_animation_finished)
 
         self.close_timer = QTimer(self)
         self.close_timer.setSingleShot(True)
         self.close_timer.timeout.connect(lambda: self._request_close("timer"))
+
+        self._visibility_guard_timer = QTimer(self)
+        self._visibility_guard_timer.setInterval(250)
+        self._visibility_guard_timer.timeout.connect(self._guard_visibility)
 
     def show_notification(self):
         if self._is_closing:
@@ -357,15 +915,12 @@ class ToastNotification(QWidget):
         target_pos = QPoint(self.pos())
         start_pos = QPoint(target_pos.x() + 28, target_pos.y())
         self.move(start_pos)
-        self.opacity_effect.setOpacity(0)
 
         self.slide_in.stop()
         self.slide_in.setStartValue(start_pos)
         self.slide_in.setEndValue(target_pos)
         self.slide_in.start()
-
-        self.fade_in.stop()
-        self.fade_in.start()
+        self._visibility_guard_timer.start()
         if self.duration > 0:
             self._remaining_duration_ms = self.duration
             self.close_timer.start(self.duration)
@@ -383,6 +938,15 @@ class ToastNotification(QWidget):
             self.raise_()
         except RuntimeError:
             return
+
+    def _guard_visibility(self):
+        if self._is_closing:
+            self._visibility_guard_timer.stop()
+            return
+        if not self.isVisible():
+            self._restore_visibility()
+            return
+        self._raise_safely()
 
     def _request_close(self, reason: str = "manual"):
         if self._is_closing:
@@ -405,6 +969,7 @@ class ToastNotification(QWidget):
         if self._is_closing:
             return
         self._is_closing = True
+        self._visibility_guard_timer.stop()
         self.close_timer.stop()
         if self._progress_animation:
             self._progress_animation.stop()
@@ -415,9 +980,6 @@ class ToastNotification(QWidget):
         self.slide_out.setStartValue(current_pos)
         self.slide_out.setEndValue(out_pos)
         self.slide_out.start()
-
-        self.fade_out.stop()
-        self.fade_out.start()
 
     def _restore_visibility(self):
         if self._is_closing:
@@ -446,7 +1008,8 @@ class ToastNotification(QWidget):
         finally:
             self._restoring_visibility = False
 
-    def _on_fade_out_finished(self):
+    def _on_close_animation_finished(self):
+        self._visibility_guard_timer.stop()
         self.closed.emit()
         self.deleteLater()
 
@@ -627,6 +1190,7 @@ class NotificationSyncWorker(QThread):
         self._seen_ids = set()
         self._seen_order = deque()
         self._max_seen_ids = 1200
+        self._session_started_at = datetime.now()
         # Poll below 1s for fast cross-device fallback when Change Streams are unavailable.
         self._check_interval = 700
         self._poll_lookback_seconds = 3600
@@ -664,8 +1228,119 @@ class NotificationSyncWorker(QThread):
             old_id = self._seen_order.popleft()
             self._seen_ids.discard(old_id)
 
+    @staticmethod
+    def _transport_cleanup_query(cutoff_iso: str, cutoff_dt: datetime) -> dict:
+        return {
+            "$and": [
+                {
+                    "$or": [
+                        {"created_at": {"$lt": cutoff_iso}},
+                        {"created_at": {"$lt": cutoff_dt}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"transport_only": True},
+                        {"action": "sync_ping"},
+                        {"silent": True},
+                    ]
+                },
+            ]
+        }
+
+    @staticmethod
+    def _is_active_remote_notification(notification: dict) -> bool:
+        if bool(notification.get("is_deleted")):
+            return False
+        sync_status = str(notification.get("sync_status") or "").strip().lower()
+        return sync_status != "deleted"
+
+    @staticmethod
+    def _notification_created_at(notification: dict) -> datetime | None:
+        raw_value = notification.get("created_at")
+        if isinstance(raw_value, datetime):
+            created_at = raw_value
+        else:
+            text = str(raw_value or "").strip()
+            if not text:
+                return None
+            if text.endswith("Z"):
+                text = f"{text[:-1]}+00:00"
+            try:
+                created_at = datetime.fromisoformat(text)
+            except Exception:
+                return None
+
+        if created_at.tzinfo is not None:
+            try:
+                created_at = created_at.astimezone().replace(tzinfo=None)
+            except Exception:
+                created_at = created_at.replace(tzinfo=None)
+        return created_at
+
+    @staticmethod
+    def _notification_entity_type(notification: dict) -> str | None:
+        return notification.get("entity_type") or notification.get("related_entity_type") or None
+
+    @staticmethod
+    def _is_transport_only_notification(notification: dict) -> bool:
+        if bool(notification.get("transport_only")):
+            return True
+        action_value = str(notification.get("action") or "").strip().lower()
+        return action_value == "sync_ping" or bool(notification.get("silent"))
+
+    @classmethod
+    def _is_persistent_remote_notification(cls, notification: dict) -> bool:
+        entity_key = str(cls._notification_entity_type(notification) or "").strip().lower()
+        if entity_key == "notifications":
+            return True
+        if cls._is_transport_only_notification(notification):
+            return False
+        persistent_fields = (
+            "priority",
+            "last_modified",
+            "related_entity_type",
+            "related_entity_id",
+            "expires_at",
+            "is_read",
+            "action_url",
+        )
+        return any(notification.get(field) is not None for field in persistent_fields)
+
+    @classmethod
+    def _notification_poll_query(cls, check_iso: str, check_dt: datetime) -> dict:
+        return {
+            "$and": [
+                {
+                    "$or": [
+                        {"created_at": {"$gt": check_iso}},
+                        {"created_at": {"$gt": check_dt}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"device_id": {"$exists": False}},
+                        {"device_id": {"$ne": DEVICE_ID}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"sync_status": {"$exists": False}},
+                        {"sync_status": {"$ne": "deleted"}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"is_deleted": {"$exists": False}},
+                        {"is_deleted": {"$ne": True}},
+                    ]
+                },
+            ]
+        }
+
     def set_repository(self, repo):
         self.repo = repo
+        self._session_started_at = datetime.now()
         safe_print(
             f"INFO: [NotificationSync] Repository set, online={getattr(repo, 'online', False)}"
         )
@@ -705,22 +1380,7 @@ class NotificationSyncWorker(QThread):
             check_iso = check_dt.isoformat()
 
             try:
-                query = {
-                    "$and": [
-                        {
-                            "$or": [
-                                {"created_at": {"$gt": check_iso}},
-                                {"created_at": {"$gt": check_dt}},
-                            ]
-                        },
-                        {
-                            "$or": [
-                                {"device_id": {"$exists": False}},
-                                {"device_id": {"$ne": DEVICE_ID}},
-                            ]
-                        },
-                    ]
-                }
+                query = self._notification_poll_query(check_iso, check_dt)
                 notifications = list(collection.find(query).sort("created_at", -1).limit(30))
             except Exception as e:
                 try:
@@ -748,7 +1408,8 @@ class NotificationSyncWorker(QThread):
                 notifications = [
                     n
                     for n in notifications
-                    if n.get("device_id") is None or n.get("device_id") != DEVICE_ID
+                    if self._is_active_remote_notification(n)
+                    and (n.get("device_id") is None or n.get("device_id") != DEVICE_ID)
                 ]
             except Exception:
                 pass
@@ -764,18 +1425,23 @@ class NotificationSyncWorker(QThread):
                         continue
 
                     self._mark_seen(notif_id)
+                    created_at = self._notification_created_at(notif)
+                    if created_at is not None and created_at < self._session_started_at:
+                        continue
+
                     saw_new = True
 
                     safe_print(
                         f"INFO: [NotificationSync] Received from {notif.get('device_id')}: {notif.get('title')}"
                     )
 
-                    entity_type = notif.get("entity_type")
+                    entity_type = self._notification_entity_type(notif)
                     entity_key = str(entity_type).strip().lower() if entity_type else ""
                     action_value = str(notif.get("action") or "").strip().lower()
                     title_text = str(notif.get("title") or "").strip()
                     message_text = str(notif.get("message") or "").strip()
                     silent = bool(notif.get("silent")) or action_value == "sync_ping"
+                    persistent_notification = self._is_persistent_remote_notification(notif)
                     if entity_key in {"system_settings", "settings"}:
                         # system_settings notifications are operational signals, not user toasts.
                         silent = True
@@ -801,6 +1467,11 @@ class NotificationSyncWorker(QThread):
                             }
                         )
 
+                    if persistent_notification and entity_key not in {
+                        "system_settings",
+                        "settings",
+                    }:
+                        trigger_tables.add("notifications")
                     if entity_key in {"system_settings", "settings"}:
                         settings_triggered = True
                     table_name = self._map_entity_to_table(entity_type)
@@ -823,20 +1494,16 @@ class NotificationSyncWorker(QThread):
 
             if not hasattr(self, "_last_cleanup") or time.time() - self._last_cleanup > 60:
                 try:
-                    old_dt = datetime.now() - timedelta(hours=1)
-                    old_time = old_dt.isoformat()
-                    result = collection.delete_many(
-                        {
-                            "$or": [
-                                {"created_at": {"$lt": old_time}},
-                                {"created_at": {"$lt": old_dt}},
-                            ]
-                        }
-                    )
-                    if result.deleted_count > 0:
-                        safe_print(
-                            f"INFO: [NotificationSync] تم حذف {result.deleted_count} إشعار قديم"
+                    if hasattr(collection, "delete_many"):
+                        old_dt = datetime.now() - timedelta(hours=1)
+                        old_time = old_dt.isoformat()
+                        result = collection.delete_many(
+                            self._transport_cleanup_query(old_time, old_dt)
                         )
+                        if result.deleted_count > 0:
+                            safe_print(
+                                f"INFO: [NotificationSync] تم حذف {result.deleted_count} إشعار قديم"
+                            )
                 except Exception as e:
                     safe_print(f"WARNING: [NotificationSync] فشل تنظيف الإشعارات القديمة: {e}")
                 self._last_cleanup = time.time()
@@ -927,11 +1594,13 @@ class NotificationManager(QObject):
     _sync_write_running = False
     _app_is_quitting = False
     _initialized = False
-    _min_duration_ms = 45000
-    _default_duration_ms = 60000
-    _warning_duration_ms = 75000
-    _error_duration_ms = 90000
-    _remote_duration_ms = 60000
+    _min_duration_ms = 10000
+    _default_duration_ms = 10000
+    _warning_duration_ms = 10000
+    _error_duration_ms = 10000
+    _remote_duration_ms = 10000
+    _dedupe_window_seconds = 8.0
+    _max_recent_fingerprints = 400
 
     def __new__(cls):
         if cls._instance is None:
@@ -946,6 +1615,7 @@ class NotificationManager(QObject):
         self._initialized = True
         self._notifications = []
         self._pending_notifications = deque()
+        self._recent_fingerprints: dict[str, float] = {}
 
         self._sync_worker = NotificationSyncWorker()
         self._sync_worker.new_notification.connect(self._on_remote_notification)
@@ -967,6 +1637,86 @@ class NotificationManager(QObject):
                 app.aboutToQuit.connect(self._on_app_about_to_quit)
             except Exception:
                 pass
+            try:
+                app.installEventFilter(self)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _find_toast_owner(widget) -> QMainWindow | None:
+        current = widget
+        visited = set()
+        while current is not None and id(current) not in visited:
+            visited.add(id(current))
+            if isinstance(current, QMainWindow):
+                return current
+            parent_getter = getattr(current, "parentWidget", None)
+            current = parent_getter() if callable(parent_getter) else None
+        return None
+
+    def _resolve_toast_owner(self) -> QMainWindow | None:
+        app = QApplication.instance()
+        if app is None:
+            return None
+
+        candidates = [
+            app.activePopupWidget(),
+            app.activeModalWidget(),
+            app.activeWindow(),
+            app.focusWidget(),
+        ]
+        for candidate in candidates:
+            owner = self._find_toast_owner(candidate)
+            if owner is not None:
+                return owner
+
+        try:
+            for widget in QApplication.topLevelWidgets():
+                if isinstance(widget, QMainWindow) and widget.isVisible():
+                    return widget
+        except Exception:
+            return None
+        return None
+
+    def _restack_visible_notifications(self) -> None:
+        if self._app_is_quitting:
+            return
+        self._prune_notifications()
+        self._update_positions()
+        for notification in list(self._notifications):
+            try:
+                if notification.isVisible() and not bool(
+                    getattr(notification, "_is_closing", False)
+                ):
+                    notification._raise_safely()
+            except RuntimeError:
+                continue
+
+    def eventFilter(self, watched, event):  # pylint: disable=invalid-name
+        if self._app_is_quitting or event is None or not self._notifications:
+            return False
+
+        event_type = event.type()
+        watched_is_top_level = False
+        try:
+            watched_is_top_level = bool(
+                isinstance(watched, QWidget)
+                and watched.isWindow()
+                and not isinstance(watched, ToastNotification)
+            )
+        except RuntimeError:
+            watched_is_top_level = False
+
+        if watched_is_top_level and event_type in {
+            QEvent.Type.Show,
+            QEvent.Type.Hide,
+            QEvent.Type.Close,
+            QEvent.Type.WindowActivate,
+            QEvent.Type.WindowStateChange,
+        }:
+            delay_ms = 0 if event_type in {QEvent.Type.Show, QEvent.Type.WindowActivate} else 120
+            QTimer.singleShot(delay_ms, self._restack_visible_notifications)
+        return False
 
     @classmethod
     def _on_app_about_to_quit(cls):
@@ -1016,13 +1766,156 @@ class NotificationManager(QObject):
         if base == 0:
             return 0
 
-        # Dynamic readability time for longer messages.
-        msg_len = len((message or "").strip())
-        extra_ms = max(0, msg_len - 48) * 90
-        if remote:
-            extra_ms += 1200
+        return max(self._min_duration_ms, base)
 
-        return max(self._min_duration_ms, base + min(extra_ms, 12000))
+    @staticmethod
+    def _normalize_text(value: object) -> str:
+        return " ".join(str(value or "").strip().split())
+
+    @staticmethod
+    def _notification_type_from_value(raw_value) -> NotificationType:
+        if isinstance(raw_value, NotificationType):
+            return raw_value
+        normalized = str(raw_value or "").strip().lower()
+        type_map = {
+            "success": NotificationType.SUCCESS,
+            "error": NotificationType.ERROR,
+            "warning": NotificationType.WARNING,
+            "info": NotificationType.INFO,
+        }
+        return type_map.get(normalized, NotificationType.INFO)
+
+    def _build_payload(
+        self,
+        *,
+        message: str,
+        notification_type: NotificationType | str = NotificationType.INFO,
+        title: str | None = None,
+        duration: int | None = None,
+        sync: bool = True,
+        entity_type: str | None = None,
+        action: str | None = None,
+        source_device: str | None = None,
+        transport_only: bool = False,
+        silent: bool = False,
+        persistent: bool = False,
+    ) -> NotificationToastPayload:
+        try:
+            safe_duration = None if duration is None else int(duration)
+        except (TypeError, ValueError):
+            safe_duration = None
+        return NotificationToastPayload(
+            message=str(message or "").strip(),
+            notification_type=self._notification_type_from_value(notification_type),
+            title=str(title or "").strip() or None,
+            duration=safe_duration,
+            sync=bool(sync),
+            entity_type=str(entity_type or "").strip() or None,
+            action=str(action or "").strip() or None,
+            source_device=str(source_device or "").strip() or None,
+            transport_only=bool(transport_only),
+            silent=bool(silent),
+            persistent=bool(persistent),
+        )
+
+    def _recent_fingerprint_cache(self) -> dict[str, float]:
+        cache = self.__dict__.get("_recent_fingerprints")
+        if cache is None:
+            cache = {}
+            self.__dict__["_recent_fingerprints"] = cache
+        return cache
+
+    def _prune_recent_fingerprints(self, now_mono: float | None = None) -> None:
+        cache = self._recent_fingerprint_cache()
+        if not cache:
+            return
+        now_value = time.monotonic() if now_mono is None else now_mono
+        cutoff = now_value - self._dedupe_window_seconds
+        expired = [key for key, seen_at in cache.items() if seen_at < cutoff]
+        for key in expired:
+            cache.pop(key, None)
+
+        if len(cache) <= self._max_recent_fingerprints:
+            return
+        for key, _seen_at in sorted(cache.items(), key=lambda item: item[1])[
+            : len(cache) - self._max_recent_fingerprints
+        ]:
+            cache.pop(key, None)
+
+    def _payload_fingerprint(self, payload: NotificationToastPayload) -> str:
+        title_text = self._normalize_text(payload.title)
+        message_text = self._normalize_text(payload.message)
+        if not title_text and not message_text:
+            return ""
+        return "|".join(
+            [
+                payload.notification_type.value,
+                title_text,
+                message_text,
+                self._normalize_text(payload.entity_type),
+                self._normalize_text(payload.action),
+                "remote" if payload.is_remote else "local",
+                "persistent" if payload.persistent else "transient",
+            ]
+        )
+
+    def _should_skip_payload(self, payload: NotificationToastPayload) -> bool:
+        if payload.silent:
+            return True
+        if not self._normalize_text(payload.message):
+            return True
+
+        fingerprint = self._payload_fingerprint(payload)
+        if not fingerprint:
+            return False
+
+        now_mono = time.monotonic()
+        self._prune_recent_fingerprints(now_mono)
+        cache = self._recent_fingerprint_cache()
+        last_seen = cache.get(fingerprint)
+        if last_seen is not None and (now_mono - last_seen) < self._dedupe_window_seconds:
+            return True
+        cache[fingerprint] = now_mono
+        return False
+
+    def _present_payload(self, payload: NotificationToastPayload) -> bool:
+        if self._should_skip_payload(payload):
+            return False
+
+        owner = self._resolve_toast_owner()
+        notification = ToastNotification(
+            message=payload.message,
+            notification_type=payload.notification_type,
+            title=payload.title,
+            duration=self._resolve_duration(
+                payload.duration,
+                payload.notification_type,
+                payload.message,
+                remote=payload.is_remote,
+            ),
+            entity_type=payload.entity_type,
+            action=payload.action,
+            source_device=payload.source_device or DEVICE_ID,
+            persistent=payload.persistent,
+            owner_window=owner,
+        )
+        notification.closed.connect(lambda: self._on_notification_closed(notification))
+        self._queue_or_show_notification(notification)
+
+        if payload.sync and self._repo is not None and getattr(self._repo, "online", False):
+            self._enqueue_sync_payload(
+                {
+                    "message": payload.message,
+                    "type": payload.notification_type.value,
+                    "title": payload.title,
+                    "device_id": DEVICE_ID,
+                    "created_at": datetime.now().isoformat(),
+                    "entity_type": payload.entity_type,
+                    "action": payload.action,
+                    "transport_only": True,
+                }
+            )
+        return True
 
     @classmethod
     def set_repository(cls, repo):
@@ -1089,31 +1982,17 @@ class NotificationManager(QObject):
         manager = cls()
 
         try:
-            type_map = {
-                "success": NotificationType.SUCCESS,
-                "error": NotificationType.ERROR,
-                "warning": NotificationType.WARNING,
-                "info": NotificationType.INFO,
-            }
-            notification_type = type_map.get(data.get("type"), NotificationType.INFO)
-            message = data.get("message", "")
-            title = data.get("title")
-            source_device = data.get("device_id")
-
-            notification = ToastNotification(
-                message=message,
-                notification_type=notification_type,
-                title=title,
-                duration=manager._resolve_duration(
-                    None,
-                    notification_type,
-                    message,
-                    remote=True,
-                ),
-                source_device=source_device,
+            payload = manager._build_payload(
+                message=data.get("message", ""),
+                notification_type=data.get("type"),
+                title=data.get("title"),
+                duration=None,
+                sync=False,
+                entity_type=data.get("entity_type"),
+                action=data.get("action"),
+                source_device=data.get("device_id"),
             )
-            notification.closed.connect(lambda: manager._on_notification_closed(notification))
-            manager._queue_or_show_notification(notification)
+            manager._present_payload(payload)
         except Exception as e:
             safe_print(f"ERROR: [NotificationManager] Remote notification failed: {e}")
 
@@ -1127,34 +2006,23 @@ class NotificationManager(QObject):
         sync: bool = True,
         entity_type: str | None = None,
         action: str | None = None,
+        persistent: bool = False,
     ):
         manager = cls()
         try:
             duration, sync = manager._coerce_legacy_duration_sync(duration, sync)
-            duration = manager._resolve_duration(duration, notification_type, message, remote=False)
-
-            notification = ToastNotification(
+            payload = manager._build_payload(
                 message=message,
                 notification_type=notification_type,
                 title=title,
                 duration=duration,
+                sync=sync,
+                entity_type=entity_type,
+                action=action,
                 source_device=DEVICE_ID,
+                persistent=persistent,
             )
-            notification.closed.connect(lambda: manager._on_notification_closed(notification))
-            manager._queue_or_show_notification(notification)
-
-            if sync and manager._repo is not None and manager._repo.online:
-                manager._enqueue_sync_payload(
-                    {
-                        "message": message,
-                        "type": notification_type.value,
-                        "title": title,
-                        "device_id": DEVICE_ID,
-                        "created_at": datetime.now().isoformat(),
-                        "entity_type": entity_type,
-                        "action": action,
-                    }
-                )
+            manager._present_payload(payload)
         except Exception as e:
             safe_print(f"ERROR: [NotificationManager] Show failed: {e}")
 
@@ -1279,6 +2147,8 @@ class NotificationManager(QObject):
             self._notifications.append(notification)
             self._update_positions()
             notification.show_notification()
+            QTimer.singleShot(0, self._restack_visible_notifications)
+            QTimer.singleShot(180, self._restack_visible_notifications)
             return
 
         self._pending_notifications.append(notification)
@@ -1292,12 +2162,23 @@ class NotificationManager(QObject):
             self._notifications.append(nxt)
             self._update_positions()
             nxt.show_notification()
+            QTimer.singleShot(0, self._restack_visible_notifications)
+            QTimer.singleShot(180, self._restack_visible_notifications)
 
     def _update_positions(self):
         self._prune_notifications()
         screen = None
+        for notification in reversed(self._notifications):
+            owner_getter = getattr(notification, "owner_window", None)
+            owner = owner_getter() if callable(owner_getter) else None
+            try:
+                if owner is not None and owner.screen() is not None:
+                    screen = owner.screen()
+                    break
+            except RuntimeError:
+                continue
         cursor_pos = QCursor.pos()
-        if cursor_pos is not None:
+        if screen is None and cursor_pos is not None:
             screen = QApplication.screenAt(cursor_pos)
         active_window = QApplication.activeWindow()
         if screen is None and active_window and active_window.screen():
@@ -1333,6 +2214,10 @@ class NotificationManager(QObject):
                 app.setProperty("_skywave_force_quit", True)
             except Exception:
                 pass
+            try:
+                app.removeEventFilter(manager)
+            except Exception:
+                pass
         if manager._sync_worker:
             manager._sync_worker.stop()
         manager._sync_write_running = False
@@ -1348,6 +2233,7 @@ class NotificationManager(QObject):
                     pass
         if manager._sync_write_thread and manager._sync_write_thread.is_alive():
             manager._sync_write_thread.join(timeout=1.0)
+        manager._recent_fingerprints = {}
         for notification in list(manager._notifications):
             try:
                 notification.close_notification(reason="shutdown")

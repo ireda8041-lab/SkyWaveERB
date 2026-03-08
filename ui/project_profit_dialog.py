@@ -65,6 +65,22 @@ class ProjectProfitDialog(QDialog):
 
         setup_auto_responsive_dialog(self)
 
+    def _client_display_name(self) -> str:
+        client_ref = str(getattr(self.project, "client_id", "") or "").strip()
+        if not client_ref:
+            return "غير محدد"
+
+        try:
+            repo = getattr(self.project_service, "repo", None)
+            if repo is not None and hasattr(repo, "get_client_by_id"):
+                client = repo.get_client_by_id(client_ref)
+                if client and getattr(client, "name", None):
+                    return str(client.name)
+        except Exception:
+            pass
+
+        return client_ref
+
     def _init_ui(self):
         from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK
 
@@ -122,7 +138,7 @@ class ProjectProfitDialog(QDialog):
         self.project_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
         # العميل
-        client_display = self.project.client_id or "غير محدد"
+        client_display = self._client_display_name()
         self.client_label = QLabel(f"👤 <b>العميل:</b> {client_display}")
         self.client_label.setStyleSheet(f"color: {COLORS['text_primary']}; font-size: 13px;")
 
@@ -439,13 +455,28 @@ class ProjectProfitDialog(QDialog):
         from core.data_loader import get_data_loader
 
         project_name = self.project.name
+        project_ref = str(
+            getattr(self.project, "id", None)
+            or getattr(self.project, "_mongo_id", None)
+            or project_name
+        )
+        project_client_id = getattr(self.project, "client_id", None)
 
         def fetch_profit_data():
             """جلب بيانات الربحية في thread منفصل"""
             try:
-                profit_data = self.project_service.get_project_profitability(project_name)
-                payments = self.project_service.get_payments_for_project(project_name)
-                expenses = self.project_service.get_expenses_for_project(project_name)
+                profit_data = self.project_service.get_project_profitability(
+                    project_ref,
+                    client_id=project_client_id,
+                )
+                payments = self.project_service.get_payments_for_project(
+                    project_ref,
+                    client_id=project_client_id,
+                )
+                expenses = self.project_service.get_expenses_for_project(
+                    project_ref,
+                    client_id=project_client_id,
+                )
 
                 return {
                     "profit_data": profit_data,

@@ -9,14 +9,22 @@ from ui.settings_tab import SettingsTab
 
 
 class _FakeSettingsService:
-    def __init__(self):
-        self._settings = {}
+    def __init__(self, initial=None):
+        self._settings = dict(initial or {})
+        self.update_setting_calls: list[tuple[str, object]] = []
 
     def get_settings(self):
         return dict(self._settings)
 
+    def get_setting(self, key, default=None):
+        return self._settings.get(key, default)
+
     def update_settings(self, data):
         self._settings.update(data or {})
+
+    def update_setting(self, key, value):
+        self._settings[key] = value
+        self.update_setting_calls.append((key, value))
 
     def save_logo_from_file(self, _path: str) -> bool:
         return False
@@ -69,3 +77,41 @@ def test_sync_settings_save_realtime_and_lazy_fields(qapp, tmp_path, monkeypatch
     assert cfg["realtime_change_stream_max_await_ms"] == 300
     assert cfg["lazy_logo_enabled"] is True
     assert cfg["logo_fetch_batch_limit"] == 12
+
+
+def test_settings_active_subtab_refreshes_only_dirty_section(qapp, monkeypatch):
+    tab = SettingsTab(settings_service=_FakeSettingsService(), repository=None, current_user=None)
+    tab.show()
+    qapp.processEvents()
+
+    calls: list[str] = []
+    monkeypatch.setattr(tab, "load_settings_data", lambda: calls.append("company"))
+    monkeypatch.setattr(tab, "load_users", lambda: calls.append("users"))
+    monkeypatch.setattr(tab, "load_currencies", lambda: calls.append("currencies"))
+
+    tab.tabs.setCurrentWidget(tab.currency_tab)
+    qapp.processEvents()
+    calls.clear()
+
+    tab.mark_data_changed("currencies")
+    tab.load_active_subtab_data(force_reload=False)
+
+    assert calls == ["currencies"]
+
+
+def test_load_payment_methods_does_not_rewrite_existing_settings(qapp):
+    service = _FakeSettingsService(
+        {
+            "payment_methods": [
+                {"name": "Cash", "description": "Cash", "details": "", "active": True}
+            ]
+        }
+    )
+    tab = SettingsTab(settings_service=service, repository=None, current_user=None)
+    tab.show()
+    qapp.processEvents()
+
+    service.update_setting_calls.clear()
+    tab.load_payment_methods()
+
+    assert service.update_setting_calls == []

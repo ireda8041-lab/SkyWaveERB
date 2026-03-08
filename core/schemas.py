@@ -435,6 +435,7 @@ class Payment(BaseSchema):
     amount: float  # المبلغ اللي اندفع
     account_id: str  # كود الحساب اللي استلم الفلوس (مثلاً: 1110 البنك)
     method: str | None = "Bank Transfer"  # (طريقة الدفع: تحويل، كاش، ...)
+    invoice_number: str | None = None  # رقم الفاتورة الثابت المرتبط بالمشروع
 
 
 class SyncOperation(str, Enum):

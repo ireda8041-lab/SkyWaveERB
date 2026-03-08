@@ -71,6 +71,7 @@ class UnifiedSyncManagerV3(QObject):
         "accounts",
         "clients",
         "services",
+        "quotations",
         "projects",
         "invoices",
         "payments",
@@ -86,6 +87,7 @@ class UnifiedSyncManagerV3(QObject):
         "clients": "name",
         "projects": "name",
         "services": "name",
+        "quotations": "quotation_number",
         "accounts": "code",
         "invoices": "invoice_number",
         "payments": "id",
@@ -102,7 +104,9 @@ class UnifiedSyncManagerV3(QObject):
         self.repo = repository
         self._lock = threading.RLock()
         self._delta_cycle_lock = threading.Lock()
+        self._full_sync_dispatch_lock = threading.Lock()
         self._is_syncing = False
+        self._full_sync_thread_in_flight = False
         self._max_retries = 3
         self._last_online_status = bool(getattr(repository, "online", False))
         self._online_status_lock = threading.Lock()
@@ -558,6 +562,19 @@ class UnifiedSyncManagerV3(QObject):
             "$and": [
                 {"$or": [{"action": {"$exists": False}}, {"action": {"$ne": "sync_ping"}}]},
                 {"$or": [{"silent": {"$exists": False}}, {"silent": {"$ne": True}}]},
+                {
+                    "$or": [
+                        {"transport_only": {"$exists": False}},
+                        {"transport_only": {"$ne": True}},
+                    ]
+                },
+                {
+                    "$or": [
+                        {"device_id": {"$exists": False}},
+                        {"last_modified": {"$exists": True}},
+                        {"priority": {"$exists": True}},
+                    ]
+                },
             ]
         }
         if not base_query:
@@ -581,6 +598,144 @@ class UnifiedSyncManagerV3(QObject):
         if candidate_dt is not None and reference_dt is not None:
             return candidate_dt > reference_dt
         return candidate_iso > reference_iso
+
+    @staticmethod
+    def _linked_project_field(table_name: str) -> str | None:
+        return {
+            "payments": "project_id",
+            "expenses": "project_id",
+            "invoices": "project_id",
+            "quotations": "converted_to_project_id",
+            "tasks": "related_project_id",
+        }.get(table_name)
+
+    @staticmethod
+    def _linked_project_client_field(table_name: str) -> str | None:
+        return {
+            "payments": "client_id",
+            "invoices": "client_id",
+            "quotations": "client_id",
+            "tasks": "related_client_id",
+        }.get(table_name)
+
+    def _normalize_project_links_for_push(
+        self,
+        cursor,
+        table_name: str,
+        record: dict[str, Any],
+        table_columns: set[str],
+        server_now_iso: str,
+    ) -> dict[str, Any]:
+        project_field = self._linked_project_field(table_name)
+        if not project_field or project_field not in table_columns:
+            return record
+
+        resolve_project = getattr(self.repo, "_resolve_project_target_row", None)
+        stable_project_ref = getattr(self.repo, "_stable_project_reference", None)
+        normalize_client_ref = getattr(self.repo, "_normalize_client_reference", None)
+        if not callable(resolve_project) or not callable(stable_project_ref):
+            return record
+
+        raw_project_ref = str(record.get(project_field) or "").strip()
+        if not raw_project_ref:
+            return record
+
+        client_field = self._linked_project_client_field(table_name)
+        raw_client_id = (
+            str(record.get(client_field) or "").strip()
+            if client_field and client_field in table_columns
+            else ""
+        )
+
+        try:
+            resolved_project = resolve_project(raw_project_ref, raw_client_id)
+        except TypeError:
+            resolved_project = resolve_project(raw_project_ref)
+        if not resolved_project:
+            return record
+
+        normalized_project_ref = str(
+            stable_project_ref(resolved_project, raw_project_ref) or ""
+        ).strip()
+        outbound_updates: dict[str, Any] = {}
+        local_updates: dict[str, Any] = {}
+        if normalized_project_ref and normalized_project_ref != raw_project_ref:
+            outbound_updates[project_field] = normalized_project_ref
+            local_updates[project_field] = normalized_project_ref
+
+        if client_field and client_field in table_columns:
+            normalized_client_id = raw_client_id
+            if raw_client_id and callable(normalize_client_ref):
+                try:
+                    normalized_client_id = str(normalize_client_ref(raw_client_id) or "").strip()
+                except Exception:
+                    normalized_client_id = raw_client_id
+            elif not raw_client_id:
+                normalized_client_id = str(resolved_project.get("client_id") or "").strip()
+
+            if normalized_client_id and normalized_client_id != raw_client_id:
+                outbound_updates[client_field] = normalized_client_id
+                if table_name not in {"tasks", "quotations"}:
+                    local_updates[client_field] = normalized_client_id
+
+        if not outbound_updates and not local_updates:
+            return record
+
+        local_id = record.get("id")
+        if local_id is not None and local_updates:
+            if "last_modified" in table_columns:
+                local_updates["last_modified"] = server_now_iso
+
+            table_ref = self._sqlite_table_ref(table_name)
+            set_clause = self._sqlite_set_clause_sql(
+                list(local_updates.keys()), table_columns=table_columns
+            )
+            cursor.execute(
+                f"UPDATE {table_ref} SET {set_clause} WHERE id = ?",  # nosec B608
+                [*local_updates.values(), local_id],
+            )
+            record.update(local_updates)
+
+        record.update(outbound_updates)
+
+        return record
+
+    @staticmethod
+    def _linked_client_only_field(table_name: str) -> str | None:
+        return {
+            "quotations": "client_id",
+        }.get(table_name)
+
+    def _normalize_client_links_for_push(
+        self,
+        cursor,
+        table_name: str,
+        record: dict[str, Any],
+        table_columns: set[str],
+        server_now_iso: str,
+    ) -> dict[str, Any]:
+        client_field = self._linked_client_only_field(table_name)
+        if not client_field or client_field not in table_columns:
+            return record
+
+        normalize_client_ref = getattr(self.repo, "_normalize_client_reference", None)
+        if not callable(normalize_client_ref):
+            return record
+
+        raw_client_id = str(record.get(client_field) or "").strip()
+        if not raw_client_id:
+            return record
+
+        try:
+            normalized_client_id = str(normalize_client_ref(raw_client_id) or "").strip()
+        except Exception:
+            return record
+        if not normalized_client_id or normalized_client_id == raw_client_id:
+            return record
+
+        # Quotations keeps local FK values in SQLite but must publish a stable client reference to Mongo.
+        record[client_field] = normalized_client_id
+        return record
 
     def _values_equal_for_sync(self, local_value: Any, incoming_value: Any) -> bool:
         """Best-effort value comparison to skip no-op SQLite updates."""
@@ -1182,21 +1337,8 @@ class UnifiedSyncManagerV3(QObject):
             return
 
         logger.info("🚀 بدء المزامنة الأولية...")
-
-        def sync_thread():
-            if self._shutdown:
-                return
-            try:
-                result = self.full_sync_from_cloud()
-                if result.get("success"):
-                    logger.info("✅ المزامنة الأولية: تم توحيد البيانات بالكامل")
-                else:
-                    logger.warning("⚠️ المزامنة الأولية لم تكتمل: %s", result.get("reason"))
-            except Exception as e:
-                logger.warning("⚠️ المزامنة الأولية: %s", e)
-
-        # استخدام QTimer بدلاً من daemon thread
-        threading.Thread(target=sync_thread, daemon=True).start()
+        if not self._run_full_sync_async(source="initial"):
+            logger.info("⏭️ تم تخطي المزامنة الأولية لأن مزامنة أخرى شغالة بالفعل")
 
     def _auto_full_sync(self):
         """🔄 المزامنة التلقائية - تفاضلية للسرعة"""
@@ -1315,19 +1457,38 @@ class UnifiedSyncManagerV3(QObject):
             waited += 0.5
         return self.is_online
 
-    def _run_full_sync_async(self):
-        if self._shutdown or self._is_syncing or not self.is_online:
-            return
+    def _run_full_sync_async(self, source: str = "background") -> bool:
+        with self._full_sync_dispatch_lock:
+            if (
+                self._shutdown
+                or self._is_syncing
+                or self._full_sync_thread_in_flight
+                or not self.is_online
+            ):
+                return False
+            self._full_sync_thread_in_flight = True
 
         def worker():
             if self._shutdown:
                 return
             try:
-                self.full_sync_from_cloud()
+                result = self.full_sync_from_cloud()
+                if source == "initial":
+                    if result.get("success"):
+                        logger.info("✅ المزامنة الأولية: تم توحيد البيانات بالكامل")
+                    else:
+                        logger.info(
+                            "⏭️ تم تخطي المزامنة الأولية: %s",
+                            result.get("reason", "busy"),
+                        )
             except Exception as e:
                 logger.debug("خطأ في المزامنة الخلفية: %s", e)
+            finally:
+                with self._full_sync_dispatch_lock:
+                    self._full_sync_thread_in_flight = False
 
         threading.Thread(target=worker, daemon=True).start()
+        return True
 
     def _cloud_pull_changes(self):
         if self._shutdown or not self.is_online:
@@ -1641,6 +1802,9 @@ class UnifiedSyncManagerV3(QObject):
             if row:
                 return row[0]
 
+            if table_name == "notifications":
+                return None
+
             # 2. البحث بالحقل الفريد - وتحديث الـ mongo_id
             if unique_value and unique_field in table_columns:
                 unique_field_ref = self._sqlite_column_ref(unique_field, allowed=table_columns)
@@ -1814,6 +1978,33 @@ class UnifiedSyncManagerV3(QObject):
                 item["milestones"] = []
             if not item.get("contract_type"):
                 item["contract_type"] = "مرة واحدة"
+        elif table_name == "tasks":
+            normalize_related_client_ref = getattr(self.repo, "_normalize_related_client_ref", None)
+            raw_related_client = str(item.get("related_client_id") or "").strip()
+            if raw_related_client and callable(normalize_related_client_ref):
+                try:
+                    normalized_related_client = str(
+                        normalize_related_client_ref(raw_related_client) or ""
+                    ).strip()
+                except Exception:
+                    normalized_related_client = ""
+                item["related_client_id"] = normalized_related_client or None
+        elif table_name == "quotations":
+            normalize_local_client_ref = getattr(
+                self.repo, "_normalize_local_client_reference", None
+            )
+            raw_client_id = str(item.get("client_id") or "").strip()
+            if raw_client_id and callable(normalize_local_client_ref):
+                try:
+                    normalized_client_id = str(
+                        normalize_local_client_ref(raw_client_id) or ""
+                    ).strip()
+                except Exception:
+                    normalized_client_id = ""
+                if not normalized_client_id:
+                    item["__skip_sync__"] = True
+                    return item
+                item["client_id"] = normalized_client_id
 
         # تحويل التواريخ
         date_fields = [
@@ -1821,6 +2012,7 @@ class UnifiedSyncManagerV3(QObject):
             "last_modified",
             "date",
             "issue_date",
+            "valid_until",
             "due_date",
             "expiry_date",
             "start_date",
@@ -1828,13 +2020,17 @@ class UnifiedSyncManagerV3(QObject):
             "last_attempt",
             "expires_at",
             "last_login",
+            "conversion_date",
+            "sent_date",
+            "viewed_date",
+            "response_date",
         ]
         for field in date_fields:
             if field in item and hasattr(item[field], "isoformat"):
                 item[field] = item[field].isoformat()
 
         # تحويل القوائم والكائنات إلى JSON
-        json_fields = ["items", "lines", "data", "milestones"]
+        json_fields = ["items", "lines", "data", "milestones", "tags"]
         for field in json_fields:
             if field in item and isinstance(item[field], list | dict):
                 item[field] = json.dumps(item[field], ensure_ascii=False)
@@ -2120,6 +2316,12 @@ class UnifiedSyncManagerV3(QObject):
     def _sync_users_from_cloud(self):
         """مزامنة المستخدمين ثنائية الاتجاه (من وإلى السحابة)"""
         try:
+            mongo_db = getattr(self.repo, "mongo_db", None)
+            users_collection = getattr(mongo_db, "users", None) if mongo_db is not None else None
+            if users_collection is None:
+                logger.info("ℹ️ تخطي مزامنة المستخدمين: MongoDB users collection غير متاحة")
+                return
+
             # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
             cursor = self.repo.get_cursor()
             conn = self.repo.sqlite_conn
@@ -2141,8 +2343,13 @@ class UnifiedSyncManagerV3(QObject):
                     user_data = dict(row)
                     username = user_data.get("username")
                     local_id = user_data.get("id")
+                    local_sync_status = str(user_data.get("sync_status") or "").lower()
+                    local_is_deleted = bool(user_data.get("is_deleted", 0))
 
-                    existing_cloud = self.repo.mongo_db.users.find_one({"username": username})
+                    if local_is_deleted or local_sync_status == "deleted":
+                        continue
+
+                    existing_cloud = users_collection.find_one({"username": username})
 
                     if existing_cloud:
                         mongo_id = str(existing_cloud["_id"])
@@ -2152,18 +2359,28 @@ class UnifiedSyncManagerV3(QObject):
                             "role": user_data.get("role"),
                             "is_active": bool(user_data.get("is_active", 1)),
                             "last_modified": datetime.now(),
+                            "sync_status": "synced",
+                            "is_deleted": False,
                         }
                         if user_data.get("password_hash"):
                             update_data["password_hash"] = user_data["password_hash"]
 
-                        self.repo.mongo_db.users.update_one(
+                        update_result = users_collection.update_one(
                             {"_id": existing_cloud["_id"]}, {"$set": update_data}
                         )
-                        cursor.execute(
-                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
-                            (mongo_id, local_id),
-                        )
-                        uploaded_count += 1
+                        if update_result and (
+                            getattr(update_result, "matched_count", 0) > 0
+                            or getattr(update_result, "modified_count", 0) > 0
+                        ):
+                            cursor.execute(
+                                """
+                                UPDATE users
+                                SET _mongo_id=?, sync_status='synced', dirty_flag = 0, is_deleted = 0
+                                WHERE id=?
+                                """,
+                                (mongo_id, local_id),
+                            )
+                            uploaded_count += 1
                     else:
                         new_user = {
                             "username": username,
@@ -2174,11 +2391,17 @@ class UnifiedSyncManagerV3(QObject):
                             "is_active": bool(user_data.get("is_active", 1)),
                             "created_at": datetime.now(),
                             "last_modified": datetime.now(),
+                            "sync_status": "synced",
+                            "is_deleted": False,
                         }
-                        result = self.repo.mongo_db.users.insert_one(new_user)
+                        result = users_collection.insert_one(new_user)
                         mongo_id = str(result.inserted_id)
                         cursor.execute(
-                            "UPDATE users SET _mongo_id=?, sync_status='synced' WHERE id=?",
+                            """
+                            UPDATE users
+                            SET _mongo_id=?, sync_status='synced', dirty_flag = 0, is_deleted = 0
+                            WHERE id=?
+                            """,
                             (mongo_id, local_id),
                         )
                         uploaded_count += 1
@@ -2189,7 +2412,7 @@ class UnifiedSyncManagerV3(QObject):
 
                 # === 2. تنزيل المستخدمين من السحابة ===
                 logger.info("📥 جاري تنزيل المستخدمين من السحابة...")
-                cloud_users = list(self.repo.mongo_db.users.find())
+                cloud_users = list(users_collection.find())
                 if not cloud_users:
                     return
 
@@ -2197,25 +2420,54 @@ class UnifiedSyncManagerV3(QObject):
                 for u in cloud_users:
                     mongo_id = str(u["_id"])
                     username = u.get("username")
+                    remote_sync_status = str(u.get("sync_status") or "").lower()
+                    remote_is_deleted = bool(u.get("is_deleted", False)) or (
+                        remote_sync_status == "deleted"
+                    )
 
                     for field in ["created_at", "last_modified", "last_login"]:
                         if field in u and hasattr(u[field], "isoformat"):
                             u[field] = u[field].isoformat()
 
                     cursor.execute(
-                        "SELECT id, sync_status FROM users WHERE _mongo_id = ? OR username = ?",
+                        "SELECT id, sync_status, is_deleted FROM users WHERE _mongo_id = ? OR username = ?",
                         (mongo_id, username),
                     )
                     exists = cursor.fetchone()
 
+                    if remote_is_deleted:
+                        if exists and str(exists[1] or "").lower() not in (
+                            "modified_offline",
+                            "new_offline",
+                        ):
+                            cursor.execute(
+                                """
+                                UPDATE users SET
+                                    _mongo_id=?, sync_status='deleted', dirty_flag = 0,
+                                    is_deleted = 1, last_modified=?
+                                WHERE id=?
+                            """,
+                                (
+                                    mongo_id,
+                                    u.get("last_modified", datetime.now().isoformat()),
+                                    exists[0],
+                                ),
+                            )
+                            downloaded_count += 1
+                        continue
+
                     if exists:
-                        if exists[1] not in ("modified_offline", "new_offline"):
+                        local_sync_status = str(exists[1] or "").lower()
+                        local_is_deleted = bool(exists[2])
+                        if local_sync_status not in ("modified_offline", "new_offline"):
+                            if local_is_deleted or local_sync_status == "deleted":
+                                continue
                             cursor.execute(
                                 """
                                 UPDATE users SET
                                     full_name=?, email=?, role=?, is_active=?,
                                     password_hash=?, _mongo_id=?, sync_status='synced',
-                                    last_modified=?
+                                    dirty_flag = 0, is_deleted = 0, last_modified=?
                                 WHERE id=?
                             """,
                                 (
@@ -2235,8 +2487,9 @@ class UnifiedSyncManagerV3(QObject):
                             """
                             INSERT INTO users (
                                 _mongo_id, username, full_name, email, role,
-                                password_hash, is_active, sync_status, created_at, last_modified
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', ?, ?)
+                                password_hash, is_active, sync_status, dirty_flag,
+                                is_deleted, created_at, last_modified
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'synced', 0, 0, ?, ?)
                         """,
                             (
                                 mongo_id,
@@ -2651,6 +2904,7 @@ class UnifiedSyncManagerV3(QObject):
                         continue
 
                     columns = [desc[0] for desc in cursor.description]
+                    table_columns = set(columns)
                     collection = self.repo.mongo_db[table]
 
                     for row in dirty_records:
@@ -2736,6 +2990,20 @@ class UnifiedSyncManagerV3(QObject):
                                 cursor.execute(delete_local_sql, (local_id,))
                                 results["deleted"] += 1
                             else:
+                                record = self._normalize_project_links_for_push(
+                                    cursor,
+                                    table,
+                                    record,
+                                    table_columns,
+                                    server_now_iso,
+                                )
+                                record = self._normalize_client_links_for_push(
+                                    cursor,
+                                    table,
+                                    record,
+                                    table_columns,
+                                    server_now_iso,
+                                )
                                 # Upsert إلى MongoDB
                                 clean_record = {
                                     k: v
@@ -2743,6 +3011,8 @@ class UnifiedSyncManagerV3(QObject):
                                     if k not in ["id", "sync_status", "dirty_flag", "is_deleted"]
                                 }
                                 clean_record["last_modified"] = server_now_iso
+                                if table == "notifications" and not clean_record.get("device_id"):
+                                    clean_record["device_id"] = self._device_id
 
                                 if mongo_id:
                                     try:

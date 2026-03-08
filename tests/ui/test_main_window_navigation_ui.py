@@ -124,3 +124,94 @@ def test_main_window_builds_tabs_and_switches(monkeypatch, qapp):
     window.status_bar.full_sync_requested.emit()
     qapp.processEvents()
     assert getattr(window, "_test_sync_clicked", False)
+
+
+def test_main_window_settings_refresh_uses_active_subtab_loader():
+    from ui import main_window as mw
+
+    calls: list[bool] = []
+
+    class _FakeSettingsTab:
+        def load_active_subtab_data(self, force_reload: bool = False):
+            calls.append(force_reload)
+
+    fake_window = type("_FakeWindow", (), {"settings_tab": _FakeSettingsTab()})()
+
+    mw.MainWindow._update_tab_ui(fake_window, "🔧 الإعدادات", {"type": "settings"})
+
+    assert calls == [False]
+
+
+def test_main_window_escape_shortcut_closes_active_modal(monkeypatch):
+    from ui import main_window as mw
+
+    events: list[str] = []
+
+    class _FakeModal:
+        def reject(self):
+            events.append("reject")
+
+    fake_window = type("_FakeWindow", (), {"tabs": None})()
+
+    monkeypatch.setattr(
+        mw,
+        "QApplication",
+        type(
+            "_FakeApp",
+            (),
+            {
+                "activePopupWidget": staticmethod(lambda: None),
+                "activeModalWidget": staticmethod(lambda: _FakeModal()),
+                "focusWidget": staticmethod(lambda: None),
+            },
+        ),
+        raising=True,
+    )
+
+    mw.MainWindow._on_close_dialog(fake_window)
+
+    assert events == ["reject"]
+
+
+def test_main_window_escape_shortcut_clears_focus_without_modal(monkeypatch):
+    from ui import main_window as mw
+
+    events: list[str] = []
+
+    class _FakeFocus:
+        def deselect(self):
+            events.append("deselect")
+
+        def clearFocus(self):
+            events.append("clearFocus")
+
+    class _FakeTab:
+        @staticmethod
+        def findChildren(_cls):
+            return []
+
+    class _FakeTabs:
+        @staticmethod
+        def currentWidget():
+            return _FakeTab()
+
+    fake_window = type("_FakeWindow", (), {"tabs": _FakeTabs()})()
+
+    monkeypatch.setattr(
+        mw,
+        "QApplication",
+        type(
+            "_FakeApp",
+            (),
+            {
+                "activePopupWidget": staticmethod(lambda: None),
+                "activeModalWidget": staticmethod(lambda: None),
+                "focusWidget": staticmethod(lambda: _FakeFocus()),
+            },
+        ),
+        raising=True,
+    )
+
+    mw.MainWindow._on_close_dialog(fake_window)
+
+    assert events == ["deselect", "clearFocus"]

@@ -81,6 +81,7 @@ htmlcov/
 .hypothesis/
 pytest-of-*/
 .pytest_*.log
+pytest*.log
 sync_watermarks.json
 
 # البناء

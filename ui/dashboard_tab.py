@@ -18,12 +18,12 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QFrame,
+    QGraphicsDropShadowEffect,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QTableWidget,
@@ -83,6 +83,12 @@ def fix_text(text: str) -> str:
         return text
 
 
+def rgba_css(color_hex: str, alpha: int) -> str:
+    """تحويل hex color إلى rgba صالح للـ Qt stylesheets."""
+    color = QColor(color_hex)
+    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
+
+
 class StatCard(QFrame):
     """تصميم الكارت الاحترافي - متجاوب مع الشاشة"""
 
@@ -92,64 +98,104 @@ class StatCard(QFrame):
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
         # 📱 تجاوب: حد أدنى وأقصى للحجم
-        self.setMinimumHeight(90)
-        self.setMinimumWidth(180)
+        self.setMinimumHeight(76)
+        self.setMinimumWidth(168)
+        self.setMaximumHeight(84)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        icon_bg = rgba_css(color_hex, 28)
+        icon_border = rgba_css(color_hex, 70)
+        value_glow = rgba_css(color_hex, 18)
 
         self.setStyleSheet(
             f"""
             QFrame {{
-                background-color: #1e293b;
-                border-radius: 15px;
-                border-right: 8px solid {color_hex};
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #16253b, stop:0.55 #1b2b43, stop:1 #1d314a);
+                border-radius: 20px;
+                border: 1px solid rgba(203, 213, 225, 0.08);
+                border-right: 5px solid {color_hex};
             }}
             QLabel {{
                 background-color: transparent;
                 border: none;
             }}
             QLabel#Title {{
-                color: #94a3b8;
-                font-size: 13px;
-                font-weight: bold;
+                color: #9fb3ce;
+                font-size: 11px;
+                font-weight: 700;
                 font-family: 'Cairo';
             }}
             QLabel#Value {{
                 color: white;
                 font-weight: bold;
-                font-size: 20px;
+                font-size: 17px;
                 font-family: 'Cairo';
+                padding: 1px 0;
             }}
             QLabel#Icon {{
-                font-size: 28px;
+                font-size: 19px;
+                min-width: 38px;
+                max-width: 38px;
+                min-height: 38px;
+                max-height: 38px;
+                border-radius: 11px;
+                background-color: {icon_bg};
+                border: 1px solid {icon_border};
+                padding: 3px;
+            }}
+            QLabel#ValueBadge {{
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 10px;
+                font-weight: 700;
+                padding: 2px 8px;
+                border-radius: 999px;
+                background-color: {value_glow};
+                border: 1px solid rgba(255,255,255,0.06);
             }}
         """
         )
 
         layout = QHBoxLayout()
-        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(10)
 
         # النصوص (يمين)
         text_layout = QVBoxLayout()
-        text_layout.setSpacing(5)
+        text_layout.setSpacing(1)
 
         self.lbl_title = QLabel(title)
         self.lbl_title.setObjectName("Title")
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self.lbl_value = QLabel(value)
         self.lbl_value.setObjectName("Value")
+        self.lbl_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self.lbl_badge = QLabel("مؤشر مباشر")
+        self.lbl_badge.setObjectName("ValueBadge")
+        self.lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_badge.hide()
 
         text_layout.addWidget(self.lbl_title)
         text_layout.addWidget(self.lbl_value)
+        text_layout.addWidget(self.lbl_badge, alignment=Qt.AlignmentFlag.AlignRight)
 
         # الأيقونة (يسار)
         lbl_icon = QLabel(icon)
         lbl_icon.setObjectName("Icon")
-        lbl_icon.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addLayout(text_layout)
         layout.addStretch()
         layout.addWidget(lbl_icon)
         self.setLayout(layout)
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(28)
+        shadow.setOffset(0, 10)
+        shadow.setColor(QColor(2, 12, 27, 120))
+        self.setGraphicsEffect(shadow)
 
     def set_value(self, value: float):
         """تحديث قيمة الكارت"""
@@ -1018,6 +1064,8 @@ class DashboardTab(QWidget):
         self._recent_current_page = 1
         self._recent_page_size = 10
         self._recent_items: list = []
+        self._show_recent_activity = True
+        self._load_recent_activity_data = True
 
         # سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1027,64 +1075,173 @@ class DashboardTab(QWidget):
 
         self.init_ui()
 
+    @staticmethod
+    def _normalize_display_datetime(value: datetime | None) -> datetime | None:
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            return value
+        try:
+            return value.astimezone().replace(tzinfo=None)
+        except Exception:
+            return value.replace(tzinfo=None)
+
+    @staticmethod
+    def _format_twelve_hour_time(value: datetime | None) -> str:
+        value = DashboardTab._normalize_display_datetime(value)
+        if not isinstance(value, datetime):
+            return "—"
+        hour_text = value.strftime("%I").lstrip("0") or "12"
+        minute_text = value.strftime("%M")
+        meridiem = "ص" if value.hour < 12 else "م"
+        return f"{hour_text}:{minute_text} {meridiem}"
+
+    @classmethod
+    def _format_datetime_badge(cls, value: datetime | None, prefix: str) -> str:
+        value = cls._normalize_display_datetime(value)
+        if not isinstance(value, datetime):
+            return f"{prefix}: —"
+        return f"{prefix}: {value.strftime('%d-%m-%Y')} • {cls._format_twelve_hour_time(value)}"
+
+    @classmethod
+    def _format_recent_timestamp(cls, value) -> str:
+        value = cls._normalize_display_datetime(value)
+        if isinstance(value, datetime):
+            return f"{value.strftime('%d-%m-%Y')} • {cls._format_twelve_hour_time(value)}"
+        return str(value or "—")
+
+    @staticmethod
+    def _apply_soft_shadow(widget: QWidget, *, blur: int = 34, y_offset: int = 10) -> None:
+        shadow = QGraphicsDropShadowEffect(widget)
+        shadow.setBlurRadius(blur)
+        shadow.setOffset(0, y_offset)
+        shadow.setColor(QColor(2, 12, 27, 110))
+        widget.setGraphicsEffect(shadow)
+
     def init_ui(self):
-        # === ScrollArea للتمرير عند الحاجة ===
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(10, 10, 10, 8)
 
-        # الـ widget الرئيسي داخل الـ scroll
-        content_widget = QWidget()
-        content_widget.setStyleSheet("background: transparent;")
+        # === 1. الهيدر الرئيسي ===
+        hero_frame = QFrame()
+        hero_frame.setStyleSheet(
+            """
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #132742, stop:0.5 #163154, stop:1 #1a365d);
+                border-radius: 24px;
+                border: 1px solid rgba(191, 219, 254, 0.09);
+            }
+            QLabel {
+                background: transparent;
+                border: none;
+                font-family: 'Cairo';
+            }
+            QLabel#DashEyebrow {
+                color: #7dd3fc;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QLabel#DashTitle {
+                color: white;
+                font-size: 22px;
+                font-weight: 800;
+            }
+            QLabel#DashSubtitle {
+                color: #b8cae3;
+                font-size: 11px;
+            }
+            QFrame#DashControlBox {
+                background-color: rgba(5, 18, 38, 0.26);
+                border: none;
+                border-radius: 18px;
+            }
+            """
+        )
+        self._apply_soft_shadow(hero_frame, blur=38, y_offset=12)
+        hero_frame.setMaximumHeight(96)
+        hero_layout = QHBoxLayout(hero_frame)
+        hero_layout.setContentsMargins(16, 10, 16, 10)
+        hero_layout.setSpacing(12)
 
-        main_layout = QVBoxLayout(content_widget)
-        main_layout.setSpacing(15)
-        main_layout.setContentsMargins(15, 15, 15, 15)
-
-        # === 1. العنوان مع زر التحديث ===
-        header_layout = QHBoxLayout()
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(2)
 
         header = QLabel("📊 لوحة القيادة والمؤشرات المالية")
+        header.setObjectName("DashTitle")
         header.setFont(get_cairo_font(18, bold=True))
-        header.setStyleSheet("color: white;")
+
+        header_subtitle = QLabel(
+            "عرض تنفيذي موحد لأهم المؤشرات مع آخر تحديث مباشر من نفس مصدر البيانات."
+        )
+        header_subtitle.setObjectName("DashSubtitle")
+        header_subtitle.setWordWrap(False)
+
+        title_layout.addWidget(header)
+        title_layout.addWidget(header_subtitle)
+
+        control_box = QFrame()
+        control_box.setObjectName("DashControlBox")
+        control_layout = QHBoxLayout(control_box)
+        control_layout.setContentsMargins(10, 8, 10, 8)
+        control_layout.setSpacing(8)
 
         self.refresh_btn = QPushButton("🔄 تحديث")
         self.refresh_btn.setStyleSheet(
             """
             QPushButton {
-                background-color: #3b82f6;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #2563eb, stop:1 #4f8dfd);
                 color: white;
-                padding: 10px 20px;
+                padding: 9px 16px;
                 font-weight: bold;
-                border-radius: 8px;
-                font-size: 13px;
+                border-radius: 12px;
+                border: 1px solid rgba(255,255,255,0.09);
+                font-size: 12px;
                 font-family: 'Cairo';
+                min-width: 116px;
             }
-            QPushButton:hover { background-color: #2563eb; }
+            QPushButton:hover {
+                background: #1d4ed8;
+            }
+            QPushButton:disabled {
+                background: #334155;
+                color: #cbd5e1;
+            }
         """
         )
         self.refresh_btn.clicked.connect(self.refresh_data)
 
-        self.last_update_lbl = QLabel("آخر تحديث: —")
+        self.last_update_lbl = QLabel(self._format_datetime_badge(None, "آخر تحديث"))
         self.last_update_lbl.setStyleSheet(
             """
-            color: #94a3b8;
-            font-size: 11px;
+            color: #dbeafe;
+            background-color: rgba(148, 163, 184, 0.10);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            border-radius: 10px;
+            padding: 7px 10px;
+            font-size: 10px;
+            font-weight: 700;
             font-family: 'Cairo';
         """
         )
 
-        header_layout.addWidget(header)
-        header_layout.addStretch()
-        header_layout.addWidget(self.last_update_lbl)
-        header_layout.addWidget(self.refresh_btn)
-        main_layout.addLayout(header_layout)
+        control_layout.addWidget(self.last_update_lbl)
+        control_layout.addWidget(self.refresh_btn)
+
+        hero_layout.addLayout(title_layout, 1)
+        hero_layout.addWidget(control_box, 0, Qt.AlignmentFlag.AlignVCenter)
+        main_layout.addWidget(hero_frame)
 
         # === 2. الكروت الإحصائية - Grid تلقائي ===
         self.cards_container = QWidget()
+        self.cards_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         self.cards_grid = QGridLayout(self.cards_container)
-        self.cards_grid.setSpacing(12)
+        self.cards_grid.setSpacing(10)
         self.cards_grid.setContentsMargins(0, 0, 0, 0)
 
         self.card_sales = StatCard("إجمالي المبيعات", "0.00 EGP", "💼", "#3b82f6")
@@ -1110,12 +1267,23 @@ class DashboardTab(QWidget):
         # === 3. القسم السفلي - Splitter للتحكم التلقائي ===
         self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.bottom_splitter.setChildrenCollapsible(False)
+        self.bottom_splitter.setHandleWidth(8)
         self.bottom_splitter.setStyleSheet(
             """
             QSplitter::handle {
-                background-color: #334155;
-                width: 3px;
-                margin: 0 5px;
+                background-color: transparent;
+                width: 8px;
+                margin: 0 1px;
+            }
+            QSplitter::handle:horizontal {
+                image: none;
+                border-left: 1px solid rgba(148, 163, 184, 0.12);
+                border-right: 1px solid rgba(15, 23, 42, 0.25);
+            }
+            QSplitter::handle:vertical {
+                image: none;
+                border-top: 1px solid rgba(148, 163, 184, 0.12);
+                border-bottom: 1px solid rgba(15, 23, 42, 0.25);
             }
         """
         )
@@ -1123,29 +1291,53 @@ class DashboardTab(QWidget):
         # أ) الرسم البياني
         self.chart_container = QFrame()
         self.chart_container.setStyleSheet(
-            """
-            QFrame {
-                background-color: #1e293b;
-                border-radius: 15px;
-                border: 1px solid #334155;
-            }
+            f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #18273d, stop:0.6 #1d2d45, stop:1 #1f334f);
+                border-radius: 20px;
+                border: 1px solid rgba(148, 163, 184, 0.10);
+                border-top: 3px solid {rgba_css("#60a5fa", 190)};
+            }}
         """
         )
+        self._apply_soft_shadow(self.chart_container)
+        self.chart_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.chart_container.setMinimumHeight(250)
         chart_layout = QVBoxLayout(self.chart_container)
-        chart_layout.setContentsMargins(15, 15, 15, 15)
+        chart_layout.setContentsMargins(12, 10, 12, 12)
+        chart_layout.setSpacing(6)
+
+        chart_header = QHBoxLayout()
+        chart_header.setSpacing(8)
 
         lbl_chart = QLabel("📈 الملخص المالي")
         lbl_chart.setStyleSheet(
             """
             color: white;
-            font-weight: bold;
+            font-weight: 800;
             font-size: 14px;
             border: none;
             background: transparent;
             font-family: 'Cairo';
         """
         )
-        chart_layout.addWidget(lbl_chart)
+        lbl_chart_meta = QLabel("قراءة سريعة لأداء الفترة الحالية")
+        lbl_chart_meta.setStyleSheet(
+            """
+            color: #9fb3ce;
+            font-size: 10px;
+            font-family: 'Cairo';
+            background: transparent;
+        """
+        )
+        chart_header.addWidget(lbl_chart)
+        chart_header.addStretch(1)
+        chart_header.addWidget(lbl_chart_meta)
+        chart_layout.addLayout(chart_header)
 
         self.chart = FinancialChart(self)
         self.chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1154,41 +1346,79 @@ class DashboardTab(QWidget):
         # ب) جدول آخر العمليات
         self.table_container = QFrame()
         self.table_container.setStyleSheet(
-            """
-            QFrame {
-                background-color: #1e293b;
-                border-radius: 15px;
-                border: 1px solid #334155;
-            }
+            f"""
+            QFrame {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #18273d, stop:0.6 #1d2d45, stop:1 #1f334f);
+                border-radius: 20px;
+                border: 1px solid rgba(148, 163, 184, 0.10);
+                border-top: 3px solid {rgba_css("#22c55e", 190)};
+            }}
         """
         )
+        self._apply_soft_shadow(self.table_container)
+        self.table_container.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.table_container.setMinimumHeight(250)
         table_layout = QVBoxLayout(self.table_container)
-        table_layout.setContentsMargins(15, 15, 15, 15)
+        table_layout.setContentsMargins(12, 10, 12, 12)
+        table_layout.setSpacing(6)
+
+        table_header = QHBoxLayout()
+        table_header.setSpacing(8)
 
         lbl_table = QLabel("📝 آخر العمليات المسجلة")
         lbl_table.setStyleSheet(
             """
             color: white;
-            font-weight: bold;
+            font-weight: 800;
             font-size: 14px;
             border: none;
             background: transparent;
             font-family: 'Cairo';
         """
         )
-        table_layout.addWidget(lbl_table)
+        table_meta = QLabel("سجل موثق لأحدث ما تم داخل النظام")
+        table_meta.setStyleSheet(
+            """
+            color: #9fb3ce;
+            font-size: 10px;
+            font-family: 'Cairo';
+            background: transparent;
+        """
+        )
+        table_header.addWidget(lbl_table)
+        table_header.addStretch(1)
+        table_header.addWidget(table_meta)
+        table_layout.addLayout(table_header)
 
-        self.recent_hint_lbl = QLabel("")
-        self.recent_hint_lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-family: 'Cairo';")
+        self.recent_hint_lbl = QLabel(
+            "يعرض أحدث العمليات الموثقة من جميع الأقسام مثل العملاء والمشاريع والفواتير والدفعات والمصروفات، مع فولباك آمن للبيانات القديمة عند الحاجة."
+        )
+        self.recent_hint_lbl.setStyleSheet(
+            """
+            color: #9fb3ce;
+            font-size: 10px;
+            font-family: 'Cairo';
+            padding: 8px 10px;
+            border-radius: 12px;
+            background-color: rgba(12, 25, 47, 0.34);
+            border: 1px solid rgba(148, 163, 184, 0.10);
+            """
+        )
+        self.recent_hint_lbl.setWordWrap(True)
         table_layout.addWidget(self.recent_hint_lbl)
 
         self.recent_table = QTableWidget()
-        self.recent_table.setColumnCount(3)
-        self.recent_table.setHorizontalHeaderLabels(["التاريخ", "الوصف", "المبلغ"])
+        self.recent_table.setColumnCount(4)
+        self.recent_table.setHorizontalHeaderLabels(["التوقيت", "العملية", "البيان", "القيمة"])
         header = self.recent_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self.recent_table.verticalHeader().setVisible(False)
         self.recent_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.recent_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -1199,59 +1429,265 @@ class DashboardTab(QWidget):
 
         fix_table_rtl(self.recent_table)
         self.recent_table.setStyleSheet(TABLE_STYLE_DARK)
-        self.recent_table.verticalHeader().setDefaultSectionSize(32)
-        table_layout.addWidget(self.recent_table)
+        self.recent_table.setShowGrid(False)
+        self.recent_table.setFrameShape(QFrame.Shape.NoFrame)
+        self.recent_table.verticalHeader().setDefaultSectionSize(28)
+        table_layout.addWidget(self.recent_table, 1)
 
         pagination_layout = QHBoxLayout()
-        pagination_layout.setContentsMargins(0, 6, 0, 0)
-        pagination_layout.setSpacing(8)
+        pagination_layout.setContentsMargins(0, 4, 0, 0)
+        pagination_layout.setSpacing(0)
+
+        self.recent_pagination_widget = QWidget()
+        self.recent_pagination_widget.setStyleSheet("background: transparent; border: none;")
+        self.recent_pagination_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        pagination_center_layout = QHBoxLayout(self.recent_pagination_widget)
+        pagination_center_layout.setContentsMargins(0, 0, 0, 0)
+        pagination_center_layout.setSpacing(8)
 
         self.recent_prev_button = QPushButton("◀ السابق")
         self.recent_prev_button.setStyleSheet(
-            "QPushButton { background-color: #1e3a8a; color: white; padding: 4px 10px; }"
+            """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #203a63, stop:1 #274876);
+                color: white;
+                padding: 7px 12px;
+                border-radius: 10px;
+                border: 1px solid rgba(148, 163, 184, 0.12);
+                font-weight: 700;
+                font-family: 'Cairo';
+            }
+            QPushButton:hover {
+                background: #31558b;
+            }
+            QPushButton:disabled {
+                background-color: #334155;
+                color: #94a3b8;
+                border-color: rgba(148, 163, 184, 0.06);
+            }
+            """
         )
-        self.recent_prev_button.setFixedHeight(24)
+        self.recent_prev_button.setFixedHeight(32)
+        self.recent_prev_button.setMinimumWidth(120)
         self.recent_prev_button.clicked.connect(self._go_recent_prev_page)
 
         self.recent_next_button = QPushButton("التالي ▶")
         self.recent_next_button.setStyleSheet(
-            "QPushButton { background-color: #1e3a8a; color: white; padding: 4px 10px; }"
+            """
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #203a63, stop:1 #274876);
+                color: white;
+                padding: 7px 12px;
+                border-radius: 10px;
+                border: 1px solid rgba(148, 163, 184, 0.12);
+                font-weight: 700;
+                font-family: 'Cairo';
+            }
+            QPushButton:hover {
+                background: #31558b;
+            }
+            QPushButton:disabled {
+                background-color: #334155;
+                color: #94a3b8;
+                border-color: rgba(148, 163, 184, 0.06);
+            }
+            """
         )
-        self.recent_next_button.setFixedHeight(24)
+        self.recent_next_button.setFixedHeight(32)
+        self.recent_next_button.setMinimumWidth(120)
         self.recent_next_button.clicked.connect(self._go_recent_next_page)
 
         self.recent_page_info_label = QLabel("صفحة 1 / 1")
         self.recent_page_info_label.setStyleSheet(
-            "color: #94a3b8; font-size: 11px; font-family: 'Cairo';"
+            """
+            color: #dbeafe;
+            font-size: 10px;
+            font-family: 'Cairo';
+            padding: 6px 10px;
+            border-radius: 10px;
+            background-color: rgba(12, 25, 47, 0.34);
+            border: 1px solid rgba(148, 163, 184, 0.10);
+            """
         )
 
         self.recent_page_size_combo = QComboBox()
         self.recent_page_size_combo.addItems(["5", "10", "20", "كل"])
         self.recent_page_size_combo.setCurrentText("10")
+        self.recent_page_size_combo.setStyleSheet(
+            """
+            QComboBox {
+                background-color: #102645;
+                color: white;
+                border: 1px solid rgba(148, 163, 184, 0.14);
+                border-radius: 10px;
+                padding: 6px 10px;
+                min-width: 86px;
+                font-family: 'Cairo';
+                font-weight: 700;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 22px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #102645;
+                color: white;
+                border: 1px solid rgba(148, 163, 184, 0.18);
+                selection-background-color: #2563eb;
+            }
+            """
+        )
+        self.recent_page_size_combo.setFixedHeight(32)
         self.recent_page_size_combo.currentTextChanged.connect(self._on_recent_page_size_changed)
 
-        pagination_layout.addWidget(self.recent_prev_button)
-        pagination_layout.addWidget(self.recent_next_button)
+        pagination_size_label = QLabel("حجم الصفحة:")
+        pagination_size_label.setStyleSheet(
+            """
+            color: #dbeafe;
+            font-size: 11px;
+            font-weight: 700;
+            font-family: 'Cairo';
+            background: transparent;
+            """
+        )
+
         pagination_layout.addStretch(1)
+        pagination_center_layout.addWidget(self.recent_page_info_label)
+        pagination_center_layout.addWidget(pagination_size_label)
         pagination_layout.addWidget(QLabel("حجم الصفحة:"))
-        pagination_layout.addWidget(self.recent_page_size_combo)
-        pagination_layout.addWidget(self.recent_page_info_label)
+        pagination_center_layout.addWidget(self.recent_page_size_combo)
+        pagination_center_layout.addSpacing(8)
+        pagination_center_layout.addWidget(self.recent_prev_button)
+        pagination_center_layout.addWidget(self.recent_next_button)
+        pagination_layout.addLayout(pagination_center_layout)
+        legacy_size_label = pagination_layout.itemAt(1).widget()
+        if legacy_size_label is not None:
+            legacy_size_label.hide()
+            legacy_size_label.setFixedWidth(0)
+        pagination_layout.addStretch(1)
         table_layout.addLayout(pagination_layout)
 
+        while pagination_layout.count():
+            stale_item = pagination_layout.takeAt(0)
+            stale_widget = stale_item.widget()
+            if stale_widget is not None:
+                stale_widget.hide()
+                stale_widget.setParent(None)
+
+        while pagination_center_layout.count():
+            stale_center_item = pagination_center_layout.takeAt(0)
+            stale_center_widget = stale_center_item.widget()
+            if stale_center_widget is not None:
+                stale_center_widget.hide()
+
+        self.recent_prev_button.show()
+        self.recent_next_button.show()
+        self.recent_page_size_combo.show()
+        self.recent_page_info_label.show()
+        pagination_size_label.show()
+
+        self.recent_pagination_meta_widget = QWidget()
+        self.recent_pagination_meta_widget.setStyleSheet("background: transparent; border: none;")
+        self.recent_pagination_meta_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        recent_meta_layout = QHBoxLayout(self.recent_pagination_meta_widget)
+        recent_meta_layout.setContentsMargins(0, 0, 0, 0)
+        recent_meta_layout.setSpacing(8)
+
+        self.recent_pagination_balance_widget = QWidget()
+        self.recent_pagination_balance_widget.setStyleSheet(
+            "background: transparent; border: none;"
+        )
+        self.recent_pagination_balance_widget.setSizePolicy(
+            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
+        )
+
+        pagination_center_layout.addWidget(self.recent_prev_button)
+        pagination_center_layout.addWidget(self.recent_next_button)
+
+        recent_meta_layout.addWidget(pagination_size_label)
+        recent_meta_layout.addWidget(self.recent_page_size_combo)
+        recent_meta_layout.addSpacing(12)
+        recent_meta_layout.addWidget(self.recent_page_info_label)
+
+        self.recent_pagination_meta_widget.adjustSize()
+        self.recent_pagination_balance_widget.setFixedWidth(
+            self.recent_pagination_meta_widget.sizeHint().width()
+        )
+
+        pagination_layout.addWidget(self.recent_pagination_balance_widget)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(self.recent_pagination_widget, 0, Qt.AlignmentFlag.AlignCenter)
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(
+            self.recent_pagination_meta_widget, 0, Qt.AlignmentFlag.AlignRight
+        )
+
         # إضافة للـ splitter
+        # Normalize the final pagination row into a single aligned strip.
+        while pagination_layout.count():
+            final_item = pagination_layout.takeAt(0)
+            final_widget = final_item.widget()
+            if final_widget is not None:
+                final_widget.hide()
+                final_widget.setParent(None)
+
+        self.recent_prev_button.setFixedHeight(32)
+        self.recent_next_button.setFixedHeight(32)
+        self.recent_page_size_combo.setFixedHeight(32)
+        self.recent_page_info_label.setFixedHeight(32)
+        self.recent_page_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_page_info_label.setMinimumWidth(74)
+        pagination_size_label.setFixedHeight(32)
+        pagination_size_label.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
+        )
+
+        clean_pagination_widget = QWidget()
+        clean_pagination_widget.setStyleSheet("background: transparent; border: none;")
+        clean_pagination_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        clean_pagination_layout = QHBoxLayout(clean_pagination_widget)
+        clean_pagination_layout.setContentsMargins(0, 0, 0, 0)
+        clean_pagination_layout.setSpacing(8)
+        clean_pagination_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.recent_prev_button.show()
+        self.recent_next_button.show()
+        self.recent_page_size_combo.show()
+        self.recent_page_info_label.show()
+        pagination_size_label.show()
+
+        clean_pagination_layout.addWidget(self.recent_prev_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        clean_pagination_layout.addWidget(self.recent_next_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        clean_pagination_layout.addSpacing(10)
+        clean_pagination_layout.addWidget(pagination_size_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        clean_pagination_layout.addWidget(
+            self.recent_page_size_combo, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        clean_pagination_layout.addSpacing(10)
+        clean_pagination_layout.addWidget(
+            self.recent_page_info_label, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+
+        self.recent_pagination_widget = clean_pagination_widget
+        self.recent_pagination_size_label = pagination_size_label
+        pagination_layout.addStretch(1)
+        pagination_layout.addWidget(self.recent_pagination_widget, 0, Qt.AlignmentFlag.AlignCenter)
+        pagination_layout.addStretch(1)
+
         self.bottom_splitter.addWidget(self.chart_container)
-        self.bottom_splitter.addWidget(self.table_container)
-        self.bottom_splitter.setStretchFactor(0, 3)
-        self.bottom_splitter.setStretchFactor(1, 2)
+        if self._show_recent_activity:
+            self.bottom_splitter.addWidget(self.table_container)
+            self.bottom_splitter.setStretchFactor(0, 3)
+            self.bottom_splitter.setStretchFactor(1, 2)
+        else:
+            self.table_container.hide()
+            self.bottom_splitter.setStretchFactor(0, 1)
 
         main_layout.addWidget(self.bottom_splitter, 1)
-
-        scroll.setWidget(content_widget)
-
-        # Layout الرئيسي للـ widget
-        outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.addWidget(scroll)
+        self._rearrange_cards()
+        self._rearrange_bottom_section()
 
     def resizeEvent(self, event):
         """إعادة ترتيب الكروت تلقائياً حسب العرض"""
@@ -1264,12 +1700,16 @@ class DashboardTab(QWidget):
         width = self.width()
 
         # حساب عدد الأعمدة المناسب
-        if width < 500:
+        if width < 560:
             cols = 1
-        elif width < 800:
+        elif width < 900:
             cols = 2
-        else:
+        elif width < 1250:
+            cols = 3
+        elif width < 1600:
             cols = 4
+        else:
+            cols = 5
 
         # إعادة ترتيب الكروت
         for i, card in enumerate(self.stat_cards):
@@ -1277,11 +1717,21 @@ class DashboardTab(QWidget):
             col = i % cols
             self.cards_grid.addWidget(card, row, col)
 
+        rows = (len(self.stat_cards) + cols - 1) // cols
+        for col in range(5):
+            self.cards_grid.setColumnStretch(col, 1 if col < cols else 0)
+        for row in range(rows + 1):
+            self.cards_grid.setRowStretch(row, 0)
+
+        card_height = self.card_sales.maximumHeight()
+        total_height = (rows * card_height) + max(0, rows - 1) * self.cards_grid.spacing()
+        self.cards_container.setFixedHeight(total_height)
+
     def _rearrange_bottom_section(self):
         """تغيير اتجاه القسم السفلي حسب العرض"""
         width = self.width()
 
-        if width < 700:
+        if width < 760:
             self.bottom_splitter.setOrientation(Qt.Orientation.Vertical)
         else:
             self.bottom_splitter.setOrientation(Qt.Orientation.Horizontal)
@@ -1311,7 +1761,11 @@ class DashboardTab(QWidget):
             try:
                 # استخدام الدالة الموحدة الجديدة
                 stats = self.accounting_service.get_dashboard_stats()
-                recent = self.accounting_service.get_recent_activity(8)
+                recent = (
+                    self.accounting_service.get_recent_activity(8)
+                    if self._show_recent_activity and self._load_recent_activity_data
+                    else []
+                )
                 return {"stats": stats, "recent": recent}
             except Exception as e:
                 safe_print(f"ERROR: [Dashboard] فشل جلب البيانات: {e}")
@@ -1340,10 +1794,13 @@ class DashboardTab(QWidget):
                 self.chart.plot_data(sales, expenses, net_profit)
 
                 self._recent_items = recent
-                self._render_recent_page()
+                if self._show_recent_activity:
+                    self._render_recent_page()
+                else:
+                    self.recent_table.setRowCount(0)
 
                 self.last_update_lbl.setText(
-                    f"آخر تحديث: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    self._format_datetime_badge(datetime.now(), "آخر تحديث")
                 )
 
                 safe_print("INFO: [Dashboard] ✅ تم تحديث الداشبورد بنجاح")
@@ -1388,12 +1845,19 @@ class DashboardTab(QWidget):
             self._recent_current_page = 1
 
         if not self._recent_items:
-            self.recent_hint_lbl.setText("لا توجد عمليات لعرضها حالياً.")
+            if self._load_recent_activity_data:
+                self.recent_hint_lbl.setText("لا توجد عمليات موثقة حديثة لعرضها حالياً.")
+            else:
+                self.recent_hint_lbl.setText(
+                    "تم إخفاء بيانات آخر العمليات من عرض الداشبورد فقط، بدون حذف أي بيانات مالية من النظام."
+                )
             self.recent_table.setRowCount(0)
             self._update_recent_controls(total_pages)
             return
 
-        self.recent_hint_lbl.setText("")
+        self.recent_hint_lbl.setText(
+            "يعرض أحدث العمليات الموثقة من جميع الأقسام مثل العملاء والمشاريع والفواتير والدفعات والمصروفات، مع فولباك آمن للبيانات القديمة عند الحاجة."
+        )
         if self._recent_page_size <= 0:
             page_items = self._recent_items
         else:
@@ -1413,26 +1877,58 @@ class DashboardTab(QWidget):
             self.recent_table.setRowCount(len(items))
             for i, entry in enumerate(items):
                 if isinstance(entry, dict):
-                    date_val = entry.get("date", "")
+                    date_val = self._format_recent_timestamp(
+                        entry.get("timestamp") or entry.get("date")
+                    )
+                    operation_val = str(entry.get("operation", "") or "").strip()
                     desc_val = entry.get("description", "")
+                    details_val = str(entry.get("details", "") or "").strip()
                     amount_val = entry.get("amount", 0)
                 else:
                     date_val = str(entry[0]) if len(entry) > 0 else ""
+                    operation_val = ""
                     desc_val = str(entry[1]) if len(entry) > 1 else ""
+                    details_val = ""
                     amount_val = entry[2] if len(entry) > 2 else 0
 
-                amount_float = float(amount_val or 0)
-                amount_item = create_centered_item(f"{amount_float:,.2f}")
-                amount_item.setTextAlignment(
-                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
-                )
-                amount_item.setForeground(
-                    QBrush(QColor("#22c55e" if amount_float >= 0 else "#ef4444"))
-                )
+                summary_val = str(desc_val or "").strip()
+                if details_val:
+                    summary_val = f"{summary_val} • {details_val}" if summary_val else details_val
 
-                self.recent_table.setItem(i, 0, create_centered_item(date_val))
-                self.recent_table.setItem(i, 1, create_centered_item(desc_val))
-                self.recent_table.setItem(i, 2, amount_item)
+                date_item = create_centered_item(date_val)
+
+                operation_item = create_centered_item(operation_val or "عملية")
+                op_color = "#cbd5e1"
+                operation_text = str(operation_val or "")
+                if "تحصيل" in operation_text:
+                    op_color = "#22c55e"
+                elif "مصروف" in operation_text or "حذف" in operation_text:
+                    op_color = "#f97316" if "مصروف" in operation_text else "#ef4444"
+                elif "إضافة" in operation_text or "إنشاء" in operation_text:
+                    op_color = "#38bdf8"
+                elif "تعديل" in operation_text:
+                    op_color = "#eab308"
+                operation_item.setForeground(QBrush(QColor(op_color)))
+
+                summary_item = create_centered_item(summary_val)
+                summary_item.setToolTip(summary_val)
+                summary_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+
+                if amount_val in (None, ""):
+                    amount_item = create_centered_item("—")
+                    amount_item.setForeground(QBrush(QColor("#94a3b8")))
+                else:
+                    amount_float = float(amount_val or 0)
+                    amount_item = create_centered_item(f"{amount_float:,.2f}")
+                    amount_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    amount_item.setForeground(
+                        QBrush(QColor("#22c55e" if amount_float >= 0 else "#ef4444"))
+                    )
+
+                self.recent_table.setItem(i, 0, date_item)
+                self.recent_table.setItem(i, 1, operation_item)
+                self.recent_table.setItem(i, 2, summary_item)
+                self.recent_table.setItem(i, 3, amount_item)
         finally:
             self.recent_table.setUpdatesEnabled(True)
             self.recent_table.setSortingEnabled(prev_sorting)
@@ -1442,6 +1938,15 @@ class DashboardTab(QWidget):
         self.recent_page_info_label.setText(f"صفحة {self._recent_current_page} / {total_pages}")
         self.recent_prev_button.setEnabled(self._recent_current_page > 1)
         self.recent_next_button.setEnabled(self._recent_current_page < total_pages)
+        self._sync_recent_pagination_balance()
+
+    def _sync_recent_pagination_balance(self):
+        meta_widget = getattr(self, "recent_pagination_meta_widget", None)
+        balance_widget = getattr(self, "recent_pagination_balance_widget", None)
+        if meta_widget is None or balance_widget is None:
+            return
+        meta_widget.adjustSize()
+        balance_widget.setFixedWidth(meta_widget.sizeHint().width())
 
     def _on_recent_page_size_changed(self, value: str):
         if value == "كل":

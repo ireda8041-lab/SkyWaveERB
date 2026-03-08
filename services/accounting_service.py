@@ -1368,82 +1368,250 @@ class AccountingService:
             safe_print(f"ERROR: [AccountingService] فشل جلب آخر القيود: {e}")
             return []
 
+    @staticmethod
+    def _activity_attr(item, field_name: str, default=None):
+        if isinstance(item, dict):
+            return item.get(field_name, default)
+        return getattr(item, field_name, default)
+
+    @staticmethod
+    def _coerce_activity_datetime(value) -> datetime | None:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                return datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        return None
+
+    def _safe_repo_list(self, getter_name: str) -> list:
+        getter = getattr(self.repo, getter_name, None)
+        if not callable(getter):
+            return []
+        try:
+            items = getter()
+        except Exception:
+            return []
+        if items is None:
+            return []
+        if isinstance(items, list):
+            return items
+        try:
+            return list(items)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _clean_activity_text(value) -> str:
+        return value.strip() if isinstance(value, str) else ""
+
+    def _resolve_activity_timestamp(self, item, *field_names: str) -> datetime | None:
+        for field_name in field_names:
+            value = self._activity_attr(item, field_name, None)
+            resolved = self._coerce_activity_datetime(value)
+            if resolved is not None:
+                return resolved
+        return None
+
+    def _infer_entity_action(self, item, created_label: str, updated_label: str) -> str:
+        created_at = self._resolve_activity_timestamp(item, "created_at")
+        modified_at = self._resolve_activity_timestamp(item, "last_modified", "updated_at")
+        if created_at is None and modified_at is None:
+            return updated_label
+        if created_at is None:
+            return updated_label
+        if modified_at is None:
+            return created_label
+        if abs((modified_at - created_at).total_seconds()) <= 120:
+            return created_label
+        return updated_label
+
+    def _resolve_client_name(self, client_ref) -> str:
+        ref = str(client_ref or "").strip()
+        if not ref:
+            return ""
+        getter = getattr(self.repo, "get_client_by_id", None)
+        if callable(getter):
+            try:
+                client = getter(ref)
+                name = self._clean_activity_text(self._activity_attr(client, "name", ""))
+                if name:
+                    return name
+            except Exception:
+                pass
+
+        for client in self._safe_repo_list("get_all_clients"):
+            candidate_values = {
+                str(self._activity_attr(client, "id", "") or ""),
+                str(self._activity_attr(client, "_mongo_id", "") or ""),
+                str(self._activity_attr(client, "mongo_id", "") or ""),
+                str(self._activity_attr(client, "name", "") or ""),
+            }
+            if ref in candidate_values:
+                name = self._clean_activity_text(self._activity_attr(client, "name", ""))
+                return name or ref
+        return ref
+
+    def _resolve_project_name(self, project_ref, client_ref=None) -> str:
+        ref = str(project_ref or "").strip()
+        if not ref:
+            return ""
+        client_key = str(client_ref or "").strip() or None
+
+        getter = getattr(self.repo, "get_project_by_number", None)
+        if callable(getter):
+            try:
+                project = getter(ref, client_key)
+                name = self._clean_activity_text(self._activity_attr(project, "name", ""))
+                if name:
+                    return name
+            except Exception:
+                pass
+
+        for method_name in ("get_project_by_id",):
+            getter = getattr(self.repo, method_name, None)
+            if not callable(getter):
+                continue
+            try:
+                project = getter(ref)
+                name = self._clean_activity_text(self._activity_attr(project, "name", ""))
+                if name:
+                    return name
+            except Exception:
+                continue
+
+        for project in self._safe_repo_list("get_all_projects"):
+            project_client_id = str(self._activity_attr(project, "client_id", "") or "")
+            if client_key and project_client_id and project_client_id != client_key:
+                continue
+            candidate_values = {
+                str(self._activity_attr(project, "id", "") or ""),
+                str(self._activity_attr(project, "_mongo_id", "") or ""),
+                str(self._activity_attr(project, "mongo_id", "") or ""),
+                str(self._activity_attr(project, "name", "") or ""),
+                str(self._activity_attr(project, "invoice_number", "") or ""),
+            }
+            if ref in candidate_values:
+                name = self._clean_activity_text(self._activity_attr(project, "name", ""))
+                return name or ref
+        return ref
+
+    @staticmethod
+    def _compose_activity_entry(
+        *,
+        timestamp: datetime,
+        operation: str,
+        description: str,
+        amount,
+        details: str = "",
+    ) -> dict:
+        details_text = str(details or "").strip()
+        return {
+            "timestamp": timestamp,
+            "date": timestamp.strftime("%Y-%m-%d"),
+            "operation": str(operation or "").strip(),
+            "description": str(description or "").strip(),
+            "details": details_text,
+            "amount": amount,
+        }
+
     def get_recent_activity(self, limit: int = 8) -> list[dict]:
         """
-        جلب آخر العمليات لعرضها في لوحة التحكم.
+        جلب آخر العمليات الموثقة لعرضها في لوحة التحكم.
 
-        الأولوية: قيود اليومية، ثم fallback إلى الدفعات + المصروفات إذا لم توجد قيود.
+        الأولوية لسجل النشاطات الحقيقي القادم من العمليات نفسها
+        (إضافة/تعديل/حذف/تحصيل...). وإذا لم توجد سجلات نشاط بعد،
+        نعود مؤقتًا إلى الحركات المالية الموثقة ثم القيود اليومية
+        كـ fallback آمن للبيانات القديمة.
         """
-        journal = self.get_recent_journal_entries(limit)
-        if journal:
-            return journal
-
         try:
+            activity_logs_getter = getattr(self.repo, "get_recent_activity_logs", None)
+            if callable(activity_logs_getter):
+                try:
+                    activity_logs = activity_logs_getter(limit)
+                    if isinstance(activity_logs, list) and activity_logs:
+                        return activity_logs[:limit]
+                except Exception as log_err:
+                    safe_print(
+                        f"WARNING: [AccountingService] فشل جلب سجل النشاطات الموثقة: {log_err}"
+                    )
+
             recent_items: list[tuple[datetime, dict]] = []
 
-            if hasattr(self.repo, "get_all_payments"):
-                payments = self.repo.get_all_payments()
-                for p in payments:
-                    if not getattr(p, "date", None):
-                        continue
-                    client_name = ""
-                    try:
-                        if getattr(p, "client_id", None) and hasattr(self.repo, "get_client_by_id"):
-                            client = self.repo.get_client_by_id(str(p.client_id))
-                            if client and getattr(client, "name", None):
-                                client_name = f" - {client.name}"
-                    except Exception:
-                        client_name = ""
-
-                    project_name = ""
-                    try:
-                        if getattr(p, "project_id", None) and hasattr(
-                            self.repo, "get_project_by_number"
-                        ):
-                            project = self.repo.get_project_by_number(str(p.project_id))
-                            if project and getattr(project, "name", None):
-                                project_name = f"{project.name}"
-                    except Exception:
-                        project_name = str(getattr(p, "project_id", "")) or ""
-
-                    method = str(getattr(p, "method", "") or "").strip()
-                    method_part = f" ({method})" if method else ""
-                    description = f"تحصيل{method_part}: {project_name}{client_name}".strip()
-
-                    recent_items.append(
-                        (
-                            p.date,
-                            {
-                                "date": p.date.strftime("%Y-%m-%d"),
-                                "description": description,
-                                "amount": float(getattr(p, "amount", 0) or 0),
-                            },
-                        )
+            for payment in self._safe_repo_list("get_all_payments"):
+                timestamp = self._resolve_activity_timestamp(
+                    payment, "last_modified", "date", "created_at"
+                )
+                if timestamp is None:
+                    continue
+                client_name = self._resolve_client_name(
+                    self._activity_attr(payment, "client_id", "")
+                )
+                project_name = self._resolve_project_name(
+                    self._activity_attr(payment, "project_id", ""),
+                    self._activity_attr(payment, "client_id", ""),
+                )
+                details_parts = []
+                if client_name:
+                    details_parts.append(f"العميل: {client_name}")
+                method = str(self._activity_attr(payment, "method", "") or "").strip()
+                if method:
+                    details_parts.append(f"الطريقة: {method}")
+                recent_items.append(
+                    (
+                        timestamp,
+                        self._compose_activity_entry(
+                            timestamp=timestamp,
+                            operation="تحصيل دفعة",
+                            description=project_name or client_name or "دفعة محصلة",
+                            details=" • ".join(details_parts),
+                            amount=float(self._activity_attr(payment, "amount", 0) or 0),
+                        ),
                     )
+                )
 
-            if hasattr(self.repo, "get_all_expenses"):
-                expenses = self.repo.get_all_expenses()
-                for e in expenses:
-                    if not getattr(e, "date", None):
-                        continue
-                    category = str(getattr(e, "category", "") or "").strip()
-                    desc = str(getattr(e, "description", "") or "").strip()
-                    desc_part = f" - {desc}" if desc else ""
-                    description = f"مصروف: {category}{desc_part}".strip()
-
-                    recent_items.append(
-                        (
-                            e.date,
-                            {
-                                "date": e.date.strftime("%Y-%m-%d"),
-                                "description": description,
-                                "amount": -float(getattr(e, "amount", 0) or 0),
-                            },
-                        )
+            for expense in self._safe_repo_list("get_all_expenses"):
+                timestamp = self._resolve_activity_timestamp(
+                    expense, "last_modified", "date", "created_at"
+                )
+                if timestamp is None:
+                    continue
+                category = str(self._activity_attr(expense, "category", "") or "").strip()
+                expense_desc = str(self._activity_attr(expense, "description", "") or "").strip()
+                project_name = self._resolve_project_name(
+                    self._activity_attr(expense, "project_id", ""),
+                    None,
+                )
+                details_parts = []
+                if project_name:
+                    details_parts.append(f"المشروع: {project_name}")
+                if expense_desc:
+                    details_parts.append(expense_desc)
+                recent_items.append(
+                    (
+                        timestamp,
+                        self._compose_activity_entry(
+                            timestamp=timestamp,
+                            operation="تسجيل مصروف",
+                            description=category or "مصروف",
+                            details=" • ".join(details_parts),
+                            amount=-float(self._activity_attr(expense, "amount", 0) or 0),
+                        ),
                     )
+                )
 
-            recent_items.sort(key=lambda x: x[0], reverse=True)
-            return [item for _, item in recent_items[:limit]]
+            if recent_items:
+                recent_items.sort(key=lambda item: item[0], reverse=True)
+                return [item for _, item in recent_items[:limit]]
+
+            journal = self.get_recent_journal_entries(limit)
+            if journal:
+                return journal
+            return []
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل جلب آخر العمليات: {e}")
             return []
@@ -3625,12 +3793,29 @@ class AccountingService:
                     if project_start and start_date <= project_start <= end_date:
                         # المستحقات = إجمالي المشروع - المدفوع
                         project_total = getattr(project, "total_amount", 0) or 0
-                        # جلب الدفعات للمشروع
-                        project_id = project._mongo_id or str(project.id)
+                        project_ref = (
+                            getattr(project, "_mongo_id", None)
+                            or getattr(project, "id", None)
+                            or getattr(project, "name", "")
+                        )
+                        project_client_id = getattr(project, "client_id", None)
                         project_payments = 0.0
-                        if hasattr(self.repo, "get_payments_by_project"):
-                            payments = self.repo.get_payments_by_project(project_id)
-                            project_payments = sum(p.amount for p in payments)
+                        if hasattr(self.repo, "get_total_paid_for_project"):
+                            project_payments = float(
+                                self.repo.get_total_paid_for_project(
+                                    str(project_ref or ""),
+                                    client_id=str(project_client_id or "") or None,
+                                )
+                                or 0.0
+                            )
+                        elif hasattr(self.repo, "get_payments_for_project"):
+                            payments = self.repo.get_payments_for_project(
+                                str(project_ref or ""),
+                                client_id=str(project_client_id or "") or None,
+                            )
+                            project_payments = sum(
+                                float(getattr(p, "amount", 0.0) or 0.0) for p in payments
+                            )
                         receivables += max(0, project_total - project_payments)
 
             net_profit = total_revenue - total_expenses

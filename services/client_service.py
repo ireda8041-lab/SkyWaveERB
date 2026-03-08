@@ -248,13 +248,15 @@ class ClientService:
         logger.info("[ClientService] استلام طلب حذف العميل نهائياً ID: %s", client_id)
 
         try:
+            client = self.repo.get_client_by_id(client_id)
+            client_name = getattr(client, "name", None) or str(client_id)
             success = self.repo.delete_client_permanently(client_id)
             if success:
                 self.invalidate_cache()  # ⚡ إبطال الـ cache
                 # ⚡ إرسال إشارة التحديث
                 app_signals.emit_data_changed("clients")
-                # 🔔 إشعار - تحويل client_id لـ string
-                notify_operation("deleted", "client", str(client_id))
+                # 🔔 إشعار باسم العميل الحقيقي بدل المعرّف الخام
+                notify_operation("deleted", "client", client_name)
                 logger.info("[ClientService] ✅ تم حذف العميل نهائياً")
             return success
         except Exception as e:

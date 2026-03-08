@@ -3,6 +3,8 @@
 جسر الإشعارات - يربط إشارات التطبيق بنظام الإشعارات
 """
 
+import re
+
 from PyQt6.QtCore import QObject, Qt
 from PyQt6.QtWidgets import QApplication
 
@@ -59,11 +61,23 @@ class NotificationBridge(QObject):
         "created": "تم إضافة",
         "updated": "تم تعديل",
         "deleted": "تم حذف",
-        "paid": "تم دفع",
+        "paid": "تم تحصيل",
         "synced": "تمت مزامنة",
         "archived": "تم أرشفة",
         "restored": "تم استعادة",
         "printed": "تم طباعة",
+        "voided": "تم إلغاء",
+    }
+    ACTIVITY_ACTION_NAMES = {
+        "created": "إضافة",
+        "updated": "تعديل",
+        "deleted": "حذف",
+        "paid": "تحصيل",
+        "synced": "مزامنة",
+        "archived": "أرشفة",
+        "restored": "استعادة",
+        "printed": "طباعة",
+        "voided": "إلغاء",
     }
 
     # أيقونات العمليات
@@ -76,7 +90,12 @@ class NotificationBridge(QObject):
         "archived": "📦",
         "restored": "♻️",
         "printed": "🖨️",
+        "voided": "🚫",
     }
+    MONEY_PATTERN = re.compile(
+        r"^\s*(?P<amount>[+-]?\d[\d,]*(?:\.\d+)?)\s*(?:ج\.?\s*م\.?|EGP)\s*(?:[-–—:]\s*(?P<label>.+))?\s*$",
+        re.IGNORECASE,
+    )
 
     def __new__(cls):
         if cls._instance is None:
@@ -114,19 +133,26 @@ class NotificationBridge(QObject):
         try:
             from ui.notification_system import notify_success, notify_warning
 
-            # بناء الرسالة
-            action_text = self.ACTION_NAMES.get(action, action)
-            entity_text = self.ENTITY_NAMES.get(entity_type, entity_type)
-            icon = self.ACTION_ICONS.get(action, "📌")
-
-            message = f"{entity_name}"
-            title = f"{icon} {action_text} {entity_text}"
+            payload = self._build_operation_payload(action, entity_type, entity_name)
+            self._record_activity(payload)
 
             # إرسال الإشعار
             if action == "deleted":
-                notify_warning(message, title, sync=False, entity_type=entity_type, action=action)
+                notify_warning(
+                    payload["message"],
+                    payload["title"],
+                    sync=False,
+                    entity_type=entity_type,
+                    action=action,
+                )
             else:
-                notify_success(message, title, sync=False, entity_type=entity_type, action=action)
+                notify_success(
+                    payload["message"],
+                    payload["title"],
+                    sync=False,
+                    entity_type=entity_type,
+                    action=action,
+                )
 
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
@@ -151,6 +177,66 @@ class NotificationBridge(QObject):
             notify_error("فشل في المزامنة", "❌ خطأ", sync=False)
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
+
+    @staticmethod
+    def _clean_operation_text(value: str) -> str:
+        return " ".join(str(value or "").split()).strip()
+
+    @classmethod
+    def _extract_amount_details(
+        cls, entity_type: str, entity_name: str
+    ) -> tuple[float | None, str]:
+        match = cls.MONEY_PATTERN.match(entity_name)
+        if not match:
+            return None, entity_name
+        amount_text = (match.group("amount") or "").replace(",", "").strip()
+        try:
+            amount_value = float(amount_text)
+        except Exception:
+            return None, entity_name
+        if entity_type == "expense":
+            amount_value = -abs(amount_value)
+        elif entity_type == "payment":
+            amount_value = abs(amount_value)
+        label = cls._clean_operation_text(match.group("label") or "")
+        return amount_value, label or entity_name
+
+    @classmethod
+    def _build_operation_payload(cls, action: str, entity_type: str, entity_name: str) -> dict:
+        action_text = cls.ACTION_NAMES.get(action, action)
+        entity_text = cls.ENTITY_NAMES.get(entity_type, entity_type)
+        icon = cls.ACTION_ICONS.get(action, "📌")
+        clean_name = cls._clean_operation_text(entity_name)
+        amount, description = cls._extract_amount_details(entity_type, clean_name)
+        return {
+            "title": f"{icon} {action_text} {entity_text}",
+            "message": clean_name,
+            "operation_text": f"{cls.ACTIVITY_ACTION_NAMES.get(action, action)} {entity_text}".strip(),
+            "description": description or clean_name or entity_text,
+            "details": "",
+            "amount": amount,
+            "action": str(action or "").strip(),
+            "entity_type": str(entity_type or "").strip(),
+        }
+
+    @staticmethod
+    def _record_activity(payload: dict) -> None:
+        try:
+            from core.repository import Repository
+
+            repo = Repository.get_active_instance()
+            if repo is None or not hasattr(repo, "log_activity"):
+                return
+            repo.log_activity(
+                action=payload.get("action", ""),
+                entity_type=payload.get("entity_type", ""),
+                operation_text=payload.get("operation_text", ""),
+                entity_name=payload.get("description", ""),
+                details=payload.get("details", ""),
+                amount=payload.get("amount"),
+            )
+        except Exception as e:
+            safe_print(f"WARNING: [NotificationBridge] فشل حفظ سجل العملية: {e}")
 
 
 def setup_notification_bridge():
@@ -188,15 +274,23 @@ def notify_operation(action: str, entity_type: str, entity_name: str):
 
         from ui.notification_system import notify_success, notify_warning
 
-        action_text = NotificationBridge.ACTION_NAMES.get(action, action)
-        entity_text = NotificationBridge.ENTITY_NAMES.get(entity_type, entity_type)
-        icon = NotificationBridge.ACTION_ICONS.get(action, "📌")
-
-        message = f"{entity_name}"
-        title = f"{icon} {action_text} {entity_text}"
+        payload = NotificationBridge._build_operation_payload(action, entity_type, entity_name)
+        NotificationBridge._record_activity(payload)
         if action == "deleted":
-            notify_warning(message, title, sync=False, entity_type=entity_type, action=action)
+            notify_warning(
+                payload["message"],
+                payload["title"],
+                sync=False,
+                entity_type=entity_type,
+                action=action,
+            )
         else:
-            notify_success(message, title, sync=False, entity_type=entity_type, action=action)
+            notify_success(
+                payload["message"],
+                payload["title"],
+                sync=False,
+                entity_type=entity_type,
+                action=action,
+            )
     except Exception as e:
         safe_print(f"ERROR: [NotificationBridge] Fallback notify failed: {e}")

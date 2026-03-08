@@ -77,6 +77,27 @@ except ImportError:
             pass
 
 
+def _entity_reference(entity: Any, *fields: str) -> str:
+    for attr_name in fields:
+        value = getattr(entity, attr_name, None)
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _entity_reference_values(entity: Any, *fields: str) -> list[str]:
+    references: list[str] = []
+    seen: set[str] = set()
+    for attr_name in fields:
+        value = getattr(entity, attr_name, None)
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            references.append(text)
+    return references
+
+
 # مسار ملف إعدادات المهام
 TASK_SETTINGS_FILE = "task_settings.json"
 
@@ -575,6 +596,12 @@ class TaskService:
 
     def get_tasks_by_client(self, client_id: str) -> list[Task]:
         """الحصول على المهام المرتبطة بعميل"""
+        if self._repository:
+            try:
+                tasks_data = self._repository.get_tasks_by_client(client_id)
+                return [self._dict_to_task(t) for t in tasks_data]
+            except Exception:
+                pass
         return [t for t in self.tasks if t.related_client == client_id]
 
     def get_statistics(self) -> dict:
@@ -1026,6 +1053,8 @@ class TaskEditorDialog(QDialog):
 
         self.projects_list: list[Any] = []
         self.clients_list: list[Any] = []
+        self._project_alias_map: dict[str, str] = {}
+        self._client_alias_map: dict[str, str] = {}
         self._load_projects_and_clients()
 
         self.setWindowTitle("✏️ تعديل مهمة" if self.is_editing else "➕ مهمة جديدة")
@@ -1049,18 +1078,34 @@ class TaskEditorDialog(QDialog):
         try:
             if self.project_service:
                 projects = self.project_service.get_all_projects()
-                self.projects_list = [
-                    (str(p.id), p.name) for p in projects if hasattr(p, "id") and hasattr(p, "name")
-                ]
+                self.projects_list = []
+                self._project_alias_map = {}
+                for project in projects:
+                    if not hasattr(project, "name"):
+                        continue
+                    stable_ref = _entity_reference(project, "_mongo_id", "id", "name")
+                    if not stable_ref:
+                        continue
+                    self.projects_list.append((stable_ref, project.name))
+                    for alias in _entity_reference_values(project, "_mongo_id", "id", "name"):
+                        self._project_alias_map[alias] = stable_ref
         except Exception as e:
             safe_print(f"WARNING: [TaskEditor] فشل تحميل المشاريع: {e}")
 
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
-                self.clients_list = [
-                    (str(c.id), c.name) for c in clients if hasattr(c, "id") and hasattr(c, "name")
-                ]
+                self.clients_list = []
+                self._client_alias_map = {}
+                for client in clients:
+                    if not hasattr(client, "name"):
+                        continue
+                    stable_ref = _entity_reference(client, "_mongo_id", "id", "name")
+                    if not stable_ref:
+                        continue
+                    self.clients_list.append((stable_ref, client.name))
+                    for alias in _entity_reference_values(client, "_mongo_id", "id", "name"):
+                        self._client_alias_map[alias] = stable_ref
         except Exception as e:
             safe_print(f"WARNING: [TaskEditor] فشل تحميل العملاء: {e}")
 
@@ -1434,14 +1479,20 @@ class TaskEditorDialog(QDialog):
                 self.due_time_input.setTime(QTime(int(parts[0]), int(parts[1])))
 
         if self.task.related_project:
+            task_project_ref = self._project_alias_map.get(
+                self.task.related_project, self.task.related_project
+            )
             for i in range(self.project_combo.count()):
-                if self.project_combo.itemData(i) == self.task.related_project:
+                if self.project_combo.itemData(i) == task_project_ref:
                     self.project_combo.setCurrentIndex(i)
                     break
 
         if self.task.related_client:
+            task_client_ref = self._client_alias_map.get(
+                self.task.related_client, self.task.related_client
+            )
             for i in range(self.client_combo.count()):
-                if self.client_combo.itemData(i) == self.task.related_client:
+                if self.client_combo.itemData(i) == task_client_ref:
                     self.client_combo.setCurrentIndex(i)
                     break
 
@@ -1574,9 +1625,12 @@ class TodoManagerWidget(QWidget):
         try:
             if self.project_service:
                 projects = self.project_service.get_all_projects()
-                self._projects_cache = {
-                    str(p.id): p.name for p in projects if hasattr(p, "id") and hasattr(p, "name")
-                }
+                self._projects_cache = {}
+                for project in projects:
+                    if not hasattr(project, "name"):
+                        continue
+                    for alias in _entity_reference_values(project, "_mongo_id", "id", "name"):
+                        self._projects_cache[alias] = project.name
                 self._projects_cache.update(
                     {p.name: p.name for p in projects if hasattr(p, "name")}
                 )
@@ -1585,9 +1639,12 @@ class TodoManagerWidget(QWidget):
         try:
             if self.client_service:
                 clients = self.client_service.get_all_clients()
-                self._clients_cache = {
-                    str(c.id): c.name for c in clients if hasattr(c, "id") and hasattr(c, "name")
-                }
+                self._clients_cache = {}
+                for client in clients:
+                    if not hasattr(client, "name"):
+                        continue
+                    for alias in _entity_reference_values(client, "_mongo_id", "id", "name"):
+                        self._clients_cache[alias] = client.name
                 self._clients_cache.update({c.name: c.name for c in clients if hasattr(c, "name")})
         except Exception as e:
             safe_print(f"WARNING: [TodoManager] فشل تحميل العملاء: {e}")
@@ -2276,7 +2333,7 @@ class TodoManagerWidget(QWidget):
             self.complete_button.setEnabled(False)
 
     def load_tasks(self):
-        """تحميل وعرض المهام في الجدول"""
+        """تحميل وعرض المهام في الجدول بدون حجز الـ UI thread"""
         if self._is_loading:
             return
 
@@ -2288,29 +2345,56 @@ class TodoManagerWidget(QWidget):
             self.tasks_table.blockSignals(True)
             self.tasks_table.setRowCount(0)
             self.tasks_table.clearSpans()
+        except Exception as e:
+            self._is_loading = False
+            self.tasks_table.blockSignals(False)
+            self.tasks_table.setUpdatesEnabled(True)
+            self.tasks_table.setSortingEnabled(True)
+            safe_print(f"ERROR: [TodoManager] فشل تهيئة تحميل المهام: {e}")
+            traceback.print_exc()
+            return
 
-            # جلب المهام حسب الفلتر
-            status_filter = self.status_filter.currentData()
+        filters = {
+            "status": self.status_filter.currentData(),
+            "priority": self.priority_filter.currentData(),
+            "category": self.category_filter.currentData(),
+            "due": self.due_filter.currentData(),
+            "project": (
+                self.project_filter.currentData() if hasattr(self, "project_filter") else "all"
+            ),
+            "client": self.client_filter.currentData() if hasattr(self, "client_filter") else "all",
+        }
+        tasks_snapshot = list(getattr(self.task_service, "tasks", []) or [])
+        projects_cache = dict(getattr(self, "_projects_cache", {}) or {})
+        clients_cache = dict(getattr(self, "_clients_cache", {}) or {})
+
+        def fetch_filtered_tasks():
+            tasks = tasks_snapshot
+
+            status_filter = filters["status"]
             if status_filter == "active":
-                tasks = self.task_service.get_active_tasks()
+                tasks = [
+                    t
+                    for t in tasks
+                    if t.status not in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]
+                    and not t.is_archived
+                ]
             elif status_filter == "completed":
-                tasks = self.task_service.get_completed_tasks()
+                tasks = [t for t in tasks if t.status == TaskStatus.COMPLETED and not t.is_archived]
             elif status_filter == "archived":
-                tasks = self.task_service.get_archived_tasks()
+                tasks = [t for t in tasks if t.is_archived]
             else:
-                tasks = self.task_service.get_all_tasks()
+                tasks = list(tasks)
 
-            # فلتر الأولوية
-            priority_filter = self.priority_filter.currentData()
+            priority_filter = filters["priority"]
             if priority_filter != "all":
                 tasks = [t for t in tasks if t.priority.name == priority_filter]
 
-            # فلتر الفئة
-            category_filter = self.category_filter.currentData()
+            category_filter = filters["category"]
             if category_filter != "all":
                 tasks = [t for t in tasks if t.category.name == category_filter]
 
-            due_filter = self.due_filter.currentData()
+            due_filter = filters["due"]
             now = datetime.now()
             if due_filter == "today":
                 tasks = [t for t in tasks if t.get_due_datetime() and t.is_due_today()]
@@ -2328,53 +2412,63 @@ class TodoManagerWidget(QWidget):
             elif due_filter == "none":
                 tasks = [t for t in tasks if t.get_due_datetime() is None]
 
-            project_filter = (
-                self.project_filter.currentData() if hasattr(self, "project_filter") else "all"
-            )
+            project_filter = filters["project"]
             if project_filter and project_filter != "all":
                 tasks = [
                     t
                     for t in tasks
                     if (
                         (t.related_project == project_filter)
-                        or (self._projects_cache.get(t.related_project) == project_filter)
+                        or (projects_cache.get(t.related_project) == project_filter)
                     )
                 ]
 
-            client_filter = (
-                self.client_filter.currentData() if hasattr(self, "client_filter") else "all"
-            )
+            client_filter = filters["client"]
             if client_filter and client_filter != "all":
                 tasks = [
                     t
                     for t in tasks
                     if (
                         (t.related_client == client_filter)
-                        or (self._clients_cache.get(t.related_client) == client_filter)
+                        or (clients_cache.get(t.related_client) == client_filter)
                     )
                 ]
 
-            # ترتيب المهام
-            tasks = self._sort_tasks(tasks)
-            self._filtered_tasks = tasks
+            return self._sort_tasks(tasks)
 
-            self._render_current_page()
+        def on_loaded(tasks):
+            try:
+                self._filtered_tasks = tasks
+                self._render_current_page()
+                self.update_statistics()
+                self.visible_count_label.setText(
+                    f"{len(self._filtered_tasks)} مهمة ظاهرة من {len(self.task_service.tasks)}"
+                )
+                safe_print(f"INFO: [TodoManager] ✅ تم تحميل {len(tasks)} مهمة")
+            except Exception as e:
+                safe_print(f"ERROR: [TodoManager] فشل عرض المهام: {e}")
+                traceback.print_exc()
+            finally:
+                self._is_loading = False
+                self.tasks_table.blockSignals(False)
+                self.tasks_table.setUpdatesEnabled(True)
+                self.tasks_table.setSortingEnabled(True)
 
-            self.update_statistics()
-            self.visible_count_label.setText(
-                f"{len(self._filtered_tasks)} مهمة ظاهرة من {len(self.task_service.tasks)}"
-            )
-            safe_print(f"INFO: [TodoManager] ✅ تم تحميل {len(tasks)} مهمة")
-
-        except Exception as e:
-            safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {e}")
-
-            traceback.print_exc()
-        finally:
+        def on_error(error_msg: str):
+            safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {error_msg}")
             self._is_loading = False
             self.tasks_table.blockSignals(False)
             self.tasks_table.setUpdatesEnabled(True)
             self.tasks_table.setSortingEnabled(True)
+
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name=f"todo_tasks_view_{id(self)}",
+            load_function=fetch_filtered_tasks,
+            on_success=on_loaded,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
     def _get_total_pages(self) -> int:
         total = len(self._filtered_tasks)

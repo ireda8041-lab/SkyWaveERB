@@ -210,6 +210,9 @@ class ProjectEditorDialog(QDialog):
         self.project_to_edit = project_to_edit
         self.is_editing = project_to_edit is not None
         self.project_items: list[schemas.ProjectItem] = []
+        self._save_in_progress = False
+        self._save_button_default_text = "💾 حفظ"
+        self._save_new_button_default_text = "💾 حفظ وفتح جديد"
 
         # Get settings service for default treasury account
         self.settings_service = getattr(service_service, "settings_service", None)
@@ -335,6 +338,15 @@ class ProjectEditorDialog(QDialog):
         self.init_ui()
 
         app_signals.safe_connect(app_signals.clients_changed, self._on_clients_changed)
+
+    @staticmethod
+    def _entity_ref(entity: Any, *fields: str) -> str:
+        for field in fields:
+            value = getattr(entity, field, None)
+            text = str(value or "").strip()
+            if text:
+                return text
+        return ""
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -904,6 +916,23 @@ class ProjectEditorDialog(QDialog):
         self._editor_layout_mode = None
         QTimer.singleShot(0, self._apply_responsive_editor_layout)
         QTimer.singleShot(80, self._apply_responsive_editor_layout)
+
+    def _set_save_busy(self, is_busy: bool) -> None:
+        self._save_in_progress = bool(is_busy)
+
+        save_button = self.__dict__.get("save_button")
+        if save_button is not None:
+            save_button.setEnabled(not is_busy)
+            save_button.setText("⏳ جاري الحفظ..." if is_busy else self._save_button_default_text)
+        save_new_button = self.__dict__.get("save_new_button")
+        if save_new_button is not None:
+            save_new_button.setEnabled(not is_busy)
+            save_new_button.setText(
+                "⏳ جاري الحفظ..." if is_busy else self._save_new_button_default_text
+            )
+        cancel_button = self.__dict__.get("cancel_button")
+        if cancel_button is not None:
+            cancel_button.setEnabled(not is_busy)
 
     def _clear_layout_items(self, layout):
         while layout.count():
@@ -1867,6 +1896,9 @@ class ProjectEditorDialog(QDialog):
         self._save_project_impl(should_close=False)
 
     def _save_project_impl(self, should_close: bool):
+        if self.__dict__.get("_save_in_progress", False):
+            return
+
         selected_client = self.client_combo.currentData()
         selected_status = self.status_combo.currentData()
         normalized_project_name = normalize_user_text(self.name_input.text())
@@ -1906,7 +1938,7 @@ class ProjectEditorDialog(QDialog):
 
         project_data = {
             "name": normalized_project_name,
-            "client_id": selected_client.name,
+            "client_id": self._entity_ref(selected_client, "id", "_mongo_id", "name"),
             "status": selected_status,
             "description": "",  # الوصف في notes_input دلوقتي
             "start_date": self.start_date_input.dateTime().toPyDateTime(),
@@ -1969,11 +2001,10 @@ class ProjectEditorDialog(QDialog):
                 if reply == QMessageBox.StandardButton.No:
                     return
 
+        self._set_save_busy(True)
         try:
             if self.is_editing:
-                project_ref = str(
-                    getattr(self.project_to_edit, "id", "") or self.project_to_edit.name
-                )
+                project_ref = self._entity_ref(self.project_to_edit, "id", "_mongo_id", "name")
                 self.project_service.update_project(project_ref, project_data)
             else:
                 self.project_service.create_project(project_data, payment_data)
@@ -1985,6 +2016,8 @@ class ProjectEditorDialog(QDialog):
                 self._reset_form()
         except Exception as e:
             notify_error(f"فشل الحفظ: {e}", "خطأ")
+        finally:
+            self._set_save_busy(False)
 
     def closeEvent(self, event):  # pylint: disable=invalid-name
         """⚡ معالجة إغلاق النافذة - تنظيف الموارد"""
@@ -2792,13 +2825,9 @@ class ProjectManagerTab(QWidget):
             self.projects_table.selectRow(row)
 
         # تحديث selected_project يدوياً
-        project_name_item = self.projects_table.item(row, 1)
-        if project_name_item:
-            project_name = project_name_item.text()
-            for proj in self.projects_list:
-                if proj.name == project_name:
-                    self.selected_project = proj
-                    break
+        project = self._project_from_row(row)
+        if project:
+            self.selected_project = project
 
         # إنشاء القائمة
         menu = QMenu(self.projects_table)
@@ -2871,8 +2900,7 @@ class ProjectManagerTab(QWidget):
         selected = self.projects_table.selectedIndexes()
         if selected:
             row = selected[0].row()
-            project_name = self.projects_table.item(row, 1).text()
-            project = self.project_service.get_project_by_id(project_name)
+            project = self._project_from_row(row)
             if project:
 
                 dialog = ProjectProfitDialog(project, self.project_service, self)
@@ -2883,10 +2911,10 @@ class ProjectManagerTab(QWidget):
         selected = self.projects_table.selectedIndexes()
         if selected:
             row = selected[0].row()
-            project_name = self.projects_table.item(row, 1).text()
-            project = self.project_service.get_project_by_id(project_name)
-            if project and hasattr(self, "printing_service") and self.printing_service:
-                self.printing_service.print_invoice(project)
+            project = self._project_from_row(row)
+            if project:
+                self.selected_project = project
+                self.print_invoice()
 
     def _add_expense_for_project(self):
         """إضافة مصروف للمشروع المحدد"""
@@ -2896,10 +2924,9 @@ class ProjectManagerTab(QWidget):
 
         try:
 
-            # الحصول على project_id
-            project_id = getattr(self.selected_project, "_mongo_id", None) or str(
-                self.selected_project.id
-            )
+            # استخدام نفس المرجع الثابت المعتمد في بقية المسارات لتجنب
+            # السقوط إلى الاسم عند وجود id و _mongo_id معًا.
+            project_id = self._project_ref(self.selected_project, self.selected_project.name)
             project_name = self.selected_project.name
 
             # فتح نافذة إضافة مصروف مع تعبئة المشروع تلقائياً
@@ -2969,16 +2996,7 @@ class ProjectManagerTab(QWidget):
             except Exception:
                 pass
 
-            self.selected_project = None
-            for proj in self._current_page_projects:
-                if proj.name == project_name:
-                    self.selected_project = proj
-                    break
-            if not self.selected_project:
-                for proj in self.projects_list:
-                    if proj.name == project_name:
-                        self.selected_project = proj
-                        break
+            self.selected_project = self._project_from_row(selected_row)
 
             if not self.selected_project:
                 return
@@ -2992,12 +3010,8 @@ class ProjectManagerTab(QWidget):
             self.preview_groupbox.setVisible(True)
 
             # حفظ ID المشروع للمهام
-            project_id_for_tasks = getattr(self.selected_project, "id", None) or getattr(
-                self.selected_project, "_mongo_id", project_name
-            )
-
             # ⚡ تحميل البيانات في الخلفية لمنع التجميد
-            self._load_preview_data_async(project_name, project_id_for_tasks)
+            self._load_preview_data_async(self.selected_project)
 
             return
 
@@ -3045,13 +3059,21 @@ class ProjectManagerTab(QWidget):
         self.projects_table.setRowCount(len(projects))
         for row, project in enumerate(projects):
             invoice_number = getattr(project, "invoice_number", None) or ""
-            self.projects_table.setItem(row, 0, create_centered_item(invoice_number))
-            self.projects_table.setItem(row, 1, create_centered_item(project.name))
-            self.projects_table.setItem(row, 2, create_centered_item(project.client_id))
-            self.projects_table.setItem(row, 3, create_centered_item(project.status.value))
-            self.projects_table.setItem(
-                row, 4, create_centered_item(self._format_date(project.start_date))
-            )
+            project_ref = self._project_ref(project, project.name)
+            project_client_id = str(getattr(project, "client_id", "") or "")
+            client_display = self._client_display_name(project_client_id)
+
+            row_items = [
+                create_centered_item(invoice_number),
+                create_centered_item(project.name),
+                create_centered_item(client_display),
+                create_centered_item(project.status.value),
+                create_centered_item(self._format_date(project.start_date)),
+            ]
+            for column, item in enumerate(row_items):
+                item.setData(Qt.ItemDataRole.UserRole, project_ref)
+                item.setData(Qt.ItemDataRole.UserRole + 1, project_client_id)
+                self.projects_table.setItem(row, column, item)
 
         self.projects_table.blockSignals(False)
         self.projects_table.setUpdatesEnabled(True)
@@ -3095,6 +3117,71 @@ class ProjectManagerTab(QWidget):
     @staticmethod
     def _preview_text_key(value) -> str:
         return normalize_user_text(str(value or "")).strip().casefold()
+
+    def _project_ref(self, project: schemas.Project | None, fallback: str | None = None) -> str:
+        if project is not None:
+            for field in ("id", "_mongo_id", "name"):
+                value = getattr(project, field, None)
+                text = str(value or "").strip()
+                if text:
+                    return text
+        return str(fallback or "").strip()
+
+    def _client_display_name(self, client_ref: str | None) -> str:
+        client_text = str(client_ref or "").strip()
+        if not client_text:
+            return ""
+
+        try:
+            client = self.client_service.get_client_by_id(client_text)
+            if client and getattr(client, "name", None):
+                return str(client.name)
+        except Exception:
+            pass
+
+        return client_text
+
+    def _project_cache_key(self, project_ref: str, client_id: str | None = None) -> str:
+        return f"{self._preview_text_key(client_id)}::{self._preview_text_key(project_ref)}"
+
+    def _project_identity(self, project: schemas.Project | None) -> str:
+        if project is None:
+            return ""
+        return self._project_cache_key(
+            self._project_ref(project, getattr(project, "name", "")),
+            str(getattr(project, "client_id", "") or ""),
+        )
+
+    def _project_from_row(self, row: int) -> schemas.Project | None:
+        project_ref = ""
+        client_id = ""
+        for column in range(self.projects_table.columnCount()):
+            item = self.projects_table.item(row, column)
+            if not item:
+                continue
+            project_ref = str(item.data(Qt.ItemDataRole.UserRole) or "").strip()
+            client_id = str(item.data(Qt.ItemDataRole.UserRole + 1) or "").strip()
+            if project_ref:
+                break
+
+        if project_ref:
+            project = self.project_service.get_project_by_id(project_ref, client_id or None)
+            if project:
+                return project
+
+        project_name_item = self.projects_table.item(row, 1)
+        project_name = project_name_item.text().strip() if project_name_item else ""
+        if not project_name:
+            return None
+
+        matches = [
+            proj
+            for proj in getattr(self, "_current_page_projects", []) or []
+            if (getattr(proj, "name", "") or "").strip() == project_name
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def _payment_preview_key(self, payment) -> tuple:
         date_short = str(getattr(payment, "date", "") or "")[:10]
@@ -3166,8 +3253,15 @@ class ProjectManagerTab(QWidget):
 
         return list(deduped.values())
 
-    def _load_preview_data_async(self, project_name: str, project_id_for_tasks: str):
+    def _load_preview_data_async(self, project: schemas.Project):
         """⚡⚡ تحميل بيانات المعاينة - محسّن للسرعة القصوى مع بيانات حديثة"""
+
+        project_name = getattr(project, "name", "") or ""
+        project_ref = self._project_ref(project, project_name)
+        project_client_id = str(getattr(project, "client_id", "") or "")
+        project_id_for_tasks = project_ref
+        cache_key = self._project_cache_key(project_ref, project_client_id)
+        expected_identity = self._project_identity(project)
 
         # ⚡ مسح محتويات الجداول فوراً عند بدء التحميل لمنع ظهور بيانات المشروع السابق
         self._populate_payments_table_fast([])
@@ -3197,7 +3291,7 @@ class ProjectManagerTab(QWidget):
             app_signals.data_changed.connect(_invalidate)
             self._preview_cache_connected = True
 
-        cache_entry = self._preview_cache.get(project_name)
+        cache_entry = self._preview_cache.get(cache_key)
         if cache_entry:
             import time
 
@@ -3235,7 +3329,6 @@ class ProjectManagerTab(QWidget):
                 except Exception:
                     pass
 
-                # ⚡ تحديث الجداول بسرعة مع ضمان عدم تكرار البيانات (من الذاكرة المؤقتة)
                 payments = data.get("payments", [])
                 expenses = data.get("expenses", [])
                 tasks = data.get("tasks", [])
@@ -3251,16 +3344,35 @@ class ProjectManagerTab(QWidget):
 
         data_loader = get_data_loader()
 
-        # ⚡ تحميل كل البيانات في طلب واحد (أسرع) - مع تجاوز الـ cache
         def fetch_all_data():
             try:
-                raw_payments = self.project_service.get_payments_for_project(project_name) or []
-                raw_expenses = self.project_service.get_expenses_for_project(project_name) or []
+                raw_payments = (
+                    self.project_service.get_payments_for_project(
+                        project_ref,
+                        client_id=project_client_id or None,
+                    )
+                    or []
+                )
+                raw_expenses = (
+                    self.project_service.get_expenses_for_project(
+                        project_ref,
+                        client_id=project_client_id or None,
+                    )
+                    or []
+                )
                 payments = self._dedupe_preview_payments(raw_payments)
                 expenses = self._dedupe_preview_expenses(raw_expenses)
-                project = self.project_service.repo.get_project_by_number(project_name)
+                project_details = (
+                    self.project_service.get_project_by_id(
+                        project_ref,
+                        project_client_id or None,
+                    )
+                    or project
+                )
 
-                total_revenue = float(project.total_amount or 0.0) if project else 0.0
+                total_revenue = (
+                    float(project_details.total_amount or 0.0) if project_details else 0.0
+                )
                 total_paid = sum(float(getattr(p, "amount", 0.0) or 0.0) for p in payments)
                 total_expenses = sum(float(getattr(e, "amount", 0.0) or 0.0) for e in expenses)
                 net_profit = total_revenue - total_expenses
@@ -3274,14 +3386,12 @@ class ProjectManagerTab(QWidget):
                     "balance_due": balance_due,
                 }
 
-                # جلب المهام
                 tasks = []
                 try:
                     ts = TaskService()
                     tasks = ts.get_tasks_by_project(str(project_id_for_tasks)) or []
                 except Exception as e:
                     safe_print(f"DEBUG: [ProjectManager] فشل جلب المهام في الخلفية: {e}")
-                    pass
 
                 return {
                     "profit": profit_data,
@@ -3294,15 +3404,13 @@ class ProjectManagerTab(QWidget):
                 raise e
 
         def on_all_data_loaded(data):
-            # التحقق أن المشروع لا يزال محدداً
-            if not self.selected_project or self.selected_project.name != project_name:
+            if self._project_identity(self.selected_project) != expected_identity:
                 return
 
             import time
 
-            self._preview_cache[project_name] = {"ts": time.monotonic(), "data": data}
+            self._preview_cache[cache_key] = {"ts": time.monotonic(), "data": data}
 
-            # ⚡ تحديث الكروت فوراً
             profit_data = data.get("profit", {})
             self.update_card_value(self.revenue_card, profit_data.get("total_revenue", 0))
             self.update_card_value(self.paid_card, profit_data.get("total_paid", 0))
@@ -3337,12 +3445,10 @@ class ProjectManagerTab(QWidget):
             except Exception:
                 pass
 
-            # ⚡ تحديث الجداول بسرعة مع ضمان عدم تكرار البيانات
             payments = data.get("payments", [])
             expenses = data.get("expenses", [])
             tasks = data.get("tasks", [])
 
-            # فلترة التكرار بناءً على الـ ID (Mongo ID أو SQLite ID)
             unique_payments = self._dedupe_preview_payments(payments)
             unique_expenses = self._dedupe_preview_expenses(expenses)
             unique_tasks = list({(getattr(t, "id", None) or id(t)): t for t in tasks}.values())
@@ -3352,7 +3458,7 @@ class ProjectManagerTab(QWidget):
             self._populate_tasks_table_fast(unique_tasks)
 
         def on_error(error_msg: str):
-            if not self.selected_project or self.selected_project.name != project_name:
+            if self._project_identity(self.selected_project) != expected_identity:
                 return
             safe_print(f"ERROR: فشل تحميل معاينة المشروع '{project_name}': {error_msg}")
             self.update_card_value(self.revenue_card, 0)
@@ -4233,7 +4339,7 @@ class ProjectManagerTab(QWidget):
         try:
             # حذف المشروع باستخدام الاسم مباشرة
             safe_print(f"INFO: [ProjectManager] جاري حذف المشروع: {project_name}")
-            project_ref = str(getattr(self.selected_project, "id", "") or project_name)
+            project_ref = self._project_ref(self.selected_project, project_name)
             success = self.project_service.delete_project(project_ref)
 
             if success:
@@ -4317,7 +4423,7 @@ class ProjectManagerTab(QWidget):
                 return
 
             # جلب الدفعات
-            payments_list = self._get_payments_list(project.name)
+            payments_list = self._get_payments_list(project)
             safe_print(f"INFO: [ProjectManager] الدفعات المرسلة للطباعة: {payments_list}")
 
             # تجهيز معلومات العميل
@@ -4354,7 +4460,10 @@ class ProjectManagerTab(QWidget):
                 return
 
             # Fallback: استخدام InvoicePrintingService
-            profit_data = self.project_service.get_project_profitability(project.name)
+            profit_data = self.project_service.get_project_profitability(
+                self._project_ref(project, project.name),
+                client_id=getattr(project, "client_id", None),
+            )
 
             # Get settings service for company data
             settings_service = None
@@ -4364,7 +4473,25 @@ class ProjectManagerTab(QWidget):
             # Fallback: استخدام InvoicePrintingService
             # Step D: Prepare the complete data dictionary
             # ⚡ استخدم رقم الفاتورة المحفوظ أولاً، وإلا ولّد رقم جديد
-            invoice_number = getattr(project, "invoice_number", None)
+            invoice_number = str(getattr(project, "invoice_number", None) or "").strip()
+            if not invoice_number:
+                repo = getattr(self.project_service, "repo", None)
+                if repo is not None and hasattr(repo, "ensure_invoice_number"):
+                    try:
+                        invoice_number = str(
+                            repo.ensure_invoice_number(
+                                self._project_ref(project, project.name),
+                                getattr(project, "client_id", None),
+                            )
+                            or ""
+                        ).strip()
+                        if invoice_number:
+                            project.invoice_number = invoice_number
+                    except Exception as invoice_err:
+                        safe_print(
+                            f"WARNING: [ProjectManager] فشل مزامنة رقم الفاتورة من المستودع: {invoice_err}"
+                        )
+
             if not invoice_number:
                 local_id = getattr(project, "id", None) or 1
                 invoice_number = f"SW-{97161 + int(local_id)}"
@@ -4453,11 +4580,20 @@ class ProjectManagerTab(QWidget):
 
             traceback.print_exc()
 
-    def _get_payments_list(self, project_name: str) -> list:
+    def _get_payments_list(self, project: schemas.Project | str) -> list:
         """جلب قائمة الدفعات للمشروع - محسّن للسرعة"""
         payments_list = []
         try:
-            payments = self.project_service.get_payments_for_project(project_name)
+            project_obj = project if isinstance(project, schemas.Project) else None
+            project_ref = (
+                self._project_ref(project_obj, str(project))
+                if project_obj is not None
+                else str(project or "")
+            )
+            client_id = getattr(project_obj, "client_id", None) if project_obj is not None else None
+            payments = self.project_service.get_payments_for_project(
+                project_ref, client_id=client_id
+            )
             if not payments:
                 return []
 
@@ -4521,7 +4657,7 @@ class ProjectManagerTab(QWidget):
                 return
 
             # جلب الدفعات
-            payments_list = self._get_payments_list(project.name)
+            payments_list = self._get_payments_list(project)
             safe_print(f"INFO: [ProjectManager] الدفعات المرسلة للقالب: {payments_list}")
 
             # تجهيز معلومات العميل

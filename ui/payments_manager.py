@@ -379,7 +379,15 @@ class NewPaymentDialog(QDialog):
 
         # جلب بيانات الربحية
         try:
-            profit_data = self.project_service.get_project_profitability(self.selected_project.name)
+            project_ref = str(
+                getattr(self.selected_project, "id", None)
+                or getattr(self.selected_project, "_mongo_id", None)
+                or self.selected_project.name
+            )
+            profit_data = self.project_service.get_project_profitability(
+                project_ref,
+                client_id=getattr(self.selected_project, "client_id", None),
+            )
             total = profit_data.get("total_revenue", 0)
             paid = profit_data.get("total_paid", 0)
             remaining = profit_data.get("balance_due", 0)
@@ -487,7 +495,15 @@ class NewPaymentDialog(QDialog):
 
         # تحذير إذا كان المبلغ أكبر من المتبقي
         try:
-            profit_data = self.project_service.get_project_profitability(self.selected_project.name)
+            project_ref = str(
+                getattr(self.selected_project, "id", None)
+                or getattr(self.selected_project, "_mongo_id", None)
+                or self.selected_project.name
+            )
+            profit_data = self.project_service.get_project_profitability(
+                project_ref,
+                client_id=getattr(self.selected_project, "client_id", None),
+            )
             remaining = profit_data.get("balance_due", 0)
             if amount > remaining > 0:
                 reply = QMessageBox.question(
@@ -551,10 +567,14 @@ class PaymentEditorDialog(QDialog):
         self.project_service = project_service
         self.original_amount = to_decimal(payment.amount)
         self.original_account_id = payment.account_id
+        self.selected_project: schemas.Project | None = None
+        self._projects_loaded = False
+        self._client_name_cache: dict[str, str] = {}
+        self._project_invoice_cache: dict[str, str] = {}
 
         self.setWindowTitle(f"تعديل دفعة - {payment.project_id}")
-        self.setMinimumWidth(450)
-        self.setMinimumHeight(400)
+        self.setMinimumWidth(560)
+        self.setMinimumHeight(500)
 
         # 📱 سياسة التمدد
         from PyQt6.QtWidgets import QSizePolicy
@@ -575,7 +595,88 @@ class PaymentEditorDialog(QDialog):
         )
 
         layout = QVBoxLayout()
+        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
         form = QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+
+        # المشروع المرتبط
+        self.project_frame = QFrame()
+        self.project_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: rgba(15, 23, 42, 0.72);
+                border: 1px solid rgba(59, 130, 246, 0.22);
+                border-radius: 10px;
+            }
+            QLabel {
+                background: transparent;
+            }
+        """
+        )
+        project_layout = QVBoxLayout(self.project_frame)
+        project_layout.setContentsMargins(12, 12, 12, 12)
+        project_layout.setSpacing(8)
+
+        project_header = QHBoxLayout()
+        project_header.setSpacing(8)
+        self.project_section_title = QLabel("المشروع المرتبط")
+        self.project_section_title.setFont(get_cairo_font(12, bold=True))
+        self.project_section_title.setStyleSheet("color: #e2e8f0;")
+
+        self.change_project_btn = QPushButton("تغيير المشروع المرتبط")
+        self.change_project_btn.setFixedHeight(30)
+        self.change_project_btn.setStyleSheet(BUTTON_STYLES["secondary"])
+        self.change_project_btn.clicked.connect(self._toggle_project_picker)
+
+        project_header.addWidget(self.project_section_title)
+        project_header.addStretch()
+        project_header.addWidget(self.change_project_btn)
+        project_layout.addLayout(project_header)
+
+        self.project_name_label = QLabel("")
+        self.project_name_label.setFont(get_cairo_font(12, bold=True))
+        self.project_name_label.setStyleSheet("color: #f8fafc;")
+        project_layout.addWidget(self.project_name_label)
+
+        self.project_meta_label = QLabel("")
+        self.project_meta_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        project_layout.addWidget(self.project_meta_label)
+
+        self.project_invoice_label = QLabel("")
+        self.project_invoice_label.setStyleSheet(
+            "color: #38bdf8; font-size: 11px; font-weight: bold;"
+        )
+        project_layout.addWidget(self.project_invoice_label)
+
+        self.project_picker_frame = QFrame()
+        self.project_picker_frame.setVisible(False)
+        self.project_picker_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: transparent;
+                border: none;
+            }
+        """
+        )
+        picker_layout = QVBoxLayout(self.project_picker_frame)
+        picker_layout.setContentsMargins(0, 4, 0, 0)
+        picker_layout.setSpacing(6)
+
+        self.project_search_hint = QLabel(
+            "ابحث باسم المشروع أو رقم الفاتورة أو اسم العميل ثم اختر النتيجة."
+        )
+        self.project_search_hint.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        picker_layout.addWidget(self.project_search_hint)
+
+        self.project_combo = SmartFilterComboBox()
+        self.project_combo.setMinimumWidth(320)
+        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
+        picker_layout.addWidget(self.project_combo)
+
+        project_layout.addWidget(self.project_picker_frame)
+        layout.addWidget(self.project_frame)
 
         # حساب الاستلام (SmartFilterComboBox مع فلترة)
         self.account_combo = SmartFilterComboBox()
@@ -624,6 +725,7 @@ class PaymentEditorDialog(QDialog):
         form.addRow("المبلغ:", self.amount_input)
         form.addRow("التاريخ:", self.date_input)
         form.addRow("طريقة الدفع:", self.method_combo)
+        form.addRow("رقم الفاتورة:", self._build_invoice_badge())
         layout.addLayout(form)
 
         # أزرار
@@ -650,10 +752,219 @@ class PaymentEditorDialog(QDialog):
 
         self.setLayout(layout)
 
+        self._load_project_options()
+        self._refresh_project_summary()
+
         # تطبيق الأسهم على كل الـ widgets
         from ui.styles import apply_arrows_to_all_widgets
 
         apply_arrows_to_all_widgets(self)
+
+    def _build_invoice_badge(self) -> QLabel:
+        self.invoice_value_label = QLabel("")
+        self.invoice_value_label.setMinimumHeight(28)
+        self.invoice_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.invoice_value_label.setStyleSheet(
+            """
+            QLabel {
+                color: #f8fafc;
+                background-color: rgba(14, 165, 233, 0.16);
+                border: 1px solid rgba(14, 165, 233, 0.25);
+                border-radius: 8px;
+                padding: 6px 10px;
+                font-weight: bold;
+            }
+        """
+        )
+        return self.invoice_value_label
+
+    def _project_ref(self, project: schemas.Project | None, fallback: str = "") -> str:
+        if project is None:
+            return str(fallback or "").strip()
+        if self.project_service and hasattr(self.project_service, "_project_ref"):
+            return str(
+                self.project_service._project_ref(project, fallback or project.name) or ""
+            ).strip()
+        return str(
+            getattr(project, "id", None)
+            or getattr(project, "_mongo_id", None)
+            or getattr(project, "name", fallback)
+            or ""
+        ).strip()
+
+    def _get_client_name(self, client_id: str) -> str:
+        client_ref = str(client_id or "").strip()
+        if not client_ref:
+            return ""
+        if client_ref in self._client_name_cache:
+            return self._client_name_cache[client_ref]
+        if not self.project_service:
+            return client_ref
+        repo = getattr(self.project_service, "repo", None)
+        if repo is None or not hasattr(repo, "get_client_by_id"):
+            return client_ref
+        try:
+            client = repo.get_client_by_id(client_ref)
+            client_name = str(getattr(client, "name", "") or client_ref).strip()
+            self._client_name_cache[client_ref] = client_name
+            return client_name
+        except Exception:
+            return client_ref
+
+    def _resolve_invoice_number_for_project(
+        self, project: schemas.Project | None, *, ensure: bool = False
+    ) -> str:
+        if project is None:
+            return str(getattr(self.payment, "invoice_number", "") or "").strip()
+        project_ref = self._project_ref(project, project.name)
+        if project_ref in self._project_invoice_cache:
+            return self._project_invoice_cache[project_ref]
+        invoice_number = str(getattr(project, "invoice_number", "") or "").strip()
+        if invoice_number:
+            self._project_invoice_cache[project_ref] = invoice_number
+            return invoice_number
+        repo = getattr(self.project_service, "repo", None) if self.project_service else None
+        if repo is not None and hasattr(repo, "get_invoice_number_for_project"):
+            try:
+                invoice_number = str(
+                    repo.get_invoice_number_for_project(
+                        project_ref,
+                        getattr(project, "client_id", None),
+                    )
+                    or ""
+                ).strip()
+                if invoice_number:
+                    self._project_invoice_cache[project_ref] = invoice_number
+                return invoice_number
+            except Exception:
+                pass
+        if ensure and repo is not None and hasattr(repo, "ensure_invoice_number"):
+            try:
+                invoice_number = str(
+                    repo.ensure_invoice_number(
+                        project_ref,
+                        getattr(project, "client_id", None),
+                    )
+                    or ""
+                ).strip()
+                if invoice_number:
+                    self._project_invoice_cache[project_ref] = invoice_number
+                return invoice_number
+            except Exception:
+                return ""
+        return ""
+
+    def _project_display_text(self, project: schemas.Project) -> str:
+        project_name = str(getattr(project, "name", "") or "").strip() or "بدون اسم"
+        client_name = self._get_client_name(getattr(project, "client_id", "") or "")
+        invoice_number = self._resolve_invoice_number_for_project(project)
+        extra_parts = []
+        if invoice_number:
+            extra_parts.append(f"فاتورة: {invoice_number}")
+        if client_name:
+            extra_parts.append(f"عميل: {client_name}")
+        suffix = f" - {' - '.join(extra_parts)}" if extra_parts else ""
+        return f"📁 {project_name}{suffix}"
+
+    def _project_matches_payment(self, project: schemas.Project) -> bool:
+        payment_project_ref = str(getattr(self.payment, "project_id", "") or "").strip()
+        payment_invoice_number = str(getattr(self.payment, "invoice_number", "") or "").strip()
+        candidates = {
+            self._project_ref(project, getattr(project, "name", "")),
+            str(getattr(project, "id", "") or "").strip(),
+            str(getattr(project, "_mongo_id", "") or "").strip(),
+            str(getattr(project, "name", "") or "").strip(),
+            str(getattr(project, "invoice_number", "") or "").strip(),
+        }
+        candidates = {candidate for candidate in candidates if candidate}
+        return payment_project_ref in candidates or (
+            payment_invoice_number and payment_invoice_number in candidates
+        )
+
+    def _load_project_options(self):
+        if not self.project_service or self._projects_loaded:
+            if not self.project_service:
+                self.change_project_btn.setEnabled(False)
+                self.change_project_btn.setToolTip("خدمة المشاريع غير متاحة في هذا السياق.")
+            return
+        self._projects_loaded = True
+        self.project_combo.clear()
+        try:
+            repo = getattr(self.project_service, "repo", None)
+            if repo is not None and hasattr(repo, "get_all_clients"):
+                for client in repo.get_all_clients() or []:
+                    client_name = str(getattr(client, "name", "") or "").strip()
+                    if not client_name:
+                        continue
+                    client_id = str(getattr(client, "id", "") or "").strip()
+                    mongo_id = str(getattr(client, "_mongo_id", "") or "").strip()
+                    if client_id:
+                        self._client_name_cache[client_id] = client_name
+                    if mongo_id:
+                        self._client_name_cache[mongo_id] = client_name
+            if repo is not None and hasattr(repo, "get_all_invoice_numbers"):
+                self._project_invoice_cache.update(repo.get_all_invoice_numbers() or {})
+            projects = self.project_service.get_all_projects() or []
+            projects = sorted(
+                projects,
+                key=lambda project: (
+                    str(getattr(project, "name", "") or "").strip().lower(),
+                    str(getattr(project, "invoice_number", "") or "").strip().lower(),
+                ),
+            )
+            selected_index = -1
+            for index, project in enumerate(projects):
+                self.project_combo.addItem(self._project_display_text(project), userData=project)
+                if selected_index < 0 and self._project_matches_payment(project):
+                    selected_index = index
+                    self.selected_project = project
+            self.project_combo.lineEdit().setPlaceholderText(
+                "اكتب اسم المشروع أو رقم الفاتورة أو العميل..."
+            )
+            if selected_index >= 0:
+                self.project_combo.setCurrentIndex(selected_index)
+            elif projects:
+                self.selected_project = None
+        except Exception as exc:
+            safe_print(f"ERROR: [PaymentEditorDialog] فشل تحميل المشاريع: {exc}")
+            self.change_project_btn.setEnabled(False)
+            self.project_search_hint.setText("تعذر تحميل المشاريع حاليًا.")
+
+    def _toggle_project_picker(self):
+        if not self.project_service:
+            return
+        visible = not self.project_picker_frame.isVisible()
+        self.project_picker_frame.setVisible(visible)
+        self.change_project_btn.setText("إخفاء البحث" if visible else "تغيير المشروع المرتبط")
+        if visible and self.project_combo.lineEdit():
+            self.project_combo.lineEdit().setFocus()
+            self.project_combo.lineEdit().selectAll()
+
+    def _on_project_selected(self, index: int):
+        if index < 0:
+            return
+        selected_project = self.project_combo.currentData()
+        if not selected_project:
+            return
+        self.selected_project = selected_project
+        self._refresh_project_summary()
+
+    def _refresh_project_summary(self):
+        project = self.selected_project
+        project_name = str(getattr(self.payment, "project_id", "") or "").strip() or "غير محدد"
+        client_name = self._get_client_name(getattr(self.payment, "client_id", "") or "")
+        invoice_number = str(getattr(self.payment, "invoice_number", "") or "").strip()
+        if project is not None:
+            project_name = str(getattr(project, "name", project_name) or project_name).strip()
+            client_name = self._get_client_name(getattr(project, "client_id", "") or "")
+            invoice_number = self._resolve_invoice_number_for_project(project, ensure=True)
+        self.project_name_label.setText(project_name)
+        self.project_meta_label.setText(f"العميل المرتبط: {client_name or 'غير محدد'}")
+        self.project_invoice_label.setText(
+            f"رقم الفاتورة المرتبط: {invoice_number or 'غير محدد حتى الآن'}"
+        )
+        self.invoice_value_label.setText(invoice_number or "غير محدد")
+        self.setWindowTitle(f"تعديل دفعة - {project_name}")
 
     def _update_payment_method_from_account(self):
         """⚡ تحديث طريقة الدفع تلقائياً حسب الحساب المختار - يدعم نظام 4 و 6 أرقام"""
@@ -713,6 +1024,24 @@ class PaymentEditorDialog(QDialog):
             self.payment.account_id = new_account_id
             self.payment.date = self.date_input.dateTime().toPyDateTime()
             self.payment.method = self.method_combo.currentText()
+            if self.selected_project is not None:
+                self.payment.project_id = self._project_ref(
+                    self.selected_project,
+                    str(getattr(self.payment, "project_id", "") or ""),
+                )
+                self.payment.client_id = str(
+                    getattr(self.selected_project, "client_id", "") or self.payment.client_id or ""
+                ).strip()
+                self.payment.invoice_number = self._resolve_invoice_number_for_project(
+                    self.selected_project, ensure=True
+                )
+            elif self.project_service and not getattr(self.payment, "invoice_number", None):
+                repo = getattr(self.project_service, "repo", None)
+                if repo is not None and hasattr(repo, "ensure_invoice_number"):
+                    self.payment.invoice_number = repo.ensure_invoice_number(
+                        self.payment.project_id,
+                        self.payment.client_id or None,
+                    )
 
             payment_id = self.payment.id or self.payment._mongo_id
 
@@ -833,9 +1162,18 @@ class PaymentsManagerTab(QWidget):
 
         # جدول الدفعات
         self.payments_table = QTableWidget()
-        self.payments_table.setColumnCount(7)
+        self.payments_table.setColumnCount(8)
         self.payments_table.setHorizontalHeaderLabels(
-            ["#", "التاريخ", "النوع", "العميل/المشروع", "المبلغ", "طريقة الدفع", "الحساب"]
+            [
+                "#",
+                "التاريخ",
+                "النوع",
+                "العميل/المشروع",
+                "رقم الفاتورة",
+                "المبلغ",
+                "طريقة الدفع",
+                "الحساب",
+            ]
         )
 
         # === UNIVERSAL SEARCH BAR ===
@@ -843,7 +1181,7 @@ class PaymentsManagerTab(QWidget):
 
         self.search_bar = UniversalSearchBar(
             self.payments_table,
-            placeholder="🔍 بحث (التاريخ، النوع، العميل، المشروع، المبلغ، الحساب)...",
+            placeholder="🔍 بحث (التاريخ، العميل، المشروع، رقم الفاتورة، المبلغ، الحساب)...",
         )
         layout.addWidget(self.search_bar)
         # === END SEARCH BAR ===
@@ -857,9 +1195,12 @@ class PaymentsManagerTab(QWidget):
             h_header.setSectionResizeMode(
                 3, QHeaderView.ResizeMode.Stretch
             )  # العميل/المشروع - يتمدد
-            h_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ
-            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # طريقة الدفع
-            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)  # الحساب - يتمدد
+            h_header.setSectionResizeMode(
+                4, QHeaderView.ResizeMode.ResizeToContents
+            )  # رقم الفاتورة
+            h_header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # المبلغ
+            h_header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # طريقة الدفع
+            h_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)  # الحساب - يتمدد
         self.payments_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.payments_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.payments_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -987,6 +1328,9 @@ class PaymentsManagerTab(QWidget):
                             proj_code = (getattr(proj, "project_code", None) or "").strip()
                             if proj_code:
                                 projects_cache[proj_code] = proj
+                            invoice_number = (getattr(proj, "invoice_number", None) or "").strip()
+                            if invoice_number:
+                                projects_cache[invoice_number] = proj
                         except Exception:
                             continue
                     self._set_cached_lookup("projects", projects_cache)
@@ -1142,14 +1486,22 @@ class PaymentsManagerTab(QWidget):
                 i, 3, create_centered_item(f"{client_name} - {project_name}")
             )
 
+            invoice_number = str(getattr(payment, "invoice_number", "") or "").strip()
+            if not invoice_number and payment.project_id:
+                proj_key = str(payment.project_id).strip()
+                project = projects_cache.get(payment.project_id) or projects_cache.get(proj_key)
+                if project:
+                    invoice_number = str(getattr(project, "invoice_number", "") or "").strip()
+            self.payments_table.setItem(i, 4, create_centered_item(invoice_number or "—"))
+
             amount_item = create_centered_item(f"{payment.amount:,.2f}")
             amount_item.setForeground(QColor("#0A6CF1"))
-            self.payments_table.setItem(i, 4, amount_item)
+            self.payments_table.setItem(i, 5, amount_item)
 
             payment_method = self._get_payment_method_from_account(
                 payment.account_id, accounts_cache
             )
-            self.payments_table.setItem(i, 5, create_centered_item(payment_method))
+            self.payments_table.setItem(i, 6, create_centered_item(payment_method))
 
             account_display = "---"
             if payment.account_id and payment.account_id in accounts_cache:
@@ -1158,7 +1510,7 @@ class PaymentsManagerTab(QWidget):
             elif payment.account_id:
                 account_display = payment.account_id
 
-            self.payments_table.setItem(i, 6, create_centered_item(account_display))
+            self.payments_table.setItem(i, 7, create_centered_item(account_display))
             self.payments_table.setRowHeight(i, 40)
 
     def _update_pagination_controls(self, total_pages: int):

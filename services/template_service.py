@@ -203,6 +203,56 @@ class TemplateService(BaseService):
             raise ValueError("Template path is outside templates directory")
         return full
 
+    @staticmethod
+    def _project_field(project: Any, field: str, default: Any = None) -> Any:
+        if isinstance(project, dict):
+            return project.get(field, default)
+        return getattr(project, field, default)
+
+    @staticmethod
+    def _set_project_field(project: Any, field: str, value: Any) -> None:
+        if isinstance(project, dict):
+            project[field] = value
+        else:
+            setattr(project, field, value)
+
+    def _resolve_project_invoice_number(self, project: Any) -> str:
+        existing_invoice_number = str(
+            self._project_field(project, "invoice_number", "") or ""
+        ).strip()
+        if existing_invoice_number:
+            return existing_invoice_number
+
+        project_ref = (
+            str(self._project_field(project, "id", "") or "").strip()
+            or str(self._project_field(project, "_mongo_id", "") or "").strip()
+            or str(self._project_field(project, "name", "") or "").strip()
+        )
+        client_id = str(self._project_field(project, "client_id", "") or "").strip()
+
+        if self.repo is not None and project_ref:
+            try:
+                invoice_number = str(
+                    self.repo.ensure_invoice_number(project_ref, client_id or None) or ""
+                ).strip()
+                if invoice_number:
+                    self._set_project_field(project, "invoice_number", invoice_number)
+                    return invoice_number
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [TemplateService] فشل مزامنة رقم الفاتورة عبر المستودع: {exc}"
+                )
+
+        local_id = self._project_field(project, "id", None)
+        try:
+            local_id_int = int(local_id)
+        except (TypeError, ValueError):
+            local_id_int = 0
+
+        invoice_number = f"SW-{97161 + local_id_int}" if local_id_int > 0 else "SW-97162"
+        self._set_project_field(project, "invoice_number", invoice_number)
+        return invoice_number
+
     def _create_templates_table(self):
         """إنشاء جدول قوالب الفواتير"""
         create_table_sql = """
@@ -624,58 +674,7 @@ class TemplateService(BaseService):
                     }
                 )
 
-            # ⚡ إنتاج رقم الفاتورة الثابت (يُحفظ في قاعدة البيانات)
-            try:
-                # أولاً: تحقق من وجود رقم فاتورة محفوظ مسبقاً
-                existing_invoice_number = getattr(project, "invoice_number", None)
-                if isinstance(project, dict):
-                    existing_invoice_number = project.get("invoice_number")
-
-                if existing_invoice_number:
-                    # استخدم الرقم المحفوظ
-                    invoice_id = existing_invoice_number
-                    safe_print(
-                        f"INFO: [TemplateService] استخدام رقم الفاتورة المحفوظ: {invoice_id}"
-                    )
-                else:
-                    # ولّد رقم جديد وحاول حفظه
-                    local_id = getattr(project, "id", None)
-                    if isinstance(project, dict):
-                        local_id = project.get("id")
-
-                    if local_id and local_id > 0:
-                        # الصيغة: 97161 + local_id (يبدأ من SW-97162)
-                        invoice_id = f"SW-{97161 + int(local_id)}"
-
-                        # حاول حفظ رقم الفاتورة في قاعدة البيانات
-                        try:
-                            if self.repo is not None:
-                                cursor = self.repo.get_cursor()
-                                try:
-                                    cursor.execute(
-                                        "UPDATE projects SET invoice_number = ? WHERE id = ?",
-                                        (invoice_id, local_id),
-                                    )
-                                    self.repo.sqlite_conn.commit()
-                                    safe_print(
-                                        f"✅ [TemplateService] تم حفظ رقم الفاتورة {invoice_id} للمشروع {local_id}"
-                                    )
-                                finally:
-                                    cursor.close()
-                        except Exception as save_error:
-                            safe_print(
-                                f"WARNING: [TemplateService] فشل حفظ رقم الفاتورة: {save_error}"
-                            )
-                    else:
-                        # لا يوجد ID - استخدم رقم افتراضي
-                        invoice_id = "SW-97162"
-                        safe_print(
-                            f"WARNING: [TemplateService] المشروع بدون ID، استخدام رقم افتراضي: {invoice_id}"
-                        )
-            except (AttributeError, KeyError, TypeError) as e:
-                # في حالة الخطأ، استخدم رقم افتراضي
-                invoice_id = "SW-97162"
-                safe_print(f"ERROR: [TemplateService] خطأ في توليد رقم الفاتورة: {e}")
+            invoice_id = self._resolve_project_invoice_number(project)
 
             # تاريخ الفاتورة = تاريخ بداية المشروع
             project_start_date = getattr(project, "start_date", None)

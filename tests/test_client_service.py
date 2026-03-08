@@ -54,15 +54,20 @@ class TestClientService:
     def test_delete_client(self, service, mock_repo):
         # Setup
         client_id = "client_123"
+        mock_repo.get_client_by_id.return_value = schemas.Client(name="Client Delete")
         mock_repo.delete_client_permanently.return_value = True
 
         # Action
-        with patch("services.client_service.app_signals"):
+        with (
+            patch("services.client_service.app_signals"),
+            patch("services.client_service.notify_operation") as notify_mock,
+        ):
             result = service.delete_client(client_id)
 
         # Assert
         assert result is True
         mock_repo.delete_client_permanently.assert_called_once_with(client_id)
+        notify_mock.assert_called_once_with("deleted", "client", "Client Delete")
 
     def test_update_client_keeps_existing_logo_when_not_explicitly_deleted(
         self, service, mock_repo

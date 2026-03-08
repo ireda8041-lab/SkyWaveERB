@@ -71,7 +71,15 @@ class PaymentDialog(QDialog):
 
         if project_service:
             try:
-                profit_data = project_service.get_project_profitability(project.name)
+                project_ref = str(
+                    getattr(project, "id", None)
+                    or getattr(project, "_mongo_id", None)
+                    or project.name
+                )
+                profit_data = project_service.get_project_profitability(
+                    project_ref,
+                    client_id=getattr(project, "client_id", None),
+                )
                 self.total_paid = to_decimal(profit_data.get("total_paid", 0))
                 self.remaining_amount = to_decimal(
                     profit_data.get("balance_due", float(self.total_amount))

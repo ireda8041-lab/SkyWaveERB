@@ -86,6 +86,57 @@ def test_fetch_client_logo_on_demand_updates_sqlite(repo):
     assert row["logo_last_synced"] is not None
 
 
+def test_fetch_client_logo_on_demand_ignores_deleted_remote_client(repo):
+    created = repo.create_client(schemas.Client(name="Deleted Lazy Logo Client"))
+
+    cursor = repo.get_cursor()
+    try:
+        cursor.execute(
+            "UPDATE clients SET _mongo_id = ? WHERE id = ?",
+            ("mongo-client-deleted-1", int(created.id)),
+        )
+        repo.sqlite_conn.commit()
+    finally:
+        cursor.close()
+
+    class _FakeDeletedClientsCollection:
+        def find_one(self, query, _projection):
+            query_text = str(query)
+            if "is_deleted" in query_text or "sync_status" in query_text:
+                return None
+            return {
+                "_id": "mongo-client-deleted-1",
+                "logo_data": "data:image/png;base64,REVFTEVURUQ=",
+                "has_logo": True,
+                "sync_status": "deleted",
+                "is_deleted": True,
+                "last_modified": "2026-02-09T20:00:00",
+            }
+
+        def update_one(self, *_args, **_kwargs):
+            return types.SimpleNamespace(modified_count=1)
+
+    repo.online = True
+    repo.mongo_client = object()
+    repo.mongo_db = types.SimpleNamespace(clients=_FakeDeletedClientsCollection())
+
+    assert repo.fetch_client_logo_on_demand(str(created.id)) is False
+
+    verify = repo.get_cursor()
+    try:
+        verify.execute(
+            "SELECT logo_data, has_logo FROM clients WHERE id = ?",
+            (int(created.id),),
+        )
+        row = verify.fetchone()
+    finally:
+        verify.close()
+
+    assert row is not None
+    assert row["logo_data"] in (None, "")
+    assert row["has_logo"] == 0
+
+
 def test_mongo_client_options_are_bounded(repo, monkeypatch):
     monkeypatch.setenv("SKYWAVE_MONGO_MAX_POOL_SIZE", "99")
     monkeypatch.setenv("SKYWAVE_MONGO_MIN_POOL_SIZE", "3")
