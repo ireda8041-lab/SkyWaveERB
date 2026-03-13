@@ -335,8 +335,10 @@ class TaskService:
             if repository is not None and self._repository and load_now:
                 try:
                     self.load_tasks()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    safe_print(
+                        f"WARNING: [TaskService] فشل إعادة تحميل المهام أثناء التهيئة: {exc}"
+                    )
             return
 
         self._initialized = True
@@ -414,11 +416,6 @@ class TaskService:
                     created_at = data["created_at"]
 
             tags_value = data.get("tags", [])
-            if isinstance(tags_value, str):
-                try:
-                    tags_value = json.loads(tags_value)
-                except Exception:
-                    tags_value = []
             if isinstance(tags_value, str):
                 try:
                     tags_value = json.loads(tags_value)
@@ -590,8 +587,10 @@ class TaskService:
             try:
                 tasks_data = self._repository.get_tasks_by_project(project_id)
                 return [self._dict_to_task(t) for t in tasks_data]
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [TaskService] تعذر تحميل مهام المشروع '{project_id}' من المستودع: {exc}"
+                )
         return [t for t in self.tasks if t.related_project == project_id]
 
     def get_tasks_by_client(self, client_id: str) -> list[Task]:
@@ -600,8 +599,10 @@ class TaskService:
             try:
                 tasks_data = self._repository.get_tasks_by_client(client_id)
                 return [self._dict_to_task(t) for t in tasks_data]
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [TaskService] تعذر تحميل مهام العميل '{client_id}' من المستودع: {exc}"
+                )
         return [t for t in self.tasks if t.related_client == client_id]
 
     def get_statistics(self) -> dict:
@@ -1431,7 +1432,7 @@ class TaskEditorDialog(QDialog):
         buttons_layout.addWidget(save_btn)
 
         if self.is_editing:
-            complete_btn = QPushButton("✅ إكمال")
+            complete_btn = QPushButton("✅ إكمال المهمة")
             complete_btn.setStyleSheet(BUTTON_STYLES["success"])
             complete_btn.setMinimumSize(80, 30)
             complete_btn.clicked.connect(self._quick_complete)
@@ -1593,6 +1594,7 @@ class TodoManagerWidget(QWidget):
         self._current_page = 1
         self._page_size = 100
         self._filtered_tasks: list[Task] = []
+        self._filtered_task_map: dict[str, Task] = {}
         self._reload_timer = QTimer()
         self._reload_timer.setSingleShot(True)
         self._reload_timer.timeout.connect(self._do_reload_tasks)
@@ -1776,33 +1778,33 @@ class TodoManagerWidget(QWidget):
 
         self.toolbar = ResponsiveToolbar()
 
-        self.add_button = QPushButton("➕ مهمة جديدة")
+        self.add_button = QPushButton("➕ إضافة مهمة")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.setMinimumHeight(28)
         self.add_button.clicked.connect(self.add_task)
 
-        self.edit_button = QPushButton("✏️ تعديل")
+        self.edit_button = QPushButton("✏️ تعديل المهمة")
         self.edit_button.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_button.setMinimumHeight(28)
         self.edit_button.clicked.connect(self.edit_selected_task)
         self.edit_button.setEnabled(False)
 
-        self.complete_button = QPushButton("✅ إكمال")
+        self.complete_button = QPushButton("✅ إكمال المهمة")
         self.complete_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.complete_button.setMinimumHeight(28)
         self.complete_button.clicked.connect(self.complete_selected_task)
         self.complete_button.setEnabled(False)
 
-        self.delete_button = QPushButton("🗑️ حذف")
+        self.delete_button = QPushButton("🗑️ حذف المهمة")
         self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_button.setMinimumHeight(28)
         self.delete_button.clicked.connect(self.delete_selected_task)
         self.delete_button.setEnabled(False)
 
-        self.settings_button = QPushButton("⚙️")
+        self.settings_button = QPushButton("⚙️ الإعدادات")
         self.settings_button.setStyleSheet(BUTTON_STYLES["secondary"])
         self.settings_button.setMinimumHeight(28)
-        self.settings_button.setMinimumWidth(40)
+        self.settings_button.setMinimumWidth(90)
         self.settings_button.setToolTip("إعدادات المهام")
         self.settings_button.clicked.connect(self.open_settings)
 
@@ -2134,7 +2136,7 @@ class TodoManagerWidget(QWidget):
         quick_btn_layout = QHBoxLayout()
         quick_btn_layout.setSpacing(8)
 
-        self.quick_complete_btn = QPushButton("✅ إكمال")
+        self.quick_complete_btn = QPushButton("✅ إكمال المهمة")
         self.quick_complete_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.quick_complete_btn.setMinimumHeight(36)
         self.quick_complete_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -2156,7 +2158,7 @@ class TodoManagerWidget(QWidget):
         archive_btn_layout = QHBoxLayout()
         archive_btn_layout.setSpacing(8)
 
-        self.archive_btn = QPushButton("📦 أرشفة")
+        self.archive_btn = QPushButton("📦 أرشفة المهمة")
         self.archive_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.archive_btn.setMinimumHeight(36)
         self.archive_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -2164,7 +2166,7 @@ class TodoManagerWidget(QWidget):
         self.archive_btn.setEnabled(False)
         archive_btn_layout.addWidget(self.archive_btn)
 
-        self.restore_btn = QPushButton("♻️ استعادة")
+        self.restore_btn = QPushButton("♻️ استعادة المهمة")
         self.restore_btn.setStyleSheet(BUTTON_STYLES["info"])
         self.restore_btn.setMinimumHeight(36)
         self.restore_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -2260,7 +2262,9 @@ class TodoManagerWidget(QWidget):
             if task_title_item:
                 task_id = task_title_item.data(Qt.ItemDataRole.UserRole)
                 if task_id:
-                    self.selected_task = self.task_service.get_task(str(task_id))
+                    self.selected_task = self._filtered_task_map.get(
+                        str(task_id)
+                    ) or self.task_service.get_task(str(task_id))
                 else:
                     self.selected_task = None
 
@@ -2439,6 +2443,9 @@ class TodoManagerWidget(QWidget):
         def on_loaded(tasks):
             try:
                 self._filtered_tasks = tasks
+                self._filtered_task_map = {
+                    str(task.id): task for task in tasks if getattr(task, "id", None)
+                }
                 self._render_current_page()
                 self.update_statistics()
                 self.visible_count_label.setText(
@@ -2456,10 +2463,18 @@ class TodoManagerWidget(QWidget):
 
         def on_error(error_msg: str):
             safe_print(f"ERROR: [TodoManager] فشل تحميل المهام: {error_msg}")
+            self._filtered_task_map = {}
             self._is_loading = False
             self.tasks_table.blockSignals(False)
             self.tasks_table.setUpdatesEnabled(True)
             self.tasks_table.setSortingEnabled(True)
+
+        if getattr(self.task_service, "_repository", None) is None:
+            try:
+                on_loaded(fetch_filtered_tasks())
+            except Exception as e:  # pragma: no cover - guarded by on_error path
+                on_error(str(e))
+            return
 
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -2830,7 +2845,11 @@ class TodoManagerWidget(QWidget):
             return
 
         task_id = task_title_item.data(Qt.ItemDataRole.UserRole)
-        task = self.task_service.get_task(str(task_id)) if task_id else None
+        task = (
+            self._filtered_task_map.get(str(task_id)) or self.task_service.get_task(str(task_id))
+            if task_id
+            else None
+        )
 
         if not task:
             return
@@ -2911,17 +2930,17 @@ class TodoManagerWidget(QWidget):
         menu.addAction(edit_action)
 
         if not task.is_archived:
-            archive_action = QAction("📦 أرشفة", menu)
+            archive_action = QAction("📦 أرشفة المهمة", menu)
             archive_action.triggered.connect(lambda: self._archive_task(task))
             menu.addAction(archive_action)
         else:
-            restore_action = QAction("♻️ استعادة", menu)
+            restore_action = QAction("♻️ استعادة المهمة", menu)
             restore_action.triggered.connect(lambda: self._restore_task(task))
             menu.addAction(restore_action)
 
         menu.addSeparator()
 
-        delete_action = QAction("🗑️ حذف", menu)
+        delete_action = QAction("🗑️ حذف المهمة", menu)
         delete_action.triggered.connect(lambda: self._delete_task(task))
         menu.addAction(delete_action)
 

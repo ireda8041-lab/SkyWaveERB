@@ -99,7 +99,7 @@ class ClientManagerTab(QWidget):
 
         self.toolbar = ResponsiveToolbar()
 
-        self.add_button = QPushButton("➕ إضافة عميل جديد")
+        self.add_button = QPushButton("➕ إضافة عميل")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(client_to_edit=None))

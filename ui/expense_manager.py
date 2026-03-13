@@ -101,12 +101,12 @@ class ExpenseManagerTab(QWidget):
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(self.open_add_dialog)
 
-        self.edit_button = QPushButton("✏️ تعديل")
+        self.edit_button = QPushButton("✏️ تعديل المصروف")
         self.edit_button.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_button.setFixedHeight(28)
         self.edit_button.clicked.connect(self.open_edit_dialog)
 
-        self.delete_button = QPushButton("🗑️ حذف")
+        self.delete_button = QPushButton("🗑️ حذف المصروف")
         self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_button.setFixedHeight(28)
         self.delete_button.clicked.connect(self.delete_selected_expense)

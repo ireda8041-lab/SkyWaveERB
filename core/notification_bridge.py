@@ -131,31 +131,34 @@ class NotificationBridge(QObject):
     def _on_operation(self, action: str, entity_type: str, entity_name: str):
         """معالجة إشارة عملية"""
         try:
-            from ui.notification_system import notify_success, notify_warning
-
             payload = self._build_operation_payload(action, entity_type, entity_name)
             self._record_activity(payload)
-
-            # إرسال الإشعار
-            if action == "deleted":
-                notify_warning(
-                    payload["message"],
-                    payload["title"],
-                    sync=False,
-                    entity_type=entity_type,
-                    action=action,
-                )
-            else:
-                notify_success(
-                    payload["message"],
-                    payload["title"],
-                    sync=False,
-                    entity_type=entity_type,
-                    action=action,
-                )
-
+            if self._persist_activity_notification(payload):
+                return
+            self._show_local_operation_toast(payload)
         except Exception as e:
             safe_print(f"ERROR: [NotificationBridge] {e}")
+
+    @staticmethod
+    def _show_local_operation_toast(payload: dict) -> None:
+        from ui.notification_system import notify_success, notify_warning
+
+        if payload.get("action") == "deleted":
+            notify_warning(
+                payload.get("message", ""),
+                payload.get("title"),
+                sync=False,
+                entity_type=payload.get("entity_type"),
+                action=payload.get("action"),
+            )
+        else:
+            notify_success(
+                payload.get("message", ""),
+                payload.get("title"),
+                sync=False,
+                entity_type=payload.get("entity_type"),
+                action=payload.get("action"),
+            )
 
     def _on_sync_completed(self, results: dict):
         """معالجة اكتمال المزامنة"""
@@ -238,6 +241,41 @@ class NotificationBridge(QObject):
         except Exception as e:
             safe_print(f"WARNING: [NotificationBridge] فشل حفظ سجل العملية: {e}")
 
+    @staticmethod
+    def _persist_activity_notification(payload: dict) -> bool:
+        try:
+            from core.repository import Repository
+            from core.schemas import NotificationPriority, NotificationType
+            from services.notification_service import NotificationService
+
+            repo = Repository.get_active_instance()
+            service = NotificationService.get_active_instance(repo)
+            if service is None:
+                return False
+
+            notification_type = (
+                NotificationType.WARNING
+                if str(payload.get("action") or "").strip().lower() == "deleted"
+                else NotificationType.SUCCESS
+            )
+            created = service.create_notification(
+                title=str(payload.get("title") or "").strip(),
+                message=str(payload.get("description") or payload.get("message") or "").strip(),
+                type=notification_type,
+                priority=NotificationPriority.MEDIUM,
+                related_entity_type=str(payload.get("entity_type") or "").strip() or None,
+                action=str(payload.get("action") or "").strip() or None,
+                operation_text=str(payload.get("operation_text") or "").strip() or None,
+                details=str(payload.get("details") or "").strip() or None,
+                amount=payload.get("amount"),
+                is_activity=True,
+                is_read=True,
+            )
+            return created is not None
+        except Exception as e:
+            safe_print(f"WARNING: [NotificationBridge] فشل حفظ النشاط كإشعار مزامن: {e}")
+            return False
+
 
 def setup_notification_bridge():
     """إعداد جسر الإشعارات"""
@@ -269,28 +307,11 @@ def notify_operation(action: str, entity_type: str, entity_name: str):
         return
 
     try:
-        if QApplication.instance() is None:
-            return
-
-        from ui.notification_system import notify_success, notify_warning
-
         payload = NotificationBridge._build_operation_payload(action, entity_type, entity_name)
         NotificationBridge._record_activity(payload)
-        if action == "deleted":
-            notify_warning(
-                payload["message"],
-                payload["title"],
-                sync=False,
-                entity_type=entity_type,
-                action=action,
-            )
-        else:
-            notify_success(
-                payload["message"],
-                payload["title"],
-                sync=False,
-                entity_type=entity_type,
-                action=action,
-            )
+        if not NotificationBridge._persist_activity_notification(payload):
+            if QApplication.instance() is None:
+                return
+            NotificationBridge._show_local_operation_toast(payload)
     except Exception as e:
         safe_print(f"ERROR: [NotificationBridge] Fallback notify failed: {e}")

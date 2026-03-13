@@ -3,7 +3,9 @@ from __future__ import annotations
 import re
 
 _WHITESPACE_RE = re.compile(r"\s+")
-_REPEAT_CHAR_RE = re.compile(r"(.)\1{2,}", flags=re.DOTALL)
+# Collapse noisy repeated letters only. Numeric/account references like 111001
+# must remain stable and must never be normalized into a different identifier.
+_REPEAT_CHAR_RE = re.compile(r"([^\W\d_])\1{2,}", flags=re.DOTALL)
 _REPEAT_PUNCT_RE = re.compile(r"([!؟,.،؛:])\1+")
 _TATWEEL_RE = re.compile(r"ـ+")
 _BAD_DATA_RE = re.compile(r"بيانات\s+غلط+", flags=re.IGNORECASE)

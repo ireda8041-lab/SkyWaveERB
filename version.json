@@ -1,14 +1,14 @@
 {
-  "version": "2.2.10",
-  "version_name": "Sky Wave ERP v2.2.10",
-  "release_date": "2026-03-08",
-  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.10/SkyWaveERP-Setup-2.2.10.exe",
+  "version": "2.2.11",
+  "version_name": "Sky Wave ERP v2.2.11",
+  "release_date": "2026-03-13",
+  "url": "https://github.com/ireda8041-lab/SkyWaveERB/releases/download/v2.2.11/SkyWaveERP-Setup-2.2.11.exe",
   "changelog": [
-    "Added fast project reassignment inside payment editing with searchable project, client, and invoice lookup.",
-    "Payments now keep invoice numbers for easier tracking, filtering, and safer project-linked updates.",
-    "Refined dashboard activity and notification UI for clearer operation details and cleaner layout behavior.",
-    "Verified fresh Windows release build and installer generation for the new update package.",
-    "Validated project with automated tests before publishing the update."
+    "Added stronger account filtering and project currency handling across accounting flows.",
+    "Improved UI responsiveness and keyboard shortcuts in managers, dialogs, and dashboard navigation.",
+    "Refined notification, settings, export, and template services for safer runtime behavior and PDF output.",
+    "Expanded automated test coverage for startup, services, data linking, and UI smoke interactions.",
+    "Built and verified a fresh Windows executable and installer package for this release."
   ],
   "min_version": "1.0.0",
   "mandatory": false,

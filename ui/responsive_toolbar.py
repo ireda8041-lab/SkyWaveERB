@@ -5,12 +5,7 @@
 """
 
 from PyQt6.QtCore import QPoint, QRect, QSize, Qt
-from PyQt6.QtWidgets import (
-    QLayout,
-    QLayoutItem,
-    QSizePolicy,
-    QWidget,
-)
+from PyQt6.QtWidgets import QLayout, QLayoutItem, QSizePolicy, QWidget
 
 
 class FlowLayout(QLayout):
@@ -111,15 +106,35 @@ class ResponsiveToolbar(QWidget):
 
     def __init__(self, parent=None, spacing: int = 5):
         super().__init__(parent)
+        self.setObjectName("ResponsiveToolbar")
 
         # السياسة: يتمدد أفقياً، يتكيف عمودياً
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        self.setStyleSheet(
+            """
+            QWidget#ResponsiveToolbar QPushButton {
+                padding: 4px 12px;
+                min-height: 24px;
+                font-size: 11px;
+                border-radius: 8px;
+            }
+            """
+        )
 
         # استخدام FlowLayout
         self._layout = FlowLayout(self, margin=0, h_spacing=spacing, v_spacing=spacing)
 
     def addButton(self, button):
         """إضافة زر للشريط"""
+        target_height = max(
+            32,
+            button.height(),
+            button.minimumHeight(),
+            button.sizeHint().height(),
+            button.minimumSizeHint().height(),
+        )
+        button.setFixedHeight(target_height)
+        button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._layout.addWidget(button)
 
     def addWidget(self, widget):

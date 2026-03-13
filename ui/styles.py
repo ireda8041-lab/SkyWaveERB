@@ -8,6 +8,10 @@ import os
 import sys
 from typing import Any
 
+from PyQt6.QtCore import QTimer
+
+from core.resource_utils import get_asset_path
+
 # استيراد دالة الطباعة الآمنة
 try:
     from core.safe_print import safe_print
@@ -22,22 +26,30 @@ except ImportError:
 
 def _get_asset_path(filename: str) -> str:
     """الحصول على المسار الصحيح للـ assets"""
-    try:
-        base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, "assets", filename).replace("\\", "/")
+    return get_asset_path(filename).replace("\\", "/")
 
 
 # مسارات الأسهم (مع تحويل backslash لـ forward slash للـ CSS)
 DOWN_ARROW_PATH = _get_asset_path("down-arrow.png")
 UP_ARROW_PATH = _get_asset_path("up-arrow.png")
+CHECK_MARK_PATH = _get_asset_path("checkmark.svg")
+RADIO_DOT_PATH = _get_asset_path("radio-dot.svg")
+_IS_WINDOWS = os.name == "nt"
 
 
 def get_arrow_url(arrow_type: str = "down") -> str:
     """الحصول على مسار السهم بصيغة URL للـ CSS"""
     path = UP_ARROW_PATH if arrow_type == "up" else DOWN_ARROW_PATH
     return path.replace("\\", "/")
+
+
+def get_icon_url(icon_name: str) -> str:
+    """الحصول على مسار أيقونة بصيغة URL للـ CSS."""
+    icon_map = {
+        "checkmark": CHECK_MARK_PATH,
+        "radio-dot": RADIO_DOT_PATH,
+    }
+    return icon_map[icon_name].replace("\\", "/")
 
 
 # ألوان SkyWave Brand Identity
@@ -64,134 +76,134 @@ COLORS = {
 BUTTON_STYLES = {
     "primary": f"""
         QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #2563eb);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #1f6be0);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(191, 219, 254, 0.16);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
         }}
         QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2563eb, stop:1 #1d4ed8);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2480ff, stop:1 #215fd3);
         }}
         QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1d4ed8, stop:1 #1e40af);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1d5cc7, stop:1 #174aa8);
         }}
         QPushButton:disabled {{
             background-color: #4b5563;
             color: #9ca3af;
         }}
     """,
-    "success": f"""
-        QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["success"]}, stop:1 #0A6CF1);
+    "success": """
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #198d73, stop:1 #12715d);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(110, 231, 183, 0.18);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
-        }}
-        QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0A6CF1, stop:1 #0858c8);
-        }}
-        QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0858c8, stop:1 #064a9f);
-        }}
-        QPushButton:disabled {{
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #21a787, stop:1 #167660);
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #14745f, stop:1 #10584a);
+        }
+        QPushButton:disabled {
             background-color: #4b5563;
             color: #9ca3af;
-        }}
+        }
     """,
     "warning": f"""
         QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["warning"]}, stop:1 #d97706);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["warning"]}, stop:1 #e85a24);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(251, 146, 60, 0.18);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
         }}
         QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d97706, stop:1 #b45309);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff7f52, stop:1 #dc4d1d);
         }}
         QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #b45309, stop:1 #92400e);
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #d84b20, stop:1 #b53c17);
         }}
         QPushButton:disabled {{
             background-color: #4b5563;
             color: #9ca3af;
         }}
     """,
-    "danger": f"""
-        QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["danger"]}, stop:1 #dc2626);
+    "danger": """
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f15a72, stop:1 #d63e5c);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(251, 113, 133, 0.20);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
-        }}
-        QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #dc2626, stop:1 #b91c1c);
-        }}
-        QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #b91c1c, stop:1 #991b1b);
-        }}
-        QPushButton:disabled {{
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #fb6b82, stop:1 #dd4765);
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #cf3d59, stop:1 #b32f49);
+        }
+        QPushButton:disabled {
             background-color: #4b5563;
             color: #9ca3af;
-        }}
+        }
     """,
     "info": f"""
         QPushButton {{
-            background-color: {COLORS["info"]};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["info"]}, stop:1 #6d28d9);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(196, 181, 253, 0.16);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
         }}
         QPushButton:hover {{
-            background-color: #7c3aed;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #9a4bff, stop:1 #7c3aed);
         }}
         QPushButton:pressed {{
-            background-color: #6d28d9;
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7330de, stop:1 #5f20bf);
         }}
         QPushButton:disabled {{
             background-color: #4b5563;
         }}
     """,
-    "secondary": f"""
-        QPushButton {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["secondary"]}, stop:1 #4b5563);
+    "secondary": """
+        QPushButton {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b4d76, stop:1 #203854);
             color: white;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 12px;
-            font-weight: bold;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-weight: 700;
             font-size: 11px;
             min-height: 14px;
-        }}
-        QPushButton:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3d4f5d, stop:1 #2d3548);
-        }}
-        QPushButton:pressed {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2d3548, stop:1 #1a1d29);
-        }}
-        QPushButton:disabled {{
+        }
+        QPushButton:hover {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #335984, stop:1 #294567);
+        }
+        QPushButton:pressed {
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #223d5b, stop:1 #1a2f47);
+        }
+        QPushButton:disabled {
             background-color: #4b5563;
             color: #9ca3af;
-        }}
+        }
     """,
 }
 
@@ -470,11 +482,14 @@ STATUS_BAR_STYLE = f"""
 COMPLETE_STYLESHEET = f"""
 /* === 1. General Settings === */
 QWidget {{
-    background-color: {COLORS["bg_dark"]};
     color: {COLORS["text_primary"]};
     font-family: 'Cairo';
     font-size: 13px;
     font-weight: normal;
+}}
+
+QMainWindow, QDialog {{
+    background-color: {COLORS["bg_dark"]};
 }}
 
 /* === 2. Inputs (Clean & Simple) === */
@@ -678,15 +693,15 @@ QLabel {{
 
 /* === 4. Buttons (Brand Colors) === */
 QPushButton {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #005BC5);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #1f6be0);
     color: #FFFFFF;
-    border: none;
-    border-radius: 8px;
-    padding: 12px 24px;
-    min-height: 40px;
-    min-width: 120px;
-    font-weight: bold;
-    font-size: 13px;
+    border: 1px solid rgba(191, 219, 254, 0.16);
+    border-radius: 10px;
+    padding: 8px 16px;
+    min-height: 36px;
+    min-width: 92px;
+    font-weight: 700;
+    font-size: 12px;
     font-family: 'Cairo';
 }}
 
@@ -702,11 +717,11 @@ QToolBar QPushButton {{
 }}
 
 QPushButton:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #005BC5, stop:1 #004A9F);
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2480ff, stop:1 #215fd3);
 }}
 
 QPushButton:pressed {{
-    background-color: #004A9F;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1d5cc7, stop:1 #174aa8);
 }}
 
 QPushButton:disabled {{
@@ -716,34 +731,44 @@ QPushButton:disabled {{
 
 /* Specific Action Buttons */
 QPushButton[text*="إضافة"], QPushButton[text*="جديد"], QPushButton[text*="حفظ"] {{
-    background-color: {COLORS["primary"]};
-    border: none;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #1f6be0);
+    border: 1px solid rgba(191, 219, 254, 0.16);
 }}
 
 QPushButton[text*="إضافة"]:hover, QPushButton[text*="جديد"]:hover, QPushButton[text*="حفظ"]:hover {{
-    background-color: #005BC5;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2480ff, stop:1 #215fd3);
 }}
 
 QPushButton[text*="تعديل"] {{
-    background-color: {COLORS["warning"]};
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["warning"]}, stop:1 #e85a24);
     color: white;
-    border: none;
+    border: 1px solid rgba(251, 146, 60, 0.18);
 }}
 
 QPushButton[text*="تعديل"]:hover {{
-    background-color: #E55025;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff7f52, stop:1 #dc4d1d);
 }}
 
-/* أزرار الحذف - لون بينك فاقع */
-QPushButton[text*="حذف"], QPushButton[text*="إلغاء"], QPushButton[text*="Delete"], QPushButton[text*="مسح"] {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["danger"]}, stop:1 #D430B0);
+/* أزرار الإلغاء - محايدة */
+QPushButton[text*="إلغاء"], QPushButton[text*="إغلاق"], QPushButton[text*="اغلاق"], QPushButton[text*="Close"] {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2b4d76, stop:1 #203854);
     color: white;
-    border: none;
+    border: 1px solid rgba(148, 163, 184, 0.18);
 }}
 
-QPushButton[text*="حذف"]:hover, QPushButton[text*="إلغاء"]:hover, QPushButton[text*="Delete"]:hover, QPushButton[text*="مسح"]:hover {{
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #D430B0, stop:1 #B01090);
-    border: 1px solid {COLORS["danger"]};
+QPushButton[text*="إلغاء"]:hover, QPushButton[text*="إغلاق"]:hover, QPushButton[text*="اغلاق"]:hover, QPushButton[text*="Close"]:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #335984, stop:1 #294567);
+}}
+
+/* أزرار الحذف - تحذيرية لكن غير فاقعة */
+QPushButton[text*="حذف"], QPushButton[text*="Delete"], QPushButton[text*="مسح"] {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f15a72, stop:1 #d63e5c);
+    color: white;
+    border: 1px solid rgba(251, 113, 133, 0.20);
+}}
+
+QPushButton[text*="حذف"]:hover, QPushButton[text*="Delete"]:hover, QPushButton[text*="مسح"]:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #fb6b82, stop:1 #dd4765);
 }}
 
 /* === 5. Tables (Deep Blue Theme) === */
@@ -757,23 +782,23 @@ QTableWidget {{
 QHeaderView::section {{
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #005BC5);
     color: white;
-    padding: 15px 10px;
+    padding: 7px 8px;
     border: none;
     border-right: 1px solid rgba(255,255,255,0.3);
     font-weight: bold;
-    font-size: 13px;
-    min-height: 40px;
+    font-size: 12px;
+    min-height: 30px;
     text-align: center;
     font-family: 'Cairo';
 }}
 
 QTableWidget::item {{
-    padding: 12px 10px;
+    padding: 8px 8px;
     border-bottom: 1px solid {COLORS["border"]};
     border-right: 1px solid rgba(30, 58, 95, 0.5);
     text-align: center;
-    min-height: 40px;
-    font-size: 13px;
+    min-height: 34px;
+    font-size: 12px;
     font-family: 'Cairo';
 }}
 
@@ -920,19 +945,88 @@ QStatusBar QWidget {{
 /* CheckBox */
 QCheckBox {{
     color: {COLORS["text_primary"]};
+    spacing: 8px;
+    padding: 1px 0;
+    background-color: transparent;
 }}
 
 QCheckBox::indicator {{
     width: 18px;
     height: 18px;
-    border-radius: 4px;
-    border: 2px solid {COLORS["border"]};
+    border-radius: 5px;
+    border: 2px solid rgba(176, 196, 222, 0.65);
     background-color: {COLORS["bg_medium"]};
+}}
+
+QCheckBox::indicator:hover {{
+    border-color: {COLORS["primary_hover"]};
+    background-color: #103562;
+}}
+
+QCheckBox::indicator:pressed {{
+    background-color: #0e2f56;
 }}
 
 QCheckBox::indicator:checked {{
     background-color: {COLORS["primary"]};
     border-color: {COLORS["primary"]};
+    image: url({get_icon_url("checkmark")});
+}}
+
+QCheckBox::indicator:checked:hover {{
+    background-color: {COLORS["primary_hover"]};
+    border-color: {COLORS["primary_hover"]};
+}}
+
+QCheckBox:hover {{
+    color: #F8FAFC;
+}}
+
+QCheckBox:disabled {{
+    color: rgba(176, 196, 222, 0.5);
+}}
+
+QRadioButton {{
+    color: {COLORS["text_primary"]};
+    spacing: 8px;
+    padding: 1px 0;
+    background-color: transparent;
+}}
+
+QRadioButton::indicator {{
+    width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    border: 2px solid rgba(176, 196, 222, 0.65);
+    background-color: {COLORS["bg_medium"]};
+}}
+
+QRadioButton::indicator:hover {{
+    border-color: {COLORS["primary_hover"]};
+    background-color: #103562;
+}}
+
+QRadioButton::indicator:pressed {{
+    background-color: #0e2f56;
+}}
+
+QRadioButton::indicator:checked {{
+    background-color: {COLORS["primary"]};
+    border-color: {COLORS["primary"]};
+    image: url({get_icon_url("radio-dot")});
+}}
+
+QRadioButton::indicator:checked:hover {{
+    background-color: {COLORS["primary_hover"]};
+    border-color: {COLORS["primary_hover"]};
+}}
+
+QRadioButton:hover {{
+    color: #F8FAFC;
+}}
+
+QRadioButton:disabled {{
+    color: rgba(176, 196, 222, 0.5);
 }}
 """
 
@@ -1088,40 +1182,59 @@ def setup_table_with_center_alignment(table):
     table.itemChanged.connect(on_item_changed)
 
 
+def _apply_custom_title_bar_now(window):
+    """تطبيق ألوان شريط العنوان على النافذة بعد اكتمال إنشاء الـ native handle."""
+    try:
+        if not _IS_WINDOWS or window is None:
+            return
+        if getattr(window, "_skywave_title_bar_applied", False):
+            return
+        import ctypes
+
+        hwnd = int(window.winId())
+        title_bar_color = 0x291301  # #011329 في BGR
+        title_text_color = 0xFFFFFF
+
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 35, ctypes.byref(ctypes.c_int(title_bar_color)), 4
+        )
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 36, ctypes.byref(ctypes.c_int(title_text_color)), 4
+        )
+        window._skywave_title_bar_applied = True
+    except RuntimeError:
+        return
+    except Exception as e:
+        safe_print(f"تعذر تخصيص شريط العنوان للنافذة: {e}")
+
+
 def setup_custom_title_bar(window):
     """
-    دالة لتطبيق لون شريط العنوان المخصص على أي نافذة
+    دالة لتطبيق لون شريط العنوان المخصص على أي نافذة.
+    يتم التأجيل لنهاية دورة الـ event loop لتجنب إجبار winId() أثناء البناء الأولي.
     """
     try:
-        import platform
+        if not _IS_WINDOWS or window is None:
+            return
+        if getattr(window, "_skywave_title_bar_applied", False) or getattr(
+            window, "_skywave_title_bar_pending", False
+        ):
+            return
 
-        # للويندوز - تخصيص شريط العنوان
-        if platform.system() == "Windows":
+        window._skywave_title_bar_pending = True
+
+        def _deferred_apply() -> None:
             try:
-                import ctypes
+                window._skywave_title_bar_pending = False
+            except RuntimeError:
+                return
+            _apply_custom_title_bar_now(window)
 
-                # الحصول على handle النافذة
-                hwnd = int(window.winId())
-
-                # تعريف الألوان (BGR format)
-                title_bar_color = 0x291301  # #011329 في BGR
-                title_text_color = 0xFFFFFF  # أبيض للنص
-
-                # تطبيق لون شريط العنوان
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 35, ctypes.byref(ctypes.c_int(title_bar_color)), 4
-                )
-
-                # تطبيق لون نص شريط العنوان
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 36, ctypes.byref(ctypes.c_int(title_text_color)), 4
-                )
-
-            except Exception as e:
-                safe_print(f"تعذر تخصيص شريط العنوان للنافذة: {e}")
-
+        QTimer.singleShot(0, _deferred_apply)
+    except RuntimeError:
+        return
     except Exception as e:
-        safe_print(f"خطأ في تخصيص شريط العنوان: {e}")
+        safe_print(f"خطأ في جدولة تخصيص شريط العنوان: {e}")
 
 
 def get_dialog_style():
@@ -1438,22 +1551,22 @@ RESPONSIVE_TABLE_STYLE = f"""
 
 RESPONSIVE_BUTTON_STYLE = f"""
     QPushButton {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #005BC5);
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {COLORS["primary"]}, stop:1 #1f6be0);
         color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 10px 20px;
+        border: 1px solid rgba(191, 219, 254, 0.16);
+        border-radius: 10px;
+        padding: 8px 16px;
         min-height: 36px;
-        min-width: 100px;
-        font-weight: bold;
-        font-size: 13px;
+        min-width: 92px;
+        font-weight: 700;
+        font-size: 12px;
         font-family: 'Cairo';
     }}
     QPushButton:hover {{
-        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #005BC5, stop:1 #004A9F);
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2480ff, stop:1 #215fd3);
     }}
     QPushButton:pressed {{
-        background-color: #004A9F;
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1d5cc7, stop:1 #174aa8);
     }}
     QPushButton:disabled {{
         background-color: #4b5563;

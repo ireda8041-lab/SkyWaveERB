@@ -20,6 +20,23 @@ def qapp():
 
 
 @pytest.fixture(autouse=True)
+def _cleanup_qt_widgets(qapp):
+    yield
+
+    for widget in list(QApplication.topLevelWidgets()):
+        try:
+            widget.close()
+            widget.deleteLater()
+        except Exception:
+            pass
+
+    try:
+        qapp.processEvents()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _avoid_blocking_dialogs(monkeypatch):
     monkeypatch.setattr(
         QMessageBox,

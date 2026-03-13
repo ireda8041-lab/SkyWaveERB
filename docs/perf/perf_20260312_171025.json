@@ -1,0 +1,61 @@
+{
+  "generated_at": "2026-03-12T17:10:25.398159",
+  "samples": [
+    {
+      "name": "Repository()",
+      "ms": 8.207900013076141,
+      "peak_kb": 54,
+      "extra": {
+        "runs": 1
+      }
+    },
+    {
+      "name": "repo.get_all_accounts()",
+      "ms": 6.002500012982637,
+      "peak_kb": 368,
+      "extra": {
+        "result_size": 0
+      }
+    },
+    {
+      "name": "repo.get_all_payments()",
+      "ms": 175.78289998346008,
+      "peak_kb": 3657,
+      "extra": {
+        "result_size": 0
+      }
+    },
+    {
+      "name": "repo.get_all_expenses()",
+      "ms": 31.417999998666346,
+      "peak_kb": 457,
+      "extra": {
+        "result_size": 0
+      }
+    },
+    {
+      "name": "repo.get_all_journal_entries()",
+      "ms": 0.661700003547594,
+      "peak_kb": 33,
+      "extra": {
+        "result_size": 0
+      }
+    },
+    {
+      "name": "svc.get_dashboard_stats()",
+      "ms": 138.79140000790358,
+      "peak_kb": 5054,
+      "extra": {
+        "result_size": 5
+      }
+    },
+    {
+      "name": "svc.get_recent_activity(8)",
+      "ms": 7.918500021332875,
+      "peak_kb": 268,
+      "extra": {
+        "result_size": 8
+      }
+    }
+  ]
+}

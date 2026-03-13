@@ -19,6 +19,8 @@ from PyQt6.QtWidgets import (
 from core.auth_models import AuthService, User
 from core.resource_utils import get_resource_path
 
+LOGIN_SUCCESS_DELAY_MS = 120
+
 
 class LoginWindow(QDialog):
     """نافذة تسجيل الدخول"""
@@ -28,8 +30,8 @@ class LoginWindow(QDialog):
         self.auth_service = auth_service
         self.authenticated_user: User | None = None
         self._ui_scale = 1.0
+        self.logo_label: QLabel | None = None
 
-        self.setWindowOpacity(0.0)
         self.setWindowTitle("Sky Wave ERP - تسجيل الدخول")
 
         self._configure_responsive_size()
@@ -43,8 +45,6 @@ class LoginWindow(QDialog):
 
         self.init_ui()
         self.center_on_screen()
-
-        self.setWindowOpacity(0.95)
 
     def _configure_responsive_size(self):
         screen = QApplication.primaryScreen()
@@ -86,22 +86,10 @@ class LoginWindow(QDialog):
 
         layout.addSpacing(self._sx(20, 8))
 
-        logo_label = QLabel()
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setMinimumHeight(self._sx(120, 90))
-
-        logo_pixmap = QPixmap(get_resource_path("logo.png"))
-        if not logo_pixmap.isNull():
-            logo_label.setPixmap(
-                logo_pixmap.scaled(
-                    self._sx(150, 100),
-                    self._sx(150, 100),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-
-        layout.addWidget(logo_label)
+        self.logo_label = QLabel()
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_label.setMinimumHeight(self._sx(120, 90))
+        layout.addWidget(self.logo_label)
         layout.addSpacing(self._sx(48, 14))
 
         title = QLabel("Sky Wave ERB")
@@ -172,9 +160,28 @@ class LoginWindow(QDialog):
         layout.addWidget(footer)
 
         main_layout.addWidget(container)
+        QTimer.singleShot(0, self._load_logo_pixmap)
 
         self.username_input.returnPressed.connect(self.attempt_login)
         self.password_input.returnPressed.connect(self.attempt_login)
+
+    def _load_logo_pixmap(self) -> None:
+        try:
+            if self.logo_label is None:
+                return
+            logo_pixmap = QPixmap(get_resource_path("logo.png"))
+            if logo_pixmap.isNull():
+                return
+            self.logo_label.setPixmap(
+                logo_pixmap.scaled(
+                    self._sx(150, 100),
+                    self._sx(150, 100),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        except RuntimeError:
+            return
 
     def _get_styles(self) -> str:
         s = self._ui_scale
@@ -198,21 +205,28 @@ class LoginWindow(QDialog):
                 border: 1px solid #2a2d45;
             }}
 
+            QLabel {{
+                background: transparent;
+            }}
+
             #title {{
                 font-size: {title_size}px;
                 font-weight: bold;
                 color: #4da6ff;
+                background: transparent;
             }}
 
             #subtitle {{
                 font-size: {subtitle_size}px;
                 color: #7a7f9d;
+                background: transparent;
             }}
 
             #label {{
                 font-size: {label_size}px;
                 color: #a0a5c0;
                 font-weight: 500;
+                background: transparent;
             }}
 
             QLineEdit#input {{
@@ -276,6 +290,7 @@ class LoginWindow(QDialog):
             #footer {{
                 font-size: {footer_size}px;
                 color: #fff;
+                background: transparent;
             }}
         """
 
@@ -307,7 +322,7 @@ class LoginWindow(QDialog):
                 font-weight: bold;
             """
             )
-            QTimer.singleShot(800, self.accept)
+            QTimer.singleShot(LOGIN_SUCCESS_DELAY_MS, self.accept)
         else:
             self.show_error("اسم المستخدم أو كلمة المرور غير صحيحة")
             self.login_btn.setEnabled(True)

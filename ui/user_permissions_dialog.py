@@ -149,7 +149,7 @@ class UserPermissionsDialog(QDialog):
         buttons_layout.setSpacing(10)
 
         # زر إعادة تعيين للافتراضي
-        self.reset_btn = QPushButton("🔄 إعادة للافتراضي")
+        self.reset_btn = QPushButton("🔄 استعادة الافتراضي")
         self.reset_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.reset_btn.clicked.connect(self.reset_to_default)
         buttons_layout.addWidget(self.reset_btn)
@@ -157,7 +157,7 @@ class UserPermissionsDialog(QDialog):
         buttons_layout.addStretch()
 
         # زر الإلغاء
-        self.cancel_btn = QPushButton("❌ إلغاء")
+        self.cancel_btn = QPushButton("إلغاء")
         self.cancel_btn.setStyleSheet(BUTTON_STYLES["secondary"])
         self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)

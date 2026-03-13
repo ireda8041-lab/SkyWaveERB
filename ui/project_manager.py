@@ -36,9 +36,20 @@ from PyQt6.QtWidgets import (
 )
 
 from core import schemas
+from core.account_filters import filter_operational_cashboxes
 from core.color_utils import clamp01, color_for_ratio
 from core.context_menu import RightClickBlocker, is_right_click_active
 from core.data_loader import get_data_loader
+from core.project_currency import (
+    amount_between_currencies,
+    amount_from_egp,
+    amount_to_egp,
+    currency_suffix,
+    normalize_currency_code,
+    normalize_exchange_rate,
+    project_currency_code,
+    project_exchange_rate,
+)
 from core.signals import app_signals
 from core.text_utils import normalize_user_text
 from services.accounting_service import AccountingService
@@ -50,7 +61,6 @@ from services.service_service import ServiceService
 from ui.client_editor_dialog import ClientEditorDialog
 from ui.custom_spinbox import CustomSpinBox
 from ui.expense_editor_dialog import ExpenseEditorDialog
-from ui.invoice_preview_dialog import InvoicePreviewDialog
 from ui.payment_dialog import PaymentDialog
 from ui.project_profit_dialog import ProjectProfitDialog
 from ui.responsive_toolbar import ResponsiveToolbar
@@ -96,6 +106,45 @@ except ImportError:
 
     def notify_info(msg, title=None):
         pass
+
+
+def _build_currency_update_summary(
+    result: dict[str, Any] | None,
+    *,
+    current_code: Any = None,
+    current_rate: Any = None,
+) -> str:
+    payload = result or {}
+    updated = int(payload.get("updated", 0) or 0)
+    failed = int(payload.get("failed", 0) or 0)
+    results = payload.get("results", {}) or {}
+    lines = [f"✅ تم تحديث {updated} عملة من الإنترنت"]
+
+    normalized_code = normalize_currency_code(current_code) if current_code else ""
+    if normalized_code:
+        if normalized_code == "EGP":
+            lines.append("العملة الحالية للمشروع: EGP (السعر الأساسي 1.00 ج.م)")
+        else:
+            normalized_rate = normalize_exchange_rate(current_rate, normalized_code)
+            lines.append(f"السعر المستخدم الآن: 1 {normalized_code} = {normalized_rate:,.4f} ج.م")
+
+    if results:
+        lines.append("")
+        for code, data in sorted(results.items()):
+            normalized_result_code = normalize_currency_code(code)
+            if bool(data.get("success")):
+                lines.append(
+                    f"• {normalized_result_code}: "
+                    f"{normalize_exchange_rate(data.get('rate', 1.0), normalized_result_code):,.4f} ج.م"
+                )
+            else:
+                lines.append(f"• {normalized_result_code}: فشل التحديث")
+
+    if failed > 0:
+        lines.append("")
+        lines.append(f"⚠️ فشل تحديث {failed} عملة")
+
+    return "\n".join(lines)
 
 
 class ProjectItemDialog(QDialog):
@@ -153,7 +202,7 @@ class ProjectItemDialog(QDialog):
         layout.addLayout(form)
 
         buttons_layout = QHBoxLayout()
-        save_btn = QPushButton("إضافة")
+        save_btn = QPushButton("إضافة البند")
         save_btn.clicked.connect(self._handle_save)
         cancel_btn = QPushButton("إلغاء")
         cancel_btn.clicked.connect(self.reject)
@@ -211,7 +260,7 @@ class ProjectEditorDialog(QDialog):
         self.is_editing = project_to_edit is not None
         self.project_items: list[schemas.ProjectItem] = []
         self._save_in_progress = False
-        self._save_button_default_text = "💾 حفظ"
+        self._save_button_default_text = "💾 حفظ المشروع"
         self._save_new_button_default_text = "💾 حفظ وفتح جديد"
 
         # Get settings service for default treasury account
@@ -327,13 +376,12 @@ class ProjectEditorDialog(QDialog):
 
         # فلترة الحسابات النقدية فقط (الخزينة والبنوك والمحافظ الإلكترونية)
         all_accounts = self.accounting_service.repo.get_all_accounts()
-        self.cash_accounts = [
-            acc
-            for acc in all_accounts
-            if acc.type == schemas.AccountType.CASH
-            or (acc.code and acc.code.startswith("111"))  # الخزينة 111x
-            or (acc.code and acc.code.startswith("12"))  # المحافظ الإلكترونية 12xx
-        ]
+        self.cash_accounts = filter_operational_cashboxes(all_accounts)
+        self._currencies_by_code: dict[str, dict[str, Any]] = {}
+        self._selected_currency_code = "EGP"
+        self._selected_exchange_rate = 1.0
+        self._currency_change_in_progress = False
+        self._load_currencies_catalog()
 
         self.init_ui()
 
@@ -347,6 +395,340 @@ class ProjectEditorDialog(QDialog):
             if text:
                 return text
         return ""
+
+    def _load_currencies_catalog(self) -> dict[str, dict[str, Any]]:
+        repo = getattr(getattr(self, "accounting_service", None), "repo", None)
+        currencies: list[dict[str, Any]] = []
+        if repo is not None and hasattr(repo, "get_all_currencies"):
+            try:
+                currencies = repo.get_all_currencies() or []
+            except Exception as exc:
+                safe_print(f"WARNING: [ProjectEditor] Failed to load currencies: {exc}")
+        catalog: dict[str, dict[str, Any]] = {}
+        for currency in currencies:
+            if not isinstance(currency, dict):
+                continue
+            code = normalize_currency_code(currency.get("code"))
+            if not code:
+                continue
+            if not bool(currency.get("active", True)) and code != "EGP":
+                continue
+            catalog[code] = {
+                "code": code,
+                "name": str(currency.get("name") or code).strip() or code,
+                "symbol": str(currency.get("symbol") or currency_suffix(code)).strip()
+                or currency_suffix(code),
+                "rate": normalize_exchange_rate(currency.get("rate", 1.0), code),
+                "is_base": bool(currency.get("is_base", code == "EGP")),
+                "active": bool(currency.get("active", True)),
+            }
+        if "EGP" not in catalog:
+            catalog["EGP"] = {
+                "code": "EGP",
+                "name": "جنيه مصري",
+                "symbol": currency_suffix("EGP"),
+                "rate": 1.0,
+                "is_base": True,
+                "active": True,
+            }
+        self._currencies_by_code = catalog
+        return catalog
+
+    def _resolve_currency_snapshot(self, currency_code: Any, fallback_rate: Any = None) -> float:
+        code = normalize_currency_code(currency_code)
+        catalog = getattr(self, "_currencies_by_code", {}) or {}
+        rate_source = (
+            fallback_rate
+            if fallback_rate is not None
+            else catalog.get(code, {}).get(
+                "rate",
+                getattr(self, "_selected_exchange_rate", 1.0),
+            )
+        )
+        return normalize_exchange_rate(rate_source, code)
+
+    def _refresh_currency_combo(
+        self, preferred_code: Any = None, preferred_rate: Any = None
+    ) -> None:
+        self._load_currencies_catalog()
+        code = normalize_currency_code(
+            preferred_code or getattr(self, "_selected_currency_code", None)
+        )
+        rate = self._resolve_currency_snapshot(code, preferred_rate)
+        if code not in self._currencies_by_code:
+            self._currencies_by_code[code] = {
+                "code": code,
+                "name": code,
+                "symbol": currency_suffix(code),
+                "rate": rate,
+                "is_base": code == "EGP",
+                "active": True,
+            }
+        self._selected_currency_code = code
+        self._selected_exchange_rate = rate
+        combo = getattr(self, "currency_combo", None)
+        if combo is None:
+            return
+        ordered = sorted(
+            self._currencies_by_code.values(),
+            key=lambda item: (0 if item.get("is_base") else 1, item.get("code", "")),
+        )
+        combo.blockSignals(True)
+        combo.clear()
+        for currency in ordered:
+            combo.addItem(f'{currency["name"]} ({currency["code"]})', currency["code"])
+        target_index = combo.findData(code)
+        if target_index < 0:
+            target_index = 0
+        if target_index >= 0:
+            combo.setCurrentIndex(target_index)
+        combo.blockSignals(False)
+        self._update_exchange_rate_display()
+        self._update_currency_decorations()
+
+    def _current_currency_code(self) -> str:
+        combo = getattr(self, "currency_combo", None)
+        if combo is not None:
+            try:
+                data = combo.currentData()
+                if data:
+                    return normalize_currency_code(data)
+            except Exception:
+                pass
+        return normalize_currency_code(getattr(self, "_selected_currency_code", None))
+
+    def _current_exchange_rate(self) -> float:
+        return self._resolve_currency_snapshot(
+            self._current_currency_code(),
+            getattr(self, "_selected_exchange_rate", 1.0),
+        )
+
+    def _current_currency_suffix(self) -> str:
+        code = self._current_currency_code()
+        currency_meta = (getattr(self, "_currencies_by_code", {}) or {}).get(code, {})
+        symbol = str(currency_meta.get("symbol") or "").strip()
+        return symbol or currency_suffix(code)
+
+    def _update_exchange_rate_display(self) -> None:
+        label = getattr(self, "exchange_rate_value_label", None)
+        if label is None:
+            return
+        code = self._current_currency_code()
+        rate = self._current_exchange_rate()
+        self._selected_currency_code = code
+        self._selected_exchange_rate = rate
+        if code == "EGP":
+            label.setText("العملة الأساسية - 1.00 ج.م")
+        else:
+            label.setText(f"1 {code} = {rate:,.4f} ج.م")
+        label.setToolTip(label.text())
+
+    def _update_currency_decorations(self) -> None:
+        suffix_text = f" {self._current_currency_suffix()}"
+        if hasattr(self, "item_price_input"):
+            self.item_price_input.setSuffix(suffix_text)
+        if hasattr(self, "payment_amount_input"):
+            self.payment_amount_input.setSuffix(suffix_text)
+        if hasattr(self, "discount_rate_input") and hasattr(self, "discount_type_combo"):
+            if self.discount_type_combo.currentData() == "amount":
+                self.discount_rate_input.setSuffix(suffix_text)
+        if hasattr(self, "currency_status_label"):
+            code = self._current_currency_code()
+            self.currency_status_label.setText(f"{code} - {self._current_exchange_rate():,.4f} ج.م")
+
+    def _project_item_to_display_currency(
+        self,
+        item: schemas.ProjectItem | dict[str, Any],
+        currency_code: Any,
+        exchange_rate: Any,
+    ) -> schemas.ProjectItem:
+        item_obj = item if isinstance(item, schemas.ProjectItem) else schemas.ProjectItem(**item)
+        converted = item_obj.model_copy(
+            update={
+                "unit_price": amount_from_egp(item_obj.unit_price, currency_code, exchange_rate),
+                "discount_amount": amount_from_egp(
+                    getattr(item_obj, "discount_amount", 0.0), currency_code, exchange_rate
+                ),
+                "total": amount_from_egp(item_obj.total, currency_code, exchange_rate),
+            }
+        )
+        full_desc = getattr(item_obj, "_service_full_desc", None)
+        if full_desc:
+            converted._service_full_desc = full_desc
+        return converted
+
+    def _project_item_to_storage_currency(
+        self,
+        item: schemas.ProjectItem | dict[str, Any],
+        currency_code: Any,
+        exchange_rate: Any,
+    ) -> schemas.ProjectItem:
+        item_obj = item if isinstance(item, schemas.ProjectItem) else schemas.ProjectItem(**item)
+        unit_price_egp = amount_to_egp(item_obj.unit_price, currency_code, exchange_rate)
+        discount_amount_egp = amount_to_egp(
+            getattr(item_obj, "discount_amount", 0.0), currency_code, exchange_rate
+        )
+        subtotal_egp = float(item_obj.quantity) * unit_price_egp
+        discount_amount_egp = min(discount_amount_egp, subtotal_egp)
+        discount_rate_egp = (discount_amount_egp / subtotal_egp * 100) if subtotal_egp > 0 else 0.0
+        converted = item_obj.model_copy(
+            update={
+                "unit_price": unit_price_egp,
+                "discount_amount": discount_amount_egp,
+                "discount_rate": discount_rate_egp,
+                "total": subtotal_egp - discount_amount_egp,
+            }
+        )
+        full_desc = getattr(item_obj, "_service_full_desc", None)
+        if full_desc:
+            converted._service_full_desc = full_desc
+        return converted
+
+    def _convert_editor_amounts(
+        self,
+        old_currency_code: Any,
+        old_exchange_rate: Any,
+        new_currency_code: Any,
+        new_exchange_rate: Any,
+    ) -> None:
+        old_code = normalize_currency_code(old_currency_code)
+        new_code = normalize_currency_code(new_currency_code)
+        old_rate = normalize_exchange_rate(old_exchange_rate, old_code)
+        new_rate = normalize_exchange_rate(new_exchange_rate, new_code)
+        if old_code == new_code and abs(old_rate - new_rate) < 1e-9:
+            return
+        self._currency_change_in_progress = True
+        try:
+            if hasattr(self, "item_price_input"):
+                self.item_price_input.setValue(
+                    amount_between_currencies(
+                        self.item_price_input.value(),
+                        old_code,
+                        old_rate,
+                        new_code,
+                        new_rate,
+                    )
+                )
+            if hasattr(self, "payment_amount_input"):
+                self.payment_amount_input.setValue(
+                    amount_between_currencies(
+                        self.payment_amount_input.value(),
+                        old_code,
+                        old_rate,
+                        new_code,
+                        new_rate,
+                    )
+                )
+            if (
+                hasattr(self, "discount_type_combo")
+                and hasattr(self, "discount_rate_input")
+                and self.discount_type_combo.currentData() == "amount"
+            ):
+                self.discount_rate_input.setValue(
+                    amount_between_currencies(
+                        self.discount_rate_input.value(),
+                        old_code,
+                        old_rate,
+                        new_code,
+                        new_rate,
+                    )
+                )
+            for item in getattr(self, "project_items", []):
+                item.unit_price = amount_between_currencies(
+                    item.unit_price,
+                    old_code,
+                    old_rate,
+                    new_code,
+                    new_rate,
+                )
+                item.discount_amount = amount_between_currencies(
+                    getattr(item, "discount_amount", 0.0),
+                    old_code,
+                    old_rate,
+                    new_code,
+                    new_rate,
+                )
+                subtotal = float(item.quantity) * float(item.unit_price)
+                item.discount_amount = min(float(item.discount_amount), subtotal)
+                item.total = subtotal - item.discount_amount
+                item.discount_rate = (
+                    (item.discount_amount / subtotal * 100) if subtotal > 0 else 0.0
+                )
+            if hasattr(self, "items_table") and hasattr(self, "_rebuild_items_table"):
+                self._rebuild_items_table()
+        finally:
+            self._currency_change_in_progress = False
+
+    def _on_currency_changed(self, _index: int) -> None:
+        new_code = self._current_currency_code()
+        new_rate = self._resolve_currency_snapshot(new_code)
+        old_code = normalize_currency_code(getattr(self, "_selected_currency_code", None))
+        old_rate = normalize_exchange_rate(getattr(self, "_selected_exchange_rate", 1.0), old_code)
+        self._selected_currency_code = new_code
+        self._selected_exchange_rate = new_rate
+        self._convert_editor_amounts(old_code, old_rate, new_code, new_rate)
+        self._update_exchange_rate_display()
+        self._update_currency_decorations()
+        if hasattr(self, "update_totals"):
+            self.update_totals()
+
+    def _refresh_currency_rates_for_editor(self) -> None:
+        repo = getattr(getattr(self, "accounting_service", None), "repo", None)
+        if repo is None or not hasattr(repo, "update_all_exchange_rates"):
+            QMessageBox.warning(self, "تعذر التحديث", "خدمة العملات غير متاحة حاليًا.")
+            return
+
+        button = getattr(self, "refresh_currency_rates_button", None)
+        default_text = "🌐 تحديث الأسعار من الإنترنت"
+        current_code = self._current_currency_code()
+
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("⏳ جاري تحديث الأسعار...")
+
+        def restore_button() -> None:
+            if button is not None:
+                button.setEnabled(True)
+                button.setText(default_text)
+
+        def refresh_rates() -> dict[str, Any]:
+            return repo.update_all_exchange_rates() or {}
+
+        def on_success(result: dict[str, Any]) -> None:
+            try:
+                self._load_currencies_catalog()
+                refreshed_rate = self._resolve_currency_snapshot(current_code)
+                self._selected_currency_code = current_code
+                self._selected_exchange_rate = refreshed_rate
+                self._refresh_currency_combo(current_code, refreshed_rate)
+                QMessageBox.information(
+                    self,
+                    "نتيجة تحديث العملات",
+                    _build_currency_update_summary(
+                        result,
+                        current_code=current_code,
+                        current_rate=refreshed_rate,
+                    ),
+                )
+            finally:
+                restore_button()
+
+        def on_error(error_msg: str) -> None:
+            restore_button()
+            QMessageBox.critical(
+                self,
+                "خطأ",
+                f"فشل تحديث أسعار العملات من الإنترنت:\n{error_msg}",
+            )
+
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="project_editor_currency_rates",
+            load_function=refresh_rates,
+            on_success=on_success,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -388,18 +770,62 @@ class ProjectEditorDialog(QDialog):
         self.start_date_input.setCalendarPopup(True)
         self.end_date_input = QDateEdit(QDate.currentDate().addDays(30))
         self.end_date_input.setCalendarPopup(True)
+        self.currency_combo = QComboBox()
+        self.currency_combo.setPlaceholderText("اختر العملة")
+        self.currency_combo.currentIndexChanged.connect(self._on_currency_changed)
+        self.exchange_rate_value_label = QLabel("")
+        self.exchange_rate_value_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.exchange_rate_value_label.setStyleSheet(
+            """
+            QLabel {
+                color: #BFDBFE;
+                background: rgba(10, 108, 241, 0.08);
+                border: 1px solid rgba(10, 108, 241, 0.18);
+                border-radius: 6px;
+                padding: 4px 8px;
+                min-height: 24px;
+            }
+            """
+        )
+        self.currency_status_label = QLabel("")
+        self.currency_status_label.setWordWrap(True)
+        self.currency_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.currency_status_label.setStyleSheet(
+            """
+            QLabel {
+                color: #93C5FD;
+                font-size: 10px;
+                padding: 2px 4px;
+            }
+            """
+        )
+        self.refresh_currency_rates_button = QPushButton("🌐 تحديث الأسعار من الإنترنت")
+        self.refresh_currency_rates_button.setStyleSheet(BUTTON_STYLES["info"])
+        self.refresh_currency_rates_button.setFixedHeight(24)
+        self.refresh_currency_rates_button.setToolTip(
+            "تحديث أسعار العملات الحالية ثم استخدام السعر الجديد عند حفظ المشروع"
+        )
+        self.refresh_currency_rates_button.clicked.connect(self._refresh_currency_rates_for_editor)
 
         self.client_label = QLabel("العميل:")
         self.name_label = QLabel("اسم المشروع:")
         self.status_label = QLabel("الحالة:")
         self.start_date_label = QLabel("تاريخ الإصدار:")
         self.end_date_label = QLabel("تاريخ الاستحقاق:")
+        self.currency_label = QLabel("العملة:")
+        self.exchange_rate_label = QLabel("السعر الفوري:")
         for label in [
             self.client_label,
             self.name_label,
             self.status_label,
             self.start_date_label,
             self.end_date_label,
+            self.currency_label,
+            self.exchange_rate_label,
         ]:
             label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -407,9 +833,15 @@ class ProjectEditorDialog(QDialog):
         self._basic_grid.setHorizontalSpacing(6)
         self._basic_grid.setVerticalSpacing(4)
         basic_layout.addLayout(self._basic_grid)
+        currency_actions_row = QHBoxLayout()
+        currency_actions_row.setSpacing(6)
+        currency_actions_row.addWidget(self.refresh_currency_rates_button, 0)
+        currency_actions_row.addWidget(self.currency_status_label, 1)
+        basic_layout.addLayout(currency_actions_row)
         basic_group.setLayout(basic_layout)
         self._basic_group = basic_group
         left_side.addWidget(basic_group)
+        self._refresh_currency_combo("EGP", 1.0)
 
         # --- 2. بنود المشروع (الخدمات) ---
         items_group = QGroupBox("بنود المشروع (الخدمات)")
@@ -431,8 +863,9 @@ class ProjectEditorDialog(QDialog):
         self.item_price_input.setSuffix(" ج.م")
         self.item_quantity_input = CustomSpinBox(decimals=2, minimum=0.1, maximum=100)
         self.item_quantity_input.setValue(1.0)
-        self.add_item_button = QPushButton("➕ إضافة البند")
+        self.add_item_button = QPushButton("إضافة بند")
         self.add_item_button.setStyleSheet(BUTTON_STYLES["primary"])
+        self.add_item_button.setToolTip("إضافة البند المحدد إلى عناصر المشروع")
         self.item_quantity_label = QLabel("الكمية:")
         self.item_price_label = QLabel("السعر:")
         self.item_quantity_label.setAlignment(
@@ -537,12 +970,7 @@ class ProjectEditorDialog(QDialog):
 
         self.tax_rate_input = CustomSpinBox(decimals=2, minimum=0, maximum=100)
         self.tax_rate_input.setSuffix(" %")
-        if self.service_service and getattr(self.service_service, "settings_service", None):
-            try:
-                default_tax = self.service_service.settings_service.get_setting("default_tax_rate")
-                self.tax_rate_input.setValue(default_tax or 0.0)
-            except Exception:
-                pass
+        self.tax_rate_input.setValue(self._get_default_tax_rate())
         self.total_label = QLabel("0.00 ج.م")
         self.total_label.setFont(get_cairo_font(12, bold=True))
         self.total_label.setStyleSheet("color: #0A6CF1;")
@@ -636,7 +1064,7 @@ class ProjectEditorDialog(QDialog):
         )
         self.notes_template_combo.addItem("اختر قالب ملاحظات...", userData=None)
 
-        apply_template_btn = QPushButton("تطبيق")
+        apply_template_btn = QPushButton("تطبيق القالب")
         apply_template_btn.setFixedHeight(24)
         apply_template_btn.setMinimumWidth(82)
         apply_template_btn.setStyleSheet(
@@ -654,7 +1082,7 @@ class ProjectEditorDialog(QDialog):
         )
         apply_template_btn.clicked.connect(self._apply_selected_notes_template)
 
-        refresh_templates_btn = QPushButton("تحديث")
+        refresh_templates_btn = QPushButton("تحديث القوالب")
         refresh_templates_btn.setFixedHeight(24)
         refresh_templates_btn.setMinimumWidth(82)
         refresh_templates_btn.setStyleSheet(
@@ -867,7 +1295,7 @@ class ProjectEditorDialog(QDialog):
             self.save_new_button.clicked.connect(self.save_project_and_new)
             buttons_layout.addWidget(self.save_new_button)
 
-        self.save_button = QPushButton("💾 حفظ")
+        self.save_button = QPushButton("💾 حفظ المشروع")
         self.save_button.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_button.setFixedHeight(28)
         self.save_button.clicked.connect(self.save_project)
@@ -957,6 +1385,8 @@ class ProjectEditorDialog(QDialog):
             self.status_label,
             self.start_date_label,
             self.end_date_label,
+            self.currency_label,
+            self.exchange_rate_label,
         ]
         for label in labels:
             label.setMinimumWidth(label_min)
@@ -968,6 +1398,8 @@ class ProjectEditorDialog(QDialog):
             (self.status_label, self.status_combo),
             (self.start_date_label, self.start_date_input),
             (self.end_date_label, self.end_date_input),
+            (self.currency_label, self.currency_combo),
+            (self.exchange_rate_label, self.exchange_rate_value_label),
         ]
         for _label, widget in fields:
             widget.setMinimumWidth(field_min)
@@ -1137,20 +1569,59 @@ class ProjectEditorDialog(QDialog):
         return
 
     def _load_payment_methods_for_combo(self):
+        combo = getattr(self, "payment_method_combo", None)
+        if not combo:
+            return
+
         try:
-            if not hasattr(self, "payment_method_combo") or not self.payment_method_combo:
-                return
-            if not self.settings_service:
+            current_data = combo.currentData() if hasattr(combo, "currentData") else None
+            current_text = combo.currentText() if hasattr(combo, "currentText") else ""
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem("تلقائي حسب الحساب", userData=None)
+
+            settings_service = getattr(self, "settings_service", None)
+            if not settings_service:
                 return
 
-            methods = self.settings_service.get_setting("payment_methods") or []
+            methods = settings_service.get_setting("payment_methods") or []
+            seen_names = set()
             for m in methods:
                 if isinstance(m, dict) and m.get("active", True):
                     name = (m.get("name") or "").strip()
-                    if name:
-                        self.payment_method_combo.addItem(name, userData=name)
-        except Exception:
-            pass
+                    if name and name not in seen_names:
+                        combo.addItem(name, userData=name)
+                        seen_names.add(name)
+
+            restored_index = 0
+            for index in range(combo.count()):
+                item_data = combo.itemData(index)
+                item_text = combo.itemText(index)
+                if current_data is not None and item_data == current_data:
+                    restored_index = index
+                    break
+                if current_data is None and current_text and item_text == current_text:
+                    restored_index = index
+                    break
+            combo.setCurrentIndex(restored_index)
+        except Exception as e:
+            safe_print(f"WARNING: [ProjectEditor] Failed to load payment methods: {e}")
+        finally:
+            try:
+                combo.blockSignals(False)
+            except Exception:
+                pass
+
+    def _get_default_tax_rate(self) -> float:
+        settings_service = getattr(getattr(self, "service_service", None), "settings_service", None)
+        if not settings_service:
+            return 0.0
+        try:
+            default_tax = settings_service.get_setting("default_tax_rate")
+            return float(default_tax or 0.0)
+        except Exception as e:
+            safe_print(f"WARNING: [ProjectEditor] Failed to load default tax rate: {e}")
+            return 0.0
 
     def _refresh_payment_methods_preview(self):
         try:
@@ -1298,10 +1769,15 @@ class ProjectEditorDialog(QDialog):
             self.service_combo.setCurrentIndex(0)
             self.item_price_input.setValue(0.0)
             self.item_quantity_input.setValue(1.0)
+            if "currency_combo" in self.__dict__:
+                try:
+                    self._refresh_currency_combo("EGP", 1.0)
+                except Exception as exc:
+                    safe_print(f"WARNING: [ProjectEditor] Failed to reset currency snapshot: {exc}")
 
             self.discount_type_combo.setCurrentIndex(0)
             self.discount_rate_input.setValue(0.0)
-            self.tax_rate_input.setValue(self.tax_rate_input.value())
+            self.tax_rate_input.setValue(self._get_default_tax_rate())
 
             self._reset_notes_template()
 
@@ -1368,16 +1844,28 @@ class ProjectEditorDialog(QDialog):
         self.end_date_input.setDate(QDate(end_value.year, end_value.month, end_value.day))
         self.discount_rate_input.setValue(self.project_to_edit.discount_rate)
         self.tax_rate_input.setValue(self.project_to_edit.tax_rate)
+        project_currency = project_currency_code(self.project_to_edit)
+        project_rate = project_exchange_rate(self.project_to_edit)
+        self._refresh_currency_combo(project_currency, project_rate)
         self.items_table.setRowCount(0)
         self.project_items.clear()
         for item in self.project_to_edit.items:
-            self.add_item_to_table(item_to_add=item)
+            display_item = self._project_item_to_display_currency(
+                item, project_currency, project_rate
+            )
+            self.add_item_to_table(item_to_add=display_item)
         self.update_totals()
 
     def on_service_selected(self, index):
         service = self.service_combo.currentData()
         if service:
-            self.item_price_input.setValue(service.default_price)
+            self.item_price_input.setValue(
+                amount_from_egp(
+                    service.default_price,
+                    self._current_currency_code(),
+                    self._current_exchange_rate(),
+                )
+            )
             # ⚡ عرض وصف الخدمة بشكل واضح
             service_desc = getattr(service, "description", None)
             safe_print(f"DEBUG: [ProjectEditor] الخدمة: {service.name}, الوصف: {service_desc}")
@@ -1413,7 +1901,11 @@ class ProjectEditorDialog(QDialog):
                     new_service = self.check_and_add_service(service_text)
                     if new_service:
                         service = new_service
-                        price = new_service.default_price
+                        price = amount_from_egp(
+                            new_service.default_price,
+                            self._current_currency_code(),
+                            self._current_exchange_rate(),
+                        )
                         self.item_price_input.setValue(price)
                     else:
                         return  # المستخدم رفض الإضافة
@@ -1608,7 +2100,7 @@ class ProjectEditorDialog(QDialog):
 
             elif column == 3:  # الخصم بالمبلغ
                 try:
-                    discount_text = cell_text.replace("ج.م", "").strip()
+                    discount_text = cell_text.replace(self._current_currency_suffix(), "").strip()
                     item.discount_amount = float(discount_text) if discount_text else 0
                     # حساب النسبة من المبلغ للحفظ
                     subtotal = item.quantity * item.unit_price
@@ -1667,7 +2159,7 @@ class ProjectEditorDialog(QDialog):
             self.discount_rate_input.setSuffix(" %")
         else:
             self.discount_rate_input.setMaximum(999999999)
-            self.discount_rate_input.setSuffix(" ج.م")
+            self.discount_rate_input.setSuffix(f" {self._current_currency_suffix()}")
         self.update_totals()
 
     def update_totals(self):
@@ -1688,7 +2180,7 @@ class ProjectEditorDialog(QDialog):
         tax_rate = self.tax_rate_input.value()
         tax_amount = taxable_amount * (tax_rate / 100)
         total_amount = taxable_amount + tax_amount
-        self.total_label.setText(f"{total_amount:,.2f} ج.م")
+        self.total_label.setText(f"{total_amount:,.2f} {self._current_currency_suffix()}")
 
     def on_client_text_changed(self, text: str):
         """التحقق من العميل عند تغيير النص"""
@@ -1903,35 +2395,39 @@ class ProjectEditorDialog(QDialog):
         selected_status = self.status_combo.currentData()
         normalized_project_name = normalize_user_text(self.name_input.text())
 
-        # التحقق من اسم المشروع
         if not normalized_project_name:
             QMessageBox.warning(self, "خطأ", "اسم المشروع مطلوب")
             return
         if normalized_project_name != self.name_input.text():
             self.name_input.setText(normalized_project_name)
 
-        # التحقق من العميل - إذا كان مكتوباً ولكن غير محدد
         if not selected_client:
             client_text = self.client_combo.currentText().strip()
             if client_text:
-                # محاولة إضافة العميل الجديد
                 new_client = self.check_and_add_client(client_text)
                 if new_client:
                     selected_client = new_client
                 else:
-                    return  # المستخدم رفض الإضافة
+                    return
             else:
                 QMessageBox.warning(self, "خطأ", "العميل مطلوب")
                 return
 
-        # 1. تجميع بيانات المشروع
-        # حساب الخصم حسب النوع
+        self._load_currencies_catalog()
+        currency_code = self._current_currency_code()
+        exchange_rate_snapshot = self._resolve_currency_snapshot(currency_code)
+        self._selected_currency_code = currency_code
+        self._selected_exchange_rate = exchange_rate_snapshot
+        storage_items = [
+            self._project_item_to_storage_currency(item, currency_code, exchange_rate_snapshot)
+            for item in self.project_items
+        ]
+
         discount_type = self.discount_type_combo.currentData()
         discount_value = self.discount_rate_input.value()
-        subtotal = sum(item.total for item in self.project_items)
+        subtotal = sum(float(item.total) for item in self.project_items)
 
         if discount_type == "amount" and discount_value > 0 and subtotal > 0:
-            # تحويل المبلغ لنسبة للحفظ
             discount_rate = (discount_value / subtotal) * 100
         else:
             discount_rate = discount_value
@@ -1940,17 +2436,17 @@ class ProjectEditorDialog(QDialog):
             "name": normalized_project_name,
             "client_id": self._entity_ref(selected_client, "id", "_mongo_id", "name"),
             "status": selected_status,
-            "description": "",  # الوصف في notes_input دلوقتي
+            "description": "",
             "start_date": self.start_date_input.dateTime().toPyDateTime(),
             "end_date": self.end_date_input.dateTime().toPyDateTime(),
-            "items": self.project_items,
+            "items": storage_items,
             "discount_rate": discount_rate,
             "tax_rate": self.tax_rate_input.value(),
             "project_notes": self.notes_input.toPlainText(),
-            "currency": schemas.CurrencyCode.EGP,
+            "currency": currency_code,
+            "exchange_rate_snapshot": exchange_rate_snapshot,
         }
 
-        # 2. (الجديد) تجميع بيانات الدفعة المقدمة
         payment_data = {}
         payment_amount = self.payment_amount_input.value()
         selected_account = self.payment_account_combo.currentData()
@@ -1961,7 +2457,7 @@ class ProjectEditorDialog(QDialog):
 
         if payment_amount > 0 and selected_account:
             payment_data = {
-                "amount": payment_amount,
+                "amount": amount_to_egp(payment_amount, currency_code, exchange_rate_snapshot),
                 "date": self.payment_date_input.dateTime().toPyDateTime(),
                 "account_id": selected_account.code,
             }
@@ -1973,8 +2469,6 @@ class ProjectEditorDialog(QDialog):
             except Exception:
                 pass
 
-        # حساب إجمالي المشروع للتحقق من نسبة الدفعة المقدمة
-        # (subtotal و discount_rate تم حسابهم أعلاه)
         if discount_type == "amount":
             discount_amount_calc = min(discount_value, subtotal)
         else:
@@ -1984,17 +2478,22 @@ class ProjectEditorDialog(QDialog):
         tax_amount = taxable_amount * (tax_rate / 100)
         total_amount = taxable_amount + tax_amount
 
-        # تحذير إذا كانت الدفعة المقدمة أقل من 70% (فقط للمشاريع الجديدة)
         if not self.is_editing and total_amount > 0:
-            min_payment = total_amount * 0.70  # 70%
+            min_payment = total_amount * 0.70
             if payment_amount < min_payment:
                 payment_percent = (payment_amount / total_amount * 100) if total_amount > 0 else 0
+                suffix_text = self._current_currency_suffix()
+                warning_message = (
+                    f"الدفعة المقدمة ({payment_amount:,.2f} {suffix_text}) تمثل فقط {payment_percent:.1f}% من إجمالي المشروع ({total_amount:,.2f} {suffix_text})."
+                    "\n\n"
+                    f"الحد الأدنى الموصى به: 70% ({min_payment:,.2f} {suffix_text})"
+                    "\n\n"
+                    "هل تريد المتابعة على أي حال؟"
+                )
                 reply = QMessageBox.warning(
                     self,
                     "⚠️ تحذير - دفعة مقدمة منخفضة",
-                    f"الدفعة المقدمة ({payment_amount:,.2f}) تمثل فقط {payment_percent:.1f}% من إجمالي المشروع ({total_amount:,.2f}).\n\n"
-                    f"الحد الأدنى الموصى به: 70% ({min_payment:,.2f})\n\n"
-                    f"هل تريد المتابعة على أي حال؟",
+                    warning_message,
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
@@ -2101,7 +2600,7 @@ class ProjectManagerTab(QWidget):
 
         self.toolbar = ResponsiveToolbar()
 
-        self.add_button = QPushButton("➕ مشروع جديد")
+        self.add_button = QPushButton("➕ إضافة مشروع")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(project_to_edit=None))
@@ -2120,28 +2619,28 @@ class ProjectManagerTab(QWidget):
         self.payment_button.setEnabled(False)
 
         # زرار عرض الربحية
-        self.profit_button = QPushButton("📊 الربحية")
+        self.profit_button = QPushButton("📊 ربحية المشروع")
         self.profit_button.setStyleSheet(BUTTON_STYLES["info"])
         self.profit_button.setFixedHeight(28)
         self.profit_button.clicked.connect(self.open_profit_dialog)
         self.profit_button.setEnabled(False)
 
-        # زرار طباعة الفاتورة
-        self.print_button = QPushButton("🖨️ طباعة")
+        # زرار حفظ الفاتورة
+        self.print_button = QPushButton("💾 حفظ الفاتورة")
         self.print_button.setStyleSheet(BUTTON_STYLES["secondary"])
         self.print_button.setFixedHeight(28)
         self.print_button.clicked.connect(self.print_invoice)
         self.print_button.setEnabled(False)
 
         # 🗑️ زرار حذف المشروع
-        self.delete_button = QPushButton("🗑️ حذف")
+        self.delete_button = QPushButton("🗑️ حذف المشروع")
         self.delete_button.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_button.setFixedHeight(28)
         self.delete_button.clicked.connect(self.delete_selected_project)
         self.delete_button.setEnabled(False)
 
         # أزرار قوالب الفواتير
-        self.preview_template_button = QPushButton("👁️ معاينة الفاتورة")
+        self.preview_template_button = QPushButton("📂 فتح الفاتورة")
         self.preview_template_button.setStyleSheet(BUTTON_STYLES["info"])
         self.preview_template_button.setFixedHeight(28)
         self.preview_template_button.clicked.connect(self.preview_invoice_template)
@@ -2152,6 +2651,12 @@ class ProjectManagerTab(QWidget):
         self.refresh_button.setStyleSheet(BUTTON_STYLES["secondary"])
         self.refresh_button.setFixedHeight(28)
         self.refresh_button.clicked.connect(self.load_projects_data)
+        self.refresh_currency_rates_button = QPushButton("🌐 تحديث الأسعار من الإنترنت")
+        self.refresh_currency_rates_button.setStyleSheet(BUTTON_STYLES["info"])
+        self.refresh_currency_rates_button.setFixedHeight(28)
+        self.refresh_currency_rates_button.clicked.connect(
+            self._refresh_currency_rates_for_projects
+        )
 
         self.show_archived_checkbox = QCheckBox("إظهار المشاريع المؤرشفة")
         self.show_archived_checkbox.clicked.connect(self.load_projects_data)
@@ -2165,6 +2670,7 @@ class ProjectManagerTab(QWidget):
         self.toolbar.addButton(self.print_button)
         self.toolbar.addButton(self.preview_template_button)
         self.toolbar.addButton(self.refresh_button)
+        self.toolbar.addButton(self.refresh_currency_rates_button)
         self.toolbar.addWidget(self.show_archived_checkbox)
 
         left_panel.addWidget(self.toolbar)
@@ -2715,7 +3221,7 @@ class ProjectManagerTab(QWidget):
 
         add_btn = None
         if show_add_btn:
-            add_btn = QPushButton("➕ مهمة")
+            add_btn = QPushButton("➕ إضافة مهمة")
             add_btn.setMinimumSize(80, 26)
             add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             add_btn.setStyleSheet(
@@ -2858,13 +3364,13 @@ class ProjectManagerTab(QWidget):
         view_action.triggered.connect(self.open_editor_for_selected)
         menu.addAction(view_action)
 
-        edit_action = QAction("✏️ تعديل", self.projects_table)
+        edit_action = QAction("✏️ تعديل المشروع", self.projects_table)
         edit_action.triggered.connect(self.open_editor_for_selected)
         menu.addAction(edit_action)
 
         menu.addSeparator()
 
-        payment_action = QAction("💰 إضافة دفعة", self.projects_table)
+        payment_action = QAction("💰 تسجيل دفعة", self.projects_table)
         payment_action.triggered.connect(self.open_payment_dialog)
         menu.addAction(payment_action)
 
@@ -2872,11 +3378,11 @@ class ProjectManagerTab(QWidget):
         expense_action.triggered.connect(self._add_expense_for_project)
         menu.addAction(expense_action)
 
-        profit_action = QAction("📊 عرض الربحية", self.projects_table)
+        profit_action = QAction("📊 ربحية المشروع", self.projects_table)
         profit_action.triggered.connect(self._show_profit_dialog)
         menu.addAction(profit_action)
 
-        print_action = QAction("🖨️ طباعة الفاتورة", self.projects_table)
+        print_action = QAction("💾 حفظ الفاتورة", self.projects_table)
         print_action.triggered.connect(self._print_invoice)
         menu.addAction(print_action)
 
@@ -3532,7 +4038,7 @@ class ProjectManagerTab(QWidget):
                         date_str = "N/A"
 
                     # اسم الحساب
-                    account_name = "نقدي"
+                    account_name = "Cash"
                     if pay.account_id:
                         if pay.account_id in accounts_cache:
                             account_name = accounts_cache[pay.account_id]
@@ -3846,7 +4352,7 @@ class ProjectManagerTab(QWidget):
                         date_str = "N/A"
 
                     # ⚡ عرض اسم الحساب الفعلي بدلاً من الكود
-                    account_name = "نقدي"
+                    account_name = "Cash"
                     if pay.account_id:
                         try:
                             account = self.accounting_service.repo.get_account_by_code(
@@ -4102,6 +4608,54 @@ class ProjectManagerTab(QWidget):
 
         except Exception as e:
             safe_print(f"ERROR: [ProjectManager] فشل ملء جدول المهام: {e}")
+
+    def _refresh_currency_rates_for_projects(self):
+        repo = getattr(getattr(self, "accounting_service", None), "repo", None)
+        if repo is None or not hasattr(repo, "update_all_exchange_rates"):
+            QMessageBox.warning(self, "تعذر التحديث", "خدمة العملات غير متاحة حاليًا.")
+            return
+
+        button = getattr(self, "refresh_currency_rates_button", None)
+        default_text = "🌐 تحديث الأسعار من الإنترنت"
+        if button is not None:
+            button.setEnabled(False)
+            button.setText("⏳ جاري تحديث الأسعار...")
+
+        def restore_button():
+            if button is not None:
+                button.setEnabled(True)
+                button.setText(default_text)
+
+        def refresh_rates():
+            return repo.update_all_exchange_rates() or {}
+
+        def on_success(result):
+            try:
+                notify_success("تم تحديث أسعار العملات بنجاح", title="العملات")
+                QMessageBox.information(
+                    self,
+                    "نتيجة تحديث العملات",
+                    _build_currency_update_summary(result),
+                )
+            finally:
+                restore_button()
+
+        def on_error(error_msg):
+            restore_button()
+            QMessageBox.critical(
+                self,
+                "خطأ",
+                f"فشل تحديث أسعار العملات من الإنترنت:\n{error_msg}",
+            )
+
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="projects_currency_rates",
+            load_function=refresh_rates,
+            on_success=on_success,
+            on_error=on_error,
+            use_thread_pool=True,
+        )
 
     def load_projects_data(self):
         """⚡ تحميل بيانات المشاريع في الخلفية لمنع التجميد"""
@@ -4364,13 +4918,7 @@ class ProjectManagerTab(QWidget):
 
         # جلب حسابات البنك/الخزينة فقط (الخزينة والمحافظ الإلكترونية)
         all_accounts = self.accounting_service.repo.get_all_accounts()
-        cash_accounts = [
-            acc
-            for acc in all_accounts
-            if acc.type == schemas.AccountType.CASH
-            or (acc.code and acc.code.startswith("111"))  # الخزينة 111x
-            or (acc.code and acc.code.startswith("12"))  # المحافظ الإلكترونية 12xx
-        ]
+        cash_accounts = filter_operational_cashboxes(all_accounts)
 
         if not cash_accounts:
             QMessageBox.critical(
@@ -4440,23 +4988,32 @@ class ProjectManagerTab(QWidget):
             # ⚡ استخدام template_service
             if self.template_service:
                 safe_print("INFO: [ProjectManager] استخدام template_service للطباعة")
-
-                html_content = self.template_service.generate_invoice_html(
-                    project=project, client_info=client_info, payments=payments_list
+                exported_path = self.template_service.export_invoice_document(
+                    project=project,
+                    client_info=client_info,
+                    payments=payments_list,
+                    use_pdf=True,
+                    open_file=False,
                 )
-                exports_dir = self.template_service.get_exports_dir()
-                filename = self.template_service.build_export_basename(project, client_info)
-
-                dialog = InvoicePreviewDialog(
-                    html_content=html_content,
-                    title=f"طباعة فاتورة - {project.name}",
-                    base_url=self.template_service.templates_dir,
-                    exports_dir=exports_dir,
-                    file_basename=filename,
-                    auto_print=True,
-                    parent=self,
-                )
-                dialog.exec()
+                if exported_path:
+                    if str(exported_path).lower().endswith(".pdf"):
+                        QMessageBox.information(
+                            self,
+                            "✅ تم حفظ الفاتورة",
+                            f"تم حفظ فاتورة PDF بنجاح.\n\n📄 {os.path.basename(exported_path)}",
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "⚠️ تم حفظ HTML",
+                            f"تم حفظ الفاتورة كملف HTML.\n\n"
+                            f"📄 {os.path.basename(exported_path)}\n\n"
+                            f"💡 لإنشاء PDF، قم بتثبيت:\n"
+                            f"   pip install weasyprint\n"
+                            f"أو استخدم Google Chrome/Edge",
+                        )
+                else:
+                    QMessageBox.critical(self, "خطأ", "فشل في حفظ الفاتورة")
                 return
 
             # Fallback: استخدام InvoicePrintingService
@@ -4496,6 +5053,25 @@ class ProjectManagerTab(QWidget):
                 local_id = getattr(project, "id", None) or 1
                 invoice_number = f"SW-{97161 + int(local_id)}"
 
+            project_currency = project_currency_code(project)
+            project_rate = project_exchange_rate(project)
+            currency_suffix_text = currency_suffix(project_currency)
+            try:
+                repo = getattr(getattr(self, "accounting_service", None), "repo", None)
+                if repo is not None and hasattr(repo, "get_all_currencies"):
+                    for current_currency in repo.get_all_currencies() or []:
+                        if (
+                            normalize_currency_code(current_currency.get("code"))
+                            == project_currency
+                        ):
+                            currency_suffix_text = (
+                                str(current_currency.get("symbol") or "").strip()
+                                or currency_suffix_text
+                            )
+                            break
+            except Exception:
+                pass
+
             invoice_data = {
                 "invoice_number": invoice_number,
                 "invoice_date": (
@@ -4514,24 +5090,57 @@ class ProjectManagerTab(QWidget):
                 "project_name": project.name,
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "project_notes": getattr(project, "project_notes", "") or "",
+                "currency_code": project_currency,
+                "currency_suffix": currency_suffix_text,
                 "items": [
                     {
                         "name": item.description,
                         "qty": float(item.quantity),
-                        "price": float(item.unit_price),
+                        "price": amount_from_egp(
+                            float(item.unit_price), project_currency, project_rate
+                        ),
                         "discount": float(item.discount_rate),
-                        "total": float(item.total),
+                        "total": amount_from_egp(float(item.total), project_currency, project_rate),
                     }
                     for item in project.items
                 ],
-                # حساب المجموع الفرعي من البنود (مع الخصومات)
-                "subtotal": sum(float(item.total) for item in project.items),
-                "grand_total": float(project.total_amount),
-                "total_paid": float(profit_data.get("total_paid", 0)),
-                "remaining_amount": float(profit_data.get("balance_due", 0)),
-                "remaining": float(profit_data.get("balance_due", 0)),
-                "total_amount": float(project.total_amount),
-                "payments": payments_list,
+                "subtotal": amount_from_egp(
+                    sum(float(item.total) for item in project.items),
+                    project_currency,
+                    project_rate,
+                ),
+                "grand_total": amount_from_egp(
+                    float(project.total_amount), project_currency, project_rate
+                ),
+                "total_paid": amount_from_egp(
+                    float(profit_data.get("total_paid", 0)),
+                    project_currency,
+                    project_rate,
+                ),
+                "remaining_amount": amount_from_egp(
+                    float(profit_data.get("balance_due", 0)),
+                    project_currency,
+                    project_rate,
+                ),
+                "remaining": amount_from_egp(
+                    float(profit_data.get("balance_due", 0)),
+                    project_currency,
+                    project_rate,
+                ),
+                "total_amount": amount_from_egp(
+                    float(project.total_amount), project_currency, project_rate
+                ),
+                "payments": [
+                    {
+                        **payment,
+                        "amount": amount_from_egp(
+                            float(payment.get("amount", 0.0) or 0.0),
+                            project_currency,
+                            project_rate,
+                        ),
+                    }
+                    for payment in payments_list
+                ],
                 "client_info": client_info,
                 "client_logo_path": client_info.get("logo_path", ""),
                 "client_logo_data": client_info.get("logo_data", ""),
@@ -4551,15 +5160,14 @@ class ProjectManagerTab(QWidget):
             printing_service = InvoicePrintingService(settings_service=settings_service)
 
             # Print invoice (generates PDF and opens it automatically)
-            pdf_path = printing_service.print_invoice(invoice_data)
+            pdf_path = printing_service.print_invoice(invoice_data, auto_open=False)
 
             if pdf_path:
                 if pdf_path.endswith(".pdf"):
                     QMessageBox.information(
                         self,
-                        "✅ تم إنشاء الفاتورة",
-                        f"تم إنشاء فاتورة PDF بنجاح!\n\n📄 {os.path.basename(pdf_path)}\n\n"
-                        f"تم فتح الملف تلقائياً للطباعة.",
+                        "✅ تم حفظ الفاتورة",
+                        f"تم حفظ فاتورة PDF بنجاح.\n\n📄 {os.path.basename(pdf_path)}",
                     )
                 else:
                     # HTML file was created instead
@@ -4576,7 +5184,7 @@ class ProjectManagerTab(QWidget):
                 QMessageBox.critical(self, "خطأ", "فشل في إنشاء الفاتورة")
 
         except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"فشل في طباعة الفاتورة:\n{str(e)}")
+            QMessageBox.critical(self, "خطأ", f"فشل في حفظ الفاتورة:\n{str(e)}")
 
             traceback.print_exc()
 
@@ -4601,7 +5209,7 @@ class ProjectManagerTab(QWidget):
             accounts_cache = {}
 
             for payment in payments:
-                account_name = "نقدي"
+                account_name = "Cash"
                 account_id = getattr(payment, "account_id", None)
 
                 if account_id:
@@ -4673,26 +5281,15 @@ class ProjectManagerTab(QWidget):
 
             # استخدام template_service للمعاينة
             if self.template_service:
-                html_content = self.template_service.generate_invoice_html(
+                preview_ok = self.template_service.preview_template(
                     project=project, client_info=client_info, payments=payments_list
                 )
-                exports_dir = self.template_service.get_exports_dir()
-                filename = self.template_service.build_export_basename(project, client_info)
-
-                dialog = InvoicePreviewDialog(
-                    html_content=html_content,
-                    title=f"معاينة فاتورة - {project.name}",
-                    base_url=self.template_service.templates_dir,
-                    exports_dir=exports_dir,
-                    file_basename=filename,
-                    auto_print=False,
-                    parent=self,
-                )
-                dialog.exec()
+                if not preview_ok:
+                    QMessageBox.warning(self, "خطأ", "تعذر فتح الفاتورة مباشرة")
             else:
                 QMessageBox.warning(self, "خطأ", "خدمة القوالب غير متوفرة")
 
         except Exception as e:
-            QMessageBox.critical(self, "خطأ", f"فشل في معاينة الفاتورة:\n{str(e)}")
+            QMessageBox.critical(self, "خطأ", f"فشل في فتح الفاتورة:\n{str(e)}")
 
             traceback.print_exc()

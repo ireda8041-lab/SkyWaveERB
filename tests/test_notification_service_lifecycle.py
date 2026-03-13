@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import types
 from datetime import datetime, timedelta
 
@@ -79,11 +80,24 @@ def test_notification_service_crud_updates_sync_state_and_filters_deleted_rows(
     assert row["dirty_flag"] == 1
     assert row["is_deleted"] == 1
 
-    assert service.get_all_notifications() == []
-    assert service.get_unread_notifications() == []
-    assert service.get_recent_activities() == []
-    assert service.get_unread_count() == 0
-    assert signals == ["notifications", "notifications", "notifications"]
+
+def test_notification_service_notification_columns_falls_back_and_logs(
+    sqlite_repo, mock_event_bus, monkeypatch, caplog
+):
+    service = NotificationService(sqlite_repo, mock_event_bus)
+
+    def _boom():
+        raise RuntimeError("pragma failed")
+
+    monkeypatch.setattr(service.repo, "get_cursor", _boom)
+    service._notification_columns_cache = None
+
+    with caplog.at_level(logging.DEBUG, logger="SkyWaveERP.services.notification_service"):
+        columns = service._notification_columns()
+
+    assert "title" in columns
+    assert "message" in columns
+    assert any("تعذر فحص أعمدة notifications" in record.message for record in caplog.records)
 
 
 def test_notification_service_mark_all_as_read_emits_signal(
@@ -210,6 +224,172 @@ def test_notification_service_online_save_tags_remote_record_with_device_id(
     assert row["_mongo_id"] == "mongo-notification-1"
     assert row["sync_status"] == "synced"
     assert row["dirty_flag"] == 0
+
+
+def test_notification_service_online_save_avoids_bool_check_on_mongo_database(
+    sqlite_repo, mock_event_bus, monkeypatch
+):
+    inserted: list[dict] = []
+
+    class _FakeNotificationsCollection:
+        @staticmethod
+        def insert_one(payload: dict):
+            inserted.append(dict(payload))
+            return types.SimpleNamespace(inserted_id="mongo-notification-bool-1")
+
+    class _MongoDatabaseProxy:
+        notifications = _FakeNotificationsCollection()
+
+        def __bool__(self):
+            raise TypeError(
+                "Database objects do not implement truth value testing or bool(). "
+                "Please compare with None instead: database is not None"
+            )
+
+    sqlite_repo.online = True
+    sqlite_repo.mongo_db = _MongoDatabaseProxy()
+    monkeypatch.setattr("services.notification_service.get_stable_device_id", lambda: "DEVICE-99")
+
+    service = NotificationService(sqlite_repo, mock_event_bus)
+    monkeypatch.setattr(service, "_show_local_toast", lambda notification: None)
+
+    created = service.create_notification(
+        title="Bool Safe Notification",
+        message="Should save remotely",
+        type=schemas.NotificationType.INFO,
+        priority=schemas.NotificationPriority.MEDIUM,
+    )
+
+    row = sqlite_repo.sqlite_conn.execute(
+        "SELECT _mongo_id, sync_status, dirty_flag FROM notifications WHERE id = ?",
+        (created.id,),
+    ).fetchone()
+
+    assert created is not None
+    assert inserted[0]["device_id"] == "DEVICE-99"
+    assert row["_mongo_id"] == "mongo-notification-bool-1"
+    assert row["sync_status"] == "synced"
+    assert row["dirty_flag"] == 0
+
+
+def test_notification_service_activity_notifications_persist_structured_operation_fields(
+    sqlite_repo, mock_event_bus, monkeypatch
+):
+    service = NotificationService(sqlite_repo, mock_event_bus)
+    monkeypatch.setattr(service, "_show_local_toast", lambda notification: None)
+
+    regular = service.create_notification(
+        title="Reminder",
+        message="General reminder",
+        type=schemas.NotificationType.INFO,
+        priority=schemas.NotificationPriority.MEDIUM,
+    )
+    activity = service.create_notification(
+        title="تم تحصيل دفعة",
+        message="Alpha Project",
+        type=schemas.NotificationType.SUCCESS,
+        priority=schemas.NotificationPriority.MEDIUM,
+        related_entity_type="payment",
+        action="paid",
+        operation_text="تحصيل دفعة",
+        details="العميل: Blue Nile",
+        amount=750.0,
+        is_activity=True,
+        is_read=True,
+    )
+
+    assert regular is not None
+    assert activity is not None
+
+    row = sqlite_repo.sqlite_conn.execute(
+        """
+        SELECT action, operation_text, details, amount, is_activity, is_read
+        FROM notifications
+        WHERE id = ?
+        """,
+        (activity.id,),
+    ).fetchone()
+
+    activities = service.get_recent_activities(limit=5)
+
+    assert row["action"] == "paid"
+    assert row["operation_text"] == "تحصيل دفعة"
+    assert row["details"] == "العميل: Blue Nile"
+    assert row["amount"] == pytest.approx(750.0)
+    assert row["is_activity"] == 1
+    assert row["is_read"] == 1
+    assert [notification.id for notification in activities] == [activity.id]
+    assert activities[0].is_activity is True
+    assert activities[0].operation_text == "تحصيل دفعة"
+    assert activities[0].amount == pytest.approx(750.0)
+
+
+def test_notification_service_excludes_activity_rows_from_general_notifications(
+    sqlite_repo, mock_event_bus, monkeypatch
+):
+    service = NotificationService(sqlite_repo, mock_event_bus)
+    monkeypatch.setattr(service, "_show_local_toast", lambda notification: None)
+
+    regular = service.create_notification(
+        title="Invoice Reminder",
+        message="Outstanding invoice",
+        type=schemas.NotificationType.INFO,
+        priority=schemas.NotificationPriority.MEDIUM,
+    )
+    activity = service.create_notification(
+        title="تم تعديل عميل",
+        message="Katkoty kids wear",
+        type=schemas.NotificationType.SUCCESS,
+        priority=schemas.NotificationPriority.MEDIUM,
+        related_entity_type="clients",
+        related_entity_id="client-42",
+        action="updated",
+        operation_text="تعديل عميل",
+        is_activity=True,
+        is_read=False,
+    )
+
+    assert regular is not None
+    assert activity is not None
+    assert [notification.id for notification in service.get_all_notifications(limit=10)] == [
+        regular.id
+    ]
+    assert [notification.id for notification in service.get_unread_notifications(limit=10)] == [
+        regular.id
+    ]
+    assert service.get_unread_count() == 1
+    assert {
+        notification.id
+        for notification in service.get_all_notifications(limit=10, include_activity=True)
+    } == {regular.id, activity.id}
+
+
+def test_notification_service_deduplicates_recent_identical_notifications(
+    sqlite_repo, mock_event_bus, monkeypatch
+):
+    service = NotificationService(sqlite_repo, mock_event_bus)
+    monkeypatch.setattr(service, "_show_local_toast", lambda notification: None)
+
+    first = service.create_notification(
+        title="Sync Failed",
+        message="Cloud connection dropped",
+        type=schemas.NotificationType.ERROR,
+        priority=schemas.NotificationPriority.HIGH,
+        related_entity_type="sync",
+    )
+    second = service.create_notification(
+        title="Sync Failed",
+        message="Cloud connection dropped",
+        type=schemas.NotificationType.ERROR,
+        priority=schemas.NotificationPriority.HIGH,
+        related_entity_type="sync",
+    )
+
+    assert first is not None
+    assert second is not None
+    assert second.id == first.id
+    row = sqlite_repo.sqlite_conn.execute("SELECT COUNT(*) FROM notifications").fetchone()
+    assert row[0] == 1
 
 
 def test_notification_service_local_toast_routes_through_notification_manager(

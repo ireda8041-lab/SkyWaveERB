@@ -1,5 +1,7 @@
 # pylint: disable=too-many-lines,too-many-public-methods
 # الملف: ui/settings_tab.py
+from __future__ import annotations
+
 """
 تاب الإعدادات المتقدمة - يشمل:
 - إدارة الحسابات
@@ -19,10 +21,12 @@ import traceback
 import webbrowser
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QRegularExpression, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QRegularExpression, QSignalBlocker, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QRegularExpressionValidator, QValidator
 from PyQt6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -48,14 +52,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from core.auth_models import AuthService, PermissionManager
 from core.config import Config
-from core.data_loader import get_data_loader
-from core.repository import Repository
 from core.signals import app_signals
 from services.settings_service import SettingsService
-from services.update_service import UpdateService
-from ui.currency_editor_dialog import CurrencyEditorDialog
 from ui.smart_combobox import SmartFilterComboBox
 from ui.styles import (
     BUTTON_STYLES,
@@ -66,12 +65,10 @@ from ui.styles import (
     fix_table_rtl,
     setup_custom_title_bar,
 )
-from ui.template_settings import TemplateSettings
-from ui.todo_manager import TaskService
-from ui.universal_search import UniversalSearchBar
-from ui.user_editor_dialog import UserEditorDialog
-from ui.user_permissions_dialog import UserPermissionsDialog
 from version import APP_NAME, CURRENT_VERSION, UPDATE_CHECK_URL
+
+if TYPE_CHECKING:
+    from core.repository import Repository
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -83,6 +80,66 @@ except ImportError:
             print(msg)
         except UnicodeEncodeError:
             pass
+
+
+def _get_template_settings_class():
+    from ui.template_settings import TemplateSettings
+
+    return TemplateSettings
+
+
+def _get_permission_manager():
+    from core.auth_models import PermissionManager
+
+    return PermissionManager
+
+
+def _create_data_loader():
+    from core.data_loader import get_data_loader
+
+    return get_data_loader()
+
+
+def _get_auth_service_class():
+    from core.auth_models import AuthService
+
+    return AuthService
+
+
+def _get_currency_editor_dialog_class():
+    from ui.currency_editor_dialog import CurrencyEditorDialog
+
+    return CurrencyEditorDialog
+
+
+def _get_task_service_class():
+    from ui.todo_manager import TaskService
+
+    return TaskService
+
+
+def _get_universal_search_bar_class():
+    from ui.universal_search import UniversalSearchBar
+
+    return UniversalSearchBar
+
+
+def _get_user_editor_dialog_class():
+    from ui.user_editor_dialog import UserEditorDialog
+
+    return UserEditorDialog
+
+
+def _get_user_permissions_dialog_class():
+    from ui.user_permissions_dialog import UserPermissionsDialog
+
+    return UserPermissionsDialog
+
+
+def _get_update_service_class():
+    from services.update_service import UpdateService
+
+    return UpdateService
 
 
 class SettingsTab(QWidget):
@@ -122,6 +179,21 @@ class SettingsTab(QWidget):
         self._dirty_sections: set[str] = set()
         self._company_logo_cache_key: tuple[str, str, int] | None = None
         self._company_logo_scaled_cache: QPixmap | None = None
+        self._company_layout_compact: bool | None = None
+        self._backup_overview_loaded = False
+        self._sync_overview_loaded = False
+        self.payment_methods_search = None
+        self.note_templates_search = None
+        self._payment_methods_search_placeholder = None
+        self._note_templates_search_placeholder = None
+        self._payment_methods_layout = None
+        self._note_templates_layout = None
+        self.template_tab = None
+        self.template_tab_placeholder = None
+        self._template_tab_index = -1
+        self._template_tab_loading = False
+        self._initialized_subtabs: set[str] = set()
+        self._lazy_subtab_setups = {}
         self.manual_sync_finished.connect(self._on_manual_sync_completed)
 
         main_layout = QVBoxLayout()
@@ -211,57 +283,53 @@ class SettingsTab(QWidget):
         # تاب بيانات الشركة
         self.company_tab = QWidget()
         self.tabs.addTab(self.company_tab, "🏢 بيانات الشركة")
-        self.setup_company_tab()
+        self._lazy_subtab_setups["company"] = self.setup_company_tab
 
         # تاب إدارة العملات
         self.currency_tab = QWidget()
         self.tabs.addTab(self.currency_tab, "💱 إدارة العملات")
-        self.setup_currency_tab()
+        self._lazy_subtab_setups["currencies"] = self.setup_currency_tab
 
         # تاب إدارة المستخدمين
         self.users_tab = QWidget()
         self.tabs.addTab(self.users_tab, "👥 إدارة المستخدمين")
-        self.setup_users_tab()
+        self._lazy_subtab_setups["users"] = self.setup_users_tab
 
         # تاب النسخ الاحتياطي
         self.backup_tab = QWidget()
         self.tabs.addTab(self.backup_tab, "💾 النسخ الاحتياطي")
-        self.setup_backup_tab()
+        self._lazy_subtab_setups["backup"] = self.setup_backup_tab
 
-        # تاب الحسابات الافتراضية
-        self.default_accounts_tab = QWidget()
-        self.tabs.addTab(self.default_accounts_tab, "🔗 الحسابات الافتراضية")
-        self.setup_default_accounts_tab()
-
-        # تاب قوالب الفواتير
-
-        self.template_tab = TemplateSettings(self.settings_service)
-        self.tabs.addTab(self.template_tab, "🎨 قوالب الفواتير")
+        # تاب قوالب الفواتير - lazy لتخفيف فتح شاشة الإعدادات
+        self.template_tab_placeholder = QWidget()
+        self._template_tab_index = self.tabs.addTab(
+            self.template_tab_placeholder, "🎨 قوالب الفواتير"
+        )
 
         # تاب طرق الدفع
         self.payment_methods_tab = QWidget()
         self.tabs.addTab(self.payment_methods_tab, "💳 طرق الدفع")
-        self.setup_payment_methods_tab()
+        self._lazy_subtab_setups["payment_methods"] = self.setup_payment_methods_tab
 
         # تاب ملاحظات المشاريع
         self.project_notes_tab = QWidget()
         self.tabs.addTab(self.project_notes_tab, "📝 ملاحظات المشاريع")
-        self.setup_project_notes_tab()
+        self._lazy_subtab_setups["project_notes"] = self.setup_project_notes_tab
 
         # تاب التحديثات
         self.update_tab = QWidget()
         self.tabs.addTab(self.update_tab, "🆕 التحديثات")
-        self.setup_update_tab()
+        self._lazy_subtab_setups["update"] = self.setup_update_tab
 
         # تاب اتصال قواعد البيانات (MongoDB)
         self.db_connection_tab = QWidget()
         self.tabs.addTab(self.db_connection_tab, "🌐 اتصال السحابة")
-        self.setup_db_connection_tab()
+        self._lazy_subtab_setups["db_connection"] = self.setup_db_connection_tab
 
         # تاب إعدادات المزامنة
         self.sync_tab = QWidget()
         self.tabs.addTab(self.sync_tab, "🔄 المزامنة")
-        self.setup_sync_tab()
+        self._lazy_subtab_setups["sync"] = self.setup_sync_tab
         # تطبيق الأسهم على كل الـ widgets
 
         apply_arrows_to_all_widgets(self)
@@ -279,10 +347,14 @@ class SettingsTab(QWidget):
         # ⚡ تطبيق محاذاة النص لليمين على كل الحقول
 
         apply_rtl_alignment_to_all_fields(self)
+        self._ensure_payment_methods_seeded()
+        self._ensure_note_templates_seeded()
+        QTimer.singleShot(0, self._ensure_initial_visible_subtab)
 
     def resizeEvent(self, event):  # pylint: disable=invalid-name
         super().resizeEvent(event)
         self._apply_tabs_responsive()
+        self._apply_company_responsive_layout()
 
     def _apply_tabs_responsive(self):
         if not hasattr(self, "tabs"):
@@ -300,6 +372,76 @@ class SettingsTab(QWidget):
         tab_font = tab_bar.font()
         tab_font.setPointSize(10 if compact else 11)
         tab_bar.setFont(tab_font)
+
+    def _apply_company_responsive_layout(self) -> None:
+        if not hasattr(self, "_company_main_layout"):
+            return
+
+        compact = self.width() < 1380
+        if self._company_layout_compact == compact:
+            return
+        self._company_layout_compact = compact
+
+        if compact:
+            self._company_main_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            self._company_main_layout.setSpacing(12)
+            self._company_main_layout.setStretch(0, 0)
+            self._company_main_layout.setStretch(1, 0)
+            if hasattr(self, "_company_logo_frame"):
+                self._company_logo_frame.setMinimumWidth(0)
+            if hasattr(self, "_company_logo_buttons_layout"):
+                self._company_logo_buttons_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+            if hasattr(self, "_company_badges_layout"):
+                self._company_badges_layout.setDirection(QBoxLayout.Direction.TopToBottom)
+        else:
+            self._company_main_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+            self._company_main_layout.setSpacing(14)
+            self._company_main_layout.setStretch(0, 2)
+            self._company_main_layout.setStretch(1, 1)
+            if hasattr(self, "_company_logo_frame"):
+                self._company_logo_frame.setMinimumWidth(320)
+            if hasattr(self, "_company_logo_buttons_layout"):
+                self._company_logo_buttons_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+            if hasattr(self, "_company_badges_layout"):
+                self._company_badges_layout.setDirection(QBoxLayout.Direction.LeftToRight)
+
+    def _set_company_badge_tone(self, badge: QLabel, tone: str) -> None:
+        palette = {
+            "success": (
+                "rgba(16, 185, 129, 0.18)",
+                "#34d399",
+                "rgba(16, 185, 129, 0.35)",
+            ),
+            "warning": (
+                "rgba(245, 158, 11, 0.18)",
+                "#fbbf24",
+                "rgba(245, 158, 11, 0.35)",
+            ),
+            "danger": (
+                "rgba(239, 68, 68, 0.16)",
+                "#fca5a5",
+                "rgba(239, 68, 68, 0.35)",
+            ),
+            "info": (
+                "rgba(59, 130, 246, 0.18)",
+                "#93c5fd",
+                "rgba(59, 130, 246, 0.35)",
+            ),
+        }
+        bg, fg, border = palette.get(tone, palette["info"])
+        badge.setStyleSheet(
+            f"""
+            QLabel {{
+                background: {bg};
+                color: {fg};
+                border: 1px solid {border};
+                border-radius: 10px;
+                padding: 6px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }}
+        """
+        )
 
     def _search_settings_tabs(self, text: str):
         if not text:
@@ -327,26 +469,195 @@ class SettingsTab(QWidget):
 
     def _current_section_key(self) -> str:
         current_widget = self.tabs.currentWidget()
+        return self._section_key_for_widget(current_widget)
+
+    def _section_key_for_widget(self, current_widget) -> str:
         if current_widget is self.company_tab:
             return "company"
         if current_widget is self.currency_tab:
             return "currencies"
         if current_widget is self.users_tab:
             return "users"
-        if current_widget is self.default_accounts_tab:
-            return "default_accounts"
         if current_widget is self.payment_methods_tab:
             return "payment_methods"
         if current_widget is self.project_notes_tab:
             return "project_notes"
         if current_widget is self.backup_tab:
             return "backup"
+        if current_widget is self.update_tab:
+            return "update"
+        if current_widget is self.db_connection_tab:
+            return "db_connection"
         if current_widget is self.sync_tab:
             return "sync"
         return "other"
 
+    def _ensure_section_ui(self, section_key: str) -> bool:
+        if section_key in self._initialized_subtabs:
+            return True
+
+        setup_fn = self._lazy_subtab_setups.get(section_key)
+        if setup_fn is None:
+            return False
+
+        setup_fn()
+        self._initialized_subtabs.add(section_key)
+
+        widget_map = {
+            "company": self.company_tab,
+            "currencies": self.currency_tab,
+            "users": self.users_tab,
+            "backup": self.backup_tab,
+            "payment_methods": self.payment_methods_tab,
+            "project_notes": self.project_notes_tab,
+            "update": self.update_tab,
+            "db_connection": self.db_connection_tab,
+            "sync": self.sync_tab,
+        }
+        target_widget = widget_map.get(section_key)
+        if target_widget is not None:
+            apply_arrows_to_all_widgets(target_widget)
+            apply_rtl_alignment_to_all_fields(target_widget)
+        return True
+
+    def _ensure_initial_visible_subtab(self) -> None:
+        try:
+            current_section = self._current_section_key()
+            if current_section:
+                self._ensure_section_ui(current_section)
+        except RuntimeError:
+            return
+        except Exception:
+            safe_print("WARNING: [SettingsTab] فشل تجهيز التبويب الظاهر أولياً")
+
+    def _ensure_template_tab(self) -> None:
+        if self.template_tab is not None or self._template_tab_index < 0:
+            return
+        if self._template_tab_loading:
+            return
+
+        self._template_tab_loading = True
+        template_settings_class = _get_template_settings_class()
+        try:
+            template_tab = template_settings_class(self.settings_service)
+            self.template_tab = template_tab
+            self.tabs.removeTab(self._template_tab_index)
+            self.tabs.insertTab(self._template_tab_index, template_tab, "🎨 قوالب الفواتير")
+            self.template_tab_placeholder = None
+            if self.tabs.currentIndex() != self._template_tab_index:
+                self.tabs.setCurrentIndex(self._template_tab_index)
+        finally:
+            self._template_tab_loading = False
+
     def _clear_dirty_section(self, section_key: str) -> None:
         self._dirty_sections.discard(section_key)
+
+    def _default_payment_methods(self) -> list[dict]:
+        payment_methods_factory = getattr(self.settings_service, "default_payment_methods", None)
+        if callable(payment_methods_factory):
+            methods = payment_methods_factory()
+            if methods:
+                return methods
+        return [
+            {
+                "name": "VF Cash",
+                "description": "Vodafone Cash transfer",
+                "details": "01067894321 - حازم أشرف\n01021965200 - رضا سامي",
+                "active": True,
+            },
+            {
+                "name": "InstaPay",
+                "description": "InstaPay transfer",
+                "details": "01067894321 - حازم أشرف\nskywaveads@instapay",
+                "active": True,
+            },
+            {
+                "name": "Bank Misr Local",
+                "description": "Local bank transfer",
+                "details": "رقم الحساب: 2630333000086626\nSWIFT CODE: BMISEGCXXXX",
+                "active": True,
+            },
+            {
+                "name": "Bank Misr Intl",
+                "description": "International bank transfer",
+                "details": "IBAN: EG020002026302630333000086626\nSWIFT CODE: BMISEGCXXXX",
+                "active": True,
+            },
+            {
+                "name": "Cash",
+                "description": "Cash payment",
+                "details": "الخزنة النقدية - مقر الشركة",
+                "active": True,
+            },
+        ]
+
+    def _ensure_payment_methods_seeded(self) -> list[dict]:
+        payment_methods = self.settings_service.get_setting("payment_methods") or []
+        if payment_methods:
+            return payment_methods
+        payment_methods = self._default_payment_methods()
+        self.settings_service.update_setting("payment_methods", payment_methods)
+        return payment_methods
+
+    def _default_note_templates(self) -> list[dict]:
+        return [
+            {
+                "name": "القالب الافتراضي",
+                "content": """• مدة التنفيذ: ___ يوم عمل.
+• تبدأ المدة من تاريخ استلام الداتا.
+• التسليم حسب الجدول الزمني المتفق عليه.
+
+• الدفعة المقدمة: 50% عند التعاقد.
+• الدفعة الثانية: 25% عند التسليم الأولي.
+• الدفعة النهائية: 25% عند التسليم النهائي.
+
+• يبدأ التنفيذ بعد استلام الدفعة الأولى.""",
+            },
+            {
+                "name": "قالب مختصر",
+                "content": "• مدة التنفيذ: ___ يوم.\n• الدفع: 50% مقدم - 50% عند التسليم.",
+            },
+        ]
+
+    def _ensure_note_templates_seeded(self) -> list[dict]:
+        note_templates = self.settings_service.get_setting("project_note_templates") or []
+        if note_templates:
+            return note_templates
+        note_templates = self._default_note_templates()
+        self.settings_service.update_setting("project_note_templates", note_templates)
+        return note_templates
+
+    def _ensure_payment_methods_search(self) -> None:
+        if self.payment_methods_search is not None or self._payment_methods_layout is None:
+            return
+        universal_search_bar = _get_universal_search_bar_class()
+        self.payment_methods_search = universal_search_bar(
+            self.payment_methods_table,
+            placeholder="🔍 بحث في طرق الدفع...",
+        )
+        placeholder = self._payment_methods_search_placeholder
+        if placeholder is not None:
+            self._payment_methods_layout.replaceWidget(placeholder, self.payment_methods_search)
+            placeholder.deleteLater()
+            self._payment_methods_search_placeholder = None
+        else:
+            self._payment_methods_layout.insertWidget(1, self.payment_methods_search)
+
+    def _ensure_note_templates_search(self) -> None:
+        if self.note_templates_search is not None or self._note_templates_layout is None:
+            return
+        universal_search_bar = _get_universal_search_bar_class()
+        self.note_templates_search = universal_search_bar(
+            self.note_templates_table,
+            placeholder="🔍 بحث في قوالب الملاحظات...",
+        )
+        placeholder = self._note_templates_search_placeholder
+        if placeholder is not None:
+            self._note_templates_layout.replaceWidget(placeholder, self.note_templates_search)
+            placeholder.deleteLater()
+            self._note_templates_search_placeholder = None
+        else:
+            self._note_templates_layout.insertWidget(1, self.note_templates_search)
 
     def mark_data_changed(self, table_name: str) -> None:
         section_map = {
@@ -365,6 +676,8 @@ class SettingsTab(QWidget):
         section_key = self._current_section_key()
         is_dirty = section_key in self._dirty_sections
 
+        self._ensure_section_ui(section_key)
+
         if section_key == "company":
             if (
                 force_reload
@@ -379,9 +692,6 @@ class SettingsTab(QWidget):
         elif section_key == "users":
             if force_reload or is_dirty or self.users_table.rowCount() == 0:
                 self.load_users()
-        elif section_key == "default_accounts":
-            if force_reload or is_dirty or self.default_treasury_combo.count() == 0:
-                self.load_default_accounts()
         elif section_key == "payment_methods":
             if force_reload or is_dirty or self.payment_methods_table.rowCount() == 0:
                 self.load_payment_methods()
@@ -389,8 +699,15 @@ class SettingsTab(QWidget):
             if force_reload or is_dirty or self.note_templates_table.rowCount() == 0:
                 self.load_note_templates()
         elif section_key == "backup":
-            if force_reload or is_dirty:
+            if force_reload or is_dirty or not self._backup_overview_loaded:
                 self.load_db_stats()
+                self._load_backup_history()
+                self._backup_overview_loaded = True
+        elif section_key == "sync":
+            if force_reload or is_dirty or not self._sync_overview_loaded:
+                self.load_sync_settings()
+                self.refresh_sync_status()
+                self._sync_overview_loaded = True
 
     def _on_system_settings_changed(self) -> None:
         self.mark_data_changed("system_settings")
@@ -401,6 +718,9 @@ class SettingsTab(QWidget):
         """معالج تغيير التاب الفرعي - محسّن لتجنب التحميل المتكرر"""
         tab_text = self.tabs.tabText(index)
         safe_print(f"INFO: [SettingsTab] تم اختيار التاب الفرعي: {tab_text}")
+        self._ensure_section_ui(self._section_key_for_widget(self.tabs.widget(index)))
+        if index == self._template_tab_index:
+            self._ensure_template_tab()
         self.load_active_subtab_data(force_reload=False)
 
     def setup_company_tab(self):
@@ -466,32 +786,32 @@ class SettingsTab(QWidget):
         summary_title.setStyleSheet("color: #E2E8F0; font-size: 16px; font-weight: bold;")
         summary_subtitle = QLabel("حدّث بيانات شركتك وشعارك لطباعة احترافية")
         summary_subtitle.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        summary_subtitle.setWordWrap(True)
         summary_text = QVBoxLayout()
         summary_text.setSpacing(2)
         summary_text.addWidget(summary_title)
         summary_text.addWidget(summary_subtitle)
         summary_layout.addLayout(summary_text)
         summary_layout.addStretch()
-        badge = QLabel("محفوظ محلياً")
-        badge.setStyleSheet(
-            """
-            QLabel {
-                background: rgba(16, 185, 129, 0.18);
-                color: #34d399;
-                border: 1px solid rgba(16, 185, 129, 0.35);
-                border-radius: 10px;
-                padding: 6px 12px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-        """
-        )
-        summary_layout.addWidget(badge)
+        badges_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        badges_layout.setSpacing(8)
+        self._company_badges_layout = badges_layout
+        self.company_status_badge = QLabel("محفوظ")
+        self.company_completeness_badge = QLabel("اكتمال 0/7")
+        self.company_logo_badge = QLabel("بدون شعار")
+        for badge in (
+            self.company_status_badge,
+            self.company_completeness_badge,
+            self.company_logo_badge,
+        ):
+            badges_layout.addWidget(badge)
+        summary_layout.addLayout(badges_layout)
         layout.addWidget(summary_frame)
 
-        main_h = QHBoxLayout()
+        main_h = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         main_h.setSpacing(14)
         main_h.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self._company_main_layout = main_h
 
         # === الجانب الأيسر: الحقول ===
         fields_frame = QFrame()
@@ -514,9 +834,14 @@ class SettingsTab(QWidget):
         fields_title = QLabel("📋 بيانات الشركة الأساسية")
         fields_title.setStyleSheet(section_title_style)
         fields_container.addWidget(fields_title)
+        fields_hint = QLabel("هذه البيانات تظهر في الفواتير والقوالب والمطبوعات مباشرة بعد الحفظ.")
+        fields_hint.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        fields_hint.setWordWrap(True)
+        fields_container.addWidget(fields_hint)
 
         fields_layout = QGridLayout()
         fields_layout.setSpacing(10)
+        fields_layout.setVerticalSpacing(12)
         fields_layout.setColumnStretch(0, 1)
         fields_layout.setColumnStretch(1, 1)
 
@@ -585,7 +910,7 @@ class SettingsTab(QWidget):
         self.company_vat_input = QLineEdit()
         self.company_vat_input.setPlaceholderText("أدخل الرقم الضريبي")
         self.company_vat_input.setStyleSheet(input_style)
-        fields_layout.addWidget(build_field(vat_lbl, self.company_vat_input), 3, 0)
+        fields_layout.addWidget(build_field(vat_lbl, self.company_vat_input), 3, 0, 1, 2)
 
         # === الجانب الأيمن: اللوجو ===
         logo_frame = QFrame()
@@ -600,7 +925,8 @@ class SettingsTab(QWidget):
         """
         )
         logo_frame.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        logo_frame.setMinimumWidth(200)
+        logo_frame.setMinimumWidth(320)
+        self._company_logo_frame = logo_frame
         logo_container = QVBoxLayout(logo_frame)
         logo_container.setContentsMargins(16, 14, 16, 16)
         logo_container.setSpacing(10)
@@ -669,10 +995,11 @@ class SettingsTab(QWidget):
         logo_container.addWidget(self.logo_preview, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # أزرار اللوجو المحسنة
-        btn_layout = QHBoxLayout()
+        btn_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         btn_layout.setSpacing(10)
+        self._company_logo_buttons_layout = btn_layout
 
-        self.select_logo_btn = QPushButton("📷 اختيار صورة")
+        self.select_logo_btn = QPushButton("📷 اختيار شعار الشركة")
         self.select_logo_btn.setStyleSheet(
             """
             QPushButton {
@@ -693,7 +1020,7 @@ class SettingsTab(QWidget):
         )
         self.select_logo_btn.clicked.connect(self.select_logo_file)
 
-        self.remove_logo_btn = QPushButton("🗑️ حذف")
+        self.remove_logo_btn = QPushButton("🗑️ حذف الشعار")
         self.remove_logo_btn.setStyleSheet(
             """
             QPushButton {
@@ -718,7 +1045,7 @@ class SettingsTab(QWidget):
         logo_container.addLayout(btn_layout)
 
         # نص توضيحي
-        hint_lbl = QLabel("PNG, JPG • 200×200 px\n✅ يتم مزامنته تلقائياً")
+        hint_lbl = QLabel("PNG, JPG • يفضّل 200×200 px\n✅ تتم مزامنته تلقائياً مع بيانات الشركة")
         hint_lbl.setStyleSheet("color: #94a3b8; font-size: 10px;")
         hint_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         logo_container.addWidget(hint_lbl)
@@ -727,11 +1054,28 @@ class SettingsTab(QWidget):
         main_h.addWidget(logo_frame, 1)
 
         layout.addLayout(main_h)
-        layout.addStretch(1)
+        layout.addSpacing(4)
 
-        # ⚡ زر الحفظ المحسن
-        save_container = QHBoxLayout()
-        save_container.addStretch()
+        footer_frame = QFrame()
+        footer_frame.setStyleSheet(
+            """
+            QFrame {
+                background: rgba(10, 27, 46, 0.65);
+                border: 1px solid rgba(80, 140, 220, 0.24);
+                border-radius: 12px;
+            }
+        """
+        )
+        footer_layout = QHBoxLayout(footer_frame)
+        footer_layout.setContentsMargins(16, 12, 16, 12)
+        footer_layout.setSpacing(12)
+
+        footer_text = QLabel(
+            "تأكد من اكتمال الاسم وبيانات التواصل حتى يظهر رأس الشركة بشكل صحيح في الفاتورة."
+        )
+        footer_text.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        footer_text.setWordWrap(True)
+        footer_layout.addWidget(footer_text, 1)
 
         self.save_company_btn = QPushButton("💾 حفظ بيانات الشركة")
         self.save_company_btn.setMinimumWidth(260)
@@ -761,10 +1105,9 @@ class SettingsTab(QWidget):
         """
         )
         self.save_company_btn.clicked.connect(self.save_settings)
-        save_container.addWidget(self.save_company_btn)
-        save_container.addStretch()
+        footer_layout.addWidget(self.save_company_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
-        layout.addLayout(save_container)
+        layout.addWidget(footer_frame)
 
         scroll_area.setWidget(scroll_content)
         outer_layout.addWidget(scroll_area)
@@ -798,6 +1141,7 @@ class SettingsTab(QWidget):
             w.textChanged.connect(self._on_company_form_changed)
 
         self._on_company_form_changed()
+        self._apply_company_responsive_layout()
 
     def _ensure_company_ui(self) -> bool:
         try:
@@ -841,11 +1185,11 @@ class SettingsTab(QWidget):
         self.add_currency_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.add_currency_btn.clicked.connect(self.add_currency)
 
-        self.edit_currency_btn = QPushButton("✏️ تعديل (مع جلب السعر)")
+        self.edit_currency_btn = QPushButton("✏️ تعديل العملة")
         self.edit_currency_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_currency_btn.clicked.connect(self.edit_currency)
 
-        self.delete_currency_btn = QPushButton("🗑️ حذف")
+        self.delete_currency_btn = QPushButton("🗑️ حذف العملة")
         self.delete_currency_btn.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_currency_btn.clicked.connect(self.delete_currency)
 
@@ -932,6 +1276,7 @@ class SettingsTab(QWidget):
 
         can_manage_users = True
         if self.current_user:
+            PermissionManager = _get_permission_manager()
             can_manage_users = PermissionManager.has_feature(self.current_user, "user_management")
 
         # أزرار التحكم
@@ -942,22 +1287,22 @@ class SettingsTab(QWidget):
         self.add_user_btn.clicked.connect(self.add_user)
         self.add_user_btn.setEnabled(can_manage_users)
 
-        self.edit_user_btn = QPushButton("✏️ تعديل")
+        self.edit_user_btn = QPushButton("✏️ تعديل المستخدم")
         self.edit_user_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_user_btn.clicked.connect(self.edit_user)
         self.edit_user_btn.setEnabled(can_manage_users)
 
-        self.permissions_btn = QPushButton("🔐 تحرير الصلاحيات")
+        self.permissions_btn = QPushButton("🔐 إدارة الصلاحيات")
         self.permissions_btn.setStyleSheet(BUTTON_STYLES["info"])
         self.permissions_btn.clicked.connect(self.edit_user_permissions)
         self.permissions_btn.setEnabled(can_manage_users)
 
-        self.delete_user_btn = QPushButton("🗑️ تعطيل")
+        self.delete_user_btn = QPushButton("🗑️ تعطيل المستخدم")
         self.delete_user_btn.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_user_btn.clicked.connect(self.delete_user)
         self.delete_user_btn.setEnabled(can_manage_users)
 
-        self.activate_user_btn = QPushButton("✅ تفعيل")
+        self.activate_user_btn = QPushButton("✅ تفعيل المستخدم")
         self.activate_user_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.activate_user_btn.clicked.connect(self.activate_user)
         self.activate_user_btn.setEnabled(can_manage_users)
@@ -1319,10 +1664,6 @@ class SettingsTab(QWidget):
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.addWidget(scroll_area)
 
-        # تحميل الإحصائيات
-        self.load_db_stats()
-        self._load_backup_history()
-
     def _optimize_database(self):
         """تحسين قاعدة البيانات"""
         try:
@@ -1359,6 +1700,7 @@ class SettingsTab(QWidget):
 
     def _load_backup_history(self):
         """تحميل سجل النسخ الاحتياطية"""
+        self._ensure_section_ui("backup")
         try:
 
             # البحث عن ملفات النسخ الاحتياطية
@@ -1446,6 +1788,7 @@ class SettingsTab(QWidget):
                     Qt.TransformationMode.SmoothTransformation,
                 )
                 self.logo_preview.setPixmap(scaled)
+                self.logo_preview.setText("")
                 self.logo_preview.setProperty("logo_path", file_path)
 
                 # ⚡ حفظ اللوجو كـ Base64 للمزامنة بين الأجهزة
@@ -1458,16 +1801,32 @@ class SettingsTab(QWidget):
         try:
             settings = self.settings_service.get_settings()
 
+            self._ensure_section_ui("company")
             if not self._ensure_company_ui():
                 return
 
-            self.company_name_input.setText(settings.get("company_name", ""))
-            self.company_tagline_input.setText(settings.get("company_tagline", ""))
-            self.company_address_input.setText(settings.get("company_address", ""))
-            self.company_phone_input.setText(settings.get("company_phone", ""))
-            self.company_email_input.setText(settings.get("company_email", ""))
-            self.company_website_input.setText(settings.get("company_website", ""))
-            self.company_vat_input.setText(settings.get("company_vat", ""))
+            blockers = [
+                QSignalBlocker(widget)
+                for widget in (
+                    self.company_name_input,
+                    self.company_tagline_input,
+                    self.company_address_input,
+                    self.company_phone_input,
+                    self.company_email_input,
+                    self.company_website_input,
+                    self.company_vat_input,
+                )
+            ]
+            try:
+                self.company_name_input.setText(settings.get("company_name", ""))
+                self.company_tagline_input.setText(settings.get("company_tagline", ""))
+                self.company_address_input.setText(settings.get("company_address", ""))
+                self.company_phone_input.setText(settings.get("company_phone", ""))
+                self.company_email_input.setText(settings.get("company_email", ""))
+                self.company_website_input.setText(settings.get("company_website", ""))
+                self.company_vat_input.setText(settings.get("company_vat", ""))
+            finally:
+                del blockers
 
             logo_path = settings.get("company_logo_path", "")
             logo_key = (
@@ -1507,6 +1866,7 @@ class SettingsTab(QWidget):
 
             if scaled and not scaled.isNull():
                 self.logo_preview.setPixmap(scaled)
+                self.logo_preview.setText("")
                 self.logo_preview.setProperty("logo_path", logo_path)
             else:
                 self.logo_preview.setPixmap(QPixmap())
@@ -1611,6 +1971,45 @@ class SettingsTab(QWidget):
         has_changes = current != snapshot
         can_save = required_ok and not invalid and has_changes
         self.save_company_btn.setEnabled(can_save)
+        preview_pixmap = self.logo_preview.pixmap()
+        has_logo = bool(current["company_logo_path"]) or (
+            preview_pixmap is not None and not preview_pixmap.isNull()
+        )
+        self.remove_logo_btn.setEnabled(has_logo)
+
+        filled_fields = sum(
+            bool(value.strip())
+            for value in (
+                current["company_name"],
+                current["company_tagline"],
+                current["company_address"],
+                current["company_phone"],
+                current["company_email"],
+                current["company_website"],
+                current["company_vat"],
+            )
+        )
+        self.company_completeness_badge.setText(f"اكتمال {filled_fields}/7")
+        self._set_company_badge_tone(
+            self.company_completeness_badge,
+            "success" if filled_fields >= 5 else "warning",
+        )
+
+        if invalid or not required_ok:
+            self.company_status_badge.setText("تحتاج مراجعة")
+            self._set_company_badge_tone(self.company_status_badge, "danger")
+        elif has_changes:
+            self.company_status_badge.setText("تغييرات غير محفوظة")
+            self._set_company_badge_tone(self.company_status_badge, "warning")
+        else:
+            self.company_status_badge.setText("محفوظ")
+            self._set_company_badge_tone(self.company_status_badge, "success")
+
+        self.company_logo_badge.setText("شعار مرفوع" if has_logo else "بدون شعار")
+        self._set_company_badge_tone(
+            self.company_logo_badge,
+            "info" if has_logo else "warning",
+        )
 
     def _update_company_preview(self):
         name = (self.company_name_input.text() or "").strip() or "—"
@@ -1621,16 +2020,28 @@ class SettingsTab(QWidget):
 
         self.company_preview_name.setText(name)
         self.company_preview_tagline.setText(tagline)
+        self.company_preview_tagline.setVisible(bool(tagline))
 
         parts = [p for p in (phone, email, website) if p]
-        self.company_preview_meta.setText(" • ".join(parts))
+        self.company_preview_meta.setText("\n".join(parts))
+        self.company_preview_meta.setVisible(bool(parts))
 
     def load_currencies(self):
         """تحميل العملات من قاعدة البيانات - محسّن"""
+        self._ensure_section_ui("currencies")
         self.currencies_table.setUpdatesEnabled(False)
         self.currencies_table.setRowCount(0)
 
-        data_loader = get_data_loader()
+        if self.repository is None:
+            try:
+                self._currencies_all = self._get_default_currencies()
+                self._render_currencies_page()
+                self._clear_dirty_section("currencies")
+            finally:
+                self.currencies_table.setUpdatesEnabled(True)
+            return
+
+        data_loader = _create_data_loader()
 
         def fetch_currencies():
             currencies = []
@@ -1752,6 +2163,7 @@ class SettingsTab(QWidget):
 
     def add_currency(self):
         """إضافة عملة جديدة"""
+        CurrencyEditorDialog = _get_currency_editor_dialog_class()
         dialog = CurrencyEditorDialog(parent=self)
         if dialog.exec():
             result = dialog.get_result()
@@ -1811,6 +2223,7 @@ class SettingsTab(QWidget):
             "active": active,
         }
 
+        CurrencyEditorDialog = _get_currency_editor_dialog_class()
         dialog = CurrencyEditorDialog(currency_data=currency_data, parent=self)
         if dialog.exec():
             result = dialog.get_result()
@@ -1981,6 +2394,7 @@ class SettingsTab(QWidget):
                 "tasks": [],
                 "settings": {},
             }
+            backup_warnings: list[str] = []
 
             # ⚡ جلب كل البيانات بشكل متوازي
             data_sources = [
@@ -2005,30 +2419,39 @@ class SettingsTab(QWidget):
                             backup_data[key] = [self._serialize_object(data)]
                 except Exception as e:
                     safe_print(f"WARNING: فشل جلب {key}: {e}")
+                    backup_warnings.append(f"{key}: {e}")
 
             # جلب المهام
             try:
-
+                TaskService = _get_task_service_class()
                 task_service = TaskService()
                 tasks = task_service.get_all_tasks()
                 backup_data["tasks"] = [self._serialize_object(t) for t in tasks]
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(f"WARNING: [SettingsTab] فشل تضمين المهام في النسخة الاحتياطية: {exc}")
+                backup_warnings.append(f"tasks: {exc}")
 
             # جلب الإعدادات
             try:
                 backup_data["settings"] = self.settings_service.get_settings()
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [SettingsTab] فشل تضمين الإعدادات في النسخة الاحتياطية: {exc}"
+                )
+                backup_warnings.append(f"settings: {exc}")
 
             # حفظ الملف
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(backup_data, f, ensure_ascii=False, indent=2, default=str)
 
-            return backup_data
+            return {"backup_data": backup_data, "warnings": backup_warnings}
 
-        def on_success(backup_data):
+        def on_success(result):
             """معالج النجاح"""
+            backup_data = (
+                result.get("backup_data", {}) if isinstance(result, dict) else (result or {})
+            )
+            backup_warnings = list(result.get("warnings", [])) if isinstance(result, dict) else []
             self.create_backup_btn.setEnabled(True)
             self.create_backup_btn.setText("💾 إنشاء نسخة احتياطية الآن")
             self.backup_progress.setVisible(False)
@@ -2049,9 +2472,7 @@ class SettingsTab(QWidget):
                 ]
             )
 
-            QMessageBox.information(
-                self,
-                "✅ نجاح",
+            message = (
                 f"تم إنشاء النسخة الاحتياطية بنجاح!\n\n"
                 f"📁 الملف: {os.path.basename(file_path)}\n"
                 f"📊 إجمالي السجلات: {total_records}\n\n"
@@ -2059,8 +2480,15 @@ class SettingsTab(QWidget):
                 f"• الخدمات: {len(backup_data.get('services', []))}\n"
                 f"• المشاريع: {len(backup_data.get('projects', []))}\n"
                 f"• المصروفات: {len(backup_data.get('expenses', []))}\n"
-                f"• المهام: {len(backup_data.get('tasks', []))}",
+                f"• المهام: {len(backup_data.get('tasks', []))}"
             )
+            if backup_warnings:
+                issues = "\n".join(f"• {warning}" for warning in backup_warnings[:5])
+                if len(backup_warnings) > 5:
+                    issues += f"\n• ... +{len(backup_warnings) - 5} more"
+                message += f"\n\n⚠️ تمت متابعة النسخ مع ملاحظات:\n{issues}"
+
+            QMessageBox.information(self, "✅ نجاح", message)
 
             # تحديث سجل النسخ الاحتياطية
             self._load_backup_history()
@@ -2073,7 +2501,7 @@ class SettingsTab(QWidget):
             QMessageBox.critical(self, "❌ خطأ", f"فشل إنشاء النسخة الاحتياطية:\n{error_msg}")
 
         # ⚡ تنفيذ في الخلفية
-        data_loader = get_data_loader()
+        data_loader = _create_data_loader()
         data_loader.load_async(
             operation_name="create_backup",
             load_function=do_backup,
@@ -2156,6 +2584,7 @@ class SettingsTab(QWidget):
 
     def load_db_stats(self):
         """⚡ تحميل إحصائيات قاعدة البيانات في الخلفية لمنع التجميد"""
+        self._ensure_section_ui("backup")
         # عرض رسالة تحميل
         self.db_stats_label.setText("⏳ جاري تحميل الإحصائيات...")
 
@@ -2271,7 +2700,7 @@ class SettingsTab(QWidget):
             self.db_stats_label.setText(f"❌ خطأ: {error_msg}")
 
         # ⚡ تحميل في الخلفية
-        data_loader = get_data_loader()
+        data_loader = _create_data_loader()
         data_loader.load_async(
             operation_name="db_stats",
             load_function=fetch_stats,
@@ -2343,6 +2772,21 @@ class SettingsTab(QWidget):
         """
         )
         layout.addWidget(info_label)
+
+        self.default_accounts_status_label = QLabel("")
+        self.default_accounts_status_label.setWordWrap(True)
+        self.default_accounts_status_label.setVisible(False)
+        self.default_accounts_status_label.setStyleSheet(
+            """
+            background: rgba(12, 33, 60, 0.55);
+            color: #cbd5f5;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(90, 150, 230, 0.22);
+            font-size: 12px;
+        """
+        )
+        layout.addWidget(self.default_accounts_status_label)
 
         form_group = QGroupBox("⚙️ إعدادات الحسابات الافتراضية")
         form_group.setStyleSheet(
@@ -2465,18 +2909,72 @@ class SettingsTab(QWidget):
         # ⚡ لا نحمل البيانات هنا - سيتم التحميل عند فتح التاب
         # self.load_default_accounts()
 
+    def _set_default_accounts_status(self, message: str = "", tone: str = "info") -> None:
+        self._ensure_section_ui("default_accounts")
+        label = self.default_accounts_status_label
+        text = str(message or "").strip()
+        if not text:
+            label.clear()
+            label.setVisible(False)
+            return
+
+        tones = {
+            "info": ("rgba(12, 33, 60, 0.55)", "#cbd5f5", "rgba(90, 150, 230, 0.22)"),
+            "warning": ("rgba(120, 63, 4, 0.22)", "#fde68a", "rgba(245, 158, 11, 0.28)"),
+            "success": ("rgba(15, 76, 56, 0.24)", "#bbf7d0", "rgba(34, 197, 94, 0.28)"),
+            "danger": ("rgba(127, 29, 29, 0.22)", "#fecaca", "rgba(248, 113, 113, 0.28)"),
+        }
+        background, color, border = tones.get(tone, tones["info"])
+        label.setStyleSheet(
+            f"""
+            background: {background};
+            color: {color};
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid {border};
+            font-size: 12px;
+        """
+        )
+        label.setText(text)
+        label.setVisible(True)
+
+    def _set_default_accounts_unavailable_state(self) -> None:
+        self._ensure_section_ui("default_accounts")
+        unavailable_text = "— غير متاح بدون اتصال قاعدة البيانات —"
+        for combo in (
+            self.default_treasury_combo,
+            self.default_revenue_combo,
+            self.default_tax_combo,
+            self.default_client_combo,
+        ):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem(unavailable_text, userData=None)
+            combo.setCurrentIndex(0)
+            combo.setEnabled(False)
+            combo.blockSignals(False)
+        self.save_default_accounts_btn.setEnabled(False)
+        self._set_default_accounts_status(
+            "⚠️ لا يمكن تحميل الحسابات الافتراضية الآن لأن قاعدة البيانات غير متصلة.\n"
+            "سيتم تفعيل القوائم تلقائياً بمجرد توفر الاتصال.",
+            tone="warning",
+        )
+
     def load_default_accounts(self):
         """تحميل الحسابات من قاعدة البيانات وملء القوائم المنسدلة"""
+        self._ensure_section_ui("default_accounts")
         if not self.repository:
-            QMessageBox.warning(self, "تحذير", "قاعدة البيانات غير متصلة")
+            self._set_default_accounts_unavailable_state()
             return
 
         self.default_treasury_combo.setEnabled(False)
         self.default_revenue_combo.setEnabled(False)
         self.default_tax_combo.setEnabled(False)
         self.default_client_combo.setEnabled(False)
+        self.save_default_accounts_btn.setEnabled(False)
+        self._set_default_accounts_status("⏳ جاري تحميل الحسابات الافتراضية...", tone="info")
 
-        data_loader = get_data_loader()
+        data_loader = _create_data_loader()
 
         def fetch_accounts():
             return self.repository.get_all_accounts()
@@ -2529,8 +3027,18 @@ class SettingsTab(QWidget):
                     settings.get("default_client_account", "1140"),
                 )
                 self._clear_dirty_section("default_accounts")
+                self.save_default_accounts_btn.setEnabled(True)
+                self._set_default_accounts_status(
+                    "✅ تم تحديث القوائم المحاسبية الافتراضية بنجاح.",
+                    tone="success",
+                )
             except Exception as e:
                 safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {e}")
+                self.save_default_accounts_btn.setEnabled(False)
+                self._set_default_accounts_status(
+                    f"❌ فشل تحميل الحسابات الافتراضية: {e}",
+                    tone="danger",
+                )
                 QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {e}")
             finally:
                 self.default_treasury_combo.setEnabled(True)
@@ -2541,6 +3049,11 @@ class SettingsTab(QWidget):
         def on_error(error_msg: str):
             try:
                 safe_print(f"ERROR: فشل تحميل الحسابات الافتراضية: {error_msg}")
+                self.save_default_accounts_btn.setEnabled(False)
+                self._set_default_accounts_status(
+                    f"❌ فشل تحميل الحسابات الافتراضية: {error_msg}",
+                    tone="danger",
+                )
                 QMessageBox.critical(self, "خطأ", f"فشل تحميل الحسابات: {error_msg}")
             finally:
                 self.default_treasury_combo.setEnabled(True)
@@ -2612,6 +3125,7 @@ class SettingsTab(QWidget):
 
     def load_users(self):
         """تحميل المستخدمين من قاعدة البيانات - محسّن لتجنب التجميد"""
+        self._ensure_section_ui("users")
         safe_print("INFO: [SettingsTab] بدء تحميل المستخدمين")
 
         if not self.repository:
@@ -2621,7 +3135,7 @@ class SettingsTab(QWidget):
         self.users_table.setUpdatesEnabled(False)
         self.users_table.setRowCount(0)
 
-        data_loader = get_data_loader()
+        data_loader = _create_data_loader()
 
         def fetch_users():
             return self.repository.get_all_users()
@@ -2772,6 +3286,7 @@ class SettingsTab(QWidget):
         """إضافة مستخدم جديد"""
         # التحقق من الصلاحية
 
+        PermissionManager = _get_permission_manager()
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
@@ -2779,8 +3294,10 @@ class SettingsTab(QWidget):
             return
 
         # إنشاء خدمة المصادقة
+        AuthService = _get_auth_service_class()
         auth_service = AuthService(self.repository)
 
+        UserEditorDialog = _get_user_editor_dialog_class()
         dialog = UserEditorDialog(auth_service, parent=self)
         if dialog.exec():
             self._invalidate_users_cache()
@@ -2791,6 +3308,7 @@ class SettingsTab(QWidget):
         """تعديل مستخدم"""
         # التحقق من الصلاحية
 
+        PermissionManager = _get_permission_manager()
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
@@ -2812,6 +3330,7 @@ class SettingsTab(QWidget):
         safe_print(f"INFO: [SettingsTab] جاري تعديل المستخدم: {username}")
 
         # إنشاء خدمة المصادقة
+        AuthService = _get_auth_service_class()
         auth_service = AuthService(self.repository)
 
         # جلب بيانات المستخدم الحديثة من قاعدة البيانات
@@ -2825,6 +3344,7 @@ class SettingsTab(QWidget):
         )
 
         # فتح نافذة التعديل مع بيانات المستخدم
+        UserEditorDialog = _get_user_editor_dialog_class()
         dialog = UserEditorDialog(auth_service, user_to_edit=user, parent=self)
         if dialog.exec():
             self._invalidate_users_cache()
@@ -2834,6 +3354,7 @@ class SettingsTab(QWidget):
         """تحرير صلاحيات المستخدم"""
         # التحقق من الصلاحية
 
+        PermissionManager = _get_permission_manager()
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
@@ -2854,6 +3375,7 @@ class SettingsTab(QWidget):
         username = username_item.text()
         safe_print(f"INFO: [SettingsTab] جاري تحرير صلاحيات المستخدم: {username}")
 
+        AuthService = _get_auth_service_class()
         auth_service = AuthService(self.repository)
 
         # جلب بيانات المستخدم الحديثة من قاعدة البيانات
@@ -2866,6 +3388,7 @@ class SettingsTab(QWidget):
 
         # فتح نافذة تحرير الصلاحيات
 
+        UserPermissionsDialog = _get_user_permissions_dialog_class()
         dialog = UserPermissionsDialog(user, self.repository, self)
         if dialog.exec():
             self._invalidate_users_cache()
@@ -2876,6 +3399,7 @@ class SettingsTab(QWidget):
         """حذف مستخدم"""
         # التحقق من الصلاحية
 
+        PermissionManager = _get_permission_manager()
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
@@ -2932,6 +3456,7 @@ class SettingsTab(QWidget):
         """تفعيل مستخدم معطل"""
         # التحقق من الصلاحية
 
+        PermissionManager = _get_permission_manager()
         if self.current_user and not PermissionManager.has_feature(
             self.current_user, "user_management"
         ):
@@ -3039,6 +3564,7 @@ class SettingsTab(QWidget):
             border-radius: 8px;
         """
         )
+        self.sync_status_label.setTextFormat(Qt.TextFormat.RichText)
         self.sync_status_label.setWordWrap(True)
         status_layout.addWidget(self.sync_status_label)
 
@@ -3077,17 +3603,6 @@ class SettingsTab(QWidget):
                 color: #F1F5F9;
                 font-size: 13px;
                 spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 20px;
-                height: 20px;
-                border-radius: 4px;
-                border: 2px solid #3d6a9f;
-                background: #0d2137;
-            }
-            QCheckBox::indicator:checked {
-                background: #0A6CF1;
-                border-color: #0A6CF1;
             }
         """
         )
@@ -3177,17 +3692,6 @@ class SettingsTab(QWidget):
                 color: #F1F5F9;
                 font-size: 13px;
                 spacing: 8px;
-            }
-            QCheckBox::indicator {
-                width: 20px;
-                height: 20px;
-                border-radius: 4px;
-                border: 2px solid #3d6a9f;
-                background: #0d2137;
-            }
-            QCheckBox::indicator:checked {
-                background: #0A6CF1;
-                border-color: #0A6CF1;
             }
         """
         )
@@ -3364,41 +3868,109 @@ class SettingsTab(QWidget):
         tab_layout.setContentsMargins(0, 0, 0, 0)
         tab_layout.addWidget(scroll_area)
 
-        # تحميل الإعدادات الحالية
-        self.load_sync_settings()
-
-        # تحديث الحالة
-        QTimer.singleShot(500, self.refresh_sync_status)
-
     def load_sync_settings(self):
         """تحميل إعدادات المزامنة من ملف التكوين"""
+        self._ensure_section_ui("sync")
         try:
-
+            config = self._get_sync_settings_defaults()
             config_path = Path("sync_config.json")
             if config_path.exists():
                 with open(config_path, encoding="utf-8") as f:
-                    config = json.load(f)
+                    config.update(json.load(f))
 
-                self.auto_sync_enabled.setChecked(config.get("enabled", True))
-                self.full_sync_interval.setValue(config.get("auto_sync_interval", 300) // 60)
-                self.quick_sync_interval.setValue(config.get("quick_sync_interval", 5))
-                self.connection_check_interval.setValue(config.get("connection_check_interval", 5))
-                self.realtime_enabled_checkbox.setChecked(config.get("realtime_enabled", True))
-                self.realtime_auto_detect_checkbox.setChecked(
-                    config.get("realtime_auto_detect", True)
+            self.auto_sync_enabled.setChecked(bool(config.get("enabled", True)))
+            self.full_sync_interval.setValue(
+                max(1, int(config.get("auto_sync_interval", 1800)) // 60)
+            )
+            self.quick_sync_interval.setValue(
+                max(
+                    1, int(config.get("quick_sync_interval", config.get("delta_sync_interval", 15)))
                 )
-                self.realtime_change_stream_max_await_ms.setValue(
-                    int(config.get("realtime_change_stream_max_await_ms", 250))
-                )
-                self.lazy_logo_enabled_checkbox.setChecked(config.get("lazy_logo_enabled", True))
-                self.logo_fetch_batch_limit.setValue(int(config.get("logo_fetch_batch_limit", 10)))
+            )
+            self.connection_check_interval.setValue(
+                max(1, int(config.get("connection_check_interval", 30)))
+            )
+            self.realtime_enabled_checkbox.setChecked(bool(config.get("realtime_enabled", True)))
+            self.realtime_auto_detect_checkbox.setChecked(
+                bool(config.get("realtime_auto_detect", True))
+            )
+            self.realtime_change_stream_max_await_ms.setValue(
+                int(config.get("realtime_change_stream_max_await_ms", 250))
+            )
+            self.lazy_logo_enabled_checkbox.setChecked(bool(config.get("lazy_logo_enabled", True)))
+            self.logo_fetch_batch_limit.setValue(int(config.get("logo_fetch_batch_limit", 10)))
 
-                safe_print("INFO: [SyncTab] تم تحميل إعدادات المزامنة")
+            safe_print("INFO: [SyncTab] تم تحميل إعدادات المزامنة")
         except Exception as e:
             safe_print(f"WARNING: [SyncTab] فشل تحميل إعدادات المزامنة: {e}")
 
+    def _get_sync_settings_defaults(self) -> dict[str, object]:
+        defaults: dict[str, object] = {
+            "enabled": True,
+            "auto_sync_interval": 1800,
+            "quick_sync_interval": 15,
+            "delta_sync_interval": 15,
+            "connection_check_interval": 30,
+            "realtime_enabled": True,
+            "realtime_auto_detect": True,
+            "realtime_change_stream_max_await_ms": 250,
+            "lazy_logo_enabled": True,
+            "logo_fetch_batch_limit": 10,
+        }
+
+        sync_manager = getattr(self.repository, "unified_sync", None)
+        if not sync_manager:
+            return defaults
+
+        try:
+            defaults["enabled"] = bool(getattr(sync_manager, "_enabled", defaults["enabled"]))
+            defaults["auto_sync_interval"] = max(
+                60, int(getattr(sync_manager, "_auto_sync_interval", 1800 * 1000)) // 1000
+            )
+            defaults["quick_sync_interval"] = max(
+                1, int(getattr(sync_manager, "_quick_sync_interval", 15 * 1000)) // 1000
+            )
+            defaults["delta_sync_interval"] = max(
+                1,
+                int(
+                    getattr(
+                        sync_manager,
+                        "_delta_sync_interval_seconds",
+                        defaults["quick_sync_interval"],
+                    )
+                ),
+            )
+            defaults["connection_check_interval"] = max(
+                1,
+                int(getattr(sync_manager, "_connection_check_interval", 30 * 1000)) // 1000,
+            )
+            defaults["realtime_enabled"] = bool(
+                getattr(sync_manager, "_realtime_enabled", defaults["realtime_enabled"])
+            )
+            defaults["realtime_auto_detect"] = bool(
+                getattr(sync_manager, "_realtime_auto_detect", defaults["realtime_auto_detect"])
+            )
+            defaults["realtime_change_stream_max_await_ms"] = int(
+                getattr(
+                    sync_manager,
+                    "_realtime_change_stream_max_await_ms",
+                    defaults["realtime_change_stream_max_await_ms"],
+                )
+            )
+            defaults["lazy_logo_enabled"] = bool(
+                getattr(sync_manager, "_lazy_logo_enabled", defaults["lazy_logo_enabled"])
+            )
+            defaults["logo_fetch_batch_limit"] = int(
+                getattr(sync_manager, "_logo_fetch_batch_limit", defaults["logo_fetch_batch_limit"])
+            )
+        except Exception as exc:
+            safe_print(f"WARNING: [SyncTab] تعذر قراءة القيم الحالية من مدير المزامنة: {exc}")
+
+        return defaults
+
     def save_sync_settings(self):
         """حفظ إعدادات المزامنة وتطبيقها"""
+        self._ensure_section_ui("sync")
         try:
             config_path = Path("sync_config.json")
             previous_config = {}
@@ -3522,8 +4094,10 @@ class SettingsTab(QWidget):
                     realtime_manager._local_rs_timeout_seconds = float(
                         config.get("realtime_local_rs_bootstrap_timeout_s", 12)
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [SyncTab] تعذر تطبيق إعدادات المزامنة مباشرة على المدير الفوري: {exc}"
+                )
 
             QMessageBox.information(
                 self,
@@ -3540,10 +4114,11 @@ class SettingsTab(QWidget):
 
     def refresh_sync_status(self):
         """تحديث حالة المزامنة"""
+        self._ensure_section_ui("sync")
         try:
             if not self.repository or not hasattr(self.repository, "unified_sync"):
                 self.sync_status_label.setText(
-                    "⚠️ نظام المزامنة غير متاح\n\nيرجى التأكد من الاتصال بقاعدة البيانات"
+                    "⚠️ <b>نظام المزامنة غير متاح</b><br><br>يرجى التأكد من الاتصال بقاعدة البيانات"
                 )
                 self.sync_status_label.setStyleSheet(
                     """
@@ -3567,37 +4142,42 @@ class SettingsTab(QWidget):
             metrics = sync_manager.get_sync_metrics()
 
             # بناء نص الحالة
-            status_text = ""
+            status_lines: list[str] = []
 
             # حالة الاتصال
             if is_online:
-                status_text += "🟢 <b>متصل بالسحابة</b>\n\n"
+                status_lines.append("🟢 <b>متصل بالسحابة</b>")
             else:
-                status_text += "🔴 <b>غير متصل بالسحابة</b>\n\n"
+                status_lines.append("🔴 <b>غير متصل بالسحابة</b>")
 
             # حالة المزامنة
             if is_syncing:
-                status_text += "🔄 <b>المزامنة جارية...</b>\n\n"
+                status_lines.append("🔄 <b>المزامنة جارية...</b>")
             else:
-                status_text += "✅ <b>جاهز للمزامنة</b>\n\n"
+                status_lines.append("✅ <b>جاهز للمزامنة</b>")
 
             # الإحصائيات
-            status_text += "<b>📊 إحصائيات المزامنة:</b>\n"
-            status_text += f"• إجمالي عمليات المزامنة: {metrics.get('total_syncs', 0)}\n"
-            status_text += f"• عمليات ناجحة: {metrics.get('successful_syncs', 0)}\n"
-            status_text += f"• عمليات فاشلة: {metrics.get('failed_syncs', 0)}\n"
+            status_lines.append("")
+            status_lines.append("<b>📊 إحصائيات المزامنة:</b>")
+            status_lines.append(f"• إجمالي عمليات المزامنة: {metrics.get('total_syncs', 0)}")
+            status_lines.append(f"• عمليات ناجحة: {metrics.get('successful_syncs', 0)}")
+            status_lines.append(f"• عمليات فاشلة: {metrics.get('failed_syncs', 0)}")
 
             last_sync = metrics.get("last_sync_time")
             if last_sync:
                 try:
                     last_sync_dt = datetime.fromisoformat(last_sync)
-                    status_text += f"• آخر مزامنة: {last_sync_dt.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    status_lines.append(
+                        f"• آخر مزامنة: {last_sync_dt.strftime('%Y-%m-%d %H:%M:%S')}"
+                    )
                 except (ValueError, TypeError):
-                    status_text += f"• آخر مزامنة: {last_sync}\n"
+                    status_lines.append(f"• آخر مزامنة: {last_sync}")
             else:
-                status_text += "• آخر مزامنة: لم تتم بعد\n"
+                status_lines.append("• آخر مزامنة: لم تتم بعد")
 
-            status_text += f"• إجمالي السجلات المزامنة: {metrics.get('total_records_synced', 0)}\n"
+            status_lines.append(
+                f"• إجمالي السجلات المزامنة: {metrics.get('total_records_synced', 0)}"
+            )
 
             # حالة الجداول
             tables_info = sync_status.get("tables", {})
@@ -3605,11 +4185,13 @@ class SettingsTab(QWidget):
             pending_total = sum(t.get("pending", 0) for t in tables_info.values())
 
             if pending_total > 0:
-                status_text += f"\n⚠️ <b>يوجد {pending_total} سجل في انتظار المزامنة</b>"
+                status_lines.append("")
+                status_lines.append(f"⚠️ <b>يوجد {pending_total} سجل في انتظار المزامنة</b>")
             else:
-                status_text += "\n✅ <b>جميع البيانات متزامنة</b>"
+                status_lines.append("")
+                status_lines.append("✅ <b>جميع البيانات متزامنة</b>")
 
-            self.sync_status_label.setText(status_text)
+            self.sync_status_label.setText("<br>".join(status_lines))
 
             # تغيير اللون حسب الحالة
             if is_online and not is_syncing and pending_total == 0:
@@ -3634,7 +4216,7 @@ class SettingsTab(QWidget):
             )
 
         except Exception as e:
-            self.sync_status_label.setText(f"❌ خطأ في تحديث الحالة:\n{e}")
+            self.sync_status_label.setText(f"❌ <b>خطأ في تحديث الحالة:</b><br>{e}")
             safe_print(f"ERROR: [SyncTab] فشل تحديث الحالة: {e}")
 
     def trigger_manual_sync(self):
@@ -3718,6 +4300,7 @@ class SettingsTab(QWidget):
         layout = QVBoxLayout(self.payment_methods_tab)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 15, 20, 15)
+        self._payment_methods_layout = layout
 
         # معلومات
         info_label = QLabel("💳 إدارة طرق الدفع التي تظهر في الفواتير والمشاريع")
@@ -3740,11 +4323,11 @@ class SettingsTab(QWidget):
         self.add_payment_method_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.add_payment_method_btn.clicked.connect(self.add_payment_method)
 
-        self.edit_payment_method_btn = QPushButton("✏️ تعديل")
+        self.edit_payment_method_btn = QPushButton("✏️ تعديل طريقة الدفع")
         self.edit_payment_method_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_payment_method_btn.clicked.connect(self.edit_payment_method)
 
-        self.delete_payment_method_btn = QPushButton("🗑️ حذف")
+        self.delete_payment_method_btn = QPushButton("🗑️ حذف طريقة الدفع")
         self.delete_payment_method_btn.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_payment_method_btn.clicked.connect(self.delete_payment_method)
 
@@ -3781,11 +4364,10 @@ class SettingsTab(QWidget):
         fix_table_rtl(self.payment_methods_table)
         self.payment_methods_table.doubleClicked.connect(self.edit_payment_method)
 
-        self.payment_methods_search = UniversalSearchBar(
-            self.payment_methods_table,
-            placeholder="🔍 بحث في طرق الدفع...",
-        )
-        layout.addWidget(self.payment_methods_search)
+        self._payment_methods_search_placeholder = QWidget()
+        self._payment_methods_search_placeholder.setVisible(False)
+        self._payment_methods_search_placeholder.setFixedHeight(0)
+        layout.addWidget(self._payment_methods_search_placeholder)
         layout.addWidget(self.payment_methods_table)
 
         pagination_layout = QHBoxLayout()
@@ -3843,41 +4425,14 @@ class SettingsTab(QWidget):
 
         self.payment_methods_table.itemSelectionChanged.connect(self._update_payment_method_preview)
 
-        # تحميل البيانات
-        self.load_payment_methods()
-
     def load_payment_methods(self):
         """تحميل طرق الدفع من قاعدة البيانات"""
+        self._ensure_section_ui("payment_methods")
         try:
+            self._ensure_payment_methods_search()
             self.payment_methods_table.setRowCount(0)
 
-            # جلب طرق الدفع من الإعدادات
-            payment_methods = self.settings_service.get_setting("payment_methods") or []
-
-            # إذا لم تكن موجودة، إنشاء قائمة افتراضية
-            if not payment_methods:
-                payment_methods = [
-                    {"name": "نقدي", "description": "الدفع النقدي", "details": "", "active": True},
-                    {
-                        "name": "تحويل بنكي",
-                        "description": "تحويل عبر البنك",
-                        "details": "",
-                        "active": True,
-                    },
-                    {
-                        "name": "فودافون كاش",
-                        "description": "محفظة فودافون كاش",
-                        "details": "",
-                        "active": True,
-                    },
-                    {
-                        "name": "انستاباي",
-                        "description": "تحويل عبر انستاباي",
-                        "details": "",
-                        "active": True,
-                    },
-                ]
-                self.settings_service.update_setting("payment_methods", payment_methods)
+            payment_methods = self._ensure_payment_methods_seeded()
 
             self._payment_methods_all = payment_methods
             self._render_payment_methods_page()
@@ -4077,14 +4632,15 @@ class SettingsTab(QWidget):
                 text += f"\n\nتفاصيل الفاتورة:\n{details}"
             self.payment_method_preview.setText(text)
 
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(f"WARNING: [SettingsTab] تعذر تحديث معاينة طريقة الدفع الحالية: {exc}")
 
     def setup_project_notes_tab(self):
         """إعداد تاب ملاحظات المشاريع - قوالب الملاحظات الافتراضية"""
         layout = QVBoxLayout(self.project_notes_tab)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 15, 20, 15)
+        self._note_templates_layout = layout
 
         # معلومات
         info_label = QLabel("📝 إدارة قوالب الملاحظات الافتراضية للمشاريع والفواتير")
@@ -4103,15 +4659,15 @@ class SettingsTab(QWidget):
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
 
-        self.add_note_template_btn = QPushButton("➕ إضافة قالب")
+        self.add_note_template_btn = QPushButton("➕ إضافة قالب ملاحظة")
         self.add_note_template_btn.setStyleSheet(BUTTON_STYLES["success"])
         self.add_note_template_btn.clicked.connect(self.add_note_template)
 
-        self.edit_note_template_btn = QPushButton("✏️ تعديل")
+        self.edit_note_template_btn = QPushButton("✏️ تعديل قالب الملاحظة")
         self.edit_note_template_btn.setStyleSheet(BUTTON_STYLES["warning"])
         self.edit_note_template_btn.clicked.connect(self.edit_note_template)
 
-        self.delete_note_template_btn = QPushButton("🗑️ حذف")
+        self.delete_note_template_btn = QPushButton("🗑️ حذف قالب الملاحظة")
         self.delete_note_template_btn.setStyleSheet(BUTTON_STYLES["danger"])
         self.delete_note_template_btn.clicked.connect(self.delete_note_template)
 
@@ -4144,11 +4700,10 @@ class SettingsTab(QWidget):
         fix_table_rtl(self.note_templates_table)
         self.note_templates_table.doubleClicked.connect(self.edit_note_template)
 
-        self.note_templates_search = UniversalSearchBar(
-            self.note_templates_table,
-            placeholder="🔍 بحث في قوالب الملاحظات...",
-        )
-        layout.addWidget(self.note_templates_search)
+        self._note_templates_search_placeholder = QWidget()
+        self._note_templates_search_placeholder.setVisible(False)
+        self._note_templates_search_placeholder.setFixedHeight(0)
+        layout.addWidget(self._note_templates_search_placeholder)
         layout.addWidget(self.note_templates_table)
 
         pagination_layout = QHBoxLayout()
@@ -4206,38 +4761,14 @@ class SettingsTab(QWidget):
 
         self.note_templates_table.itemSelectionChanged.connect(self._update_note_template_preview)
 
-        # تحميل البيانات
-        self.load_note_templates()
-
     def load_note_templates(self):
         """تحميل قوالب الملاحظات من قاعدة البيانات"""
+        self._ensure_section_ui("project_notes")
         try:
+            self._ensure_note_templates_search()
             self.note_templates_table.setRowCount(0)
 
-            # جلب قوالب الملاحظات من الإعدادات
-            note_templates = self.settings_service.get_setting("project_note_templates") or []
-
-            # إذا لم تكن موجودة، إنشاء قائمة افتراضية
-            if not note_templates:
-                note_templates = [
-                    {
-                        "name": "القالب الافتراضي",
-                        "content": """• مدة التنفيذ: ___ يوم عمل.
-• تبدأ المدة من تاريخ استلام الداتا.
-• التسليم حسب الجدول الزمني المتفق عليه.
-
-• الدفعة المقدمة: 50% عند التعاقد.
-• الدفعة الثانية: 25% عند التسليم الأولي.
-• الدفعة النهائية: 25% عند التسليم النهائي.
-
-• يبدأ التنفيذ بعد استلام الدفعة الأولى.""",
-                    },
-                    {
-                        "name": "قالب مختصر",
-                        "content": "• مدة التنفيذ: ___ يوم.\n• الدفع: 50% مقدم - 50% عند التسليم.",
-                    },
-                ]
-                self.settings_service.update_setting("project_note_templates", note_templates)
+            note_templates = self._ensure_note_templates_seeded()
 
             self._note_templates_all = note_templates
             self._render_note_templates_page()
@@ -4608,8 +5139,10 @@ class SettingsTab(QWidget):
 
                 repository_module.MONGO_URI = normalized_uri
                 repository_module.DB_NAME = db_name
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [SettingsTab] تعذر تمرير إعدادات السحابة الجديدة إلى core.repository: {exc}"
+                )
 
             from core.config import _persist_cloud_config
 
@@ -4626,8 +5159,10 @@ class SettingsTab(QWidget):
                     if getattr(self.repository, "mongo_client", None):
                         try:
                             self.repository.mongo_client.close()
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            safe_print(
+                                f"WARNING: [SettingsTab] تعذر إغلاق اتصال Mongo الحالي قبل إعادة التهيئة: {exc}"
+                            )
                     self.repository.mongo_client = None
                     self.repository.mongo_db = None
                     self.repository.online = False
@@ -4636,8 +5171,10 @@ class SettingsTab(QWidget):
                         self.repository._start_mongo_connection()
                     if hasattr(self.repository, "unified_sync") and self.repository.unified_sync:
                         self.repository.unified_sync._run_full_sync_async()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    safe_print(
+                        f"WARNING: [SettingsTab] تعذر إعادة تهيئة اتصال السحابة بعد حفظ الإعدادات: {exc}"
+                    )
         except Exception as e:
             QMessageBox.critical(self, "خطأ", f"تعذر حفظ الإعدادات: {e}")
 
@@ -4712,6 +5249,7 @@ class SettingsTab(QWidget):
 
     def check_for_updates(self):
         """التحقق من وجود تحديثات جديدة"""
+        self._ensure_section_ui("update")
 
         # تعطيل الزرار أثناء الفحص
         self.check_update_btn.setEnabled(False)
@@ -4728,6 +5266,7 @@ class SettingsTab(QWidget):
         )
 
         # إنشاء خدمة التحديث
+        UpdateService = _get_update_service_class()
         self.update_service = UpdateService(CURRENT_VERSION, UPDATE_CHECK_URL)
 
         # إنشاء Thread للتحقق

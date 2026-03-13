@@ -21,6 +21,8 @@ PROJECT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000  # 24 ساعة - فحص المش
 LAZY_LOAD_DELAY_MS = 100  # تأخير التحميل الكسول
 CACHE_WARMUP_DELAY_MS = 5000  # تأخير تسخين الـ cache
 SYNC_START_DELAY_MS = 15000  # ⚡ تأخير بدء المزامنة (15 ثانية)
+DEFERRED_SERVICES_DELAY_MS = 900  # إرجاء الخدمات الثانوية قليلاً لتحسين الاستجابة الأولية
+STARTUP_MAINTENANCE_DELAY_MS = 30000  # تأخير الصيانة الشهرية لتفادي ضغط البداية
 
 # ⚡ تحسين الأداء على Windows
 if os.name == "nt":
@@ -57,31 +59,6 @@ from version import APP_NAME, CURRENT_VERSION
 
 logger.info("⚡ %s v%s", APP_NAME, CURRENT_VERSION)
 
-# --- 1. استيراد "القلب" ---
-# Authentication
-from core.auth_models import AuthService
-from core.event_bus import EventBus
-from core.repository import Repository
-
-# 🔄 نظام المزامنة الموحد - المصدر الوحيد للمزامنة
-from core.unified_sync import UnifiedSyncManagerV3
-
-# --- 2. استيراد "الأقسام" (العقل) ---
-from services.accounting_service import AccountingService
-from services.client_service import ClientService
-from services.expense_service import ExpenseService
-from services.export_service import ExportService
-from services.invoice_service import InvoiceService
-from services.notification_service import NotificationService
-from services.printing_service import PrintingService
-from services.project_service import ProjectService
-from services.service_service import ServiceService
-from services.settings_service import SettingsService
-from ui.login_window import LoginWindow
-
-# --- 3. استيراد "الواجهة" ---
-from ui.main_window import MainWindow
-
 
 class SkyWaveERPApp:
     """
@@ -95,68 +72,102 @@ class SkyWaveERPApp:
         logger.info("=" * 80)
         logger.info("[MainApp] بدء تشغيل تطبيق Sky Wave ERP...")
 
-        # --- 1. تجهيز "القلب" ---
-        self.repository = Repository()
+        # تهيئة خفيفة جدًا قبل أول UI، وتأجيل الخدمات الثقيلة إلى ما بعد ظهور splash.
+        self.repository = None
+        self.auth_service = None
 
-        # ⚡ الصيانة الشهرية التلقائية (تشغيل مرة واحدة عند البدء)
-        try:
-            from core.db_maintenance import run_monthly_maintenance_if_needed
-
-            run_monthly_maintenance_if_needed()
-        except Exception as e:
-            logger.warning("[MainApp] تحذير: فشلت الصيانة الشهرية: %s", e)
-
-        # ✅ صيانة قاعدة البيانات التلقائية (في الخلفية لتسريع البدء)
-        # سيتم إنشاء الـ timers لاحقاً بعد بدء event loop
         self.maintenance_timer = None
         self.settings_timer = None
         self.update_timer = None
+        self.realtime_manager = None
+        self._realtime_setup_attempts = 0
+        self._realtime_setup_max_attempts = 24
+        self._realtime_setup_retry_ms = 15000
+
+        self.event_bus = None
+        self.settings_service = None
+        self.unified_sync = None
+        self.sync_manager = None
+        self.accounting_service = None
+        self.client_service = None
+        self.service_service = None
+        self.expense_service = None
+        self.invoice_service = None
+        self.project_service = None
+        self.notification_service = None
+        self.template_service = None
+        self.printing_service = None
+        self.export_service = None
+        self.live_watcher = None
+        self.live_router = None
+        self.auto_update_service = None
+
+        # يتم تفعيل NotificationBridge بعد إنشاء QApplication وبعد نجاح تسجيل الدخول.
+        self._notification_bridge_pending = True
+        self._services_initialized = False
+        self._deferred_services_initialized = False
+        self._startup_maintenance_started = False
+
+        logger.info("[MainApp] تم تجهيز الحد الأدنى لتسجيل الدخول بسرعة.")
+
+    def _initialize_login_services(self) -> None:
+        if self.repository is not None and self.auth_service is not None:
+            return
+
+        import time
+
+        started_at = time.perf_counter()
+
+        from core.auth_models import AuthService
+        from core.repository import Repository
+
+        if self.repository is None:
+            self.repository = Repository()
+        if self.auth_service is None:
+            self.auth_service = AuthService(repository=self.repository)
+
+        logger.info(
+            "[MainApp] تم تجهيز خدمات تسجيل الدخول خلال %.2f ثانية.",
+            time.perf_counter() - started_at,
+        )
+
+    def _initialize_application_services(self) -> None:
+        if self._services_initialized:
+            return
+
+        import time
+
+        started_at = time.perf_counter()
+
+        from core.event_bus import EventBus
+        from core.signals import app_signals
+        from core.unified_sync import UnifiedSyncManagerV3
+        from services.accounting_service import AccountingService
+        from services.client_service import ClientService
+        from services.expense_service import ExpenseService
+        from services.invoice_service import InvoiceService
+        from services.project_service import ProjectService
+        from services.service_service import ServiceService
+        from services.settings_service import SettingsService
+        from ui.notification_system import NotificationManager
+        from ui.todo_manager import TaskService
 
         self.event_bus = EventBus()
         self.settings_service = SettingsService()
         self.settings_service.set_repository(self.repository)
         self.repository.settings_service = self.settings_service
 
-        # 🔄 نظام المزامنة الموحد - MongoDB First (النظام الرئيسي الوحيد)
         self.unified_sync = UnifiedSyncManagerV3(self.repository)
-        # ⚡ ربط مدير المزامنة بالـ repository لتتمكن واجهة الإعدادات من الوصول إليه
         self.repository.unified_sync = self.unified_sync
-        self.realtime_manager = None
-        self._realtime_setup_attempts = 0
-        self._realtime_setup_max_attempts = 24
-        self._realtime_setup_retry_ms = 15000
-
-        # ⚡ ربط إشارة تغيير البيانات بنظام الإشارات المركزي (للمزامنة الفورية)
-        from core.signals import app_signals
-
-        # ملاحظة: الـ services تستخدم app_signals مباشرة، لا حاجة لربط Repository signal
-        # ⚡ ربط مدير المزامنة بالإشارات للمزامنة الفورية
         app_signals.set_sync_manager(self.unified_sync)
-
-        # 🔥 للتوافق مع الواجهة - نستخدم unified_sync كـ sync_manager
         self.sync_manager = self.unified_sync
 
-        logger.info("[MainApp] تم تجهيز المخزن (Repo) والإذاعة (Bus) والإعدادات.")
-        logger.info("🚀 نظام المزامنة جاهز - سيبدأ بعد فتح النافذة الرئيسية")
-
-        # تعيين Repository لـ TaskService
-        from ui.todo_manager import TaskService
-
         TaskService.set_repository(self.repository)
-
-        # تعيين Repository لنظام الإشعارات
-        from ui.notification_system import NotificationManager
-
         NotificationManager.set_repository(self.repository)
 
-        # يتم تفعيل NotificationBridge بعد إنشاء QApplication داخل run()
-        self._notification_bridge_pending = True
-
-        # --- 2. تجهيز "الأقسام" (حقن الاعتمادية) ---
         self.accounting_service = AccountingService(
             repository=self.repository, event_bus=self.event_bus
         )
-
         self.client_service = ClientService(repository=self.repository)
         self.service_service = ServiceService(
             repository=self.repository,
@@ -164,50 +175,98 @@ class SkyWaveERPApp:
             settings_service=self.settings_service,
         )
         self.expense_service = ExpenseService(repository=self.repository, event_bus=self.event_bus)
-
         self.invoice_service = InvoiceService(repository=self.repository, event_bus=self.event_bus)
-
         self.project_service = ProjectService(
             repository=self.repository,
             event_bus=self.event_bus,
             accounting_service=self.accounting_service,
             settings_service=self.settings_service,
         )
+        self.live_router = None
+        self._services_initialized = True
 
-        self.notification_service = NotificationService(
-            repository=self.repository, event_bus=self.event_bus
+        logger.info(
+            "[MainApp] تم تجهيز الخدمات الأساسية بعد تسجيل الدخول في %.2f ثانية.",
+            time.perf_counter() - started_at,
         )
 
-        # Template Service (for invoice templates)
+    def _initialize_deferred_services(self, main_window=None) -> None:
+        if self._deferred_services_initialized:
+            return
+
+        import time
+
+        started_at = time.perf_counter()
+
+        from core.live_watcher import LiveDataWatcher
+        from services.export_service import ExportService
+        from services.notification_service import NotificationService
+        from services.printing_service import PrintingService
         from services.template_service import TemplateService
 
-        self.template_service = TemplateService(
-            repository=self.repository, settings_service=self.settings_service
+        if self.notification_service is None:
+            self.notification_service = NotificationService(
+                repository=self.repository, event_bus=self.event_bus
+            )
+        if self.template_service is None:
+            self.template_service = TemplateService(
+                repository=self.repository, settings_service=self.settings_service
+            )
+        if self.printing_service is None:
+            self.printing_service = PrintingService(
+                settings_service=self.settings_service,
+                template_service=self.template_service,
+            )
+        if self.export_service is None:
+            self.export_service = ExportService(repository=self.repository)
+        if self.live_watcher is None:
+            self.live_watcher = LiveDataWatcher(repository=self.repository, check_interval=30)
+
+        if getattr(self, "_notification_bridge_pending", False):
+            try:
+                from core.notification_bridge import setup_notification_bridge
+
+                setup_notification_bridge()
+                self._notification_bridge_pending = False
+            except Exception as e:
+                logger.debug("[MainApp] تعذر تفعيل NotificationBridge: %s", e)
+
+        if main_window is not None and hasattr(main_window, "attach_deferred_services"):
+            main_window.attach_deferred_services(
+                notification_service=self.notification_service,
+                printing_service=self.printing_service,
+                template_service=self.template_service,
+                export_service=self.export_service,
+            )
+
+        self._deferred_services_initialized = True
+        logger.info(
+            "[MainApp] تم تجهيز الخدمات الثانوية في الخلفية خلال %.2f ثانية.",
+            time.perf_counter() - started_at,
         )
 
-        self.printing_service = PrintingService(
-            settings_service=self.settings_service,
-            template_service=self.template_service,  # ✅ تمرير template_service
-        )
+    def _run_startup_maintenance_if_needed(self) -> None:
+        if self._startup_maintenance_started:
+            return
 
-        self.export_service = ExportService(repository=self.repository)
+        try:
+            from core.data_loader import get_data_loader
+            from core.db_maintenance import run_monthly_maintenance_if_needed
 
-        # Authentication Service
-        self.auth_service = AuthService(repository=self.repository)
-
-        # ⚡ Live Data Watcher - Real-Time Updates System
-        from core.live_watcher import LiveDataWatcher
-
-        self.live_watcher = LiveDataWatcher(
-            repository=self.repository, check_interval=30
-        )  # ⚡ 30 ثانية للأداء
-        self.live_router = None  # سيتم تهيئته بعد إنشاء النافذة الرئيسية
-        logger.info("🔴 تم تهيئة نظام التحديثات الحية (محسّن)")
-
-        # ⚡ الـ timers سيتم إنشاؤها لاحقاً بعد بدء event loop (في _init_background_timers)
-
-        logger.info("[MainApp] تم تجهيز كل الأقسام (Services).")
-        logger.info("تم تهيئة خدمة الإشعارات والطباعة والمصادقة")
+            self._startup_maintenance_started = True
+            data_loader = get_data_loader()
+            data_loader.load_async(
+                operation_name="startup_monthly_maintenance",
+                load_function=run_monthly_maintenance_if_needed,
+                on_success=lambda _result: None,
+                on_error=lambda error_msg: logger.warning(
+                    "[MainApp] تحذير: فشلت الصيانة الشهرية المؤجلة: %s", error_msg
+                ),
+                use_thread_pool=True,
+            )
+        except Exception as e:
+            self._startup_maintenance_started = False
+            logger.warning("[MainApp] تحذير: فشلت الصيانة الشهرية المؤجلة: %s", e)
 
     @staticmethod
     def _is_local_mongo_target() -> bool:
@@ -272,15 +331,6 @@ class SkyWaveERPApp:
         except Exception as e:
             logger.debug("[MainApp] تعذر تفعيل graceful Ctrl+C: %s", e)
 
-        if getattr(self, "_notification_bridge_pending", False):
-            try:
-                from core.notification_bridge import setup_notification_bridge
-
-                setup_notification_bridge()
-                self._notification_bridge_pending = False
-            except Exception as e:
-                logger.debug("[MainApp] تعذر تفعيل NotificationBridge: %s", e)
-
         # === معالجة أخطاء Qt ===
         def qt_message_handler(mode, context, message):
             """معالج رسائل Qt لتجنب الأخطاء المزعجة"""
@@ -334,18 +384,14 @@ class SkyWaveERPApp:
         app.setStyleSheet(
             f"""
             * {{
-                background-color: {COLORS["bg_dark"]};
                 color: {COLORS["text_primary"]};
             }}
             QWidget {{
-                background-color: {COLORS["bg_dark"]};
                 color: {COLORS["text_primary"]};
             }}
-            QDialog {{
+            QDialog, QMainWindow {{
                 background-color: {COLORS["bg_dark"]};
-            }}
-            QMainWindow {{
-                background-color: {COLORS["bg_dark"]};
+                color: {COLORS["text_primary"]};
             }}
         """
         )
@@ -387,8 +433,12 @@ class SkyWaveERPApp:
         splash.activateWindow()
 
         # معالجة الأحداث لضمان ظهور الـ splash فوراً
-        for _ in range(5):
+        for _ in range(2):
             app.processEvents()
+
+        splash.show_message("🔐 جاري تهيئة خدمات تسجيل الدخول...")
+        app.processEvents()
+        self._initialize_login_services()
 
         # === تحميل الخط العربي Cairo ===
         from PyQt6.QtGui import QFontDatabase
@@ -407,17 +457,11 @@ class SkyWaveERPApp:
         else:
             logger.error("❌ لم يتم العثور على ملف الخط")
 
-        # === تطبيق الأنماط العامة ===
-        splash.show_message("🎨 جاري تطبيق الأنماط...")
-        app.processEvents()
-
-        from ui.styles import apply_styles
-
-        apply_styles(app)
-
         # === عرض نافذة تسجيل الدخول ===
         splash.show_message("🔐 جاري تحميل نافذة تسجيل الدخول...")
         app.processEvents()
+
+        from ui.login_window import LoginWindow
 
         login_window = LoginWindow(self.auth_service)
         login_window.setWindowFlags(login_window.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
@@ -431,6 +475,11 @@ class SkyWaveERPApp:
 
         if login_window.exec() != QDialog.DialogCode.Accepted:
             logger.info("[MainApp] تم إلغاء تسجيل الدخول. إغلاق التطبيق.")
+            try:
+                if self.repository is not None:
+                    self.repository.close()
+            except Exception as e:
+                logger.debug("[MainApp] تعذر تنظيف repository بعد إلغاء تسجيل الدخول: %s", e)
             sys.exit(0)
 
         # الحصول على المستخدم المصادق عليه
@@ -448,9 +497,14 @@ class SkyWaveERPApp:
             "[MainApp] تم تسجيل دخول المستخدم: %s (%s)", current_user.username, role_display
         )
 
-        # === عرض splash screen مرة أخرى أثناء تحميل النافذة الرئيسية ===
         splash = ModernSplash()
         splash.show()
+        splash.show_message("⚙️ جاري تجهيز الأقسام والخدمات...")
+        app.processEvents()
+
+        self._initialize_application_services()
+
+        # === عرض splash screen مرة أخرى أثناء تحميل النافذة الرئيسية ===
         app.processEvents()
 
         # إعادة تطبيق الأنماط الكاملة مع إزالة الإطارات البرتقالية
@@ -481,6 +535,8 @@ class SkyWaveERPApp:
         splash.show_message("🏗️ جاري بناء الواجهة الرئيسية...")
         app.processEvents()
 
+        from ui.main_window import MainWindow
+
         main_window = MainWindow(
             current_user=current_user,
             settings_service=self.settings_service,
@@ -503,6 +559,13 @@ class SkyWaveERPApp:
 
         main_window.show()
         app.processEvents()
+
+        QTimer.singleShot(
+            DEFERRED_SERVICES_DELAY_MS,
+            lambda: self._initialize_deferred_services(main_window),
+        )
+
+        QTimer.singleShot(STARTUP_MAINTENANCE_DELAY_MS, self._run_startup_maintenance_if_needed)
 
         # إظهار النافذة بعد تطبيق الستايل (منع الشاشة البيضاء)
         main_window.setWindowOpacity(1.0)
@@ -604,8 +667,11 @@ class SkyWaveERPApp:
         QTimer.singleShot(100, self._init_background_timers)
 
         # 🚀 تفعيل نظام المزامنة الموحد فقط (تعطيل الأنظمة الأخرى للاستقرار)
-        QTimer.singleShot(5000, start_auto_sync_system)
-        logger.info("[MainApp] 🚀 نظام المزامنة سيبدأ بعد 5 ثوانٍ")
+        QTimer.singleShot(SYNC_START_DELAY_MS, start_auto_sync_system)
+        logger.info(
+            "[MainApp] 🚀 نظام المزامنة سيبدأ بعد %.1f ثانية",
+            SYNC_START_DELAY_MS / 1000,
+        )
         logger.info("[MainApp] 🔄 وضع المزامنة: Hybrid (Realtime + Delta fallback)")
 
         # ⚡ تفعيل التحديث التلقائي في الخلفية
@@ -969,14 +1035,14 @@ def main() -> int:
 
             NotificationManager.shutdown()
         except Exception:
-            pass
+            logger.debug("[MainApp] فشل إيقاف NotificationManager أثناء الإغلاق", exc_info=True)
 
         try:
             from core.realtime_sync import shutdown_realtime_sync
 
             shutdown_realtime_sync()
         except Exception:
-            pass
+            logger.debug("[MainApp] فشل إيقاف RealtimeSync أثناء الإغلاق", exc_info=True)
 
         logger.info("=" * 80)
         logger.info("إغلاق التطبيق")

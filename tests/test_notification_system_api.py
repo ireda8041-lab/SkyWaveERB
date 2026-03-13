@@ -12,6 +12,7 @@ from ui import notification_system as ns
 def _reset_notification_manager_state():
     ns.NotificationManager._instance = None
     ns.NotificationManager._app_is_quitting = False
+    ns.NotificationManager._ui_bridge = None
     app = ns.QApplication.instance()
     if app is not None:
         try:
@@ -27,6 +28,7 @@ def _reset_notification_manager_state():
             pass
     ns.NotificationManager._instance = None
     ns.NotificationManager._app_is_quitting = False
+    ns.NotificationManager._ui_bridge = None
     app = ns.QApplication.instance()
     if app is not None:
         try:
@@ -215,6 +217,62 @@ def test_show_forwards_persistent_flag_to_toast(monkeypatch):
     assert created["action"] == "updated"
 
 
+def test_notification_sync_worker_stop_avoids_force_terminate(monkeypatch):
+    worker = ns.NotificationSyncWorker()
+    calls = {"request": 0, "quit": 0, "wait": [], "terminate": 0}
+
+    monkeypatch.setattr(
+        worker,
+        "requestInterruption",
+        lambda: calls.__setitem__("request", calls["request"] + 1),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        worker,
+        "quit",
+        lambda: calls.__setitem__("quit", calls["quit"] + 1),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        worker,
+        "wait",
+        lambda timeout: calls["wait"].append(timeout) or False,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        worker,
+        "terminate",
+        lambda: calls.__setitem__("terminate", calls["terminate"] + 1),
+        raising=False,
+    )
+
+    worker.stop()
+
+    assert calls["request"] == 1
+    assert calls["quit"] == 1
+    assert calls["wait"] == [1500]
+    assert calls["terminate"] == 0
+
+
+def test_notification_manager_shutdown_does_not_create_new_instance(monkeypatch):
+    ns.NotificationManager._instance = None
+    monkeypatch.setattr(
+        ns.NotificationManager,
+        "__init__",
+        lambda self: (_ for _ in ()).throw(AssertionError("should not initialize")),
+        raising=False,
+    )
+
+    ns.NotificationManager.shutdown()
+
+
+def test_notification_manager_skips_background_workers_during_pytest():
+    manager = ns.NotificationManager()
+
+    assert manager._sync_worker is None
+    assert manager._sync_write_thread is None
+
+
 def test_show_dedupes_identical_payloads_within_window(monkeypatch):
     shown = []
 
@@ -255,6 +313,44 @@ def test_show_dedupes_identical_payloads_within_window(monkeypatch):
     )
 
     assert len(shown) == 1
+
+
+def test_submit_payload_queues_when_called_off_ui_thread(monkeypatch):
+    queued: list[ns.NotificationToastPayload] = []
+    fake_bridge = types.SimpleNamespace(
+        present_requested=types.SimpleNamespace(emit=lambda payload: queued.append(payload))
+    )
+
+    monkeypatch.setattr(
+        ns,
+        "QApplication",
+        types.SimpleNamespace(instance=lambda: object()),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        ns.NotificationManager,
+        "_is_ui_thread",
+        classmethod(lambda cls: False),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ns.NotificationManager,
+        "_ensure_ui_bridge",
+        classmethod(lambda cls: fake_bridge),
+        raising=False,
+    )
+
+    payload = ns.NotificationToastPayload(
+        message="Background due-project toast",
+        notification_type=ns.NotificationType.WARNING,
+        title="موعد استحقاق مشروع قريب",
+        sync=False,
+    )
+
+    result = ns.NotificationManager._submit_payload(payload)
+
+    assert result is True
+    assert queued == [payload]
 
 
 def test_notification_manager_resolves_main_window_owner_from_active_modal(qt_app, monkeypatch):
@@ -540,3 +636,54 @@ def test_check_new_notifications_accepts_related_entity_type_fallback(monkeypatc
         }
     ]
     assert sync_calls == [{"notifications", "payments"}]
+
+
+def test_check_new_notifications_keeps_activity_notifications_silent(monkeypatch):
+    emitted: list[dict] = []
+    sync_calls: list[set[str]] = []
+
+    class _Cursor:
+        def __init__(self, docs):
+            self._docs = list(docs)
+
+        def sort(self, *_args, **_kwargs):
+            return self
+
+        def limit(self, size):
+            return self._docs[:size]
+
+    class _Collection:
+        def __init__(self, docs):
+            self._docs = docs
+
+        def find(self, _query=None):
+            return _Cursor(self._docs)
+
+    activity_doc = {
+        "_id": "activity-1",
+        "title": "تم تعديل عميل",
+        "message": "Katkoty kids wear",
+        "type": "success",
+        "related_entity_type": "clients",
+        "device_id": "DEVICE-OTHER",
+        "created_at": "2999-01-01T12:03:00",
+        "sync_status": "synced",
+        "is_deleted": False,
+        "is_activity": True,
+        "operation_text": "تعديل عميل",
+    }
+
+    worker = ns.NotificationSyncWorker()
+    worker.repo = types.SimpleNamespace(
+        mongo_db=types.SimpleNamespace(notifications=_Collection([activity_doc]))
+    )
+    worker.new_notification.connect(emitted.append)
+    worker._trigger_instant_sync = lambda tables: sync_calls.append(set(tables))
+    worker._trigger_settings_sync = lambda: None
+    monkeypatch.setattr(ns, "DEVICE_ID", "DEVICE-LOCAL", raising=True)
+
+    result = worker._check_new_notifications()
+
+    assert result is True
+    assert emitted == []
+    assert sync_calls == [{"clients", "notifications"}]

@@ -43,6 +43,10 @@ def test_clients_tab_buttons_click_without_crash(monkeypatch, qapp):
     tab = client_manager.ClientManagerTab(client_service=_NoopService())
     tab.show()
 
+    assert tab.add_button.text() == "➕ إضافة عميل"
+    assert tab.edit_button.text() == "✏️ تعديل العميل"
+    assert tab.delete_button.text() == "🗑️ حذف العميل"
+
     monkeypatch.setattr(tab, "open_editor", lambda *args, **kwargs: None, raising=True)
     monkeypatch.setattr(tab, "open_editor_for_selected", lambda *args, **kwargs: None, raising=True)
 
@@ -72,6 +76,10 @@ def test_services_tab_buttons_click_without_crash(monkeypatch, qapp):
 
     tab = service_manager.ServiceManagerTab(service_service=_NoopService())
     tab.show()
+
+    assert tab.add_button.text() == "➕ إضافة خدمة"
+    assert tab.edit_button.text() == "✏️ تعديل الخدمة"
+    assert tab.archive_button.text() == "📦 أرشفة الخدمة"
 
     monkeypatch.setattr(tab, "open_editor", lambda *args, **kwargs: None, raising=True)
     monkeypatch.setattr(tab, "open_editor_for_selected", lambda *args, **kwargs: None, raising=True)

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QScrollArea
 
 from core import schemas
 from core.event_bus import EventBus
@@ -76,7 +77,7 @@ def test_expense_dialog_creates_expense_in_sqlite(monkeypatch, qapp, sqlite_repo
     qapp.processEvents()
 
     dialog.category_combo.setCurrentIndex(0)
-    dialog.account_combo.setCurrentIndex(0)
+    dialog.account_combo.setCurrentIndex(1)
     dialog.amount_input.setValue(123.45)
 
     QTest.mouseClick(dialog.save_button, Qt.MouseButton.LeftButton)
@@ -118,7 +119,7 @@ def test_expense_dialog_uses_stable_project_reference_for_duplicate_names(qapp, 
     qapp.processEvents()
 
     dialog.category_combo.setCurrentText("مصروفات متنوعة")
-    dialog.account_combo.setCurrentIndex(0)
+    dialog.account_combo.setCurrentIndex(1)
     dialog.amount_input.setValue(75.0)
     qapp.processEvents()
 
@@ -130,6 +131,41 @@ def test_expense_dialog_uses_stable_project_reference_for_duplicate_names(qapp, 
     assert any(abs(e.amount - 75.0) < 0.001 and e.project_id == str(project_b.id) for e in expenses)
     assert sqlite_repo.get_total_expenses_for_project(str(project_a.id)) == 0.0
     assert sqlite_repo.get_total_expenses_for_project(str(project_b.id)) == 75.0
+
+
+def test_expense_dialog_requires_explicit_account_selection(monkeypatch, qapp, sqlite_repo):
+    _seed_cash_account(sqlite_repo)
+
+    bus = EventBus()
+    expense_service = ExpenseService(sqlite_repo, bus)
+    accounting_service = _AccountingStub(sqlite_repo)
+    dialog = ExpenseEditorDialog(
+        expense_service=expense_service,
+        accounting_service=accounting_service,
+        project_service=_ProjectServiceStub(),
+        expense_to_edit=None,
+    )
+    dialog.show()
+    qapp.processEvents()
+
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "ui.expense_editor_dialog.QMessageBox.warning",
+        lambda *_args, **kwargs: messages.append(str(kwargs.get("text") or _args[2])),
+        raising=False,
+    )
+
+    dialog.category_combo.setCurrentIndex(0)
+    dialog.amount_input.setValue(25.0)
+    qapp.processEvents()
+
+    QTest.mouseClick(dialog.save_button, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+
+    assert dialog.result() != dialog.DialogCode.Accepted
+    assert messages
+    assert any("اختيار حساب الدفع" in message for message in messages)
+    assert sqlite_repo.get_all_expenses() == []
 
 
 def test_expense_dialog_loads_existing_stable_project_reference(qapp, sqlite_repo):
@@ -204,8 +240,12 @@ def test_payment_dialog_creates_payment_in_sqlite(monkeypatch, qapp, sqlite_repo
     dialog.show()
     qapp.processEvents()
 
-    dialog.project_combo.setCurrentIndex(0)
-    dialog.account_combo.setCurrentIndex(0)
+    assert not dialog.findChildren(QScrollArea)
+    assert dialog.save_btn.height() <= 34
+    assert dialog.cancel_btn.height() <= 34
+
+    dialog.project_combo.setCurrentIndex(1)
+    dialog.account_combo.setCurrentIndex(1)
     dialog.amount_input.setValue(200.0)
     qapp.processEvents()
 
@@ -305,6 +345,113 @@ def test_payment_editor_reassigns_payment_to_selected_project_and_invoice(
     assert refreshed.project_id == str(project_b.id)
     assert refreshed.client_id == str(client_b.id)
     assert refreshed.invoice_number == project_b.invoice_number
+
+
+def test_payment_editor_dialog_uses_fixed_layout_and_toggleable_project_search(
+    monkeypatch, qapp, sqlite_repo
+):
+    _seed_cash_account(sqlite_repo)
+
+    bus = EventBus()
+    accounting_service = _AccountingStub(sqlite_repo)
+    client_service = ClientService(sqlite_repo)
+
+    monkeypatch.setattr("services.project_service.PRINTING_AVAILABLE", False, raising=False)
+
+    project_service = ProjectService(
+        repository=sqlite_repo,
+        event_bus=bus,
+        accounting_service=accounting_service,
+        settings_service=None,
+    )
+
+    client = client_service.create_client(schemas.Client(name="Payment Layout Client"))
+    project = sqlite_repo.create_project(
+        schemas.Project(
+            name="Payment Layout Project",
+            client_id=str(client.id),
+            total_amount=800.0,
+        )
+    )
+    payment = sqlite_repo.create_payment(
+        schemas.Payment(
+            project_id=str(project.id),
+            client_id=str(client.id),
+            date=datetime(2026, 3, 8, 9, 0, 0),
+            amount=125.0,
+            account_id="111101",
+            method="Cash",
+            invoice_number=project.invoice_number,
+        )
+    )
+
+    dialog = PaymentEditorDialog(
+        payment=payment,
+        accounts=sqlite_repo.get_all_accounts(),
+        accounting_service=accounting_service,
+        project_service=project_service,
+    )
+    dialog.show()
+    qapp.processEvents()
+
+    assert not dialog.findChildren(QScrollArea)
+    assert dialog.save_btn.height() <= 34
+    assert dialog.cancel_btn.height() <= 34
+    assert dialog.save_btn.text() == "حفظ الدفعة"
+    assert not dialog.project_picker_frame.isVisible()
+    assert dialog.project_combo.count() == 0
+    assert dialog.project_meta_label.text() == client.name
+    assert dialog.project_invoice_label.text() == project.invoice_number
+    assert dialog.project_total_value_label.text() != ""
+    collapsed_height = dialog.height()
+
+    QTest.mouseClick(dialog.change_project_btn, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    QTest.qWait(10)
+
+    assert dialog.project_picker_frame.isVisible()
+    assert "إخفاء" in dialog.change_project_btn.text()
+    assert dialog.project_combo.count() > 0
+    expanded_height = dialog.height()
+    assert expanded_height >= collapsed_height
+
+    project_line_edit = dialog.project_combo.lineEdit()
+    assert project_line_edit is not None
+    project_line_edit.setText("Payment Edit")
+    dialog.project_combo._on_text_edited("Payment Edit")
+    dialog.project_combo._show_popup_safe()
+    qapp.processEvents()
+    QTest.qWait(5)
+
+    QTest.mouseClick(dialog.change_project_btn, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    QTest.qWait(10)
+
+    assert not dialog.project_picker_frame.isVisible()
+    assert "تغيير" in dialog.change_project_btn.text()
+    assert dialog.height() <= expanded_height
+    assert dialog.height() <= collapsed_height + 2
+
+    for _ in range(3):
+        QTest.mouseClick(dialog.change_project_btn, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        QTest.qWait(5)
+        QTest.mouseClick(dialog.change_project_btn, Qt.MouseButton.LeftButton)
+        qapp.processEvents()
+        QTest.qWait(5)
+
+    QTest.mouseClick(dialog.change_project_btn, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    QTest.qWait(5)
+    project_line_edit.setText("Project")
+    dialog.project_combo._on_text_edited("Project")
+    dialog.project_combo._show_popup_safe()
+    qapp.processEvents()
+    QTest.qWait(5)
+
+    dialog.close()
+    qapp.processEvents()
+    QTest.qWait(20)
 
 
 def test_payments_manager_renders_invoice_number_column(qapp, sqlite_repo):

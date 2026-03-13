@@ -1,4 +1,6 @@
 # الملف: ui/payments_manager.py
+from __future__ import annotations
+
 """
 تاب إدارة الدفعات - عرض وتعديل جميع الدفعات (تحصيلات العملاء)
 ⚡ محسّن: إضافة دفعة جديدة، تصفية، تصدير، تكامل محاسبي كامل
@@ -6,33 +8,36 @@
 
 import time
 from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from core import schemas
-from services.accounting_service import AccountingService
-from services.client_service import ClientService
-from services.project_service import ProjectService
+from core.account_filters import filter_operational_cashboxes, infer_payment_method_from_account
 from ui.custom_spinbox import CustomSpinBox
 from ui.smart_combobox import SmartFilterComboBox
 from ui.styles import BUTTON_STYLES, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
+
+if TYPE_CHECKING:
+    from services.accounting_service import AccountingService
+    from services.client_service import ClientService
+    from services.project_service import ProjectService
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -46,6 +51,26 @@ except ImportError:
             pass
 
 
+_SCHEMAS_MODULE = None
+
+
+def _get_schemas_module():
+    global _SCHEMAS_MODULE
+    if _SCHEMAS_MODULE is None:
+        from core import schemas as schemas_module
+
+        _SCHEMAS_MODULE = schemas_module
+    return _SCHEMAS_MODULE
+
+
+class _SchemasProxy:
+    def __getattr__(self, name: str):
+        return getattr(_get_schemas_module(), name)
+
+
+schemas = _SchemasProxy()
+
+
 def to_decimal(value) -> Decimal:
     """تحويل آمن للقيم المالية إلى Decimal"""
     if value is None:
@@ -54,6 +79,285 @@ def to_decimal(value) -> Decimal:
         return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
         return Decimal("0.00")
+
+
+def _format_currency(value, placeholder: str = "0.00 ج.م") -> str:
+    if value is None:
+        return placeholder
+    try:
+        return f"{float(value):,.2f} ج.م"
+    except Exception:
+        return placeholder
+
+
+def _payment_dialog_stylesheet() -> str:
+    from ui.styles import COLORS, get_arrow_url
+
+    return f"""
+        * {{
+            outline: none;
+            font-family: 'Cairo';
+        }}
+        QDialog {{
+            background-color: {COLORS['bg_dark']};
+            color: {COLORS['text_primary']};
+        }}
+        QWidget#dialogContent {{
+            background-color: {COLORS['bg_dark']};
+        }}
+        QFrame#sectionCard {{
+            background-color: rgba(5, 32, 69, 0.94);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            border-radius: 16px;
+        }}
+        QFrame#detailsCard {{
+            background-color: transparent;
+            border: 1px solid rgba(59, 130, 246, 0.18);
+            border-radius: 16px;
+        }}
+        QWidget#dialogFooter {{
+            background-color: rgba(5, 32, 69, 0.96);
+            border-top: 1px solid rgba(59, 130, 246, 0.16);
+        }}
+        QLabel#sectionBadge {{
+            color: #dbeafe;
+            background-color: rgba(37, 99, 235, 0.18);
+            border: 1px solid rgba(96, 165, 250, 0.28);
+            border-radius: 12px;
+            padding: 5px 12px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        QLabel#sectionHeading {{
+            color: {COLORS['text_primary']};
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QLabel#projectHeadline {{
+            color: #f8fafc;
+            font-size: 14px;
+            font-weight: 700;
+        }}
+        QLabel#fieldLabel,
+        QLabel#surfaceCaption,
+        QLabel#statCaption {{
+            color: #cbd5e1;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        QLabel#hintLabel {{
+            color: #93c5fd;
+            font-size: 10px;
+            font-weight: 500;
+        }}
+        QFrame#surfaceCard,
+        QFrame#statCard,
+        QFrame#pickerFrame {{
+            background-color: rgba(15, 23, 42, 0.48);
+            border: 1px solid rgba(96, 165, 250, 0.16);
+            border-radius: 12px;
+        }}
+        QFrame#sectionDivider {{
+            background-color: rgba(148, 163, 184, 0.18);
+            border: none;
+            min-height: 1px;
+            max-height: 1px;
+        }}
+        QLabel#surfaceValue {{
+            color: #f8fafc;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QLabel#statValue {{
+            color: #f8fafc;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QLabel#valueBadge {{
+            color: #f8fafc;
+            background-color: rgba(14, 165, 233, 0.14);
+            border: 1px solid rgba(14, 165, 233, 0.26);
+            border-radius: 10px;
+            padding: 5px 10px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QComboBox, QDateEdit, QLineEdit {{
+            background-color: {COLORS['bg_medium']};
+            color: {COLORS['text_primary']};
+            border: 1px solid {COLORS['border']};
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 12px;
+            min-height: 20px;
+        }}
+        QComboBox:hover, QDateEdit:hover, QLineEdit:hover {{
+            border-color: rgba(96, 165, 250, 0.55);
+        }}
+        QComboBox:focus, QDateEdit:focus, QLineEdit:focus {{
+            border: 1px solid {COLORS['primary']};
+        }}
+        QComboBox::drop-down, QDateEdit::drop-down {{
+            border: none;
+            width: 24px;
+        }}
+        QComboBox::down-arrow, QDateEdit::down-arrow {{
+            image: url({get_arrow_url("down")});
+            width: 10px;
+            height: 10px;
+        }}
+        QComboBox QLineEdit, QDateEdit QLineEdit {{
+            background: transparent;
+            border: none;
+            padding: 0;
+            min-height: 0;
+            color: {COLORS['text_primary']};
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {COLORS['bg_medium']};
+            color: {COLORS['text_primary']};
+            border: 1px solid {COLORS['border']};
+            selection-background-color: {COLORS['primary']};
+        }}
+        QPushButton#ghostButton {{
+            background-color: rgba(37, 99, 235, 0.14);
+            color: #dbeafe;
+            border: 1px solid rgba(96, 165, 250, 0.2);
+            border-radius: 10px;
+            padding: 0 14px;
+            min-height: 30px;
+            min-width: 112px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        QPushButton#ghostButton:hover {{
+            background-color: rgba(37, 99, 235, 0.24);
+        }}
+        QPushButton#dialogPrimaryButton {{
+            background-color: {COLORS['primary']};
+            color: white;
+            border: none;
+            border-radius: 10px;
+            padding: 0 18px;
+            min-height: 32px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QPushButton#dialogPrimaryButton:hover {{
+            background-color: {COLORS['primary_hover']};
+        }}
+        QPushButton#dialogPrimaryButton:disabled {{
+            background-color: rgba(51, 65, 85, 0.95);
+            color: #94a3b8;
+        }}
+        QPushButton#dialogSecondaryButton {{
+            background: qlineargradient(
+                x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(57, 86, 123, 0.98),
+                stop:1 rgba(29, 55, 87, 0.98)
+            );
+            color: #f8fafc;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 0 18px;
+            min-height: 32px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QPushButton#dialogSecondaryButton:hover {{
+            background: qlineargradient(
+                x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(67, 98, 137, 0.99),
+                stop:1 rgba(36, 64, 99, 0.99)
+            );
+            border: 1px solid rgba(255, 255, 255, 0.14);
+        }}
+        QPushButton#dialogSecondaryButton:pressed {{
+            background: qlineargradient(
+                x1:0, y1:0, x2:0, y2:1,
+                stop:0 rgba(24, 46, 73, 0.99),
+                stop:1 rgba(18, 35, 58, 0.99)
+            );
+        }}
+    """
+
+
+def _style_payment_amount_input(amount_input: CustomSpinBox):
+    from ui.styles import COLORS
+
+    amount_input.setFixedHeight(38)
+    amount_input.spinbox.setStyleSheet(
+        f"""
+        QDoubleSpinBox {{
+            background-color: {COLORS['bg_medium']};
+            color: {COLORS['text_primary']};
+            border: 1px solid {COLORS['border']};
+            border-right: none;
+            border-top-left-radius: 10px;
+            border-bottom-left-radius: 10px;
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+            padding: 8px 12px;
+            min-height: 20px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        QDoubleSpinBox:focus {{
+            border: 1px solid {COLORS['primary']};
+            border-right: none;
+        }}
+        """
+    )
+    amount_input.btn_plus.setStyleSheet(
+        f"""
+        QPushButton {{
+            background-color: rgba(15, 23, 42, 0.92);
+            color: {COLORS['text_secondary']};
+            border: 1px solid {COLORS['border']};
+            border-top-right-radius: 10px;
+            border-bottom: none;
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 19px;
+            max-height: 19px;
+            font-size: 8px;
+            font-weight: 700;
+            padding: 0;
+        }}
+        QPushButton:hover {{
+            background-color: {COLORS['primary']};
+            color: white;
+        }}
+        QPushButton:pressed {{
+            background-color: {COLORS['primary_dark']};
+        }}
+        """
+    )
+    amount_input.btn_minus.setStyleSheet(
+        f"""
+        QPushButton {{
+            background-color: rgba(15, 23, 42, 0.92);
+            color: {COLORS['text_secondary']};
+            border: 1px solid {COLORS['border']};
+            border-top: none;
+            border-bottom-right-radius: 10px;
+            min-width: 24px;
+            max-width: 24px;
+            min-height: 19px;
+            max-height: 19px;
+            font-size: 8px;
+            font-weight: 700;
+            padding: 0;
+        }}
+        QPushButton:hover {{
+            background-color: {COLORS['primary']};
+            color: white;
+        }}
+        QPushButton:pressed {{
+            background-color: {COLORS['primary_dark']};
+        }}
+        """
+    )
 
 
 class NewPaymentDialog(QDialog):
@@ -75,380 +379,494 @@ class NewPaymentDialog(QDialog):
         self.project_service = project_service
         self.accounting_service = accounting_service
         self.client_service = client_service
-        self.selected_project = None
+        self.selected_project: schemas.Project | None = None
+        self.current_payment_method = "سيحدد تلقائيًا"
+        self._client_name_cache: dict[str, str] = {}
+        self._project_invoice_cache: dict[str, str] = {}
 
-        self.setWindowTitle("💰 إضافة دفعة جديدة")
-        self.setMinimumWidth(550)
-        self.setMinimumHeight(500)
-
-        # 📱 سياسة التمدد
-        from PyQt6.QtWidgets import QSizePolicy
-
+        self.setWindowTitle("إضافة دفعة جديدة")
+        self.setMinimumWidth(680)
+        self.setMinimumHeight(0)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        # تطبيق شريط العنوان المخصص
-        from ui.styles import setup_custom_title_bar
+        from ui.styles import apply_arrows_to_all_widgets, setup_custom_title_bar
 
         setup_custom_title_bar(self)
-        self.setStyleSheet(
-            """
-            * { outline: none; }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
-            QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
-            QPushButton:focus { border: none; outline: none; }
-        """
-        )
-
+        self._apply_dialog_style()
         self._setup_ui()
         self._load_data()
-
-        # تطبيق الأسهم
-        from ui.styles import apply_arrows_to_all_widgets
-
+        self._refresh_project_summary()
+        self._update_payment_method()
+        self._finalize_dialog_size()
         apply_arrows_to_all_widgets(self)
 
+    def _apply_dialog_style(self):
+        self.setStyleSheet(_payment_dialog_stylesheet())
+
     def _setup_ui(self):
-        """إعداد الواجهة - تصميم احترافي"""
-        from ui.styles import COLORS, get_arrow_url
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
 
-        layout = QVBoxLayout()
-        layout.setSpacing(10)
-        layout.setContentsMargins(14, 14, 14, 14)
-        self.setLayout(layout)
+        content_widget = QWidget()
+        content_widget.setObjectName("dialogContent")
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(12, 12, 12, 6)
 
-        # ستايل الحقول
-        field_style = f"""
-            QComboBox, QDateEdit {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_primary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 8px 10px;
-                font-size: 11px;
-                min-height: 18px;
-            }}
-            QComboBox:hover, QDateEdit:hover {{
-                border-color: {COLORS['primary']};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 22px;
-            }}
-            QComboBox::down-arrow {{
-                image: url({get_arrow_url("down")});
-                width: 10px;
-                height: 10px;
-            }}
-            QTextEdit {{
-                background-color: {COLORS['bg_medium']};
-                color: {COLORS['text_primary']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 6px;
-                font-size: 11px;
-            }}
-        """
+        self.project_frame = self._create_section_card()
+        project_layout = QVBoxLayout(self.project_frame)
+        project_layout.setContentsMargins(12, 12, 12, 12)
+        project_layout.setSpacing(6)
 
-        label_style = f"color: {COLORS['text_primary']}; font-size: 11px; font-weight: bold;"
+        badge = QLabel("المشروع المرتبط")
+        badge.setObjectName("sectionBadge")
+        badge.setFont(get_cairo_font(11, bold=True))
+        project_layout.addWidget(badge, 0, Qt.AlignmentFlag.AlignRight)
 
-        # === قسم المشروع ===
-        project_label = QLabel("📁 المشروع")
-        project_label.setStyleSheet(label_style)
-        layout.addWidget(project_label)
+        heading = QLabel("اختر المشروع الذي سيتم تسجيل الدفعة عليه")
+        heading.setObjectName("sectionHeading")
+        heading.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        project_layout.addWidget(heading)
 
-        # SmartFilterComboBox مع فلترة ذكية
         self.project_combo = SmartFilterComboBox()
-        self.project_combo.setStyleSheet(field_style)
-        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
-        layout.addWidget(self.project_combo)
-
-        # معلومات المشروع المالية (تظهر عند اختيار مشروع)
-        self.project_info_frame = QFrame()
-        self.project_info_frame.setStyleSheet(
-            f"""
-            QFrame {{
-                background-color: rgba(30, 41, 59, 0.6);
-                border-radius: 6px;
-                border: 1px solid {COLORS['border']};
-            }}
-        """
+        self.project_combo.setFixedHeight(38)
+        self.project_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
         )
-        info_layout = QHBoxLayout(self.project_info_frame)
-        info_layout.setContentsMargins(6, 6, 6, 6)
-        info_layout.setSpacing(6)
+        self.project_combo.setMinimumContentsLength(22)
+        self.project_combo.currentIndexChanged.connect(self._on_project_selected)
+        if self.project_combo.lineEdit():
+            self.project_combo.lineEdit().setPlaceholderText(
+                "ابحث باسم المشروع أو العميل أو رقم الفاتورة"
+            )
+        project_layout.addWidget(self._create_field_block("المشروع", self.project_combo))
 
-        self.total_label = self._create_info_label("الإجمالي", "0.00", "#3b82f6")
-        self.paid_label = self._create_info_label("المدفوع", "0.00", "#10b981")
-        self.remaining_label = self._create_info_label("المتبقي", "0.00", "#ef4444")
+        self.project_search_hint = QLabel(
+            "يمكنك البحث باسم المشروع أو العميل أو رقم الفاتورة للوصول إليه سريعًا."
+        )
+        self.project_search_hint.setObjectName("hintLabel")
+        self.project_search_hint.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.project_search_hint.setWordWrap(True)
+        project_layout.addWidget(self.project_search_hint)
 
-        info_layout.addWidget(self.total_label)
-        info_layout.addWidget(self.paid_label)
-        info_layout.addWidget(self.remaining_label)
+        self.project_name_label = QLabel("اختر مشروعًا للبدء")
+        self.project_name_label.setObjectName("projectHeadline")
+        self.project_name_label.setFont(get_cairo_font(13, bold=True))
+        self.project_name_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+        self.project_name_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.project_name_label.setWordWrap(True)
+        project_layout.addWidget(self.project_name_label)
 
-        layout.addWidget(self.project_info_frame)
-        self.project_info_frame.setVisible(False)
+        project_meta_layout = QGridLayout()
+        project_meta_layout.setHorizontalSpacing(8)
+        project_meta_layout.setVerticalSpacing(8)
+        project_meta_layout.addWidget(
+            self._create_meta_surface("العميل المرتبط", "project_meta_label"), 0, 0
+        )
+        project_meta_layout.addWidget(
+            self._create_meta_surface("رقم الفاتورة", "project_invoice_label"), 0, 1
+        )
+        project_meta_layout.setColumnStretch(0, 1)
+        project_meta_layout.setColumnStretch(1, 1)
+        project_layout.addLayout(project_meta_layout)
 
-        # === قسم الحساب ===
-        acc_label = QLabel("💳 الحساب المستلم")
-        acc_label.setStyleSheet(label_style)
-        layout.addWidget(acc_label)
+        project_stats_layout = QGridLayout()
+        project_stats_layout.setHorizontalSpacing(8)
+        project_stats_layout.setVerticalSpacing(8)
+        project_stats_layout.addWidget(
+            self._create_stat_surface("إجمالي المشروع", "project_total_value_label", "#38bdf8"),
+            0,
+            0,
+        )
+        project_stats_layout.addWidget(
+            self._create_stat_surface("المدفوع", "project_paid_value_label", "#22c55e"),
+            0,
+            1,
+        )
+        project_stats_layout.addWidget(
+            self._create_stat_surface("المتبقي", "project_remaining_value_label", "#f97316"),
+            0,
+            2,
+        )
+        for column in range(3):
+            project_stats_layout.setColumnStretch(column, 1)
+        project_layout.addLayout(project_stats_layout)
+        content_layout.addWidget(self.project_frame)
 
-        # SmartFilterComboBox مع فلترة ذكية
+        details_frame = self._create_section_card("detailsCard")
+        details_layout = QVBoxLayout(details_frame)
+        details_layout.setContentsMargins(12, 12, 12, 12)
+        details_layout.setSpacing(6)
+
+        details_title = QLabel("تفاصيل الدفعة")
+        details_title.setObjectName("sectionHeading")
+        details_title.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        details_layout.addWidget(details_title)
+
         self.account_combo = SmartFilterComboBox()
-        self.account_combo.setStyleSheet(field_style)
+        self.account_combo.setFixedHeight(38)
+        self.account_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.account_combo.setMinimumContentsLength(20)
         self.account_combo.currentIndexChanged.connect(self._update_payment_method)
-        layout.addWidget(self.account_combo)
+        if self.account_combo.lineEdit():
+            self.account_combo.lineEdit().setPlaceholderText("ابحث عن الحساب المستلم")
+        details_layout.addWidget(self._create_field_block("الحساب المستلم", self.account_combo))
 
-        # === صف المبلغ والتاريخ ===
-        row1 = QHBoxLayout()
-        row1.setSpacing(10)
+        amount_date_row = QHBoxLayout()
+        amount_date_row.setSpacing(8)
 
-        # المبلغ
-        amount_container = QVBoxLayout()
-        amount_container.setSpacing(3)
-        amount_label = QLabel("💰 المبلغ")
-        amount_label.setStyleSheet(label_style)
-        amount_container.addWidget(amount_label)
-        self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
+        self.amount_input = CustomSpinBox(decimals=2, minimum=0.0, maximum=100_000_000)
         self.amount_input.setSuffix(" ج.م")
         self.amount_input.valueChanged.connect(self._validate_payment)
-        amount_container.addWidget(self.amount_input)
-        row1.addLayout(amount_container, 1)
+        self._style_amount_input()
+        amount_date_row.addWidget(self._create_field_block("المبلغ", self.amount_input), 1)
 
-        # التاريخ
-        date_container = QVBoxLayout()
-        date_container.setSpacing(3)
-        date_label = QLabel("📅 التاريخ")
-        date_label.setStyleSheet(label_style)
-        date_container.addWidget(date_label)
         self.date_input = QDateEdit(QDate.currentDate())
-        self.date_input.setStyleSheet(field_style)
+        self.date_input.setFixedHeight(38)
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("yyyy-MM-dd")
-        date_container.addWidget(self.date_input)
-        row1.addLayout(date_container, 1)
+        amount_date_row.addWidget(self._create_field_block("التاريخ", self.date_input), 1)
+        details_layout.addLayout(amount_date_row)
 
-        layout.addLayout(row1)
+        footer_row = QHBoxLayout()
+        footer_row.setSpacing(8)
 
-        # === الملاحظات ===
-        notes_label = QLabel("📝 ملاحظات")
-        notes_label.setStyleSheet(label_style)
-        layout.addWidget(notes_label)
+        self.method_value_label = self._build_value_badge("method_value_label")
+        self.method_label = self.method_value_label
+        footer_row.addWidget(self._create_field_block("طريقة الدفع", self.method_value_label), 1)
 
-        self.notes_input = QTextEdit()
-        self.notes_input.setStyleSheet(field_style)
-        self.notes_input.setPlaceholderText("ملاحظات اختيارية...")
-        self.notes_input.setFixedHeight(55)
-        layout.addWidget(self.notes_input)
+        self._build_value_badge("invoice_value_label")
+        footer_row.addWidget(self._create_field_block("رقم الفاتورة", self.invoice_value_label), 1)
+        details_layout.addLayout(footer_row)
+        content_layout.addWidget(details_frame)
 
-        # طريقة الدفع (مخفي - للاستخدام الداخلي)
-        self.method_label = QLabel("")
-        self.method_label.setVisible(False)
-        layout.addWidget(self.method_label)
+        main_layout.addWidget(content_widget)
 
-        layout.addStretch()
-
-        # === أزرار التحكم ===
-        buttons_layout = QHBoxLayout()
+        buttons_container = QWidget()
+        buttons_container.setObjectName("dialogFooter")
+        buttons_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(12, 8, 12, 8)
         buttons_layout.setSpacing(8)
         buttons_layout.addStretch()
 
-        self.save_btn = QPushButton("💾 تسجيل الدفعة")
-        self.save_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #10b981; color: white;
-                padding: 8px 16px; font-weight: bold; border-radius: 6px;
-                font-size: 11px; min-width: 110px;
-            }
-            QPushButton:hover { background-color: #059669; }
-            QPushButton:disabled { background-color: #4b5563; color: #9ca3af; }
-        """
-        )
-        self.save_btn.setFixedHeight(28)
+        self.save_btn = QPushButton("حفظ الدفعة")
+        self.save_btn.setObjectName("dialogPrimaryButton")
+        self.save_btn.setFixedSize(118, 34)
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save_payment)
         buttons_layout.addWidget(self.save_btn)
 
         self.cancel_btn = QPushButton("إلغاء")
-        self.cancel_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #475569; color: white;
-                padding: 8px 16px; border-radius: 6px;
-                font-size: 11px; min-width: 80px;
-            }
-            QPushButton:hover { background-color: #64748b; }
-        """
-        )
-        self.cancel_btn.setFixedHeight(28)
+        self.cancel_btn.setObjectName("dialogSecondaryButton")
+        self.cancel_btn.setFixedSize(118, 34)
         self.cancel_btn.clicked.connect(self.reject)
         buttons_layout.addWidget(self.cancel_btn)
 
-        layout.addLayout(buttons_layout)
+        main_layout.addWidget(buttons_container)
 
-    def _create_info_label(self, title: str, value: str, color: str) -> QFrame:
-        """إنشاء label معلومات مالية"""
-        frame = QFrame()
-        frame.setStyleSheet(
-            f"""
-            QFrame {{
-                background-color: {color};
-                border-radius: 5px;
-                border: none;
-            }}
-        """
-        )
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 5, 8, 5)
-        layout.setSpacing(1)
+    def _create_section_card(self, object_name: str = "sectionCard") -> QFrame:
+        card = QFrame()
+        card.setObjectName(object_name)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        return card
 
-        title_lbl = QLabel(title)
-        title_lbl.setStyleSheet(
-            "color: rgba(255,255,255,0.8); font-size: 9px; background: transparent;"
-        )
-        title_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        value_lbl = QLabel(value)
-        value_lbl.setStyleSheet(
-            "color: white; font-weight: bold; font-size: 12px; background: transparent;"
-        )
-        value_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        value_lbl.setObjectName("value_label")
+    def _create_meta_surface(self, title: str, label_attr: str) -> QFrame:
+        surface = QFrame()
+        surface.setObjectName("surfaceCard")
+        surface.setMinimumHeight(50)
+        surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(10, 6, 10, 6)
+        surface_layout.setSpacing(2)
 
-        layout.addWidget(title_lbl)
-        layout.addWidget(value_lbl)
-        return frame
+        caption = QLabel(title)
+        caption.setObjectName("surfaceCaption")
+        surface_layout.addWidget(caption)
+
+        value_label = QLabel("")
+        value_label.setObjectName("surfaceValue")
+        value_label.setWordWrap(True)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        surface_layout.addWidget(value_label)
+        setattr(self, label_attr, value_label)
+        return surface
+
+    def _create_stat_surface(self, title: str, label_attr: str, accent_color: str) -> QFrame:
+        surface = QFrame()
+        surface.setObjectName("statCard")
+        surface.setMinimumHeight(48)
+        surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(10, 6, 10, 6)
+        surface_layout.setSpacing(2)
+
+        caption = QLabel(title)
+        caption.setObjectName("statCaption")
+        caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        surface_layout.addWidget(caption)
+
+        value_label = QLabel("--")
+        value_label.setObjectName("statValue")
+        value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        value_label.setStyleSheet(f"color: {accent_color};")
+        surface_layout.addWidget(value_label)
+        setattr(self, label_attr, value_label)
+        return surface
+
+    def _build_value_badge(self, label_attr: str) -> QLabel:
+        badge = QLabel("")
+        badge.setObjectName("valueBadge")
+        badge.setFixedHeight(38)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        setattr(self, label_attr, badge)
+        return badge
+
+    def _create_field_block(self, label_text: str, widget: QWidget) -> QWidget:
+        block = QWidget()
+        block.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        block_layout = QVBoxLayout(block)
+        block_layout.setContentsMargins(0, 0, 0, 0)
+        block_layout.setSpacing(3)
+
+        label = QLabel(label_text)
+        label.setObjectName("fieldLabel")
+        block_layout.addWidget(label)
+        block_layout.addWidget(widget)
+        return block
+
+    def _style_amount_input(self):
+        _style_payment_amount_input(self.amount_input)
+
+    def _finalize_dialog_size(self):
+        self.layout().activate()
+        self.adjustSize()
+        width = max(680, self.sizeHint().width())
+        height = max(468, self.sizeHint().height())
+        self.setFixedSize(width, height)
 
     def _load_data(self):
-        """تحميل البيانات"""
-        # تحميل المشاريع
+        self.project_combo.clear()
+        self.project_combo.addItem("اختر المشروع المرتبط", userData=None)
         try:
-            projects = self.project_service.get_all_projects()
-            for proj in projects:
-                # عرض اسم المشروع مع العميل
-                client_name = ""
-                if proj.client_id:
-                    try:
-                        client = self.client_service.get_client_by_id(proj.client_id)
-                        if client:
-                            client_name = f" ({client.name})"
-                    except Exception:
-                        pass
-                display = f"📁 {proj.name}{client_name}"
-                self.project_combo.addItem(display, userData=proj)
-            self.project_combo.lineEdit().setPlaceholderText("اكتب للبحث عن المشروع...")
+            repo = getattr(self.project_service, "repo", None)
+            if repo is not None and hasattr(repo, "get_all_clients"):
+                for client in repo.get_all_clients() or []:
+                    client_name = str(getattr(client, "name", "") or "").strip()
+                    if not client_name:
+                        continue
+                    client_id = str(getattr(client, "id", "") or "").strip()
+                    mongo_id = str(getattr(client, "_mongo_id", "") or "").strip()
+                    if client_id:
+                        self._client_name_cache[client_id] = client_name
+                    if mongo_id:
+                        self._client_name_cache[mongo_id] = client_name
+            if repo is not None and hasattr(repo, "get_all_invoice_numbers"):
+                self._project_invoice_cache.update(repo.get_all_invoice_numbers() or {})
+
+            projects = sorted(
+                self.project_service.get_all_projects() or [],
+                key=lambda project: (
+                    str(getattr(project, "name", "") or "").strip().lower(),
+                    str(getattr(project, "invoice_number", "") or "").strip().lower(),
+                ),
+            )
+            for project in projects:
+                self.project_combo.addItem(self._project_display_text(project), userData=project)
         except Exception as e:
             safe_print(f"ERROR: [NewPaymentDialog] فشل تحميل المشاريع: {e}")
 
-        # تحميل الحسابات
+        self.account_combo.clear()
+        self.account_combo.addItem("اختر الحساب المستلم", userData=None)
         try:
-            accounts = self._get_cash_accounts()
-            for acc in accounts:
-                display = f"💰 {acc.name} ({acc.code})"
-                self.account_combo.addItem(display, userData=acc)
-            self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث عن الحساب...")
+            for account in self._get_cash_accounts():
+                self.account_combo.addItem(
+                    f"💰 {account.name} ({account.code})",
+                    userData=account,
+                )
         except Exception as e:
             safe_print(f"ERROR: [NewPaymentDialog] فشل تحميل الحسابات: {e}")
+
+        self.project_combo.setCurrentIndex(0)
+        self.account_combo.setCurrentIndex(0)
+        self._validate_payment()
 
     def _get_cash_accounts(self) -> list[schemas.Account]:
         """جلب حسابات النقدية والبنوك"""
         try:
             all_accounts = self.accounting_service.repo.get_all_accounts()
-            return [
-                acc
-                for acc in all_accounts
-                if acc.type in [schemas.AccountType.CASH, schemas.AccountType.ASSET]
-                and acc.code.startswith("11")
-            ]
+            return filter_operational_cashboxes(all_accounts)
         except Exception:
             return []
 
     def _on_project_selected(self, index: int):
-        """عند اختيار مشروع"""
-        if index < 0:
-            self.selected_project = None
-            self.project_info_frame.setVisible(False)
-            self._validate_payment()
-            return
-
-        self.selected_project = self.project_combo.currentData()
-        if not self.selected_project:
-            self.project_info_frame.setVisible(False)
-            self._validate_payment()
-            return
-
-        # جلب بيانات الربحية
-        try:
-            project_ref = str(
-                getattr(self.selected_project, "id", None)
-                or getattr(self.selected_project, "_mongo_id", None)
-                or self.selected_project.name
-            )
-            profit_data = self.project_service.get_project_profitability(
-                project_ref,
-                client_id=getattr(self.selected_project, "client_id", None),
-            )
-            total = profit_data.get("total_revenue", 0)
-            paid = profit_data.get("total_paid", 0)
-            remaining = profit_data.get("balance_due", 0)
-
-            # تحديث الـ labels
-            self.total_label.findChild(QLabel, "value_label").setText(f"{total:,.2f}")
-            self.paid_label.findChild(QLabel, "value_label").setText(f"{paid:,.2f}")
-            self.remaining_label.findChild(QLabel, "value_label").setText(f"{remaining:,.2f}")
-
-            # تعيين المبلغ الافتراضي للمتبقي
-            if remaining > 0:
-                self.amount_input.setValue(remaining)
-
-            self.project_info_frame.setVisible(True)
-        except Exception as e:
-            safe_print(f"ERROR: [NewPaymentDialog] فشل جلب بيانات المشروع: {e}")
-            self.project_info_frame.setVisible(False)
-
+        self.selected_project = self.project_combo.currentData() if index > 0 else None
+        remaining = self._refresh_project_summary()
+        if self.selected_project and remaining is not None and self.amount_input.value() <= 0:
+            self.amount_input.setValue(max(float(remaining), 0.0))
         self._validate_payment()
 
     def _update_payment_method(self):
         """تحديث طريقة الدفع حسب الحساب"""
         account = self.account_combo.currentData()
         if not account:
-            self.method_label.setText("---")
+            self.current_payment_method = "سيحدد تلقائيًا"
+            self.method_label.setText(self.current_payment_method)
+            self._validate_payment()
             return
 
-        method = self._get_payment_method_from_account(account)
-        self.method_label.setText(method)
+        self.current_payment_method = self._get_payment_method_from_account(account)
+        self.method_label.setText(self.current_payment_method)
+        self._validate_payment()
 
     def _get_payment_method_from_account(self, account: schemas.Account | None) -> str:
         """⚡ تحديد طريقة الدفع من الحساب - يدعم نظام 4 و 6 أرقام"""
         if not account:
             return "Other"
+        return infer_payment_method_from_account(account)
 
-        code = account.code or ""
-        name = (account.name or "").lower()
+    def _project_ref(self, project: schemas.Project | None, fallback: str = "") -> str:
+        if project is None:
+            return str(fallback or "").strip()
+        if self.project_service and hasattr(self.project_service, "_project_ref"):
+            return str(
+                self.project_service._project_ref(project, fallback or project.name) or ""
+            ).strip()
+        return str(
+            getattr(project, "id", None)
+            or getattr(project, "_mongo_id", None)
+            or getattr(project, "name", fallback)
+            or ""
+        ).strip()
 
-        # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-        if "vodafone" in name or "فودافون" in name or "v/f" in name or "vf" in name:
-            return "Vodafone Cash"
-        elif "instapay" in name or "انستاباي" in name:
-            return "InstaPay"
-        elif "كاش" in name or "cash" in name or "خزينة" in name or "صندوق" in name:
-            return "Cash"
-        elif "بنك" in name or "bank" in name:
-            return "Bank Transfer"
-        elif "شيك" in name or "check" in name:
-            return "Check"
+    def _get_client_name(self, client_id: str) -> str:
+        client_ref = str(client_id or "").strip()
+        if not client_ref:
+            return ""
+        if client_ref in self._client_name_cache:
+            return self._client_name_cache[client_ref]
+        try:
+            client = self.client_service.get_client_by_id(client_ref)
+            client_name = str(getattr(client, "name", "") or client_ref).strip()
+            self._client_name_cache[client_ref] = client_name
+            return client_name
+        except Exception:
+            return client_ref
 
-        # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
-        if code in ["1103", "111000"] or code.startswith("1110"):
-            return "Vodafone Cash"
-        elif code in ["1104"] or "instapay" in code.lower():
-            return "InstaPay"
-        elif code in ["1101", "111101"] or code.startswith("1111"):
-            return "Cash"
-        elif code.startswith("1102") or code.startswith("1112"):
-            return "Bank Transfer"
+    def _resolve_invoice_number_for_project(
+        self, project: schemas.Project | None, *, ensure: bool = False
+    ) -> str:
+        if project is None:
+            return ""
+        project_ref = self._project_ref(project, getattr(project, "name", ""))
+        if project_ref in self._project_invoice_cache:
+            return self._project_invoice_cache[project_ref]
 
-        return "Other"
+        invoice_number = str(getattr(project, "invoice_number", "") or "").strip()
+        if invoice_number:
+            self._project_invoice_cache[project_ref] = invoice_number
+            return invoice_number
+
+        repo = getattr(self.project_service, "repo", None)
+        if repo is not None and hasattr(repo, "get_invoice_number_for_project"):
+            try:
+                invoice_number = str(
+                    repo.get_invoice_number_for_project(
+                        project_ref,
+                        getattr(project, "client_id", None),
+                    )
+                    or ""
+                ).strip()
+                if invoice_number:
+                    self._project_invoice_cache[project_ref] = invoice_number
+                    return invoice_number
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [Payments] تعذر جلب رقم فاتورة المشروع '{project_ref}': {exc}"
+                )
+
+        if ensure and repo is not None and hasattr(repo, "ensure_invoice_number"):
+            try:
+                invoice_number = str(
+                    repo.ensure_invoice_number(
+                        project_ref,
+                        getattr(project, "client_id", None),
+                    )
+                    or ""
+                ).strip()
+                if invoice_number:
+                    self._project_invoice_cache[project_ref] = invoice_number
+                return invoice_number
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [Payments] تعذر توليد رقم فاتورة للمشروع '{project_ref}': {exc}"
+                )
+                return ""
+        return ""
+
+    def _project_display_text(self, project: schemas.Project) -> str:
+        project_name = str(getattr(project, "name", "") or "").strip() or "بدون اسم"
+        client_name = self._get_client_name(getattr(project, "client_id", "") or "")
+        invoice_number = self._resolve_invoice_number_for_project(project)
+        extra_parts = []
+        if invoice_number:
+            extra_parts.append(f"فاتورة: {invoice_number}")
+        if client_name:
+            extra_parts.append(f"عميل: {client_name}")
+        suffix = f" - {' - '.join(extra_parts)}" if extra_parts else ""
+        return f"📁 {project_name}{suffix}"
+
+    def _refresh_project_summary(self):
+        project = self.selected_project
+        if not project:
+            self.project_name_label.setText("اختر مشروعًا للبدء")
+            self.project_meta_label.setText("سيظهر العميل هنا")
+            self.project_invoice_label.setText("سيظهر رقم الفاتورة هنا")
+            self.invoice_value_label.setText("غير محدد")
+            self.project_total_value_label.setText("--")
+            self.project_paid_value_label.setText("--")
+            self.project_remaining_value_label.setText("--")
+            self.setWindowTitle("إضافة دفعة جديدة")
+            return None
+
+        project_name = str(getattr(project, "name", "") or "").strip() or "غير محدد"
+        client_name = self._get_client_name(getattr(project, "client_id", "") or "")
+        invoice_number = self._resolve_invoice_number_for_project(project, ensure=True)
+
+        self.project_name_label.setText(project_name)
+        self.project_meta_label.setText(client_name or "غير محدد")
+        self.project_invoice_label.setText(invoice_number or "سيُنشأ تلقائيًا")
+        self.invoice_value_label.setText(invoice_number or "سيُنشأ تلقائيًا")
+        self.setWindowTitle(f"إضافة دفعة - {project_name}")
+
+        remaining = None
+        try:
+            project_ref = self._project_ref(project, project_name)
+            profit_data = self.project_service.get_project_profitability(
+                project_ref,
+                client_id=getattr(project, "client_id", None),
+            )
+            total = profit_data.get("total_revenue", 0)
+            paid = profit_data.get("total_paid", 0)
+            remaining = profit_data.get("balance_due", 0)
+            self.project_total_value_label.setText(_format_currency(total, "--"))
+            self.project_paid_value_label.setText(_format_currency(paid, "--"))
+            self.project_remaining_value_label.setText(_format_currency(remaining, "--"))
+        except Exception as e:
+            safe_print(f"ERROR: [NewPaymentDialog] فشل جلب بيانات المشروع: {e}")
+            self.project_total_value_label.setText("--")
+            self.project_paid_value_label.setText("--")
+            self.project_remaining_value_label.setText("--")
+        return remaining
 
     def _validate_payment(self):
         """التحقق من صحة البيانات"""
@@ -465,32 +883,44 @@ class NewPaymentDialog(QDialog):
 
         self.save_btn.setEnabled(is_valid)
 
+    def _cleanup_smart_combos(self):
+        for combo in self.findChildren(SmartFilterComboBox):
+            combo.shutdown()
+
+    def reject(self):
+        self._cleanup_smart_combos()
+        super().reject()
+
+    def done(self, result: int):
+        self._cleanup_smart_combos()
+        super().done(result)
+
     def _save_payment(self):
         """حفظ الدفعة"""
         # ⚡ منع الضغط المزدوج - تعطيل الزر فوراً
         if not self.save_btn.isEnabled():
             return
         self.save_btn.setEnabled(False)
-        self.save_btn.setText("جاري الحفظ...")
+        self.save_btn.setText("جارٍ الحفظ")
 
         if not self.selected_project:
-            QMessageBox.warning(self, "⚠️ تنبيه", "يرجى اختيار المشروع أولاً.")
+            QMessageBox.warning(self, "تنبيه", "يرجى اختيار المشروع أولاً.")
             self.save_btn.setEnabled(True)
-            self.save_btn.setText("💾 تسجيل الدفعة")
+            self.save_btn.setText("حفظ الدفعة")
             return
 
         account = self.account_combo.currentData()
         if not account:
-            QMessageBox.warning(self, "⚠️ تنبيه", "يرجى اختيار حساب الاستلام.")
+            QMessageBox.warning(self, "تنبيه", "يرجى اختيار حساب الاستلام.")
             self.save_btn.setEnabled(True)
-            self.save_btn.setText("💾 تسجيل الدفعة")
+            self.save_btn.setText("حفظ الدفعة")
             return
 
         amount = self.amount_input.value()
         if amount <= 0:
-            QMessageBox.warning(self, "⚠️ تنبيه", "يرجى إدخال مبلغ صحيح.")
+            QMessageBox.warning(self, "تنبيه", "يرجى إدخال مبلغ صحيح.")
             self.save_btn.setEnabled(True)
-            self.save_btn.setText("💾 تسجيل الدفعة")
+            self.save_btn.setText("حفظ الدفعة")
             return
 
         # تحذير إذا كان المبلغ أكبر من المتبقي
@@ -515,10 +945,10 @@ class NewPaymentDialog(QDialog):
                 )
                 if reply == QMessageBox.StandardButton.No:
                     self.save_btn.setEnabled(True)
-                    self.save_btn.setText("💾 تسجيل الدفعة")
+                    self.save_btn.setText("حفظ الدفعة")
                     return
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(f"WARNING: [Payments] تعذر التحقق من تجاوز المتبقي قبل تسجيل الدفعة: {exc}")
 
         try:
             # إنشاء الدفعة
@@ -527,25 +957,26 @@ class NewPaymentDialog(QDialog):
                 amount=amount,
                 date=self.date_input.dateTime().toPyDateTime(),
                 account_id=account.code,
+                method=self.current_payment_method if account else None,
             )
 
             if payment:
                 self.payment_created.emit(payment)
-                QMessageBox.information(self, "✅ تم", "تم تسجيل الدفعة بنجاح.")
+                QMessageBox.information(self, "تم", "تم تسجيل الدفعة بنجاح.")
                 self.accept()
             else:
                 QMessageBox.warning(self, "خطأ", "فشل تسجيل الدفعة.")
                 self.save_btn.setEnabled(True)
-                self.save_btn.setText("💾 تسجيل الدفعة")
+                self.save_btn.setText("حفظ الدفعة")
 
         except Exception as e:
             error_msg = str(e)
             if "مكررة" in error_msg or "duplicate" in error_msg.lower():
-                QMessageBox.warning(self, "⚠️ دفعة مكررة", f"يوجد دفعة بنفس البيانات:\n{error_msg}")
+                QMessageBox.warning(self, "دفعة مكررة", f"يوجد دفعة بنفس البيانات:\n{error_msg}")
             else:
                 QMessageBox.critical(self, "خطأ", f"فشل تسجيل الدفعة: {e}")
             self.save_btn.setEnabled(True)
-            self.save_btn.setText("💾 تسجيل الدفعة")
+            self.save_btn.setText("حفظ الدفعة")
 
 
 class PaymentEditorDialog(QDialog):
@@ -567,216 +998,325 @@ class PaymentEditorDialog(QDialog):
         self.project_service = project_service
         self.original_amount = to_decimal(payment.amount)
         self.original_account_id = payment.account_id
+        self.current_payment_method = str(getattr(payment, "method", "") or "Other")
         self.selected_project: schemas.Project | None = None
         self._projects_loaded = False
         self._client_name_cache: dict[str, str] = {}
         self._project_invoice_cache: dict[str, str] = {}
-
+        self._resize_sync_timer = QTimer(self)
+        self._resize_sync_timer.setSingleShot(True)
+        self._resize_sync_timer.timeout.connect(self._sync_dialog_size)
+        self._project_stats_timer = QTimer(self)
+        self._project_stats_timer.setSingleShot(True)
+        self._project_stats_timer.timeout.connect(self._refresh_project_stats)
         self.setWindowTitle(f"تعديل دفعة - {payment.project_id}")
-        self.setMinimumWidth(560)
-        self.setMinimumHeight(500)
-
-        # 📱 سياسة التمدد
-        from PyQt6.QtWidgets import QSizePolicy
-
+        self.setMinimumWidth(680)
+        self.setMinimumHeight(0)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
-        # تطبيق شريط العنوان المخصص
-        from ui.styles import setup_custom_title_bar
+        from ui.styles import apply_arrows_to_all_widgets, setup_custom_title_bar
 
         setup_custom_title_bar(self)
-        self.setStyleSheet(
-            """
-            * { outline: none; }
-            QLineEdit:focus, QTextEdit:focus, QComboBox:focus,
-            QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus,
-            QPushButton:focus { border: none; outline: none; }
-        """
-        )
+        self._apply_dialog_style()
+        self._setup_ui()
+        self._refresh_project_summary()
+        apply_arrows_to_all_widgets(self)
 
-        layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setContentsMargins(14, 14, 14, 14)
-        form = QFormLayout()
-        form.setHorizontalSpacing(14)
-        form.setVerticalSpacing(10)
+    def _apply_dialog_style(self):
+        self.setStyleSheet(_payment_dialog_stylesheet())
 
-        # المشروع المرتبط
-        self.project_frame = QFrame()
-        self.project_frame.setStyleSheet(
-            """
-            QFrame {
-                background-color: rgba(15, 23, 42, 0.72);
-                border: 1px solid rgba(59, 130, 246, 0.22);
-                border-radius: 10px;
-            }
-            QLabel {
-                background: transparent;
-            }
-        """
-        )
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+
+        content_widget = QWidget()
+        content_widget.setObjectName("dialogContent")
+        self._content_widget = content_widget
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(12, 12, 12, 6)
+
+        self.project_frame = self._create_section_card()
         project_layout = QVBoxLayout(self.project_frame)
         project_layout.setContentsMargins(12, 12, 12, 12)
-        project_layout.setSpacing(8)
+        project_layout.setSpacing(6)
 
         project_header = QHBoxLayout()
         project_header.setSpacing(8)
+
         self.project_section_title = QLabel("المشروع المرتبط")
-        self.project_section_title.setFont(get_cairo_font(12, bold=True))
-        self.project_section_title.setStyleSheet("color: #e2e8f0;")
+        self.project_section_title.setObjectName("sectionBadge")
+        self.project_section_title.setFont(get_cairo_font(11, bold=True))
+        project_header.addWidget(self.project_section_title, 0, Qt.AlignmentFlag.AlignRight)
 
-        self.change_project_btn = QPushButton("تغيير المشروع المرتبط")
-        self.change_project_btn.setFixedHeight(30)
-        self.change_project_btn.setStyleSheet(BUTTON_STYLES["secondary"])
-        self.change_project_btn.clicked.connect(self._toggle_project_picker)
-
-        project_header.addWidget(self.project_section_title)
         project_header.addStretch()
+
+        self.change_project_btn = QPushButton("تغيير المشروع")
+        self.change_project_btn.setObjectName("ghostButton")
+        self.change_project_btn.clicked.connect(self._toggle_project_picker)
         project_header.addWidget(self.change_project_btn)
         project_layout.addLayout(project_header)
 
+        current_project_label = QLabel("البيانات الحالية")
+        current_project_label.setObjectName("sectionHeading")
+        current_project_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        project_layout.addWidget(current_project_label)
+
         self.project_name_label = QLabel("")
-        self.project_name_label.setFont(get_cairo_font(12, bold=True))
-        self.project_name_label.setStyleSheet("color: #f8fafc;")
+        self.project_name_label.setObjectName("projectHeadline")
+        self.project_name_label.setFont(get_cairo_font(13, bold=True))
+        self.project_name_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+        )
+        self.project_name_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.project_name_label.setWordWrap(True)
         project_layout.addWidget(self.project_name_label)
 
-        self.project_meta_label = QLabel("")
-        self.project_meta_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        project_layout.addWidget(self.project_meta_label)
-
-        self.project_invoice_label = QLabel("")
-        self.project_invoice_label.setStyleSheet(
-            "color: #38bdf8; font-size: 11px; font-weight: bold;"
+        project_meta_layout = QGridLayout()
+        project_meta_layout.setHorizontalSpacing(8)
+        project_meta_layout.setVerticalSpacing(8)
+        project_meta_layout.addWidget(
+            self._create_meta_surface("العميل المرتبط", "project_meta_label"), 0, 0
         )
-        project_layout.addWidget(self.project_invoice_label)
+        project_meta_layout.addWidget(
+            self._create_meta_surface("رقم الفاتورة", "project_invoice_label"), 0, 1
+        )
+        project_meta_layout.setColumnStretch(0, 1)
+        project_meta_layout.setColumnStretch(1, 1)
+        project_layout.addLayout(project_meta_layout)
+
+        project_stats_layout = QGridLayout()
+        project_stats_layout.setHorizontalSpacing(8)
+        project_stats_layout.setVerticalSpacing(8)
+        project_stats_layout.addWidget(
+            self._create_stat_surface("إجمالي المشروع", "project_total_value_label", "#38bdf8"),
+            0,
+            0,
+        )
+        project_stats_layout.addWidget(
+            self._create_stat_surface("المدفوع", "project_paid_value_label", "#22c55e"),
+            0,
+            1,
+        )
+        project_stats_layout.addWidget(
+            self._create_stat_surface("المتبقي", "project_remaining_value_label", "#f97316"),
+            0,
+            2,
+        )
+        for column in range(3):
+            project_stats_layout.setColumnStretch(column, 1)
+        project_layout.addLayout(project_stats_layout)
+
+        divider = QFrame()
+        divider.setObjectName("sectionDivider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        project_layout.addWidget(divider)
 
         self.project_picker_frame = QFrame()
-        self.project_picker_frame.setVisible(False)
-        self.project_picker_frame.setStyleSheet(
-            """
-            QFrame {
-                background-color: transparent;
-                border: none;
-            }
-        """
-        )
+        self.project_picker_frame.setObjectName("pickerFrame")
         picker_layout = QVBoxLayout(self.project_picker_frame)
-        picker_layout.setContentsMargins(0, 4, 0, 0)
+        picker_layout.setContentsMargins(10, 10, 10, 10)
         picker_layout.setSpacing(6)
 
         self.project_search_hint = QLabel(
-            "ابحث باسم المشروع أو رقم الفاتورة أو اسم العميل ثم اختر النتيجة."
+            "ابحث باسم المشروع أو العميل أو رقم الفاتورة ثم اختر النتيجة المناسبة."
         )
-        self.project_search_hint.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        self.project_search_hint.setObjectName("hintLabel")
+        self.project_search_hint.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum
+        )
+        self.project_search_hint.setWordWrap(True)
         picker_layout.addWidget(self.project_search_hint)
 
         self.project_combo = SmartFilterComboBox()
-        self.project_combo.setMinimumWidth(320)
+        self.project_combo.setMinimumWidth(0)
+        self.project_combo.setFixedHeight(38)
+        self.project_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.project_combo.setMinimumContentsLength(20)
         self.project_combo.currentIndexChanged.connect(self._on_project_selected)
+        if self.project_combo.lineEdit():
+            self.project_combo.lineEdit().setPlaceholderText(
+                "ابحث باسم المشروع أو العميل أو رقم الفاتورة"
+            )
         picker_layout.addWidget(self.project_combo)
 
         project_layout.addWidget(self.project_picker_frame)
-        layout.addWidget(self.project_frame)
+        content_layout.addWidget(self.project_frame)
 
-        # حساب الاستلام (SmartFilterComboBox مع فلترة)
+        details_frame = self._create_section_card("detailsCard")
+        details_layout = QVBoxLayout(details_frame)
+        details_layout.setContentsMargins(12, 12, 12, 12)
+        details_layout.setSpacing(6)
+
+        details_title = QLabel("تفاصيل الدفعة")
+        details_title.setObjectName("sectionHeading")
+        details_title.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        details_layout.addWidget(details_title)
+
         self.account_combo = SmartFilterComboBox()
+        self.account_combo.setFixedHeight(38)
+        self.account_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.account_combo.setMinimumContentsLength(18)
+        if self.account_combo.lineEdit():
+            self.account_combo.lineEdit().setPlaceholderText("ابحث عن الحساب المستلم")
+
         selected_index = 0
-        for i, acc in enumerate(accounts):
+        for i, acc in enumerate(self.accounts):
             display_text = f"💰 {acc.name} ({acc.code})"
             self.account_combo.addItem(display_text, userData=acc)
-            if acc.code == payment.account_id:
+            if acc.code == self.payment.account_id:
                 selected_index = i
         self.account_combo.setCurrentIndex(selected_index)
-
-        # ربط تغيير الحساب بتحديث طريقة الدفع
         self.account_combo.currentIndexChanged.connect(self._update_payment_method_from_account)
+        details_layout.addWidget(self._create_field_block("الحساب المستلم", self.account_combo))
 
-        # المبلغ
+        details_row = QHBoxLayout()
+        details_row.setSpacing(8)
+
         self.amount_input = CustomSpinBox(decimals=2, minimum=0.01, maximum=100_000_000)
         self.amount_input.setSuffix(" ج.م")
-        self.amount_input.setValue(payment.amount)
-        self.amount_input.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.amount_input.setValue(self.payment.amount)
+        self._style_amount_input()
+        details_row.addWidget(self._create_field_block("المبلغ", self.amount_input), 1)
 
-        # التاريخ
         self.date_input = QDateEdit()
+        self.date_input.setFixedHeight(38)
         self.date_input.setCalendarPopup(True)
         self.date_input.setDisplayFormat("yyyy-MM-dd")
-        if payment.date:
-            self.date_input.setDate(QDate(payment.date.year, payment.date.month, payment.date.day))
+        if self.payment.date:
+            self.date_input.setDate(
+                QDate(self.payment.date.year, self.payment.date.month, self.payment.date.day)
+            )
         else:
             self.date_input.setDate(QDate.currentDate())
+        details_row.addWidget(self._create_field_block("التاريخ", self.date_input), 1)
 
-        # طريقة الدفع (سيتم تحديثها تلقائياً حسب الحساب)
-        self.method_combo = QComboBox()
-        methods = ["Bank Transfer", "Cash", "Vodafone Cash", "InstaPay", "Check", "Other"]
-        self.method_combo.addItems(methods)
-        self.method_combo.setEnabled(False)  # معطل - يتحدد تلقائياً من الحساب
+        details_layout.addLayout(details_row)
 
-        # تحديد طريقة الدفع الأولية
-        if payment.method:
-            idx = self.method_combo.findText(payment.method)
-            if idx >= 0:
-                self.method_combo.setCurrentIndex(idx)
+        footer_row = QHBoxLayout()
+        footer_row.setSpacing(8)
 
-        # تحديث طريقة الدفع حسب الحساب المختار
+        self.method_value_label = self._build_value_badge("method_value_label")
+        self.method_value_label.setText(self.current_payment_method)
         self._update_payment_method_from_account()
+        footer_row.addWidget(self._create_field_block("طريقة الدفع", self.method_value_label), 1)
 
-        form.addRow("الحساب المستلم:", self.account_combo)
-        form.addRow("المبلغ:", self.amount_input)
-        form.addRow("التاريخ:", self.date_input)
-        form.addRow("طريقة الدفع:", self.method_combo)
-        form.addRow("رقم الفاتورة:", self._build_invoice_badge())
-        layout.addLayout(form)
-
-        # أزرار
-        buttons_layout = QHBoxLayout()
-        self.save_btn = QPushButton("💾 حفظ التعديلات")
-        self.save_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #0A6CF1; color: white;
-                padding: 10px; font-weight: bold; border-radius: 6px;
-            }
-            QPushButton:hover { background-color: #0A6CF1; }
-        """
+        footer_row.addWidget(
+            self._create_field_block(
+                "رقم الفاتورة", self._build_value_badge("invoice_value_label")
+            ),
+            1,
         )
+        details_layout.addLayout(footer_row)
+
+        content_layout.addWidget(details_frame)
+        main_layout.addWidget(content_widget)
+
+        buttons_container = QWidget()
+        buttons_container.setObjectName("dialogFooter")
+        buttons_container.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(12, 8, 12, 8)
+        buttons_layout.setSpacing(8)
+        buttons_layout.addStretch()
+
+        self.save_btn = QPushButton("حفظ الدفعة")
+        self.save_btn.setObjectName("dialogPrimaryButton")
+        self.save_btn.setFixedSize(118, 34)
         self.save_btn.clicked.connect(self.save_changes)
+        buttons_layout.addWidget(self.save_btn)
 
         self.cancel_btn = QPushButton("إلغاء")
+        self.cancel_btn.setObjectName("dialogSecondaryButton")
+        self.cancel_btn.setFixedSize(118, 34)
         self.cancel_btn.clicked.connect(self.reject)
-
-        buttons_layout.addStretch()
-        buttons_layout.addWidget(self.save_btn)
         buttons_layout.addWidget(self.cancel_btn)
-        layout.addLayout(buttons_layout)
 
-        self.setLayout(layout)
+        main_layout.addWidget(buttons_container)
+        self._set_project_picker_visible(False)
+        self._apply_initial_dialog_size()
 
-        self._load_project_options()
-        self._refresh_project_summary()
+    def _create_section_card(self, object_name: str = "sectionCard") -> QFrame:
+        card = QFrame()
+        card.setObjectName(object_name)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        return card
 
-        # تطبيق الأسهم على كل الـ widgets
-        from ui.styles import apply_arrows_to_all_widgets
+    def _create_meta_surface(self, title: str, label_attr: str) -> QFrame:
+        surface = QFrame()
+        surface.setObjectName("surfaceCard")
+        surface.setMinimumHeight(50)
+        surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(10, 6, 10, 6)
+        surface_layout.setSpacing(2)
 
-        apply_arrows_to_all_widgets(self)
+        caption = QLabel(title)
+        caption.setObjectName("surfaceCaption")
+        surface_layout.addWidget(caption)
 
-    def _build_invoice_badge(self) -> QLabel:
-        self.invoice_value_label = QLabel("")
-        self.invoice_value_label.setMinimumHeight(28)
-        self.invoice_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.invoice_value_label.setStyleSheet(
-            """
-            QLabel {
-                color: #f8fafc;
-                background-color: rgba(14, 165, 233, 0.16);
-                border: 1px solid rgba(14, 165, 233, 0.25);
-                border-radius: 8px;
-                padding: 6px 10px;
-                font-weight: bold;
-            }
-        """
-        )
-        return self.invoice_value_label
+        value_label = QLabel("")
+        value_label.setObjectName("surfaceValue")
+        value_label.setWordWrap(True)
+        value_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        surface_layout.addWidget(value_label)
+        setattr(self, label_attr, value_label)
+        return surface
+
+    def _create_stat_surface(self, title: str, label_attr: str, accent_color: str) -> QFrame:
+        surface = QFrame()
+        surface.setObjectName("statCard")
+        surface.setMinimumHeight(48)
+        surface.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        surface_layout = QVBoxLayout(surface)
+        surface_layout.setContentsMargins(10, 6, 10, 6)
+        surface_layout.setSpacing(2)
+
+        caption = QLabel(title)
+        caption.setObjectName("statCaption")
+        caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        surface_layout.addWidget(caption)
+
+        value_label = QLabel("--")
+        value_label.setObjectName("statValue")
+        value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        value_label.setStyleSheet(f"color: {accent_color};")
+        surface_layout.addWidget(value_label)
+        setattr(self, label_attr, value_label)
+        return surface
+
+    def _create_field_block(self, label_text: str, widget: QWidget) -> QWidget:
+        block = QWidget()
+        block.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        block_layout = QVBoxLayout(block)
+        block_layout.setContentsMargins(0, 0, 0, 0)
+        block_layout.setSpacing(3)
+
+        label = QLabel(label_text)
+        label.setObjectName("fieldLabel")
+        block_layout.addWidget(label)
+        block_layout.addWidget(widget)
+        return block
+
+    def _style_amount_input(self):
+        _style_payment_amount_input(self.amount_input)
+
+    def _build_value_badge(self, label_attr: str) -> QLabel:
+        badge = QLabel("")
+        badge.setObjectName("valueBadge")
+        badge.setFixedHeight(38)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        setattr(self, label_attr, badge)
+        return badge
 
     def _project_ref(self, project: schemas.Project | None, fallback: str = "") -> str:
         if project is None:
@@ -836,8 +1376,10 @@ class PaymentEditorDialog(QDialog):
                 if invoice_number:
                     self._project_invoice_cache[project_ref] = invoice_number
                 return invoice_number
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [Payments] تعذر جلب رقم فاتورة المشروع '{project_ref}' أثناء التعديل: {exc}"
+                )
         if ensure and repo is not None and hasattr(repo, "ensure_invoice_number"):
             try:
                 invoice_number = str(
@@ -850,7 +1392,10 @@ class PaymentEditorDialog(QDialog):
                 if invoice_number:
                     self._project_invoice_cache[project_ref] = invoice_number
                 return invoice_number
-            except Exception:
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [Payments] تعذر توليد رقم فاتورة للمشروع '{project_ref}' أثناء التعديل: {exc}"
+                )
                 return ""
         return ""
 
@@ -934,11 +1479,53 @@ class PaymentEditorDialog(QDialog):
         if not self.project_service:
             return
         visible = not self.project_picker_frame.isVisible()
-        self.project_picker_frame.setVisible(visible)
-        self.change_project_btn.setText("إخفاء البحث" if visible else "تغيير المشروع المرتبط")
+        if visible:
+            self._load_project_options()
+        if not visible:
+            self._prepare_project_picker_for_hide()
+        self._set_project_picker_visible(visible)
         if visible and self.project_combo.lineEdit():
             self.project_combo.lineEdit().setFocus()
             self.project_combo.lineEdit().selectAll()
+
+    def _prepare_project_picker_for_hide(self):
+        combo = getattr(self, "project_combo", None)
+        if combo is None:
+            return
+        combo.shutdown()
+        line_edit = combo.lineEdit()
+        if line_edit:
+            line_edit.clearFocus()
+
+    def _set_project_picker_visible(self, visible: bool):
+        self.project_picker_frame.setVisible(visible)
+        self.project_picker_frame.setMinimumHeight(0)
+        self.project_picker_frame.setMaximumHeight(16777215 if visible else 0)
+        self.change_project_btn.setText("إخفاء البحث" if visible else "تغيير المشروع")
+        if self.project_frame.layout():
+            self.project_frame.layout().invalidate()
+        if getattr(self, "_content_widget", None) and self._content_widget.layout():
+            self._content_widget.layout().invalidate()
+        if self.layout():
+            self.layout().invalidate()
+        self._resize_sync_timer.stop()
+        self._resize_sync_timer.start(0)
+
+    def _apply_initial_dialog_size(self):
+        self.layout().activate()
+        hint = self.sizeHint()
+        self.setFixedSize(max(680, hint.width()), max(468, hint.height()))
+
+    def _sync_dialog_size(self):
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        if getattr(self, "_content_widget", None):
+            self._content_widget.adjustSize()
+        self.layout().activate()
+        self.adjustSize()
+        width = max(680, self.sizeHint().width())
+        height = max(468, self.sizeHint().height())
+        self.setFixedSize(width, height)
 
     def _on_project_selected(self, index: int):
         if index < 0:
@@ -949,6 +1536,47 @@ class PaymentEditorDialog(QDialog):
         self.selected_project = selected_project
         self._refresh_project_summary()
 
+    def _queue_project_stats_refresh(self) -> None:
+        self.project_total_value_label.setText("--")
+        self.project_paid_value_label.setText("--")
+        self.project_remaining_value_label.setText("--")
+        if not self.project_service:
+            return
+        self._project_stats_timer.stop()
+        self._project_stats_timer.start(16)
+
+    def _refresh_project_stats(self) -> None:
+        try:
+            summary_project = self.selected_project
+            if summary_project is None and self.project_service:
+                summary_project = self.project_service.get_project_by_id(
+                    getattr(self.payment, "project_id", ""),
+                    getattr(self.payment, "client_id", None),
+                )
+            if summary_project is not None and self.project_service:
+                project_ref = self._project_ref(
+                    summary_project, getattr(summary_project, "name", "")
+                )
+                profitability = self.project_service.get_project_profitability(
+                    project_ref,
+                    client_id=getattr(summary_project, "client_id", None),
+                )
+                self.project_total_value_label.setText(
+                    _format_currency(profitability.get("total_revenue", 0), "--")
+                )
+                self.project_paid_value_label.setText(
+                    _format_currency(profitability.get("total_paid", 0), "--")
+                )
+                self.project_remaining_value_label.setText(
+                    _format_currency(profitability.get("balance_due", 0), "--")
+                )
+                return
+        except Exception as exc:
+            safe_print(f"WARNING: [Payments] تعذر تحديث إحصاءات المشروع في نافذة التعديل: {exc}")
+        self.project_total_value_label.setText("--")
+        self.project_paid_value_label.setText("--")
+        self.project_remaining_value_label.setText("--")
+
     def _refresh_project_summary(self):
         project = self.selected_project
         project_name = str(getattr(self.payment, "project_id", "") or "").strip() or "غير محدد"
@@ -957,14 +1585,13 @@ class PaymentEditorDialog(QDialog):
         if project is not None:
             project_name = str(getattr(project, "name", project_name) or project_name).strip()
             client_name = self._get_client_name(getattr(project, "client_id", "") or "")
-            invoice_number = self._resolve_invoice_number_for_project(project, ensure=True)
-        self.project_name_label.setText(project_name)
-        self.project_meta_label.setText(f"العميل المرتبط: {client_name or 'غير محدد'}")
-        self.project_invoice_label.setText(
-            f"رقم الفاتورة المرتبط: {invoice_number or 'غير محدد حتى الآن'}"
-        )
+            invoice_number = self._resolve_invoice_number_for_project(project, ensure=False)
+        self.project_name_label.setText(project_name or "غير محدد")
+        self.project_meta_label.setText(client_name or "غير محدد")
+        self.project_invoice_label.setText(invoice_number or "غير محدد حتى الآن")
         self.invoice_value_label.setText(invoice_number or "غير محدد")
         self.setWindowTitle(f"تعديل دفعة - {project_name}")
+        self._queue_project_stats_refresh()
 
     def _update_payment_method_from_account(self):
         """⚡ تحديث طريقة الدفع تلقائياً حسب الحساب المختار - يدعم نظام 4 و 6 أرقام"""
@@ -972,41 +1599,22 @@ class PaymentEditorDialog(QDialog):
         if not selected_account:
             return
 
-        account_name = (selected_account.name or "").lower()
-        code = selected_account.code
+        self.current_payment_method = infer_payment_method_from_account(selected_account)
+        self.method_value_label.setText(self.current_payment_method)
 
-        # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-        if (
-            "vodafone" in account_name
-            or "فودافون" in account_name
-            or "v/f" in account_name
-            or "vf" in account_name
-        ):
-            self.method_combo.setCurrentText("Vodafone Cash")
-        elif "instapay" in account_name or "انستاباي" in account_name:
-            self.method_combo.setCurrentText("InstaPay")
-        elif (
-            "كاش" in account_name
-            or "cash" in account_name
-            or "خزينة" in account_name
-            or "صندوق" in account_name
-        ):
-            self.method_combo.setCurrentText("Cash")
-        elif "بنك" in account_name or "bank" in account_name:
-            self.method_combo.setCurrentText("Bank Transfer")
-        elif "شيك" in account_name or "check" in account_name:
-            self.method_combo.setCurrentText("Check")
-        # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
-        elif code in ["1103", "111000"] or code.startswith("1110"):
-            self.method_combo.setCurrentText("Vodafone Cash")
-        elif code in ["1104"] or "instapay" in code.lower():
-            self.method_combo.setCurrentText("InstaPay")
-        elif code in ["1101", "111101"] or code.startswith("1111"):
-            self.method_combo.setCurrentText("Cash")
-        elif code.startswith("1102") or code.startswith("1112"):
-            self.method_combo.setCurrentText("Bank Transfer")
-        else:
-            self.method_combo.setCurrentText("Other")
+    def _cleanup_smart_combos(self):
+        self._resize_sync_timer.stop()
+        self._project_stats_timer.stop()
+        for combo in self.findChildren(SmartFilterComboBox):
+            combo.shutdown()
+
+    def reject(self):
+        self._cleanup_smart_combos()
+        super().reject()
+
+    def done(self, result: int):
+        self._cleanup_smart_combos()
+        super().done(result)
 
     def save_changes(self):
         selected_account = self.account_combo.currentData()
@@ -1023,7 +1631,7 @@ class PaymentEditorDialog(QDialog):
             self.payment.amount = float(new_amount)
             self.payment.account_id = new_account_id
             self.payment.date = self.date_input.dateTime().toPyDateTime()
-            self.payment.method = self.method_combo.currentText()
+            self.payment.method = self.current_payment_method
             if self.selected_project is not None:
                 self.payment.project_id = self._project_ref(
                     self.selected_project,
@@ -1601,13 +2209,7 @@ class PaymentsManagerTab(QWidget):
         """جلب حسابات النقدية والبنوك"""
         try:
             all_accounts = self.accounting_service.repo.get_all_accounts()
-            cash_accounts = [
-                acc
-                for acc in all_accounts
-                if acc.type in [schemas.AccountType.CASH, schemas.AccountType.ASSET]
-                and acc.code.startswith("11")  # حسابات النقدية تبدأ بـ 11
-            ]
-            return cash_accounts
+            return filter_operational_cashboxes(all_accounts)
         except Exception as e:
             safe_print(f"ERROR: [PaymentsManager] فشل جلب حسابات النقدية: {e}")
             return []
@@ -1618,42 +2220,7 @@ class PaymentsManagerTab(QWidget):
             return "---"
 
         account = accounts_cache[account_code]
-        account_name = (getattr(account, "name", "") or "").lower()
-        code = str(account_code)
-
-        # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-        if (
-            "vodafone" in account_name
-            or "فودافون" in account_name
-            or "v/f" in account_name
-            or "vf" in account_name
-        ):
-            return "Vodafone Cash"
-        elif "instapay" in account_name or "انستاباي" in account_name:
-            return "InstaPay"
-        elif (
-            "كاش" in account_name
-            or "cash" in account_name
-            or "خزينة" in account_name
-            or "صندوق" in account_name
-        ):
-            return "Cash"
-        elif "بنك" in account_name or "bank" in account_name:
-            return "Bank Transfer"
-        elif "شيك" in account_name or "check" in account_name:
-            return "Check"
-
-        # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
-        if code in ["1103", "111000"] or code.startswith("1110"):
-            return "Vodafone Cash"
-        elif code in ["1104"] or "instapay" in code.lower():
-            return "InstaPay"
-        elif code in ["1101", "111101"] or code.startswith("1111"):
-            return "Cash"
-        elif code.startswith("1102") or code.startswith("1112"):
-            return "Bank Transfer"
-
-        return "Other"
+        return infer_payment_method_from_account(account)
 
     def _get_cached_lookup(self, key: str) -> dict | None:
         ts = self._lookups_cache_ts.get(key)

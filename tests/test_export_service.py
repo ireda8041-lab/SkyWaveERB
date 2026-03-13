@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import services.export_service as export_module
 from core import schemas
 from services.export_service import ExportService
 
@@ -94,3 +95,24 @@ def test_export_expenses_to_excel_uses_project_name(monkeypatch):
             "حساب الدفع": "1101",
         }
     ]
+
+
+def test_export_service_falls_back_to_raw_references_and_logs(monkeypatch):
+    class _BrokenRepo:
+        def get_client_by_id(self, _client_id: str):
+            raise RuntimeError("client lookup failed")
+
+        def get_project_by_number(self, _project_ref: str, client_id: str | None = None):
+            raise RuntimeError("project lookup failed")
+
+    logs: list[str] = []
+    monkeypatch.setattr(
+        export_module, "safe_print", lambda msg: logs.append(str(msg)), raising=True
+    )
+
+    service = ExportService(repository=_BrokenRepo())
+
+    assert service._resolve_client_display_name("CLIENT-X") == "CLIENT-X"
+    assert service._resolve_project_display_name("PROJ-X") == "PROJ-X"
+    assert any("CLIENT-X" in message for message in logs)
+    assert any("PROJ-X" in message for message in logs)

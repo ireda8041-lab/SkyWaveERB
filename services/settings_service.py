@@ -26,6 +26,53 @@ os.makedirs(_APP_DATA_DIR, exist_ok=True)
 # ملف الإعدادات المحلي في مجلد المشروع
 _LOCAL_SETTINGS_FILE = "skywave_settings.json"
 
+DEFAULT_PAYMENT_METHODS: list[dict[str, Any]] = [
+    {
+        "name": "VF Cash",
+        "description": "Vodafone Cash transfer",
+        "details": "01067894321 - حازم أشرف\n01021965200 - رضا سامي",
+        "active": True,
+    },
+    {
+        "name": "InstaPay",
+        "description": "InstaPay transfer",
+        "details": "01067894321 - حازم أشرف\nskywaveads@instapay",
+        "active": True,
+    },
+    {
+        "name": "Bank Misr Local",
+        "description": "Local bank transfer",
+        "details": "رقم الحساب: 2630333000086626\nSWIFT CODE: BMISEGCXXXX",
+        "active": True,
+    },
+    {
+        "name": "Bank Misr Intl",
+        "description": "International bank transfer",
+        "details": "IBAN: EG020002026302630333000086626\nSWIFT CODE: BMISEGCXXXX",
+        "active": True,
+    },
+    {
+        "name": "Cash",
+        "description": "Cash payment",
+        "details": "الخزنة النقدية - مقر الشركة",
+        "active": True,
+    },
+]
+_LEGACY_PAYMENT_METHOD_NAMES = {
+    "cash",
+    "instapay",
+    "bank transfer",
+    "نقدي",
+    "تحويل بنكي",
+    "انستاباي",
+    "تحويل بنكي دولي",
+    "فودافون كاش",
+    "إنستا باي",
+    "تحويل بنكي داخل مصر",
+    "تحويل بنكي من خارج مصر",
+    "دفع نقدي",
+}
+
 
 class SettingsService:
     """قسم الإعدادات المسؤول عن حفظ وقراءة إعدادات التطبيق."""
@@ -57,10 +104,87 @@ class SettingsService:
         self.repo = None
         self.settings = self.load_settings()
         self._merge_local_settings()
+        self._normalize_runtime_settings()
         safe_print("INFO: قسم الإعدادات (SettingsService) جاهز.")
 
     def _touch_settings(self) -> None:
         self.settings["settings_last_modified"] = datetime.now().isoformat()
+
+    @staticmethod
+    def default_payment_methods() -> list[dict[str, Any]]:
+        return [dict(method) for method in DEFAULT_PAYMENT_METHODS]
+
+    @classmethod
+    def normalize_payment_methods(cls, value: Any) -> tuple[list[dict[str, Any]], bool]:
+        if not isinstance(value, list) or not value:
+            return cls.default_payment_methods(), True
+
+        normalized: list[dict[str, Any]] = []
+        has_legacy_names = False
+        changed = False
+
+        for item in value:
+            if not isinstance(item, dict):
+                changed = True
+                continue
+
+            name = str(item.get("name") or "").strip()
+            description = str(item.get("description") or "").strip()
+            details = str(item.get("details") or "").strip()
+            active = bool(item.get("active", True))
+
+            if not name and not description and not details:
+                changed = True
+                continue
+
+            if name.casefold() in _LEGACY_PAYMENT_METHOD_NAMES:
+                has_legacy_names = True
+
+            normalized_item = {
+                "name": name,
+                "description": description,
+                "details": details,
+                "active": active,
+            }
+            if normalized_item != item:
+                changed = True
+            normalized.append(normalized_item)
+
+        if not normalized or has_legacy_names:
+            return cls.default_payment_methods(), True
+
+        canonical_defaults = cls.default_payment_methods()
+        canonical_names = [str(method.get("name") or "").strip() for method in canonical_defaults]
+        canonical_set = {name for name in canonical_names if name}
+        current_by_name = {
+            str(method.get("name") or "").strip(): dict(method)
+            for method in normalized
+            if str(method.get("name") or "").strip()
+        }
+        if current_by_name and all(name in canonical_set for name in current_by_name):
+            missing_names = [name for name in canonical_names if name not in current_by_name]
+            if missing_names:
+                merged_methods: list[dict[str, Any]] = []
+                for default_method in canonical_defaults:
+                    default_name = str(default_method.get("name") or "").strip()
+                    merged_methods.append(dict(current_by_name.get(default_name) or default_method))
+                return merged_methods, True
+
+        return normalized, changed
+
+    def _normalize_runtime_settings(self) -> None:
+        updated = False
+
+        payment_methods, changed = self.normalize_payment_methods(
+            self.settings.get("payment_methods")
+        )
+        if changed or self.settings.get("payment_methods") != payment_methods:
+            self.settings["payment_methods"] = payment_methods
+            updated = True
+
+        if updated:
+            self._touch_settings()
+            self.save_settings(self.settings)
 
     @classmethod
     def _build_cloud_payload(cls, source: dict[str, Any]) -> dict[str, Any]:
@@ -137,9 +261,12 @@ class SettingsService:
 
     def save_settings(self, settings_data: dict[str, Any]):
         try:
+            prepared_settings = dict(settings_data)
+            payload_core = self._build_cloud_payload(prepared_settings)
+            prepared_settings["settings_content_hash"] = self._compute_settings_hash(payload_core)
             with open(self.SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(settings_data, f, ensure_ascii=False, indent=4)
-            self.settings = settings_data
+                json.dump(prepared_settings, f, ensure_ascii=False, indent=4)
+            self.settings = prepared_settings
             safe_print("INFO: [SettingsService] تم حفظ الإعدادات بنجاح.")
         except Exception as e:
             safe_print(f"ERROR: [SettingsService] فشل حفظ الإعدادات: {e}")
@@ -168,8 +295,8 @@ class SettingsService:
                     emit_notification=True,
                     silent_notification=True,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(f"WARNING: [SettingsService] تعذر مزامنة الإعداد '{key}' إلى السحابة: {exc}")
 
     def update_settings(self, new_settings: dict[str, Any]):
         if not isinstance(new_settings, dict):
@@ -190,8 +317,8 @@ class SettingsService:
                     emit_notification=True,
                     silent_notification=True,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(f"WARNING: [SettingsService] تعذر مزامنة دفعة إعدادات إلى السحابة: {exc}")
 
     # ==========================================
     # ⚡ دوال اللوجو - للمزامنة بين الأجهزة
@@ -338,8 +465,10 @@ class SettingsService:
                             "silent": bool(silent_notification),
                         }
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    safe_print(
+                        f"WARNING: [SettingsService] تعذر إنشاء إشعار تحديث الإعدادات: {exc}"
+                    )
 
             safe_print("INFO: [SettingsService] ✅ تم رفع الإعدادات للسحابة")
             return True
@@ -411,8 +540,10 @@ class SettingsService:
                 from core.signals import app_signals
 
                 app_signals.system_changed.emit()
-            except Exception:
-                pass
+            except Exception as exc:
+                safe_print(
+                    f"WARNING: [SettingsService] تعذر بث system_changed بعد مزامنة الإعدادات: {exc}"
+                )
 
             safe_print("INFO: [SettingsService] ✅ تم تحميل الإعدادات من السحابة")
             return True

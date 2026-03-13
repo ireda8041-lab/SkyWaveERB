@@ -42,6 +42,7 @@ skywave_local.db
 # السجلات
 logs/*.log
 !logs/.gitkeep
+import_*.log
 
 # الملفات المصدرة
 exports/*.xlsx
@@ -94,6 +95,12 @@ installer_output/
 *.bak
 *.swp
 SkyWaveERP_Setup_temp.iss
+tmp/pdf_repro/
+reports/*debug*.png
+
+# ملفات نسخ احتياطية تشغيلية (لا تُرفع للمستودع)
+backups/**/*.db.backup
+backups/**/*.appdata.backup.json
 
 # Trae IDE
 .trae/

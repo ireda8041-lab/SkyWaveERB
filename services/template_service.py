@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -21,6 +22,12 @@ from PyQt6.QtWidgets import QApplication
 from core import schemas
 from core.base_service import BaseService
 from core.logo_utils import print_logo_png_data_url
+from core.project_currency import (
+    project_amount_from_egp,
+    project_currency_code,
+    project_currency_suffix,
+    project_exchange_rate,
+)
 
 # ⚡ استيراد مكتبات PDF الاختيارية
 WEASYPRINT_AVAILABLE: bool | None = None
@@ -64,22 +71,24 @@ def _try_get_weasyprint():
 
 
 pdfkit_available = False
+PDFKIT_IMPORT_ERROR = ""
 try:
     import pdfkit
 
     pdfkit_available = True
-except Exception:
-    pass
+except Exception as e:
+    PDFKIT_IMPORT_ERROR = str(e)
 
 qwebengine_available = False
+QWEBENGINE_IMPORT_ERROR = ""
 try:
     if not getattr(sys, "frozen", False):
         import importlib
 
         importlib.import_module("PyQt6.QtWebEngineWidgets")
         qwebengine_available = True
-except Exception:
-    pass
+except Exception as e:
+    QWEBENGINE_IMPORT_ERROR = str(e)
 
 # ⚡ استيراد آمن لـ jinja2
 try:
@@ -113,6 +122,20 @@ def get_base_path():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _normalize_windows_loader_path(path: str) -> str:
+    r"""Normalize Windows extended paths because some template loaders reject the \\?\ prefix."""
+    if not isinstance(path, str):
+        return path
+
+    normalized = os.path.abspath(path)
+    if os.name == "nt":
+        if normalized.startswith("\\\\?\\UNC\\"):
+            normalized = "\\\\" + normalized[8:]
+        elif normalized.startswith("\\\\?\\"):
+            normalized = normalized[4:]
+    return os.path.normpath(normalized)
+
+
 class TemplateService(BaseService):
     """خدمة إدارة قوالب الفواتير"""
 
@@ -143,14 +166,17 @@ class TemplateService(BaseService):
 
         self.templates_dir = None
         for path in possible_paths:
-            if os.path.exists(path):
-                self.templates_dir = path
-                safe_print(f"INFO: [TemplateService] Found templates at: {path}")
+            normalized_path = _normalize_windows_loader_path(path)
+            if os.path.exists(normalized_path):
+                self.templates_dir = normalized_path
+                safe_print(f"INFO: [TemplateService] Found templates at: {normalized_path}")
                 break
 
         if not self.templates_dir:
             # إنشاء المجلد الافتراضي
-            self.templates_dir = os.path.join("assets", "templates", "invoices")
+            self.templates_dir = _normalize_windows_loader_path(
+                os.path.join("assets", "templates", "invoices")
+            )
             os.makedirs(self.templates_dir, exist_ok=True)
             safe_print(
                 f"WARNING: [TemplateService] Created templates directory: {self.templates_dir}"
@@ -159,7 +185,10 @@ class TemplateService(BaseService):
         if not JINJA2_AVAILABLE or Environment is None or FileSystemLoader is None:
             raise RuntimeError("Jinja2 is required for template rendering")
 
-        self.jinja_env = Environment(loader=FileSystemLoader(self.templates_dir), autoescape=True)
+        self.jinja_env = Environment(
+            loader=FileSystemLoader(_normalize_windows_loader_path(self.templates_dir)),
+            autoescape=True,
+        )
 
         # إضافة فلاتر مخصصة
         self.jinja_env.filters["format_currency"] = self._format_currency
@@ -642,9 +671,9 @@ class TemplateService(BaseService):
                             {
                                 "name": item.get("description", "خدمة"),
                                 "qty": f"{item.get('quantity', 1):.1f}",
-                                "price": f"{item.get('unit_price', 0):,.0f}",
+                                "price": f"{project_amount_from_egp(float(item.get('unit_price', 0) or 0.0), project):,.2f}",
                                 "discount": f"{item.get('discount_rate', 0):.1f}",
-                                "total": f"{item.get('total', 0):,.0f}",
+                                "total": f"{project_amount_from_egp(float(item.get('total', 0) or 0.0), project):,.2f}",
                             }
                         )
                     else:
@@ -652,9 +681,9 @@ class TemplateService(BaseService):
                             {
                                 "name": getattr(item, "description", "خدمة"),
                                 "qty": f"{getattr(item, 'quantity', 1):.1f}",
-                                "price": f"{getattr(item, 'unit_price', 0):,.0f}",
+                                "price": f"{project_amount_from_egp(float(getattr(item, 'unit_price', 0) or 0.0), project):,.2f}",
                                 "discount": f"{getattr(item, 'discount_rate', 0):.1f}",
-                                "total": f"{getattr(item, 'total', 0):,.0f}",
+                                "total": f"{project_amount_from_egp(float(getattr(item, 'total', 0) or 0.0), project):,.2f}",
                             }
                         )
             else:
@@ -668,9 +697,9 @@ class TemplateService(BaseService):
                     {
                         "name": project_name,
                         "qty": "1.0",
-                        "price": f"{grand_total:,.0f}",
+                        "price": f"{project_amount_from_egp(grand_total, project):,.2f}",
                         "discount": "0.0",
-                        "total": f"{grand_total:,.0f}",
+                        "total": f"{project_amount_from_egp(grand_total, project):,.2f}",
                     }
                 )
 
@@ -690,7 +719,7 @@ class TemplateService(BaseService):
 
             # معالجة الدفعات
             payments_list = []
-            total_paid = 0.0
+            total_paid_egp = 0.0
 
             safe_print(
                 f"INFO: [TemplateService] معالجة الدفعات - عدد الدفعات: {len(payments) if payments else 0}"
@@ -702,11 +731,11 @@ class TemplateService(BaseService):
                     if isinstance(payment, dict):
                         payment_date = payment.get("date", "")
                         amount_value = payment.get("amount", 0)
-                        method_value = payment.get("method", "نقدي")
+                        method_value = payment.get("method", "Cash")
                     else:
                         payment_date = getattr(payment, "date", "")
                         amount_value = getattr(payment, "amount", 0)
-                        method_value = getattr(payment, "method", None) or "نقدي"
+                        method_value = getattr(payment, "method", None) or "Cash"
 
                     # تحويل التاريخ لنص
                     if hasattr(payment_date, "strftime"):
@@ -720,25 +749,31 @@ class TemplateService(BaseService):
                     except (ValueError, TypeError):
                         amount = 0.0
 
-                    total_paid += amount
+                    total_paid_egp += amount
 
                     # جلب اسم الحساب إذا كان متوفراً
                     account_name = method_value
                     if isinstance(payment, dict):
                         account_name = payment.get("account_name", "") or payment.get(
-                            "method", "نقدي"
+                            "method", "Cash"
                         )
 
                     payment_entry = {
                         "date": date_str,
-                        "amount": amount,  # ⚡ رقم مش string عشان القالب يقدر يعمل format
+                        "amount": project_amount_from_egp(amount, project),  # display currency
                         "method": method_value,
                         "account_name": account_name,
                     }
                     payments_list.append(payment_entry)
 
             # حساب المتبقي - إصلاح المشكلة المحاسبية
-            remaining = max(0, grand_total - total_paid)  # ⚡ لا يمكن أن يكون سالب
+            total_paid = project_amount_from_egp(total_paid_egp, project)
+            remaining_egp = max(0, grand_total - total_paid_egp)
+            remaining = project_amount_from_egp(remaining_egp, project)
+            subtotal_display = project_amount_from_egp(gross_total, project)
+            discount_amount_display = project_amount_from_egp(discount_amount, project)
+            tax_amount_display = project_amount_from_egp(tax_amount, project)
+            grand_total_display = project_amount_from_egp(grand_total, project)
 
             # إضافة معلومات الشركة من الإعدادات
 
@@ -888,6 +923,21 @@ class TemplateService(BaseService):
             # ⚡ نسبة الخصم (تم حسابها مسبقاً في project_discount_rate)
             discount_rate = project_discount_rate
 
+            currency_code = project_currency_code(project)
+            exchange_rate_snapshot = project_exchange_rate(project)
+            currency_suffix_text = project_currency_suffix(project)
+            try:
+                if self.repo is not None and hasattr(self.repo, "get_all_currencies"):
+                    for current_currency in self.repo.get_all_currencies() or []:
+                        if str(current_currency.get("code") or "").strip().upper() == currency_code:
+                            currency_suffix_text = (
+                                str(current_currency.get("symbol") or "").strip()
+                                or currency_suffix_text
+                            )
+                            break
+            except Exception:
+                pass
+
             client_logo_width_px = 120
             client_logo_max_height_px = 40
             client_logo_max_width_percent = 22
@@ -952,21 +1002,25 @@ class TemplateService(BaseService):
                 "client_logo_circle_class": client_logo_circle_class,
                 # البنود
                 "items": items,
+                "currency_code": currency_code,
+                "currency_suffix": currency_suffix_text,
                 # الحسابات
                 # ⚡ subtotal = الإجمالي الكلي (قبل الخصم) = gross_total
                 # ⚡ grand_total = الإجمالي الفرعي (بعد الخصم)
-                "subtotal": f"{gross_total:,.2f}",
+                "subtotal": f"{subtotal_display:,.2f}",
                 "discount_rate": f"{discount_rate:.0f}",
-                "discount_amount": f"{discount_amount:,.2f}" if discount_amount > 0 else "0",
-                "discount_amount_raw": discount_amount,  # للمقارنة في القالب
-                "tax_amount": f"{tax_amount:,.2f}" if tax_amount > 0 else "0",
-                "grand_total": f"{grand_total:,.2f}",
-                "total_amount": f"{grand_total:,.2f}",  # للتوافق
+                "discount_amount": (
+                    f"{discount_amount_display:,.2f}" if discount_amount_display > 0 else "0"
+                ),
+                "discount_amount_raw": discount_amount_display,
+                "tax_amount": f"{tax_amount_display:,.2f}" if tax_amount_display > 0 else "0",
+                "grand_total": f"{grand_total_display:,.2f}",
+                "total_amount": f"{grand_total_display:,.2f}",
                 # الدفعات
                 "payments": payments_list,
-                "total_paid": f"{total_paid:,.0f}",
-                "amount_paid": f"{total_paid:,.0f}",  # للتوافق
-                "remaining_amount": f"{remaining:,.0f}",
+                "total_paid": f"{total_paid:,.2f}",
+                "amount_paid": f"{total_paid:,.2f}",
+                "remaining_amount": f"{remaining:,.2f}",
                 # معلومات الشركة
                 **company_data,
                 # معلومات المشروع
@@ -977,9 +1031,10 @@ class TemplateService(BaseService):
                 # ⚡ العلامة المائية
                 "watermark_path": watermark_base64,
                 # متغيرات للتحقق
-                "debug_grand_total": grand_total,
+                "debug_grand_total": grand_total_display,
                 "debug_total_paid": total_paid,
                 "debug_remaining": remaining,
+                "debug_exchange_rate_snapshot": exchange_rate_snapshot,
             }
 
         except Exception as e:
@@ -996,52 +1051,61 @@ class TemplateService(BaseService):
     ) -> bool:
         """معاينة القالب - توليد PDF سريع وفتحه"""
         try:
-
-            exports_dir = self.get_exports_dir()
-            filename = self.build_export_basename(project, client_info)
-
-            # توليد HTML
-            html_content = self.generate_invoice_html(project, client_info, template_id, payments)
-
-            if use_pdf:
-                # ⚡ توليد PDF سريع
-                pdf_path = os.path.join(str(exports_dir), f"{filename}.pdf")
-
-                # حذف الملف القديم
-                if os.path.exists(pdf_path):
-                    try:
-                        os.remove(pdf_path)
-                    except Exception:
-                        pass
-
-                pdf_path = self._generate_pdf_fast(html_content, str(exports_dir), filename)
-
-                if pdf_path and os.path.exists(pdf_path):
-                    self._open_file(pdf_path)
-                    safe_print(f"✅ [TemplateService] تم إنشاء PDF: {pdf_path}")
-                    return True
-                else:
-                    # Fallback: فتح HTML
-                    safe_print("WARNING: [TemplateService] فشل PDF، جاري فتح HTML...")
-                    html_path = os.path.join(str(exports_dir), f"{filename}.html")
-                    with open(html_path, "w", encoding="utf-8") as f:
-                        f.write(html_content)
-                    self._open_file(html_path)
-                    return True
-            else:
-                # فتح HTML مباشرة
-                html_path = os.path.join(str(exports_dir), f"{filename}.html")
-                with open(html_path, "w", encoding="utf-8") as f:
-                    f.write(html_content)
-                self._open_file(html_path)
-                safe_print(f"✅ [TemplateService] تم فتح HTML: {html_path}")
-                return True
+            exported_path = self.export_invoice_document(
+                project=project,
+                client_info=client_info,
+                template_id=template_id,
+                payments=payments,
+                use_pdf=use_pdf,
+                open_file=True,
+            )
+            return bool(exported_path)
 
         except Exception as e:
             safe_print(f"ERROR: خطأ في معاينة القالب: {e}")
 
             traceback.print_exc()
             return False
+
+    def export_invoice_document(
+        self,
+        project: schemas.Project,
+        client_info: dict[str, str],
+        template_id: int | None = None,
+        payments: list[dict[str, Any]] | None = None,
+        use_pdf: bool = True,
+        open_file: bool = False,
+    ) -> str | None:
+        """إنشاء ملف الفاتورة مباشرة وإرجاع مساره، مع فتح اختياري للملف الناتج."""
+        exports_dir = self.get_exports_dir()
+        filename = self.build_export_basename(project, client_info)
+        html_content = self.generate_invoice_html(project, client_info, template_id, payments)
+
+        exported_path: str | None = None
+        if use_pdf:
+            pdf_path = os.path.join(str(exports_dir), f"{filename}.pdf")
+            if os.path.exists(pdf_path):
+                try:
+                    os.remove(pdf_path)
+                except Exception:
+                    pass
+
+            exported_path = self._generate_pdf_fast(html_content, str(exports_dir), filename)
+            if exported_path and os.path.exists(exported_path):
+                safe_print(f"✅ [TemplateService] تم إنشاء ملف الفاتورة: {exported_path}")
+                if open_file:
+                    self._open_file(exported_path)
+                return exported_path
+
+            safe_print("WARNING: [TemplateService] فشل إنشاء PDF، سيتم حفظ HTML بدلاً منه")
+
+        html_path = os.path.join(str(exports_dir), f"{filename}.html")
+        with open(html_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        safe_print(f"✅ [TemplateService] تم حفظ ملف الفاتورة: {html_path}")
+        if open_file:
+            self._open_file(html_path)
+        return html_path
 
     def get_exports_dir(self) -> Path:
         if getattr(sys, "frozen", False):
@@ -1121,39 +1185,9 @@ class TemplateService(BaseService):
             safe_print("INFO: [TemplateService] pdfkit غير متوفر")
 
         try:
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-            ]
-            browser_path = None
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    browser_path = path
-                    break
-
-            if browser_path:
-                html_path = os.path.join(exports_dir, f"{filename}.html")
-                with open(html_path, "w", encoding="utf-8") as f:
-                    f.write(html_content)
-                abs_html_path = os.path.abspath(html_path)
-                abs_pdf_path = os.path.abspath(pdf_path)
-                cmd = [
-                    browser_path,
-                    "--headless",
-                    "--disable-gpu",
-                    "--print-to-pdf=" + abs_pdf_path,
-                    "file:///" + abs_html_path.replace("\\", "/"),
-                ]
-                subprocess.run(cmd, capture_output=True, timeout=30, check=False)
-                if os.path.exists(pdf_path):
-                    safe_print("✅ [TemplateService] تم إنشاء PDF بالمتصفح")
-                    try:
-                        os.remove(html_path)
-                    except Exception:
-                        pass
-                    return pdf_path
+            browser_pdf = self._generate_pdf_with_browser(html_content, pdf_path)
+            if browser_pdf:
+                return browser_pdf
         except Exception as e:
             safe_print(f"WARNING: [TemplateService] فشل المتصفح: {e}")
 
@@ -1172,6 +1206,119 @@ class TemplateService(BaseService):
         safe_name = "".join(c for c in str(name) if c.isalnum() or c in (" ", "_", "-")).strip()
         safe_name = safe_name.replace(" ", "_")
         return safe_name[:50] if safe_name else "invoice"
+
+    @staticmethod
+    def _find_browser_executable() -> str | None:
+        chrome_paths = [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        ]
+        for path in chrome_paths:
+            if os.path.exists(path):
+                return path
+        return None
+
+    @staticmethod
+    def _decode_process_output(payload: bytes | str | None) -> str:
+        if payload is None:
+            return ""
+        if isinstance(payload, str):
+            return payload
+        for encoding in ("utf-8", "cp1252", "latin1"):
+            try:
+                return payload.decode(encoding)
+            except Exception:
+                continue
+        return payload.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _extract_pdf_text_for_validation(pdf_path: str, pdf_bytes: bytes) -> str:
+        extracted_text: list[str] = []
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(pdf_path)
+            for index, page in enumerate(reader.pages):
+                extracted_text.append(page.extract_text() or "")
+                if index >= 1:
+                    break
+        except Exception:
+            pass
+
+        if extracted_text and "".join(extracted_text).strip():
+            return "\n".join(extracted_text)
+        return pdf_bytes.decode("latin1", errors="ignore")
+
+    def _is_generated_pdf_usable(self, pdf_path: str) -> bool:
+        try:
+            pdf_bytes = Path(pdf_path).read_bytes()
+        except Exception:
+            return False
+
+        if not pdf_bytes.startswith(b"%PDF"):
+            safe_print("WARNING: [TemplateService] تم رفض ملف PDF لأن تركيبه غير صحيح")
+            return False
+
+        pdf_text = self._extract_pdf_text_for_validation(pdf_path, pdf_bytes).lower()
+        browser_shell_markers = (
+            "chrome://new-tab-page",
+            "search google or type a url",
+            "new tab",
+        )
+        if any(marker in pdf_text for marker in browser_shell_markers):
+            safe_print(
+                "WARNING: [TemplateService] تم رفض PDF لأنه يحتوي على محتوى متصفح بدلاً من الفاتورة"
+            )
+            return False
+
+        return True
+
+    def _generate_pdf_with_browser(self, html_content: str, pdf_path: str) -> str | None:
+        browser_path = self._find_browser_executable()
+        if not browser_path:
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="skywave_pdf_") as temp_dir:
+            temp_html_path = Path(temp_dir) / "invoice.html"
+            temp_pdf_path = Path(temp_dir) / "invoice.pdf"
+            temp_html_path.write_text(html_content, encoding="utf-8")
+
+            cmd = [
+                browser_path,
+                "--headless=new",
+                "--disable-gpu",
+                "--allow-file-access-from-files",
+                "--virtual-time-budget=4000",
+                "--print-to-pdf=" + str(temp_pdf_path),
+                temp_html_path.resolve().as_uri(),
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                timeout=30,
+                check=False,
+                text=False,
+            )
+
+            if not temp_pdf_path.exists():
+                stderr_preview = self._decode_process_output(result.stderr).strip()
+                if stderr_preview:
+                    safe_print(
+                        f"WARNING: [TemplateService] فشل المتصفح في إنتاج PDF: {stderr_preview[:300]}"
+                    )
+                return None
+
+            if not self._is_generated_pdf_usable(str(temp_pdf_path)):
+                return None
+
+            shutil.copyfile(temp_pdf_path, pdf_path)
+            if os.path.exists(pdf_path):
+                safe_print("✅ [TemplateService] تم إنشاء PDF بالمتصفح")
+                return pdf_path
+
+        return None
 
     def _generate_pdf(self, html_content: str, exports_dir: str, filename: str) -> str | None:
         """توليد PDF من HTML"""

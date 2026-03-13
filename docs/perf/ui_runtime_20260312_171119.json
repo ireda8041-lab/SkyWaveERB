@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-03-12T17:11:19",
+  "screens": {
+    "LoginWindow": {
+      "avg_ms": 8.28,
+      "min_ms": 2.76,
+      "max_ms": 29.93,
+      "runs": 5
+    },
+    "SettingsTab": {
+      "avg_ms": 3.62,
+      "min_ms": 2.45,
+      "max_ms": 7.95,
+      "runs": 5
+    },
+    "DashboardTab": {
+      "avg_ms": 9.29,
+      "min_ms": 9.0,
+      "max_ms": 9.5,
+      "runs": 5
+    }
+  },
+  "ranked": [
+    {
+      "screen": "DashboardTab",
+      "avg_ms": 9.29,
+      "min_ms": 9.0,
+      "max_ms": 9.5,
+      "runs": 5
+    },
+    {
+      "screen": "LoginWindow",
+      "avg_ms": 8.28,
+      "min_ms": 2.76,
+      "max_ms": 29.93,
+      "runs": 5
+    },
+    {
+      "screen": "SettingsTab",
+      "avg_ms": 3.62,
+      "min_ms": 2.45,
+      "max_ms": 7.95,
+      "runs": 5
+    }
+  ]
+}

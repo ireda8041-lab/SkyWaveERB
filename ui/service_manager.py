@@ -95,7 +95,7 @@ class ServiceManagerTab(QWidget):
 
         self.toolbar = ResponsiveToolbar()
 
-        self.add_button = QPushButton("➕ إضافة خدمة جديدة")
+        self.add_button = QPushButton("➕ إضافة خدمة")
         self.add_button.setStyleSheet(BUTTON_STYLES["success"])
         self.add_button.setFixedHeight(28)
         self.add_button.clicked.connect(lambda: self.open_editor(service_to_edit=None))
@@ -105,7 +105,7 @@ class ServiceManagerTab(QWidget):
         self.edit_button.setFixedHeight(28)
         self.edit_button.clicked.connect(self.open_editor_for_selected)
 
-        self.archive_button = QPushButton("❌ أرشفة الخدمة")
+        self.archive_button = QPushButton("📦 أرشفة الخدمة")
         self.archive_button.setStyleSheet(BUTTON_STYLES["danger"])
         self.archive_button.setFixedHeight(28)
         self.archive_button.clicked.connect(self.archive_selected_service)

@@ -31,6 +31,15 @@ def test_taskservice_task_to_dict_keeps_tags_as_list():
     assert payload["tags"] == ["a", "b"]
 
 
+def test_taskservice_dict_to_task_parses_json_tags_string_once():
+    TaskService._instance = None
+    TaskService._repository = None
+    service = TaskService(repository=None)
+    task = service._dict_to_task({"id": "2", "title": "json-tags", "tags": '["a","b"]'})
+    assert task is not None
+    assert task.tags == ["a", "b"]
+
+
 def test_todo_selection_uses_task_id_not_title(qapp):
     TaskService._instance = None
     TaskService._repository = None
@@ -53,6 +62,32 @@ def test_todo_selection_uses_task_id_not_title(qapp):
 
     assert widget.selected_task is not None
     assert widget.selected_task.id == "2"
+
+
+def test_todo_manager_load_tasks_uses_sync_fast_path_without_repository(monkeypatch, qapp):
+    import ui.todo_manager as todo_module
+
+    TaskService._instance = None
+    TaskService._repository = None
+    service = TaskService(repository=None)
+    service.tasks = [Task(id="1", title="Fast"), Task(id="2", title="Path")]
+
+    monkeypatch.setattr(
+        todo_module,
+        "get_data_loader",
+        lambda: (_ for _ in ()).throw(AssertionError("data_loader should not be used")),
+        raising=True,
+    )
+
+    widget = TodoManagerWidget(project_service=None, client_service=None)
+    widget.update_timer.stop()
+    widget.show()
+    qapp.processEvents()
+
+    widget.load_tasks()
+    qapp.processEvents()
+
+    assert widget.tasks_table.rowCount() >= 2
 
 
 def test_task_reminder_uses_due_time(qapp):
@@ -157,6 +192,22 @@ def test_task_editor_preserves_mongo_refs_when_local_ids_also_exist(qapp):
     assert dialog.result_task is not None
     assert dialog.result_task.related_project == "mongo-project-15"
     assert dialog.result_task.related_client == "mongo-client-15"
+
+
+def test_todo_toolbar_buttons_use_consistent_labels(qapp):
+    widget = TodoManagerWidget(project_service=None, client_service=None)
+    widget.update_timer.stop()
+    widget.show()
+    qapp.processEvents()
+
+    assert widget.add_button.text() == "➕ إضافة مهمة"
+    assert widget.edit_button.text() == "✏️ تعديل المهمة"
+    assert widget.complete_button.text() == "✅ إكمال المهمة"
+    assert widget.delete_button.text() == "🗑️ حذف المهمة"
+    assert widget.settings_button.text() == "⚙️ الإعدادات"
+    assert widget.quick_complete_btn.text() == "✅ إكمال المهمة"
+    assert widget.archive_btn.text() == "📦 أرشفة المهمة"
+    assert widget.restore_btn.text() == "♻️ استعادة المهمة"
 
 
 def test_todo_widget_displays_mongo_project_and_client_names(qapp):

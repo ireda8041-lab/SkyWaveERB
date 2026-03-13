@@ -30,6 +30,9 @@ class NotificationService:
     - حذف الإشعارات القديمة
     """
 
+    _active_instance: "NotificationService | None" = None
+    _duplicate_window_seconds = 120
+
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
         تهيئة خدمة الإشعارات
@@ -41,11 +44,28 @@ class NotificationService:
         self.repo = repository
         self.event_bus = event_bus
         self._notification_columns_cache: set[str] | None = None
+        NotificationService._active_instance = self
 
         # الاشتراك في الأحداث المهمة
         self._subscribe_to_events()
 
         logger.info("تم تهيئة NotificationService")
+
+    @classmethod
+    def get_active_instance(
+        cls, repository: Repository | None = None
+    ) -> "NotificationService | None":
+        instance = cls._active_instance
+        if instance is None:
+            return None
+        instance_repo = getattr(instance, "repo", None)
+        if repository is None:
+            return None
+        if instance_repo is not repository:
+            return None
+        if getattr(repository, "_closed", False):
+            return None
+        return instance
 
     def _subscribe_to_events(self):
         """⚡ الاشتراك في جميع الأحداث المهمة لإنشاء إشعارات تلقائية"""
@@ -112,14 +132,14 @@ class NotificationService:
                         column_name = None
                 if column_name:
                     columns.add(str(column_name))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("تعذر فحص أعمدة notifications من SQLite، سيتم استخدام fallback: %s", exc)
         finally:
             if cursor is not None:
                 try:
                     cursor.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("تعذر إغلاق cursor أعمدة notifications: %s", exc)
 
         if not columns:
             columns = {
@@ -136,6 +156,13 @@ class NotificationService:
                 "related_entity_id",
                 "action_url",
                 "expires_at",
+                "action",
+                "operation_text",
+                "details",
+                "amount",
+                "is_activity",
+                "dirty_flag",
+                "is_deleted",
             }
 
         self._notification_columns_cache = columns
@@ -151,7 +178,110 @@ class NotificationService:
         return " AND ".join(clauses) if clauses else "1 = 1"
 
     def _repo_is_online(self) -> bool:
-        return bool(getattr(self.repo, "online", False) and getattr(self.repo, "mongo_db", None))
+        return (
+            bool(getattr(self.repo, "online", False))
+            and getattr(self.repo, "mongo_db", None) is not None
+        )
+
+    @staticmethod
+    def _compact_text(value: object | None) -> str:
+        return " ".join(str(value or "").split()).strip()
+
+    @staticmethod
+    def _normalize_amount(value: object | None) -> float | None:
+        if value in (None, ""):
+            return None
+        try:
+            return round(float(value), 4)
+        except Exception:
+            return None
+
+    def _notification_signature(self, notification: Notification) -> tuple[object, ...]:
+        return (
+            self._compact_text(notification.title),
+            self._compact_text(notification.message),
+            str(notification.type.value),
+            self._compact_text(notification.related_entity_type),
+            self._compact_text(notification.related_entity_id),
+            self._compact_text(notification.action_url),
+            self._compact_text(notification.action),
+            self._compact_text(notification.operation_text),
+            self._compact_text(notification.details),
+            self._normalize_amount(notification.amount),
+            1 if notification.is_activity else 0,
+        )
+
+    def _notification_where(self, *conditions: str, include_activity: bool = True) -> str:
+        scoped_conditions = list(conditions)
+        columns = self._notification_columns()
+        if not include_activity and "is_activity" in columns:
+            scoped_conditions.append("(is_activity = 0 OR is_activity IS NULL)")
+        return self._active_notification_where(*scoped_conditions)
+
+    def _dedupe_notifications(
+        self,
+        notifications: list[Notification],
+        within_seconds: int | None = None,
+    ) -> list[Notification]:
+        window_seconds = int(within_seconds or self._duplicate_window_seconds)
+        deduped: list[Notification] = []
+        seen: list[tuple[tuple[object, ...], datetime]] = []
+
+        for notification in notifications:
+            created_at = notification.created_at or datetime.min
+            signature = self._notification_signature(notification)
+            is_duplicate = False
+            for seen_signature, seen_created_at in seen:
+                if signature != seen_signature:
+                    continue
+                if abs((seen_created_at - created_at).total_seconds()) <= window_seconds:
+                    is_duplicate = True
+                    break
+            if is_duplicate:
+                continue
+            deduped.append(notification)
+            seen.append((signature, created_at))
+
+        return deduped
+
+    def _find_recent_duplicate(
+        self,
+        notification: Notification,
+        within_seconds: int | None = None,
+    ) -> Notification | None:
+        window_seconds = int(within_seconds or self._duplicate_window_seconds)
+        cutoff_iso = (datetime.now() - timedelta(seconds=window_seconds)).isoformat()
+        cursor = None
+        try:
+            cursor = self.repo.get_cursor()
+            where_sql = self._notification_where("created_at >= ?", include_activity=True)
+            cursor.execute(
+                f"""
+                SELECT *
+                FROM notifications
+                WHERE {where_sql}
+                ORDER BY created_at DESC, id DESC
+                LIMIT 40
+            """,
+                (cutoff_iso,),
+            )
+            rows = cursor.fetchall() or []
+        except Exception as exc:
+            logger.debug("تعذر البحث عن إشعار مماثل قبل الإنشاء: %s", exc)
+            return None
+        finally:
+            if cursor is not None:
+                try:
+                    cursor.close()
+                except Exception as exc:
+                    logger.debug("تعذر إغلاق cursor مطابقة الإشعارات: %s", exc)
+
+        target_signature = self._notification_signature(notification)
+        for row in rows:
+            existing = self._row_to_notification(row)
+            if existing and self._notification_signature(existing) == target_signature:
+                return existing
+        return None
 
     def _emit_notifications_changed(self) -> None:
         try:
@@ -160,6 +290,8 @@ class NotificationService:
             logger.debug("تعذر بث إشارة تحديث الإشعارات: %s", exc)
 
     def _show_local_toast(self, notification: Notification) -> None:
+        if notification.is_activity:
+            return
         message = str(notification.message or "").strip()
         if not message:
             return
@@ -239,6 +371,12 @@ class NotificationService:
         related_entity_id: str | None = None,
         action_url: str | None = None,
         expires_at: datetime | None = None,
+        action: str | None = None,
+        operation_text: str | None = None,
+        details: str | None = None,
+        amount: float | None = None,
+        is_activity: bool = False,
+        is_read: bool = False,
     ) -> Notification | None:
         """
         إنشاء إشعار جديد
@@ -266,9 +404,24 @@ class NotificationService:
                 related_entity_id=related_entity_id,
                 action_url=action_url,
                 expires_at=expires_at,
+                action=action,
+                operation_text=operation_text,
+                details=details,
+                amount=amount,
+                is_activity=is_activity,
+                is_read=is_read,
             )
 
             # حفظ في قاعدة البيانات
+            duplicate_notification = self._find_recent_duplicate(notification)
+            if duplicate_notification is not None:
+                logger.debug(
+                    "تم منع إنشاء إشعار مكرر: %s / %s",
+                    notification.title,
+                    notification.message,
+                )
+                return duplicate_notification
+
             saved_notification = self._save_notification(notification)
 
             if saved_notification:
@@ -282,7 +435,8 @@ class NotificationService:
                     },
                 )
                 self._emit_notifications_changed()
-                self._show_local_toast(saved_notification)
+                if not saved_notification.is_activity:
+                    self._show_local_toast(saved_notification)
 
                 logger.info("تم إنشاء إشعار: %s", title)
                 return saved_notification
@@ -307,7 +461,7 @@ class NotificationService:
                 "message": notification.message,
                 "type": notification.type.value,
                 "priority": notification.priority.value,
-                "is_read": 0,
+                "is_read": 1 if notification.is_read else 0,
                 "related_entity_type": notification.related_entity_type,
                 "related_entity_id": notification.related_entity_id,
                 "action_url": notification.action_url,
@@ -315,6 +469,16 @@ class NotificationService:
                     notification.expires_at.isoformat() if notification.expires_at else None
                 ),
             }
+            if "action" in columns:
+                insert_data["action"] = notification.action
+            if "operation_text" in columns:
+                insert_data["operation_text"] = notification.operation_text
+            if "details" in columns:
+                insert_data["details"] = notification.details
+            if "amount" in columns:
+                insert_data["amount"] = notification.amount
+            if "is_activity" in columns:
+                insert_data["is_activity"] = 1 if notification.is_activity else 0
             if "dirty_flag" in columns:
                 insert_data["dirty_flag"] = 1
             if "is_deleted" in columns:
@@ -326,7 +490,7 @@ class NotificationService:
                 notification.created_at = now_dt
                 notification.last_modified = now_dt
                 notification.sync_status = "new_offline"
-                notification.is_read = False
+                notification.is_read = bool(notification.is_read)
                 column_names = list(insert_data.keys())
                 placeholders = ", ".join("?" for _ in column_names)
                 cursor.execute(
@@ -374,7 +538,9 @@ class NotificationService:
             logger.error("فشل حفظ الإشعار: %s", e)
             return None
 
-    def get_unread_notifications(self, limit: int = 50) -> list[Notification]:
+    def get_unread_notifications(
+        self, limit: int = 50, *, include_activity: bool = False
+    ) -> list[Notification]:
         """
         الحصول على الإشعارات غير المقروءة
         ⚡ يستخدم cursor منفصل لتجنب Recursive cursor
@@ -386,20 +552,23 @@ class NotificationService:
             قائمة الإشعارات غير المقروءة
         """
         try:
+            safe_limit = max(1, int(limit or 50))
+            raw_limit = max(safe_limit * 3, safe_limit + 12, 40)
             cursor = self.repo.get_cursor()
             try:
-                where_sql = self._active_notification_where(
+                where_sql = self._notification_where(
                     "is_read = 0",
                     "(expires_at IS NULL OR expires_at > ?)",
+                    include_activity=include_activity,
                 )
                 cursor.execute(
                     f"""
                     SELECT * FROM notifications
                     WHERE {where_sql}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, id DESC
                     LIMIT ?
                 """,
-                    (datetime.now().isoformat(), limit),
+                    (datetime.now().isoformat(), raw_limit),
                 )
 
                 rows = cursor.fetchall()
@@ -412,13 +581,15 @@ class NotificationService:
                 if notification:
                     notifications.append(notification)
 
-            return notifications
+            return self._dedupe_notifications(notifications)[:safe_limit]
 
         except Exception as e:
             logger.error("فشل الحصول على الإشعارات غير المقروءة: %s", e)
             return []
 
-    def get_all_notifications(self, limit: int = 100) -> list[Notification]:
+    def get_all_notifications(
+        self, limit: int = 100, *, include_activity: bool = False
+    ) -> list[Notification]:
         """
         الحصول على جميع الإشعارات - يستخدم cursor منفصل
 
@@ -429,19 +600,22 @@ class NotificationService:
             قائمة جميع الإشعارات
         """
         try:
+            safe_limit = max(1, int(limit or 100))
+            raw_limit = max(safe_limit * 3, safe_limit + 16, 50)
             cursor = self.repo.get_cursor()
             try:
-                where_sql = self._active_notification_where(
-                    "(expires_at IS NULL OR expires_at > ?)"
+                where_sql = self._notification_where(
+                    "(expires_at IS NULL OR expires_at > ?)",
+                    include_activity=include_activity,
                 )
                 cursor.execute(
                     f"""
                     SELECT * FROM notifications
                     WHERE {where_sql}
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, id DESC
                     LIMIT ?
                 """,
-                    (datetime.now().isoformat(), limit),
+                    (datetime.now().isoformat(), raw_limit),
                 )
 
                 rows = cursor.fetchall()
@@ -454,10 +628,62 @@ class NotificationService:
                 if notification:
                     notifications.append(notification)
 
-            return notifications
+            return self._dedupe_notifications(notifications)[:safe_limit]
 
         except Exception as e:
             logger.error("فشل الحصول على الإشعارات: %s", e)
+            return []
+
+    def get_recent_activity_notifications(self, limit: int = 10) -> list[Notification]:
+        """إرجاع الإشعارات التي تمثل عمليات موثقة فقط."""
+        try:
+            safe_limit = max(1, int(limit or 10))
+            raw_limit = max(safe_limit * 3, safe_limit + 10, 30)
+            columns = self._notification_columns()
+            activity_clauses: list[str] = []
+            if "is_activity" in columns:
+                activity_clauses.append("is_activity = 1")
+            if "operation_text" in columns:
+                activity_clauses.append(
+                    "(operation_text IS NOT NULL AND TRIM(operation_text) != '')"
+                )
+            elif "action" in columns:
+                activity_clauses.append("(action IS NOT NULL AND TRIM(action) != '')")
+            if not activity_clauses:
+                return []
+
+            cursor = self.repo.get_cursor()
+            try:
+                where_sql = self._notification_where(
+                    f"({' OR '.join(activity_clauses)})",
+                    include_activity=True,
+                )
+                cursor.execute(
+                    f"""
+                    SELECT * FROM notifications
+                    WHERE {where_sql}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT ?
+                """,
+                    (raw_limit,),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+
+            activities: list[Notification] = []
+            for row in rows:
+                notification = self._row_to_notification(row)
+                if notification:
+                    activities.append(notification)
+
+            logger.debug("تم جلب %s نشاط مزامن", len(activities))
+            deduped_activities = self._dedupe_notifications(activities)
+            logger.debug("تم جلب %s نشاط مزامن بعد إزالة المكرر", len(deduped_activities))
+            return deduped_activities[:safe_limit]
+
+        except Exception as e:
+            logger.error("فشل الحصول على الأنشطة المزامنة الحديثة: %s", e)
             return []
 
     def get_recent_activities(self, limit: int = 10) -> list[Notification]:
@@ -470,36 +696,7 @@ class NotificationService:
         Returns:
             قائمة آخر الأنشطة
         """
-        try:
-            cursor = self.repo.get_cursor()
-            try:
-                where_sql = self._active_notification_where()
-                cursor.execute(
-                    f"""
-                    SELECT * FROM notifications
-                    WHERE {where_sql}
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """,
-                    (limit,),
-                )
-
-                rows = cursor.fetchall()
-            finally:
-                cursor.close()
-
-            activities = []
-            for row in rows:
-                notification = self._row_to_notification(row)
-                if notification:
-                    activities.append(notification)
-
-            logger.debug("تم جلب %s نشاط حديث", len(activities))
-            return activities
-
-        except Exception as e:
-            logger.error("فشل الحصول على الأنشطة الحديثة: %s", e)
-            return []
+        return self.get_recent_activity_notifications(limit)
 
     def mark_as_read(self, notification_id: int) -> bool:
         """
@@ -815,7 +1012,7 @@ class NotificationService:
             logger.error("فشل حذف الإشعارات القديمة: %s", e)
             return 0
 
-    def get_unread_count(self) -> int:
+    def get_unread_count(self, *, include_activity: bool = False) -> int:
         """
         الحصول على عدد الإشعارات غير المقروءة
         ⚡ يستخدم cursor منفصل لتجنب Recursive cursor
@@ -826,21 +1023,28 @@ class NotificationService:
         try:
             cursor = self.repo.get_cursor()
             try:
-                where_sql = self._active_notification_where(
+                where_sql = self._notification_where(
                     "is_read = 0",
                     "(expires_at IS NULL OR expires_at > ?)",
+                    include_activity=include_activity,
                 )
                 cursor.execute(
                     f"""
-                    SELECT COUNT(*) FROM notifications
+                    SELECT * FROM notifications
                     WHERE {where_sql}
+                    ORDER BY created_at DESC, id DESC
                 """,
                     (datetime.now().isoformat(),),
                 )
-                result = cursor.fetchone()
+                rows = cursor.fetchall() or []
             finally:
                 cursor.close()
-            return result[0] if result else 0
+            notifications: list[Notification] = []
+            for row in rows:
+                notification = self._row_to_notification(row)
+                if notification:
+                    notifications.append(notification)
+            return len(self._dedupe_notifications(notifications))
 
         except Exception as e:
             logger.error("فشل الحصول على عدد الإشعارات غير المقروءة: %s", e)
@@ -849,21 +1053,38 @@ class NotificationService:
     def _row_to_notification(self, row) -> Notification | None:
         """تحويل صف من قاعدة البيانات إلى كائن Notification"""
         try:
+
+            def _row_value(name: str, default=None):
+                try:
+                    value = row[name]
+                except Exception:
+                    return default
+                return default if value is None and default is not None else value
+
             return Notification(
-                id=row["id"],
-                created_at=datetime.fromisoformat(row["created_at"]),
-                last_modified=datetime.fromisoformat(row["last_modified"]),
-                title=row["title"],
-                message=row["message"],
-                type=NotificationType(row["type"]),
-                priority=NotificationPriority(row["priority"]),
-                is_read=bool(row["is_read"]),
-                related_entity_type=row["related_entity_type"],
-                related_entity_id=row["related_entity_id"],
-                action_url=row["action_url"],
-                expires_at=datetime.fromisoformat(row["expires_at"]) if row["expires_at"] else None,
-                _mongo_id=row["_mongo_id"],
-                sync_status=row["sync_status"],
+                id=_row_value("id"),
+                created_at=datetime.fromisoformat(_row_value("created_at")),
+                last_modified=datetime.fromisoformat(_row_value("last_modified")),
+                title=_row_value("title", ""),
+                message=_row_value("message", ""),
+                type=NotificationType(_row_value("type")),
+                priority=NotificationPriority(_row_value("priority")),
+                is_read=bool(_row_value("is_read", 0)),
+                related_entity_type=_row_value("related_entity_type"),
+                related_entity_id=_row_value("related_entity_id"),
+                action_url=_row_value("action_url"),
+                expires_at=(
+                    datetime.fromisoformat(_row_value("expires_at"))
+                    if _row_value("expires_at")
+                    else None
+                ),
+                action=_row_value("action"),
+                operation_text=_row_value("operation_text"),
+                details=_row_value("details"),
+                amount=_row_value("amount"),
+                is_activity=bool(_row_value("is_activity", 0)),
+                _mongo_id=_row_value("_mongo_id"),
+                sync_status=_row_value("sync_status"),
             )
         except Exception as e:
             logger.error("فشل تحويل صف إلى Notification: %s", e)

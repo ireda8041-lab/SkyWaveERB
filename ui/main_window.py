@@ -1,60 +1,63 @@
 # pylint: disable=too-many-lines,too-many-positional-arguments
 # الملف: ui/main_window.py
-
+from __future__ import annotations
 
 import ctypes
-import gc
 import os
 import platform
 import threading
 import time
 import traceback
+from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
     QStatusBar,
     QTableWidget,
     QTabWidget,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
-from core import UnifiedSyncManagerV3
-from core.auth_models import PermissionManager, UserRole
-from core.data_loader import get_data_loader
-from core.keyboard_shortcuts import KeyboardShortcutManager
-from core.realtime_sync import shutdown_realtime_sync
 from core.resource_utils import get_resource_path
 from core.signals import app_signals
-from services.accounting_service import AccountingService
-from services.auto_update_service import get_auto_update_service
-from services.client_service import ClientService
-from services.expense_service import ExpenseService
-from services.invoice_service import InvoiceService
-from services.notification_service import NotificationService
-from services.project_service import ProjectService
-from services.service_service import ServiceService
-from services.settings_service import SettingsService
-from services.template_service import TemplateService
-from ui.accounting_manager import AccountingManagerTab
-from ui.client_manager import ClientManagerTab
-from ui.dashboard_tab import DashboardTab
-from ui.expense_manager import ExpenseManagerTab
-from ui.notification_system import NotificationManager
-from ui.payments_manager import PaymentsManagerTab
-from ui.project_manager import ProjectManagerTab
-from ui.service_manager import ServiceManagerTab
-from ui.settings_tab import SettingsTab
-from ui.shortcuts_help_dialog import ShortcutsHelpDialog
-from ui.status_bar_widget import StatusBarWidget
 from ui.styles import apply_rtl_alignment_to_all_fields
-from ui.todo_manager import TaskService, TodoManagerWidget
+
+if TYPE_CHECKING:
+    from core import UnifiedSyncManagerV3
+    from core.auth_models import PermissionManager, UserRole
+    from core.keyboard_shortcuts import KeyboardShortcutManager
+    from services.accounting_service import AccountingService
+    from services.client_service import ClientService
+    from services.expense_service import ExpenseService
+    from services.invoice_service import InvoiceService
+    from services.notification_service import NotificationService
+    from services.project_service import ProjectService
+    from services.service_service import ServiceService
+    from services.settings_service import SettingsService
+    from ui.shortcuts_help_dialog import ShortcutsHelpDialog
+    from ui.status_bar_widget import StatusBarWidget
+
+UnifiedSyncManagerV3 = None
+PermissionManager = None
+UserRole = None
+KeyboardShortcutManager = None
+ShortcutsHelpDialog = None
+StatusBarWidget = None
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -66,6 +69,261 @@ except ImportError:
             print(msg)
         except UnicodeEncodeError:
             pass
+
+
+ACCOUNTING_TAB_LABEL = "🗃️ الخزن"
+LEGACY_ACCOUNTING_TAB_LABEL = "📊 المحاسبة"
+ACCOUNTING_TAB_LABELS = {
+    ACCOUNTING_TAB_LABEL,
+    LEGACY_ACCOUNTING_TAB_LABEL,
+}
+TAB_DASHBOARD_LABEL = "🏠 الصفحة الرئيسية"
+TAB_PROJECTS_LABEL = "🚀 المشاريع"
+TAB_EXPENSES_LABEL = "💳 المصروفات"
+TAB_PAYMENTS_LABEL = "💰 الدفعات"
+TAB_CLIENTS_LABEL = "👤 العملاء"
+TAB_SERVICES_LABEL = "🛠️ الخدمات والباقات"
+TAB_TODO_LABEL = "📋 المهام"
+TAB_SETTINGS_LABEL = "🔧 الإعدادات"
+PROJECT_DUE_DATE_INTERVAL_MS = 86_400_000
+PROJECT_DUE_DATE_INITIAL_DELAY_MS = 45_000
+DIRECT_TAB_LOAD_LABELS = {
+    TAB_DASHBOARD_LABEL,
+    TAB_PROJECTS_LABEL,
+    TAB_EXPENSES_LABEL,
+    TAB_PAYMENTS_LABEL,
+    TAB_CLIENTS_LABEL,
+    TAB_SERVICES_LABEL,
+    TAB_TODO_LABEL,
+    TAB_SETTINGS_LABEL,
+    *ACCOUNTING_TAB_LABELS,
+}
+
+
+class _ActionConfirmationDialog(QDialog):
+    def __init__(self, parent, title: str, message: str):
+        super().__init__(parent)
+        self._clicked_button = None
+        self.setModal(True)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowTitle(title)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.setMinimumWidth(460)
+        self.setObjectName("action_confirmation_dialog")
+
+        primary_text, secondary_text = (
+            message.split("\n\n", 1) if "\n\n" in message else (message, "")
+        )
+        confirm_label = "إغلاق الآن"
+        cancel_label = "البقاء في البرنامج"
+        badge_text = "!"
+        accent_color = "#F59E0B"
+        if "الخروج" in title:
+            confirm_label = "تسجيل الخروج"
+            cancel_label = "إلغاء"
+            badge_text = "↩"
+            accent_color = "#0A6CF1"
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(20, 18, 20, 18)
+        root_layout.setSpacing(16)
+
+        card = QFrame()
+        card.setObjectName("confirmation_card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 20, 22, 18)
+        card_layout.setSpacing(14)
+
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(14)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(6)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("confirmation_title")
+        text_layout.addWidget(title_label)
+
+        primary_label = QLabel(primary_text.strip())
+        primary_label.setObjectName("confirmation_primary")
+        primary_label.setWordWrap(True)
+        text_layout.addWidget(primary_label)
+
+        if secondary_text.strip():
+            secondary_label = QLabel(secondary_text.strip())
+            secondary_label.setObjectName("confirmation_secondary")
+            secondary_label.setWordWrap(True)
+            text_layout.addWidget(secondary_label)
+
+        header_layout.addLayout(text_layout, 1)
+
+        badge_label = QLabel(badge_text)
+        badge_label.setObjectName("confirmation_badge")
+        badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_label.setProperty("accentColor", accent_color)
+        header_layout.addWidget(badge_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        card_layout.addLayout(header_layout)
+
+        note_frame = QFrame()
+        note_frame.setObjectName("confirmation_note")
+        note_layout = QHBoxLayout(note_frame)
+        note_layout.setContentsMargins(14, 10, 14, 10)
+        note_layout.setSpacing(8)
+        note_icon = QLabel("•")
+        note_icon.setObjectName("confirmation_note_icon")
+        note_text = QLabel("سيتم تنفيذ العملية بشكل آمن دون فقدان البيانات الحالية.")
+        note_text.setObjectName("confirmation_note_text")
+        note_text.setWordWrap(True)
+        note_layout.addWidget(note_icon, 0, Qt.AlignmentFlag.AlignTop)
+        note_layout.addWidget(note_text, 1)
+        card_layout.addWidget(note_frame)
+
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(12)
+
+        self.cancel_button = QPushButton(cancel_label)
+        self.cancel_button.setObjectName("cancel_exit_button")
+        self.cancel_button.clicked.connect(
+            lambda: self._finish_with_button(self.cancel_button, False)
+        )
+
+        self.confirm_button = QPushButton(confirm_label)
+        self.confirm_button.setObjectName("confirm_exit_button")
+        self.confirm_button.clicked.connect(
+            lambda: self._finish_with_button(self.confirm_button, True)
+        )
+
+        self.cancel_button.setAutoDefault(False)
+        self.confirm_button.setDefault(True)
+        self.confirm_button.setAutoDefault(True)
+
+        buttons_layout.addWidget(self.cancel_button, 1)
+        buttons_layout.addWidget(self.confirm_button, 1)
+        card_layout.addLayout(buttons_layout)
+
+        root_layout.addWidget(card)
+
+        self.setStyleSheet(
+            f"""
+            QDialog#action_confirmation_dialog {{
+                background-color: #052045;
+            }}
+            QFrame#confirmation_card {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #0A2E56, stop:1 #072647);
+                border: 1px solid #1B4D84;
+                border-radius: 18px;
+            }}
+            QLabel {{
+                background: transparent;
+                color: #FFFFFF;
+            }}
+            QLabel#confirmation_title {{
+                font-size: 20px;
+                font-weight: 800;
+            }}
+            QLabel#confirmation_primary {{
+                font-size: 15px;
+                font-weight: 700;
+                color: #F8FBFF;
+                line-height: 1.3em;
+            }}
+            QLabel#confirmation_secondary {{
+                font-size: 13px;
+                font-weight: 500;
+                color: #A7C2E8;
+                line-height: 1.35em;
+            }}
+            QLabel#confirmation_badge {{
+                min-width: 42px;
+                max-width: 42px;
+                min-height: 42px;
+                max-height: 42px;
+                border-radius: 21px;
+                background-color: {accent_color};
+                color: #FFFFFF;
+                font-size: 20px;
+                font-weight: 900;
+            }}
+            QFrame#confirmation_note {{
+                background-color: rgba(7, 58, 109, 0.75);
+                border: 1px solid rgba(89, 149, 219, 0.35);
+                border-radius: 12px;
+            }}
+            QLabel#confirmation_note_icon {{
+                color: #5FB3FF;
+                font-size: 18px;
+                font-weight: 900;
+            }}
+            QLabel#confirmation_note_text {{
+                color: #C9DBF2;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton {{
+                min-height: 46px;
+                border-radius: 12px;
+                border: none;
+                padding: 10px 16px;
+                font-size: 14px;
+                font-weight: 800;
+            }}
+            QPushButton#confirm_exit_button {{
+                background-color: #0A6CF1;
+                color: #FFFFFF;
+            }}
+            QPushButton#confirm_exit_button:hover {{
+                background-color: #2D84F5;
+            }}
+            QPushButton#cancel_exit_button {{
+                background-color: #14365F;
+                color: #EAF3FF;
+                border: 1px solid #2A5B95;
+            }}
+            QPushButton#cancel_exit_button:hover {{
+                background-color: #1D497D;
+            }}
+            """
+        )
+
+    def _finish_with_button(self, button, accepted: bool):
+        self._clicked_button = button
+        if accepted:
+            self.accept()
+        else:
+            self.reject()
+
+    def showEvent(self, event):  # pylint: disable=invalid-name
+        super().showEvent(event)
+        QTimer.singleShot(0, self._ensure_frontmost)
+
+    def _ensure_frontmost(self):
+        try:
+            if self.isMinimized():
+                self.showNormal()
+        except Exception:
+            pass
+        try:
+            self.raise_()
+        except Exception:
+            pass
+        try:
+            self.activateWindow()
+        except Exception:
+            pass
+        try:
+            self.confirm_button.setFocus()
+        except Exception:
+            pass
+
+    def buttons(self):
+        return [self.cancel_button, self.confirm_button]
+
+    def clickedButton(self):
+        return self._clicked_button
 
 
 class MainWindow(QMainWindow):
@@ -97,6 +355,9 @@ class MainWindow(QMainWindow):
 
         self._connection_check_timer = None
         self._allow_close = False
+        self._closing_in_progress = False
+        self._close_confirmation_pending = False
+        self._quit_requested = False
         self._last_close_request_ts = 0.0
         self._last_close_event_log_ts = 0.0
         self._exit_confirmation_open = False
@@ -176,15 +437,26 @@ class MainWindow(QMainWindow):
         # ربط signal اكتمال المزامنة
         self.sync_completed.connect(self._on_full_sync_completed)
 
-        # إعداد مؤقت لفحص مواعيد استحقاق المشاريع (كل 24 ساعة)
-        self.project_check_timer = QTimer()
+        # إعداد فحص مؤجل لمواعيد استحقاق المشاريع لتخفيف حمل بدء التشغيل.
+        self.project_check_timer = QTimer(self)
+        self.project_check_timer.setInterval(PROJECT_DUE_DATE_INTERVAL_MS)
         self.project_check_timer.timeout.connect(self._check_project_due_dates_background)
-        self.project_check_timer.start(86400000)  # 24 ساعة
-
-        # ⚡ فحص أولي في الخلفية بعد 10 ثواني
-        QTimer.singleShot(10000, self._check_project_due_dates_background)
+        self._project_due_dates_bootstrap_timer = QTimer(self)
+        self._project_due_dates_bootstrap_timer.setSingleShot(True)
+        self._project_due_dates_bootstrap_timer.timeout.connect(
+            self._run_initial_project_due_dates_check
+        )
+        self._project_due_dates_initial_run_done = False
+        if self.notification_service is not None:
+            self._start_project_due_date_checks()
 
         # إعداد اختصارات لوحة المفاتيح
+        global KeyboardShortcutManager
+        if KeyboardShortcutManager is None:
+            from core.keyboard_shortcuts import KeyboardShortcutManager as _KeyboardShortcutManager
+
+            KeyboardShortcutManager = _KeyboardShortcutManager
+
         self.shortcuts_manager = KeyboardShortcutManager(self)
         self.shortcuts_manager.setup_shortcuts()
         self._connect_shortcuts()
@@ -279,13 +551,10 @@ class MainWindow(QMainWindow):
 
         self._apply_tabs_responsive()
 
-        if self.template_service is None:
-            self.template_service = TemplateService(
-                repository=self.accounting_service.repo, settings_service=self.settings_service
-            )
+        self._init_tab_factories()
 
         # تحديث template_service في printing_service إذا كان موجوداً
-        if self.printing_service:
+        if self.printing_service and self.template_service:
             self.printing_service.template_service = self.template_service
 
         # --- 3. إنشاء كل التابات مرة واحدة (بدون Lazy Loading لتجنب التجميد) ---
@@ -317,11 +586,17 @@ class MainWindow(QMainWindow):
         # Keep UI responsive under bursty sync/realtime events.
         self._sync_ui_refresh_cooldown_seconds = 2.0
 
-        # ⚡ إنشاء كل التابات فوراً (بدون تحميل بيانات)
+        # ⚡ إنشاء هيكل التابات مع تحميل مرحلي للتبويبات الثقيلة
         self._create_all_tabs()
 
         # تطبيق الصلاحيات حسب دور المستخدم (بعد إنشاء كل التابات)
         self.apply_permissions()
+
+        global StatusBarWidget
+        if StatusBarWidget is None:
+            from ui.status_bar_widget import StatusBarWidget as _StatusBarWidget
+
+            StatusBarWidget = _StatusBarWidget
 
         self.status_bar = StatusBarWidget()
 
@@ -456,6 +731,12 @@ class MainWindow(QMainWindow):
 
         # --- 4. إعداد المزامنة (إذا لم يتم تمريرها) ---
         if not self.sync_manager:
+            global UnifiedSyncManagerV3
+            if UnifiedSyncManagerV3 is None:
+                from core import UnifiedSyncManagerV3 as _UnifiedSyncManagerV3
+
+                UnifiedSyncManagerV3 = _UnifiedSyncManagerV3
+
             self.sync_manager = UnifiedSyncManagerV3(self.accounting_service.repo)
 
         # إعداد المزامنة التلقائية كل 10 دقائق
@@ -468,15 +749,91 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self._load_initial_data_safely)
 
     def _create_all_tabs(self):
-        """⚡ إنشاء كل التابات مرة واحدة (بدون تحميل بيانات) - محسّن للسرعة"""
-        safe_print("INFO: [MainWindow] ⚡ إنشاء كل التابات...")
+        """تهيئة التبويبات بشكل مرحلي لتقليل زمن فتح الواجهة."""
+        safe_print("INFO: [MainWindow] ⚡ تجهيز هيكل التبويبات بتحميل مرحلي...")
 
-        # 1. Dashboard - التاب الأول فقط يُنشأ فوراً
-        self.dashboard_tab = DashboardTab(self.accounting_service)
-        self.tabs.addTab(self.dashboard_tab, "🏠 الصفحة الرئيسية")
+        tab_order = [
+            TAB_DASHBOARD_LABEL,
+            TAB_PROJECTS_LABEL,
+            TAB_EXPENSES_LABEL,
+            TAB_PAYMENTS_LABEL,
+            TAB_CLIENTS_LABEL,
+            TAB_SERVICES_LABEL,
+            ACCOUNTING_TAB_LABEL,
+            TAB_TODO_LABEL,
+            TAB_SETTINGS_LABEL,
+        ]
 
-        # 2. Projects
-        self.projects_tab = ProjectManagerTab(
+        for tab_name in tab_order:
+            if tab_name == TAB_DASHBOARD_LABEL:
+                self.tabs.addTab(self._build_real_tab(tab_name), tab_name)
+                self._tab_data_loaded.setdefault(tab_name, False)
+                continue
+
+            placeholder = self._create_placeholder_tab(
+                title=tab_name,
+                message="يتم تجهيز هذا القسم عند أول فتح لتقليل وقت تشغيل البرنامج.",
+            )
+            self.tabs.addTab(placeholder, tab_name)
+            self._tab_data_loaded.setdefault(tab_name, False)
+
+        safe_print("INFO: [MainWindow] ⚡ تم تجهيز هيكل التبويبات")
+
+    def _init_tab_factories(self):
+        self._tab_attribute_names = {
+            TAB_DASHBOARD_LABEL: "dashboard_tab",
+            TAB_PROJECTS_LABEL: "projects_tab",
+            TAB_EXPENSES_LABEL: "expense_tab",
+            TAB_PAYMENTS_LABEL: "payments_tab",
+            TAB_CLIENTS_LABEL: "clients_tab",
+            TAB_SERVICES_LABEL: "services_tab",
+            ACCOUNTING_TAB_LABEL: "accounting_tab",
+            TAB_TODO_LABEL: "todo_tab",
+            TAB_SETTINGS_LABEL: "settings_tab",
+        }
+        self._tab_factories = {
+            TAB_DASHBOARD_LABEL: self._create_dashboard_tab_widget,
+            TAB_PROJECTS_LABEL: self._create_projects_tab_widget,
+            TAB_EXPENSES_LABEL: self._create_expenses_tab_widget,
+            TAB_PAYMENTS_LABEL: self._create_payments_tab_widget,
+            TAB_CLIENTS_LABEL: self._create_clients_tab_widget,
+            TAB_SERVICES_LABEL: self._create_services_tab_widget,
+            ACCOUNTING_TAB_LABEL: self._create_accounting_tab_widget,
+            TAB_TODO_LABEL: self._create_todo_tab_widget,
+            TAB_SETTINGS_LABEL: self._create_settings_tab_widget,
+        }
+
+    def _create_placeholder_tab(self, title: str, message: str) -> QWidget:
+        placeholder = QWidget()
+        placeholder.setProperty("_is_lazy_placeholder", True)
+        layout = QVBoxLayout(placeholder)
+        layout.setContentsMargins(28, 28, 28, 28)
+        layout.setSpacing(10)
+
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            "color: #FFFFFF; font-size: 22px; font-weight: 700; background: transparent;"
+        )
+        message_label = QLabel(message)
+        message_label.setWordWrap(True)
+        message_label.setStyleSheet(
+            "color: #7FA2D4; font-size: 13px; font-weight: 500; background: transparent;"
+        )
+
+        layout.addWidget(title_label)
+        layout.addWidget(message_label)
+        layout.addStretch(1)
+        return placeholder
+
+    def _create_dashboard_tab_widget(self):
+        from ui.dashboard_tab import DashboardTab
+
+        return DashboardTab(self.accounting_service)
+
+    def _create_projects_tab_widget(self):
+        from ui.project_manager import ProjectManagerTab
+
+        return ProjectManagerTab(
             self.project_service,
             self.client_service,
             self.service_service,
@@ -485,73 +842,193 @@ class MainWindow(QMainWindow):
             self.printing_service,
             template_service=self.template_service,
         )
-        self.tabs.addTab(self.projects_tab, "🚀 المشاريع")
 
-        # 3. Expenses
-        self.expense_tab = ExpenseManagerTab(
+    def _create_expenses_tab_widget(self):
+        from ui.expense_manager import ExpenseManagerTab
+
+        return ExpenseManagerTab(
             self.expense_service,
             self.accounting_service,
             self.project_service,
         )
-        self.tabs.addTab(self.expense_tab, "💳 المصروفات")
 
-        # 4. Payments
-        self.payments_tab = PaymentsManagerTab(
+    def _create_payments_tab_widget(self):
+        from ui.payments_manager import PaymentsManagerTab
+
+        return PaymentsManagerTab(
             project_service=self.project_service,
             accounting_service=self.accounting_service,
             client_service=self.client_service,
             current_user=self.current_user,
         )
-        self.tabs.addTab(self.payments_tab, "💰 الدفعات")
 
-        # 5. Clients
-        self.clients_tab = ClientManagerTab(self.client_service)
-        self.tabs.addTab(self.clients_tab, "👤 العملاء")
+    def _create_clients_tab_widget(self):
+        from ui.client_manager import ClientManagerTab
 
-        # 6. Services
-        self.services_tab = ServiceManagerTab(self.service_service)
-        self.tabs.addTab(self.services_tab, "🛠️ الخدمات والباقات")
+        return ClientManagerTab(self.client_service)
 
-        # 7. Accounting
-        self.accounting_tab = AccountingManagerTab(
+    def _create_services_tab_widget(self):
+        from ui.service_manager import ServiceManagerTab
+
+        return ServiceManagerTab(self.service_service)
+
+    def _create_accounting_tab_widget(self):
+        from ui.accounting_manager import AccountingManagerTab
+
+        return AccountingManagerTab(
             self.expense_service,
             self.accounting_service,
             self.project_service,
         )
-        self.tabs.addTab(self.accounting_tab, "📊 المحاسبة")
+
+    def _create_todo_tab_widget(self):
+        from ui.todo_manager import TaskService, TodoManagerWidget
 
         TaskService._repository = self.accounting_service.repo
         TaskService._instance = None
         TaskService(repository=self.accounting_service.repo, load_now=False)
-        self.todo_tab = TodoManagerWidget(
+        return TodoManagerWidget(
             project_service=self.project_service, client_service=self.client_service
         )
-        self.tabs.addTab(self.todo_tab, "📋 المهام")
 
-        # 9. Settings
-        self.settings_tab = SettingsTab(
+    def _create_settings_tab_widget(self):
+        from ui.settings_tab import SettingsTab
+
+        return SettingsTab(
             self.settings_service,
             repository=self.accounting_service.repo,
             current_user=self.current_user,
         )
-        self.tabs.addTab(self.settings_tab, "🔧 الإعدادات")
 
-        safe_print("INFO: [MainWindow] ⚡ تم إنشاء كل التابات")
+    def _find_tab_index_by_name(self, tab_name: str) -> int:
+        for index in range(self.tabs.count()):
+            if self.tabs.tabText(index) == tab_name:
+                return index
+        return -1
 
-        # ⚡ تطبيق محاذاة RTL في الخلفية بعد ثانية
+    def _build_real_tab(self, tab_name: str):
+        attr_name = self._tab_attribute_names.get(tab_name)
+        existing_tab = getattr(self, attr_name, None) if attr_name else None
+        if existing_tab is not None:
+            return existing_tab
 
-        def apply_rtl_later():
-            for i in range(self.tabs.count()):
-                tab_widget = self.tabs.widget(i)
-                if tab_widget:
-                    apply_rtl_alignment_to_all_fields(tab_widget)
-            safe_print("INFO: [MainWindow] ⚡ تم تطبيق محاذاة RTL على كل الحقول")
+        factory = self._tab_factories.get(tab_name)
+        if factory is None:
+            return None
 
-        QTimer.singleShot(1000, apply_rtl_later)
+        widget = factory()
+        if attr_name:
+            setattr(self, attr_name, widget)
+        try:
+            apply_rtl_alignment_to_all_fields(widget)
+        except Exception as rtl_error:
+            safe_print(f"WARNING: [MainWindow] تعذر تطبيق RTL على التاب {tab_name}: {rtl_error}")
+        return widget
+
+    def _ensure_real_tab_for_index(self, index: int):
+        if index < 0 or index >= self.tabs.count():
+            return None
+
+        tab_name = self.tabs.tabText(index)
+        attr_name = self._tab_attribute_names.get(tab_name)
+        existing_widget = getattr(self, attr_name, None) if attr_name else None
+        current_widget = self.tabs.widget(index)
+
+        if current_widget is not None and not bool(current_widget.property("_is_lazy_placeholder")):
+            if attr_name and existing_widget is None:
+                setattr(self, attr_name, current_widget)
+            return current_widget
+
+        real_widget = self._build_real_tab(tab_name)
+        if real_widget is None:
+            return current_widget
+
+        if current_widget is real_widget:
+            return real_widget
+
+        was_current = self.tabs.currentIndex() == index
+        self.tabs.blockSignals(True)
+        self.tabs.removeTab(index)
+        self.tabs.insertTab(index, real_widget, tab_name)
+        self.tabs.blockSignals(False)
+
+        if current_widget is not None:
+            current_widget.deleteLater()
+
+        if was_current:
+            self.tabs.setCurrentIndex(index)
+
+        return real_widget
+
+    def _activate_tab(self, tab_name: str):
+        tab_index = self._find_tab_index_by_name(tab_name)
+        if tab_index < 0:
+            return None
+        self._ensure_real_tab_for_index(tab_index)
+        self.tabs.setCurrentIndex(tab_index)
+        return self.tabs.widget(tab_index)
+
+    def _ensure_current_tab_widget(self):
+        return self._ensure_real_tab_for_index(self.tabs.currentIndex())
+
+    def attach_deferred_services(
+        self,
+        *,
+        notification_service=None,
+        printing_service=None,
+        template_service=None,
+        export_service=None,
+    ):
+        """ربط الخدمات الثانوية بعد ظهور النافذة لتقليل زمن الفتح."""
+        if notification_service is not None:
+            self.notification_service = notification_service
+        if template_service is not None:
+            self.template_service = template_service
+        if printing_service is not None:
+            self.printing_service = printing_service
+        if export_service is not None:
+            self.export_service = export_service
+
+        if self.printing_service and self.template_service:
+            self.printing_service.template_service = self.template_service
+
+        projects_tab = getattr(self, "projects_tab", None)
+        if projects_tab is not None:
+            projects_tab.printing_service = self.printing_service
+            projects_tab.template_service = self.template_service
+
+        if notification_service is not None:
+            MainWindow._start_project_due_date_checks(self)
+
+    def _start_project_due_date_checks(
+        self, *, initial_delay_ms: int = PROJECT_DUE_DATE_INITIAL_DELAY_MS
+    ) -> None:
+        """ابدأ فحص استحقاقات المشاريع بعد استقرار الواجهة وربط الخدمات الثانوية."""
+        if self.notification_service is None:
+            return
+
+        if not self.project_check_timer.isActive():
+            self.project_check_timer.start()
+
+        if self._project_due_dates_initial_run_done:
+            return
+
+        if not self._project_due_dates_bootstrap_timer.isActive():
+            self._project_due_dates_bootstrap_timer.start(max(1000, int(initial_delay_ms)))
+
+    def _run_initial_project_due_dates_check(self) -> None:
+        if self._project_due_dates_initial_run_done:
+            return
+        self._project_due_dates_initial_run_done = True
+        self._check_project_due_dates_background()
 
     def on_tab_changed(self, index):
         """⚡ تحميل بيانات التاب عند التنقل - محسّن للسرعة"""
         try:
+            if index < 0:
+                return
+
+            self._ensure_real_tab_for_index(index)
             tab_name = self.tabs.tabText(index)
 
             # ⚡ تحميل البيانات إذا لم تكن محملة أو تحتاج تحديث (Lazy Refresh)
@@ -583,30 +1060,36 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(50, lambda: self._do_load_tab_data(tab_name))
 
     def _do_load_tab_data_safe(self, tab_name: str):
-        """⚡ تحميل البيانات في الخلفية باستخدام QThread لمنع التجميد"""
+        """تحميل بيانات التاب بأخف مسار ممكن بدون تكرار تحميلات شكلية."""
+        if MainWindow._supports_direct_tab_load(tab_name):
+            self._refresh_in_progress[f"tab_{tab_name}"] = True
+            QTimer.singleShot(0, lambda t=tab_name: MainWindow._run_direct_tab_load(self, t))
+            return
 
         # الحصول على DataLoader
+        from core.data_loader import get_data_loader
+
         data_loader = get_data_loader()
 
         # تحديد دالة التحميل حسب التاب
         def get_load_function():
-            if tab_name == "🏠 الصفحة الرئيسية":
+            if tab_name == TAB_DASHBOARD_LABEL:
                 return self._load_dashboard_data
-            elif tab_name == "🚀 المشاريع":
+            elif tab_name == TAB_PROJECTS_LABEL:
                 return self._load_projects_data
-            elif tab_name == "💳 المصروفات":
+            elif tab_name == TAB_EXPENSES_LABEL:
                 return self._load_expenses_data
-            elif tab_name == "💰 الدفعات":
+            elif tab_name == TAB_PAYMENTS_LABEL:
                 return self._load_payments_data
-            elif tab_name == "👤 العملاء":
+            elif tab_name == TAB_CLIENTS_LABEL:
                 return self._load_clients_data
-            elif tab_name == "🛠️ الخدمات والباقات":
+            elif tab_name == TAB_SERVICES_LABEL:
                 return self._load_services_data
-            elif tab_name == "📊 المحاسبة":
+            elif tab_name in ACCOUNTING_TAB_LABELS:
                 return self._load_accounting_data
-            elif tab_name == "📋 المهام":
+            elif tab_name == TAB_TODO_LABEL:
                 return self._load_tasks_data
-            elif tab_name == "🔧 الإعدادات":
+            elif tab_name == TAB_SETTINGS_LABEL:
                 return self._load_settings_data
             return None
 
@@ -622,18 +1105,12 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 safe_print(f"ERROR: فشل تحديث واجهة التاب {tab_name}: {e}")
             finally:
-                self._refresh_in_progress[f"tab_{tab_name}"] = False
-                if self.pending_refreshes.pop(tab_name, False):
-                    current_tab = self.tabs.tabText(self.tabs.currentIndex())
-                    if current_tab == tab_name:
-                        QTimer.singleShot(220, lambda t=tab_name: self._do_load_tab_data_safe(t))
-                    else:
-                        self.pending_refreshes[tab_name] = True
+                MainWindow._finish_tab_load_cycle(self, tab_name)
 
         def on_error(error_msg):
             """معالج الخطأ"""
             safe_print(f"ERROR: فشل تحميل بيانات التاب {tab_name}: {error_msg}")
-            self._refresh_in_progress[f"tab_{tab_name}"] = False
+            MainWindow._finish_tab_load_cycle(self, tab_name)
 
         # تحميل البيانات في الخلفية
         self._refresh_in_progress[f"tab_{tab_name}"] = True
@@ -644,6 +1121,35 @@ class MainWindow(QMainWindow):
             on_error=on_error,
             use_thread_pool=True,
         )
+
+    @staticmethod
+    def _supports_direct_tab_load(tab_name: str) -> bool:
+        return tab_name in DIRECT_TAB_LOAD_LABELS
+
+    def _run_direct_tab_load(self, tab_name: str) -> None:
+        try:
+            MainWindow._update_tab_ui(self, tab_name, {"type": "direct"})
+            self._tab_data_loaded[tab_name] = True
+        except Exception as e:
+            safe_print(f"ERROR: فشل تحميل التاب {tab_name} مباشرة: {e}")
+        finally:
+            MainWindow._finish_tab_load_cycle(self, tab_name)
+
+    def _finish_tab_load_cycle(self, tab_name: str) -> None:
+        self._refresh_in_progress[f"tab_{tab_name}"] = False
+        if not self.pending_refreshes.pop(tab_name, False):
+            return
+
+        tabs = getattr(self, "tabs", None)
+        if tabs is None:
+            self.pending_refreshes[tab_name] = True
+            return
+
+        current_tab = tabs.tabText(tabs.currentIndex())
+        if current_tab == tab_name:
+            QTimer.singleShot(220, lambda t=tab_name: self._do_load_tab_data_safe(t))
+        else:
+            self.pending_refreshes[tab_name] = True
 
     # ===== دوال تحميل البيانات (تعمل في الخلفية) =====
 
@@ -691,31 +1197,34 @@ class MainWindow(QMainWindow):
     def _update_tab_ui(self, tab_name: str, data: dict):
         """تحديث واجهة التاب بعد تحميل البيانات (يعمل على main thread)"""
         try:
-            if tab_name == "🏠 الصفحة الرئيسية":
+            if tab_name == TAB_DASHBOARD_LABEL:
                 if hasattr(self, "dashboard_tab"):
                     self.dashboard_tab.refresh_data()
-            elif tab_name == "🚀 المشاريع":
+            elif tab_name == TAB_PROJECTS_LABEL:
                 if hasattr(self, "projects_tab"):
+                    self.projects_tab.service_service = self.service_service
+                    self.projects_tab.accounting_service = self.accounting_service
                     self.projects_tab.load_projects_data()
-            elif tab_name == "💳 المصروفات":
+            elif tab_name == TAB_EXPENSES_LABEL:
                 if hasattr(self, "expense_tab"):
                     self.expense_tab.load_expenses_data()
-            elif tab_name == "💰 الدفعات":
+            elif tab_name == TAB_PAYMENTS_LABEL:
                 if hasattr(self, "payments_tab"):
                     self.payments_tab.load_payments_data()
-            elif tab_name == "👤 العملاء":
+            elif tab_name == TAB_CLIENTS_LABEL:
                 if hasattr(self, "clients_tab"):
                     self.clients_tab.load_clients_data()
-            elif tab_name == "🛠️ الخدمات والباقات":
+            elif tab_name == TAB_SERVICES_LABEL:
                 if hasattr(self, "services_tab"):
                     self.services_tab.load_services_data()
-            elif tab_name == "📊 المحاسبة":
+            elif tab_name in ACCOUNTING_TAB_LABELS:
                 if hasattr(self, "accounting_tab"):
+                    self.accounting_tab.project_service = self.project_service
                     self.accounting_tab.load_accounts_data()
-            elif tab_name == "📋 المهام":
+            elif tab_name == TAB_TODO_LABEL:
                 if hasattr(self, "todo_tab"):
                     self.todo_tab.load_tasks()
-            elif tab_name == "🔧 الإعدادات":
+            elif tab_name == TAB_SETTINGS_LABEL:
                 if hasattr(self, "settings_tab"):
                     try:
                         self.settings_tab.load_active_subtab_data(force_reload=False)
@@ -733,9 +1242,8 @@ class MainWindow(QMainWindow):
     def _load_initial_data_safely(self):
         """⚡ تحميل البيانات الأولية بسرعة"""
         try:
-            # ⚡ تحميل بيانات الداشبورد فوراً
-            if hasattr(self, "dashboard_tab"):
-                self.dashboard_tab.refresh_data()
+            self._activate_tab(TAB_DASHBOARD_LABEL)
+            self._do_load_tab_data_safe(TAB_DASHBOARD_LABEL)
         except Exception as e:
             safe_print(f"ERROR: فشل تحميل البيانات الأولية: {e}")
 
@@ -749,6 +1257,8 @@ class MainWindow(QMainWindow):
 
         def on_error(error_msg):
             safe_print(f"WARNING: فشل فحص مواعيد المشاريع: {error_msg}")
+
+        from core.data_loader import get_data_loader
 
         data_loader = get_data_loader()
         data_loader.load_async(
@@ -872,7 +1382,7 @@ class MainWindow(QMainWindow):
                     if hasattr(self.payments_tab.project_service, "invalidate_cache"):
                         self.payments_tab.project_service.invalidate_cache()
 
-            elif tab_name == "📊 المحاسبة":
+            elif tab_name in ACCOUNTING_TAB_LABELS:
                 if hasattr(self, "accounting_tab") and hasattr(
                     self.accounting_tab, "invalidate_cache"
                 ):
@@ -900,10 +1410,10 @@ class MainWindow(QMainWindow):
                 "tasks": ["📋 المهام"],
                 "currencies": ["🔧 الإعدادات"],
                 "ids": ["🔧 الإعدادات"],  # IDs sequences
-                "accounts": ["📊 المحاسبة"],
+                "accounts": [ACCOUNTING_TAB_LABEL],
                 "payments": ["💰 الدفعات"],
                 "expenses": ["💳 المصروفات"],
-                "journal_entries": ["📊 المحاسبة"],
+                "journal_entries": [ACCOUNTING_TAB_LABEL],
             }
 
             target_tabs = list(mapping.get(table_name, []))
@@ -1077,6 +1587,11 @@ class MainWindow(QMainWindow):
                 else:
                     repo = self._get_sync_repository()
                     if repo is not None:
+                        global UnifiedSyncManagerV3
+                        if UnifiedSyncManagerV3 is None:
+                            from core import UnifiedSyncManagerV3 as _UnifiedSyncManagerV3
+
+                            UnifiedSyncManagerV3 = _UnifiedSyncManagerV3
                         unified_sync = UnifiedSyncManagerV3(repo)
                         result = unified_sync.full_sync_from_cloud()
 
@@ -1261,6 +1776,9 @@ class MainWindow(QMainWindow):
         ):
             self._trigger_safe_quit("logout")
 
+    def _build_confirmation_dialog(self, title: str, message: str):
+        return _ActionConfirmationDialog(self, title, message)
+
     def _confirm_exit(self, title: str, message: str) -> bool:
         """عرض نافذة تأكيد موحدة ومنع تكرار النوافذ أثناء ضغطات الإغلاق المتتالية."""
         if self._exit_confirmation_open:
@@ -1268,27 +1786,102 @@ class MainWindow(QMainWindow):
 
         self._exit_confirmation_open = True
         try:
-            reply = QMessageBox.question(
-                self,
-                title,
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            return reply == QMessageBox.StandardButton.Yes
+            try:
+                if self.isMinimized():
+                    self.showNormal()
+                self.raise_()
+                self.activateWindow()
+            except Exception:
+                pass
+            dialog = self._build_confirmation_dialog(title, message)
+            result = dialog.exec()
+            return result == QDialog.DialogCode.Accepted
         finally:
             self._exit_confirmation_open = False
 
+    def _handle_deferred_close_confirmation(self):
+        self._close_confirmation_pending = False
+        if self._closing_in_progress or self._allow_close:
+            return
+
+        confirmed = self._confirm_exit(
+            title="تأكيد الإغلاق",
+            message="هل تريد إغلاق البرنامج الآن؟\n\nسيتم إيقاف المزامنة والخدمات بشكل آمن.",
+        )
+        if confirmed:
+            self._allow_close = True
+            try:
+                if self.isMinimized():
+                    self.showNormal()
+                self.raise_()
+                self.activateWindow()
+            except Exception:
+                pass
+            self.close()
+
     def _trigger_safe_quit(self, source: str = "unknown"):
         """تشغيل مسار الإغلاق الرسمي بحيث يمر عبر closeEvent الآمن."""
-        if self._allow_close:
+        if self._allow_close or self._closing_in_progress:
             return
 
         safe_print(f"INFO: [MainWindow] طلب إغلاق آمن من المصدر: {source}")
         self._allow_close = True
+        try:
+            self.close()
+        except Exception:
+            self._closing_in_progress = True
+            self._stop_close_related_ui_timers()
+            self._request_application_quit()
 
-        # نستدعي quit بشكل مؤجل لتجنب إعادة الدخول داخل closeEvent الحالي.
-        QTimer.singleShot(0, QApplication.quit)
+    def _stop_close_related_ui_timers(self):
+        """إيقاف مؤقتات الواجهة فقط؛ تنظيف الخدمات المركزية يتم من main.py."""
+        try:
+            if hasattr(self, "project_check_timer") and self.project_check_timer:
+                self.project_check_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            if (
+                hasattr(self, "_project_due_dates_bootstrap_timer")
+                and self._project_due_dates_bootstrap_timer
+            ):
+                self._project_due_dates_bootstrap_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_connection_check_timer", None):
+                self._connection_check_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, "_table_refresh_timer", None):
+                self._table_refresh_timer.stop()
+        except Exception:
+            pass
+
+        try:
+            for _tab_name, timer in list(self._deferred_refresh_timers.items()):
+                if timer:
+                    timer.stop()
+                    timer.deleteLater()
+            self._deferred_refresh_timers.clear()
+        except Exception:
+            pass
+
+    def _request_application_quit(self):
+        if self._quit_requested:
+            return
+        self._quit_requested = True
+        app = QApplication.instance()
+        if app is not None:
+            try:
+                app.setQuitOnLastWindowClosed(True)
+            except Exception:
+                pass
+            QTimer.singleShot(0, lambda: app.exit(0))
 
     def _connect_shortcuts(self):
         """ربط الاختصارات بالإجراءات"""
@@ -1315,10 +1908,28 @@ class MainWindow(QMainWindow):
         self.shortcuts_manager.save_data.connect(self._on_save_data)
         self.shortcuts_manager.close_dialog.connect(self._on_close_dialog)
 
+    def _keyboard_target_widget(self):
+        active_modal = QApplication.activeModalWidget()
+        if active_modal is not None and active_modal is not self:
+            return active_modal
+        return self._ensure_current_tab_widget()
+
+    def _keyboard_target_chain(self):
+        targets = []
+        primary_target = self._keyboard_target_widget()
+        if primary_target is not None:
+            targets.append(primary_target)
+
+        current_tab = self._ensure_current_tab_widget()
+        if current_tab is not None and current_tab not in targets:
+            targets.append(current_tab)
+
+        return targets
+
     def _on_new_project(self):
         """معالج اختصار مشروع جديد"""
         # التبديل إلى تاب المشاريع
-        self.tabs.setCurrentIndex(1)
+        self._activate_tab(TAB_PROJECTS_LABEL)
         # فتح نافذة مشروع جديد بعد تأخير بسيط
 
         QTimer.singleShot(100, lambda: self.projects_tab.open_editor(project_to_edit=None))
@@ -1326,7 +1937,7 @@ class MainWindow(QMainWindow):
     def _on_new_client(self):
         """معالج اختصار عميل جديد"""
         # التبديل إلى تاب العملاء
-        self.tabs.setCurrentIndex(4)
+        self._activate_tab(TAB_CLIENTS_LABEL)
         # فتح نافذة عميل جديد بعد تأخير بسيط
 
         QTimer.singleShot(100, self.clients_tab.open_editor)
@@ -1334,36 +1945,47 @@ class MainWindow(QMainWindow):
     def _on_new_expense(self):
         """معالج اختصار مصروف جديد"""
         # التبديل إلى تاب المصروفات
-        self.tabs.setCurrentIndex(2)
+        self._activate_tab(TAB_EXPENSES_LABEL)
         # فتح نافذة مصروف جديد بعد تأخير بسيط
 
         QTimer.singleShot(100, self.expense_tab.open_add_dialog)
 
     def _on_search_activated(self):
         """معالج اختصار تفعيل البحث"""
-        # تفعيل البحث في التاب الحالي
-        current_index = self.tabs.currentIndex()
-        current_tab = self.tabs.widget(current_index)
+        for target in self._keyboard_target_chain():
+            if hasattr(target, "focus_search"):
+                try:
+                    target.focus_search()
+                    return
+                except Exception:
+                    pass
 
-        # البحث عن شريط البحث في التاب الحالي
-        if hasattr(current_tab, "search_bar"):
-            current_tab.search_bar.setFocus()
-            current_tab.search_bar.selectAll()
-        else:
-            # محاولة البحث عن أي QLineEdit في التاب
+            if hasattr(target, "search_bar"):
+                try:
+                    target.search_bar.setFocus()
+                    target.search_bar.selectAll()
+                    return
+                except Exception:
+                    pass
 
-            search_bars = current_tab.findChildren(QLineEdit)
-            for search_bar in search_bars:
-                if (
-                    "search" in search_bar.placeholderText().lower()
-                    or "بحث" in search_bar.placeholderText()
-                ):
-                    search_bar.setFocus()
-                    search_bar.selectAll()
-                    break
+            if hasattr(target, "findChildren"):
+                search_bars = target.findChildren(QLineEdit)
+                for search_bar in search_bars:
+                    placeholder = search_bar.placeholderText().lower()
+                    if "search" in placeholder or "بحث" in placeholder:
+                        search_bar.setFocus()
+                        search_bar.selectAll()
+                        return
 
     def _on_refresh_data(self):
         """معالج اختصار تحديث البيانات"""
+        active_modal = QApplication.activeModalWidget()
+        if active_modal is not None and active_modal is not self:
+            for method_name in ("refresh_data", "load_data", "reload_data", "on_refresh"):
+                if hasattr(active_modal, method_name):
+                    getattr(active_modal, method_name)()
+                    return
+
         current_index = self.tabs.currentIndex()
         tab_name = self.tabs.tabText(current_index)
 
@@ -1373,7 +1995,7 @@ class MainWindow(QMainWindow):
             "💳 المصروفات": self._refresh_expenses_tab,
             "💰 الدفعات": self._refresh_payments_tab,
             "🛠️ الخدمات والباقات": self._refresh_services_tab,
-            "📊 المحاسبة": self._refresh_accounting_tab,
+            ACCOUNTING_TAB_LABEL: self._refresh_accounting_tab,
             "📋 المهام": self._refresh_tasks_tab,
         }
         refresh_action = refresh_map.get(tab_name)
@@ -1385,6 +2007,11 @@ class MainWindow(QMainWindow):
 
     def _on_show_help(self):
         """معالج اختصار عرض المساعدة"""
+        global ShortcutsHelpDialog
+        if ShortcutsHelpDialog is None:
+            from ui.shortcuts_help_dialog import ShortcutsHelpDialog as _ShortcutsHelpDialog
+
+            ShortcutsHelpDialog = _ShortcutsHelpDialog
         dialog = ShortcutsHelpDialog(self.shortcuts_manager, self)
         dialog.exec()
 
@@ -1454,57 +2081,111 @@ class MainWindow(QMainWindow):
 
     def _on_new_payment(self):
         """معالج اختصار دفعة جديدة"""
-        self.tabs.setCurrentIndex(3)
+        self._activate_tab(TAB_PAYMENTS_LABEL)
 
         QTimer.singleShot(100, self.payments_tab.open_add_dialog)
 
     def _on_delete_selected(self):
         """معالج اختصار حذف العنصر المحدد"""
-        current_tab = self.tabs.currentWidget()
-        # البحث عن دالة الحذف في التاب الحالي
-        if hasattr(current_tab, "delete_selected_payment"):
-            current_tab.delete_selected_payment()
-        elif hasattr(current_tab, "delete_selected_expense"):
-            current_tab.delete_selected_expense()
-        elif hasattr(current_tab, "delete_selected_client"):
-            current_tab.delete_selected_client()
-        elif hasattr(current_tab, "delete_selected"):
-            current_tab.delete_selected()
-        elif hasattr(current_tab, "on_delete"):
-            current_tab.on_delete()
+        for target in self._keyboard_target_chain():
+            for method_name in (
+                "delete_selected_payment",
+                "delete_selected_expense",
+                "delete_selected_client",
+                "delete_selected_account",
+                "delete_selected_project",
+                "delete_selected_task",
+                "delete_selected",
+                "on_delete",
+            ):
+                if hasattr(target, method_name):
+                    getattr(target, method_name)()
+                    return
+
+    @staticmethod
+    def _visible_item_views(container) -> list[QAbstractItemView]:
+        if container is None:
+            return []
+
+        item_views = [
+            view for view in container.findChildren(QAbstractItemView) if view.isVisible()
+        ]
+        focus_widget = QApplication.focusWidget()
+        item_views.sort(key=lambda view: 0 if view is focus_widget else 1)
+        return item_views
+
+    @staticmethod
+    def _copy_item_view_selection(view: QAbstractItemView) -> bool:
+        selection_model = view.selectionModel()
+        if selection_model is None or not selection_model.hasSelection():
+            return False
+
+        indexes = sorted(
+            selection_model.selectedIndexes(),
+            key=lambda index: (index.row(), index.column()),
+        )
+        if not indexes:
+            return False
+
+        rows: dict[int, dict[int, str]] = {}
+        for index in indexes:
+            rows.setdefault(index.row(), {})[index.column()] = str(index.data() or "")
+
+        line_texts: list[str] = []
+        for row_number in sorted(rows):
+            columns = rows[row_number]
+            line_texts.append("\t".join(columns[column] for column in sorted(columns)))
+
+        QApplication.clipboard().setText("\n".join(line_texts))
+        return True
 
     def _on_select_all(self):
         """معالج اختصار تحديد الكل"""
-        current_tab = self.tabs.currentWidget()
-        # البحث عن الجدول في التاب الحالي
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            focus_widget.selectAll()
+            return
 
-        tables = current_tab.findChildren(QTableWidget)
-        for table in tables:
-            if table.isVisible():
-                table.selectAll()
-                break
+        for target in self._keyboard_target_chain():
+            if hasattr(target, "select_all"):
+                try:
+                    target.select_all()
+                    return
+                except Exception:
+                    pass
+
+            for view in MainWindow._visible_item_views(target):
+                view.selectAll()
+                return
 
     def _on_copy_selected(self):
         """معالج اختصار نسخ المحدد"""
-        current_tab = self.tabs.currentWidget()
+        focus_widget = QApplication.focusWidget()
+        if isinstance(focus_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            focus_widget.copy()
+            return
 
-        tables = current_tab.findChildren(QTableWidget)
-        for table in tables:
-            if table.isVisible() and table.selectedItems():
-                # نسخ البيانات المحددة
-                selected = table.selectedItems()
-                if selected:
-                    text = "\t".join([item.text() for item in selected])
-                    QApplication.clipboard().setText(text)
-                break
+        for target in self._keyboard_target_chain():
+            if hasattr(target, "copy_selected"):
+                try:
+                    if target.copy_selected():
+                        return
+                except Exception:
+                    pass
+
+            for view in MainWindow._visible_item_views(target):
+                if MainWindow._copy_item_view_selection(view):
+                    return
 
     def _on_export_excel(self):
         """معالج اختصار تصدير Excel"""
-        current_tab = self.tabs.currentWidget()
-        if hasattr(current_tab, "export_to_excel"):
-            current_tab.export_to_excel()
-        elif hasattr(current_tab, "on_export"):
-            current_tab.on_export()
+        for target in self._keyboard_target_chain():
+            if hasattr(target, "export_to_excel"):
+                target.export_to_excel()
+                return
+            if hasattr(target, "on_export"):
+                target.on_export()
+                return
 
     def _on_print_current(self):
         """معالج اختصار الطباعة"""
@@ -1516,6 +2197,7 @@ class MainWindow(QMainWindow):
                     return
 
         current_tab = self.tabs.currentWidget()
+        current_tab = self._ensure_current_tab_widget() or current_tab
         for method_name in ["print_invoice", "print_data", "on_print"]:
             if hasattr(current_tab, method_name):
                 getattr(current_tab, method_name)()
@@ -1545,7 +2227,7 @@ class MainWindow(QMainWindow):
                     getattr(active_modal, method_name)()
                     return
 
-        current_tab = self.tabs.currentWidget()
+        current_tab = self._ensure_current_tab_widget()
         for method_name in ["save_data", "on_save", "save_settings"]:
             if hasattr(current_tab, method_name):
                 getattr(current_tab, method_name)()
@@ -1574,6 +2256,14 @@ class MainWindow(QMainWindow):
         }
 
         # إخفاء التابات غير المسموحة (باستخدام النظام الجديد)
+        global PermissionManager, UserRole
+        if PermissionManager is None or UserRole is None:
+            from core.auth_models import PermissionManager as _PermissionManager
+            from core.auth_models import UserRole as _UserRole
+
+            PermissionManager = _PermissionManager
+            UserRole = _UserRole
+
         tabs_to_hide = []
         for tab_name, tab_index in tab_permissions.items():
             if not PermissionManager.can_access_tab(self.current_user, tab_name):
@@ -1733,9 +2423,9 @@ class MainWindow(QMainWindow):
                 "invoices": "💰 الدفعات",  # Invoices map to payments tab
                 "payments": "💰 الدفعات",
                 "expenses": "💳 المصروفات",
-                "accounting": "📊 المحاسبة",
-                "accounts": "📊 المحاسبة",
-                "journal_entries": "📊 المحاسبة",
+                "accounting": ACCOUNTING_TAB_LABEL,
+                "accounts": ACCOUNTING_TAB_LABEL,
+                "journal_entries": ACCOUNTING_TAB_LABEL,
                 "services": "🛠️ الخدمات والباقات",
                 "tasks": "📋 المهام",
                 "currencies": "🔧 الإعدادات",
@@ -1870,6 +2560,10 @@ class MainWindow(QMainWindow):
         """
         try:
             now = time.monotonic()
+            if self._closing_in_progress:
+                event.accept()
+                return
+
             if (now - self._last_close_event_log_ts) > 8.0:
                 self._last_close_event_log_ts = now
                 safe_print(
@@ -1877,90 +2571,23 @@ class MainWindow(QMainWindow):
                 )
 
             if not self._allow_close:
-                if (now - self._last_close_request_ts) > 0.35:
-                    self._last_close_request_ts = now
-                    confirmed = self._confirm_exit(
-                        title="تأكيد الإغلاق",
-                        message="هل تريد إغلاق البرنامج الآن؟\n\nسيتم إيقاف المزامنة والخدمات بشكل آمن.",
-                    )
-                    if confirmed:
-                        self._allow_close = True
-                        # main.py disables quit-on-last-window-close; request quit explicitly.
-                        app = QApplication.instance()
-                        if app is not None:
-                            QTimer.singleShot(0, app.quit)
-                    else:
-                        event.ignore()
-                        return
-                else:
+                if self._close_confirmation_pending or self._exit_confirmation_open:
                     event.ignore()
                     return
+                if (now - self._last_close_request_ts) <= 0.35:
+                    event.ignore()
+                    return
+                self._last_close_request_ts = now
+                self._close_confirmation_pending = True
+                event.ignore()
+                QTimer.singleShot(0, self._handle_deferred_close_confirmation)
+                return
 
-            safe_print("INFO: [MainWindow] بدء عملية الإغلاق الآمن...")
-
-            # 1. إيقاف مؤقت فحص المشاريع
-            if hasattr(self, "project_check_timer"):
-                try:
-                    self.project_check_timer.stop()
-                    safe_print("✅ تم إيقاف مؤقت فحص المشاريع")
-                except RuntimeError:
-                    pass  # Timer تم حذفه بالفعل
-
-            # 1.1 إيقاف أي تحديثات مؤجلة للشاشات
-            try:
-                for _tab_name, timer in list(self._deferred_refresh_timers.items()):
-                    if timer:
-                        timer.stop()
-                        timer.deleteLater()
-                self._deferred_refresh_timers.clear()
-            except Exception:
-                pass
-
-            # 2. إيقاف خدمة التحديث التلقائي
-            try:
-                auto_update = get_auto_update_service()
-                if auto_update:
-                    auto_update.stop()
-                    safe_print("✅ تم إيقاف خدمة التحديث التلقائي")
-            except Exception as e:
-                safe_print(f"تحذير: فشل إيقاف خدمة التحديث: {e}")
-
-            # 3. إيقاف خدمة المزامنة
-            if hasattr(self, "sync_manager") and self.sync_manager:
-                try:
-                    self.sync_manager.stop()
-                    safe_print("✅ تم إيقاف خدمة المزامنة")
-                except Exception as e:
-                    safe_print(f"تحذير: فشل إيقاف المزامنة: {e}")
-
-            # 4. إيقاف نظام المزامنة الفورية
-            try:
-                shutdown_realtime_sync()
-                safe_print("✅ تم إيقاف المزامنة الفورية")
-            except Exception as e:
-                safe_print(f"تحذير: فشل إيقاف المزامنة الفورية: {e}")
-
-            # 5. إيقاف نظام الإشعارات
-            try:
-                NotificationManager.shutdown()
-                safe_print("✅ تم إيقاف نظام الإشعارات")
-            except Exception as e:
-                safe_print(f"تحذير: فشل إيقاف الإشعارات: {e}")
-
-            # 6. إغلاق قاعدة البيانات بشكل آمن
-            if hasattr(self, "accounting_service") and hasattr(self.accounting_service, "repo"):
-                try:
-                    self.accounting_service.repo.close()
-                    safe_print("✅ تم إغلاق قاعدة البيانات")
-                except Exception as e:
-                    safe_print(f"تحذير: فشل إغلاق قاعدة البيانات: {e}")
-
-            # 7. تنظيف الذاكرة
-            gc.collect()
-            safe_print("✅ تم تنظيف الذاكرة")
-
-            safe_print("INFO: [MainWindow] اكتملت عملية الإغلاق الآمن بنجاح")
+            self._closing_in_progress = True
+            self._stop_close_related_ui_timers()
+            safe_print("INFO: [MainWindow] تم تفويض الإغلاق الآمن إلى التطبيق الرئيسي")
             event.accept()
+            self._request_application_quit()
 
         except Exception as e:
             safe_print(f"ERROR: خطأ أثناء الإغلاق: {e}")

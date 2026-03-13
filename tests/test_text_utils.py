@@ -13,3 +13,8 @@ def test_normalize_user_text_fixes_common_phrase():
 
 def test_normalize_user_text_trims_and_collapses_spaces():
     assert normalize_user_text("  مرحبا   بك  ") == "مرحبا بك"
+
+
+def test_normalize_user_text_keeps_numeric_references_intact():
+    assert normalize_user_text("111001") == "111001"
+    assert normalize_user_text("0001222333") == "0001222333"

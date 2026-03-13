@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-نافذة كشف الحساب - عرض جميع الحركات المحاسبية لحساب معين
+نافذة حركة الخزنة - عرض الوارد والصادر والرصيد لخزنة تشغيلية.
 """
 
 from datetime import datetime
@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core import schemas
+from core.account_filters import get_cashbox_treasury_type
 from ui.styles import BUTTON_STYLES, COLORS, TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
 # استيراد دالة الطباعة الآمنة
@@ -38,7 +39,7 @@ except ImportError:
 
 class LedgerWindow(QDialog):
     """
-    نافذة كشف الحساب - تعرض جميع الحركات المحاسبية لحساب معين
+    نافذة حركة الخزنة - تعرض جميع الحركات المالية لخزنة تشغيلية
     متجاوبة مع حجم الشاشة
     """
 
@@ -51,7 +52,7 @@ class LedgerWindow(QDialog):
         self._page_size = 100
         self._movements: list = []
 
-        self.setWindowTitle(f"كشف حساب: {account.name} ({account.code})")
+        self.setWindowTitle(f"حركة الخزنة: {account.name}")
 
         # 📱 تجاوب: حجم متجاوب مع الشاشة
         from PyQt6.QtWidgets import QApplication, QSizePolicy
@@ -86,8 +87,8 @@ class LedgerWindow(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(15)
 
-        # === 1. معلومات الحساب ===
-        info_group = QGroupBox("معلومات الحساب")
+        # === 1. معلومات الخزنة ===
+        info_group = QGroupBox("معلومات الخزنة")
         info_group.setStyleSheet(
             f"""
             QGroupBox {{
@@ -112,16 +113,15 @@ class LedgerWindow(QDialog):
 
         info_layout = QHBoxLayout()
 
-        # الكود
-        code_label = QLabel(f"الكود: {self.account.code}")
+        # المرجع الداخلي
+        code_label = QLabel(f"المرجع الداخلي: {self.account.code}")
         code_label.setStyleSheet(
             f"font-size: 14px; color: {COLORS['text_primary']}; font-weight: bold;"
         )
         info_layout.addWidget(code_label)
 
-        # النوع
-        type_text = self.account.type.value if self.account.type else "N/A"
-        type_label = QLabel(f"النوع: {type_text}")
+        # الفئة
+        type_label = QLabel(f"الفئة: {self._describe_cashbox()}")
         type_label.setStyleSheet(f"font-size: 14px; color: {COLORS['info']};")
         info_layout.addWidget(type_label)
 
@@ -210,7 +210,7 @@ class LedgerWindow(QDialog):
         layout.addWidget(filter_group)
 
         # === 3. جدول الحركات ===
-        movements_group = QGroupBox("الحركات المحاسبية")
+        movements_group = QGroupBox("حركة الخزنة")
         movements_group.setStyleSheet(
             f"""
             QGroupBox {{
@@ -234,7 +234,7 @@ class LedgerWindow(QDialog):
         self.movements_table = QTableWidget()
         self.movements_table.setColumnCount(6)
         self.movements_table.setHorizontalHeaderLabels(
-            ["التاريخ", "الوصف", "المرجع", "مدين", "دائن", "الرصيد"]
+            ["التاريخ", "الوصف", "المرجع", "الوارد", "الصادر", "الرصيد"]
         )
 
         # ستايل الجدول
@@ -256,14 +256,14 @@ class LedgerWindow(QDialog):
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # التاريخ
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # الوصف
             header.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)  # المرجع
-            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # مدين
-            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # دائن
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)  # الوارد
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)  # الصادر
             header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)  # الرصيد
 
             header.resizeSection(0, 120)  # التاريخ
             header.resizeSection(2, 150)  # المرجع
-            header.resizeSection(3, 120)  # مدين
-            header.resizeSection(4, 120)  # دائن
+            header.resizeSection(3, 120)  # الوارد
+            header.resizeSection(4, 120)  # الصادر
             header.resizeSection(5, 120)  # الرصيد
 
         movements_layout.addWidget(self.movements_table)
@@ -303,13 +303,13 @@ class LedgerWindow(QDialog):
         # === 4. الملخص ===
         summary_layout = QHBoxLayout()
 
-        self.total_debit_label = QLabel("إجمالي المدين: 0.00 جنيه")
+        self.total_debit_label = QLabel("إجمالي الوارد: 0.00 جنيه")
         self.total_debit_label.setStyleSheet(
             f"font-size: 14px; color: {COLORS['success']}; font-weight: bold;"
         )
         summary_layout.addWidget(self.total_debit_label)
 
-        self.total_credit_label = QLabel("إجمالي الدائن: 0.00 جنيه")
+        self.total_credit_label = QLabel("إجمالي الصادر: 0.00 جنيه")
         self.total_credit_label.setStyleSheet(
             f"font-size: 14px; color: {COLORS['danger']}; font-weight: bold;"
         )
@@ -338,7 +338,7 @@ class LedgerWindow(QDialog):
         export_btn.clicked.connect(self.export_to_excel)
         buttons_layout.addWidget(export_btn)
 
-        print_btn = QPushButton("🖨️ طباعة")
+        print_btn = QPushButton("🖨️ طباعة الحركة")
         print_btn.setStyleSheet(BUTTON_STYLES["info"])
         print_btn.clicked.connect(self.print_ledger)
         buttons_layout.addWidget(print_btn)
@@ -355,13 +355,13 @@ class LedgerWindow(QDialog):
         self.setLayout(layout)
 
     def load_ledger_data(self):
-        """⚡ تحميل بيانات كشف الحساب في الخلفية لمنع التجميد"""
-        safe_print(f"INFO: [LedgerWindow] جاري تحميل كشف حساب: {self.account.name}")
+        """⚡ تحميل بيانات حركة الخزنة في الخلفية لمنع التجميد"""
+        safe_print(f"INFO: [LedgerWindow] جاري تحميل حركة خزنة: {self.account.name}")
 
         # عرض رسالة تحميل
         self.movements_table.setRowCount(0)
-        self.total_debit_label.setText("إجمالي المدين: ⏳ جاري التحميل...")
-        self.total_credit_label.setText("إجمالي الدائن: ⏳ جاري التحميل...")
+        self.total_debit_label.setText("إجمالي الوارد: ⏳ جاري التحميل...")
+        self.total_credit_label.setText("إجمالي الصادر: ⏳ جاري التحميل...")
         self.net_movement_label.setText("صافي الحركة: ⏳ جاري التحميل...")
         self.opening_balance_label.setText("الرصيد الافتتاحي: ⏳ جاري التحميل...")
 
@@ -373,7 +373,7 @@ class LedgerWindow(QDialog):
         account_code = self.account.code
 
         def fetch_ledger_data():
-            """جلب بيانات كشف الحساب في thread منفصل"""
+            """جلب بيانات حركة الخزنة في thread منفصل"""
             try:
                 # تحويل إلى datetime
                 start_datetime = datetime.combine(start_date, datetime.min.time())
@@ -392,7 +392,7 @@ class LedgerWindow(QDialog):
                 }
 
             except Exception as e:
-                safe_print(f"ERROR: [LedgerWindow] فشل تحميل كشف الحساب: {e}")
+                safe_print(f"ERROR: [LedgerWindow] فشل تحميل حركة الخزنة: {e}")
                 import traceback
 
                 traceback.print_exc()
@@ -402,7 +402,7 @@ class LedgerWindow(QDialog):
             """تحديث الواجهة بالبيانات"""
             try:
                 if data.get("error"):
-                    QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{data['error']}")
+                    QMessageBox.critical(self, "خطأ", f"فشل تحميل حركة الخزنة:\n{data['error']}")
                     return
 
                 movements = data["movements"]
@@ -416,8 +416,8 @@ class LedgerWindow(QDialog):
                 self._render_current_page()
 
                 # تحديث الملخص
-                self.total_debit_label.setText(f"إجمالي المدين: {total_debit:,.2f} جنيه")
-                self.total_credit_label.setText(f"إجمالي الدائن: {total_credit:,.2f} جنيه")
+                self.total_debit_label.setText(f"إجمالي الوارد: {total_debit:,.2f} جنيه")
+                self.total_credit_label.setText(f"إجمالي الصادر: {total_credit:,.2f} جنيه")
                 self.net_movement_label.setText(f"صافي الحركة: {net_movement:,.2f} جنيه")
                 self.opening_balance_label.setText(f"الرصيد الافتتاحي: {opening_balance:,.2f} جنيه")
 
@@ -431,7 +431,7 @@ class LedgerWindow(QDialog):
 
         def on_error(error_msg):
             safe_print(f"ERROR: [LedgerWindow] {error_msg}")
-            QMessageBox.critical(self, "خطأ", f"فشل تحميل كشف الحساب:\n{error_msg}")
+            QMessageBox.critical(self, "خطأ", f"فشل تحميل حركة الخزنة:\n{error_msg}")
 
         # ⚡ تحميل في الخلفية
         data_loader = get_data_loader()
@@ -542,7 +542,7 @@ class LedgerWindow(QDialog):
         self.load_ledger_data()
 
     def export_to_excel(self):
-        """تصدير كشف الحساب إلى CSV"""
+        """تصدير حركة الخزنة إلى CSV"""
         try:
             import csv
 
@@ -550,10 +550,10 @@ class LedgerWindow(QDialog):
 
             # اختيار مكان الحفظ
             default_filename = (
-                f"كشف_حساب_{self.account.code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                f"حركة_خزنة_{self.account.code}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
             )
             file_path, _ = QFileDialog.getSaveFileName(
-                self, "حفظ كشف الحساب", default_filename, "CSV Files (*.csv);;All Files (*)"
+                self, "حفظ حركة الخزنة", default_filename, "CSV Files (*.csv);;All Files (*)"
             )
 
             if not file_path:
@@ -567,10 +567,10 @@ class LedgerWindow(QDialog):
             with open(file_path, "w", newline="", encoding="utf-8-sig") as file:
                 writer = csv.writer(file)
 
-                # كتابة معلومات الحساب
-                writer.writerow(["كشف حساب"])
-                writer.writerow(["الحساب:", self.account.name])
-                writer.writerow(["الكود:", self.account.code])
+                # كتابة معلومات الخزنة
+                writer.writerow(["حركة خزنة"])
+                writer.writerow(["الخزنة:", self.account.name])
+                writer.writerow(["المرجع الداخلي:", self.account.code])
                 writer.writerow(["الرصيد الحالي:", f"{self.account.balance:,.2f} جنيه"])
                 writer.writerow(
                     [
@@ -602,7 +602,7 @@ class LedgerWindow(QDialog):
                 writer.writerow([self.net_movement_label.text()])
 
             QMessageBox.information(
-                self, "✅ تم التصدير", f"تم تصدير كشف الحساب بنجاح!\n\n📄 {file_path}"
+                self, "✅ تم التصدير", f"تم تصدير حركة الخزنة بنجاح!\n\n📄 {file_path}"
             )
 
         except Exception as e:
@@ -610,10 +610,10 @@ class LedgerWindow(QDialog):
             import traceback
 
             traceback.print_exc()
-            QMessageBox.critical(self, "خطأ", f"فشل تصدير كشف الحساب:\n{str(e)}")
+            QMessageBox.critical(self, "خطأ", f"فشل تصدير حركة الخزنة:\n{str(e)}")
 
     def print_ledger(self):
-        """طباعة كشف الحساب"""
+        """طباعة حركة الخزنة"""
         try:
             from PyQt6.QtCore import QRect, Qt
             from PyQt6.QtGui import QPageLayout, QPainter
@@ -648,15 +648,15 @@ class LedgerWindow(QDialog):
                 # العنوان
                 painter.setFont(title_font)
                 painter.drawText(
-                    QRect(margin, y, page_width, 50), Qt.AlignmentFlag.AlignCenter, "كشف حساب"
+                    QRect(margin, y, page_width, 50), Qt.AlignmentFlag.AlignCenter, "حركة الخزنة"
                 )
                 y += 60
 
-                # معلومات الحساب
+                # معلومات الخزنة
                 painter.setFont(header_font)
-                painter.drawText(margin, y, f"الحساب: {self.account.name}")
+                painter.drawText(margin, y, f"الخزنة: {self.account.name}")
                 y += 30
-                painter.drawText(margin, y, f"الكود: {self.account.code}")
+                painter.drawText(margin, y, f"المرجع الداخلي: {self.account.code}")
                 y += 30
                 painter.drawText(margin, y, f"الرصيد الحالي: {self.account.balance:,.2f} جنيه")
                 y += 30
@@ -675,7 +675,7 @@ class LedgerWindow(QDialog):
                 painter.setFont(header_font)
                 col_widths = [150, 300, 200, 150, 150, 150]
                 x = margin
-                headers = ["التاريخ", "الوصف", "المرجع", "مدين", "دائن", "الرصيد"]
+                headers = ["التاريخ", "الوصف", "المرجع", "الوارد", "الصادر", "الرصيد"]
                 for i, header in enumerate(headers):
                     painter.drawText(x, y, header)
                     x += col_widths[i]
@@ -720,7 +720,7 @@ class LedgerWindow(QDialog):
                 painter.end()
 
                 QMessageBox.information(
-                    self, "✅ تمت الطباعة", "تم إرسال كشف الحساب إلى الطابعة بنجاح!"
+                    self, "✅ تمت الطباعة", "تم إرسال حركة الخزنة إلى الطابعة بنجاح!"
                 )
 
             except Exception as e:
@@ -732,4 +732,11 @@ class LedgerWindow(QDialog):
             import traceback
 
             traceback.print_exc()
-            QMessageBox.critical(self, "خطأ", f"فشل طباعة كشف الحساب:\n{str(e)}")
+            QMessageBox.critical(self, "خطأ", f"فشل طباعة حركة الخزنة:\n{str(e)}")
+
+    def _describe_cashbox(self) -> str:
+        """إرجاع وصف تشغيلي مبسط للخزنة بدل النوع المحاسبي الداخلي."""
+        treasury_type = get_cashbox_treasury_type(self.account).strip()
+        if treasury_type:
+            return treasury_type
+        return "خزنة تشغيلية"

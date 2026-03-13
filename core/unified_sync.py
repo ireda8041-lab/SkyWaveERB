@@ -251,6 +251,84 @@ class UnifiedSyncManagerV3(QObject):
             parsed = maximum
         return parsed
 
+    @staticmethod
+    def _mongo_id_variants(mongo_id: Any) -> list[Any]:
+        """Builds all safe `_id` variants for legacy string/ObjectId compatibility."""
+        raw = str(mongo_id or "").strip()
+        if not raw:
+            return []
+
+        variants: list[Any] = [raw]
+        try:
+            from bson import ObjectId
+
+            if len(raw) == 24:
+                object_id = ObjectId(raw)
+                if object_id not in variants:
+                    variants.append(object_id)
+        except Exception:
+            pass
+        return variants
+
+    def _mongo_id_query(self, mongo_id: Any) -> dict[str, Any] | None:
+        variants = self._mongo_id_variants(mongo_id)
+        if not variants:
+            return None
+        if len(variants) == 1:
+            return {"_id": variants[0]}
+        return {"$or": [{"_id": variant} for variant in variants]}
+
+    def _push_record_to_remote(
+        self,
+        collection,
+        *,
+        mongo_id: Any,
+        clean_record: dict[str, Any],
+        unique_field: str | None,
+        unique_value: Any,
+    ) -> str | None:
+        """
+        Update existing remote rows without creating a duplicate when the same logical
+        `_id` exists once as a string and once as an ObjectId.
+        """
+        query = self._mongo_id_query(mongo_id)
+        if query is not None:
+            result = collection.update_one(query, {"$set": clean_record}, upsert=False)
+            if getattr(result, "matched_count", 0) or getattr(result, "modified_count", 0):
+                return str(mongo_id or "").strip() or None
+
+        if unique_field and unique_value not in (None, ""):
+            result = collection.update_one(
+                {unique_field: unique_value},
+                {"$set": clean_record},
+                upsert=False,
+            )
+            if getattr(result, "matched_count", 0) or getattr(result, "modified_count", 0):
+                resolved_id = str(mongo_id or "").strip()
+                if hasattr(collection, "find_one"):
+                    try:
+                        found = collection.find_one({unique_field: unique_value}, {"_id": 1})
+                    except TypeError:
+                        found = collection.find_one({unique_field: unique_value})
+                    if isinstance(found, dict) and found.get("_id") is not None:
+                        resolved_id = str(found.get("_id"))
+                return resolved_id or None
+
+        insert_payload = dict(clean_record)
+        preferred_id = None
+        for variant in self._mongo_id_variants(mongo_id):
+            if not isinstance(variant, str):
+                preferred_id = variant
+                break
+        if preferred_id is None:
+            preferred_id = str(mongo_id or "").strip() or None
+        if preferred_id is not None:
+            insert_payload["_id"] = preferred_id
+
+        result = collection.insert_one(insert_payload)
+        inserted_id = getattr(result, "inserted_id", None)
+        return str(inserted_id) if inserted_id is not None else None
+
     def _load_sync_config(self):
         """Load sync intervals from sync_config.json if available."""
         try:
@@ -2925,30 +3003,17 @@ class UnifiedSyncManagerV3(QObject):
 
                                 if mongo_id:
                                     try:
-                                        try:
-                                            from bson import ObjectId
-
-                                            result = collection.update_one(
-                                                {"_id": ObjectId(mongo_id)},
-                                                {
-                                                    "$set": {
-                                                        "is_deleted": True,
-                                                        "sync_status": "deleted",
-                                                        "last_modified": now_dt,
-                                                    }
-                                                },
-                                            )
-                                        except Exception:
-                                            result = collection.update_one(
-                                                {"_id": mongo_id},
-                                                {
-                                                    "$set": {
-                                                        "is_deleted": True,
-                                                        "sync_status": "deleted",
-                                                        "last_modified": now_dt,
-                                                    }
-                                                },
-                                            )
+                                        query = self._mongo_id_query(mongo_id) or {"_id": mongo_id}
+                                        result = collection.update_one(
+                                            query,
+                                            {
+                                                "$set": {
+                                                    "is_deleted": True,
+                                                    "sync_status": "deleted",
+                                                    "last_modified": now_dt,
+                                                }
+                                            },
+                                        )
                                         remote_matched = bool(
                                             getattr(result, "matched_count", 0)
                                             or getattr(result, "modified_count", 0)
@@ -3015,23 +3080,29 @@ class UnifiedSyncManagerV3(QObject):
                                     clean_record["device_id"] = self._device_id
 
                                 if mongo_id:
-                                    try:
-                                        from bson import ObjectId
-
-                                        collection.update_one(
-                                            {"_id": ObjectId(mongo_id)},
-                                            {"$set": clean_record},
-                                            upsert=True,
-                                        )
-                                    except Exception:
-                                        collection.update_one(
-                                            {"_id": mongo_id},
-                                            {"$set": clean_record},
-                                            upsert=True,
+                                    resolved_mongo_id = self._push_record_to_remote(
+                                        collection,
+                                        mongo_id=mongo_id,
+                                        clean_record=clean_record,
+                                        unique_field=unique_field,
+                                        unique_value=unique_value,
+                                    )
+                                    if (
+                                        resolved_mongo_id
+                                        and str(mongo_id or "").strip() != resolved_mongo_id
+                                    ):
+                                        set_mongo_id_sql = f"UPDATE {table_ref} SET _mongo_id = ? WHERE id = ?"  # nosec B608
+                                        cursor.execute(
+                                            set_mongo_id_sql, (resolved_mongo_id, local_id)
                                         )
                                 else:
-                                    result = collection.insert_one(clean_record)
-                                    mongo_id = str(result.inserted_id)
+                                    mongo_id = self._push_record_to_remote(
+                                        collection,
+                                        mongo_id=None,
+                                        clean_record=clean_record,
+                                        unique_field=unique_field,
+                                        unique_value=unique_value,
+                                    )
                                     set_mongo_id_sql = f"UPDATE {table_ref} SET _mongo_id = ? WHERE id = ?"  # nosec B608
                                     cursor.execute(set_mongo_id_sql, (mongo_id, local_id))
 
@@ -3071,6 +3142,41 @@ class UnifiedSyncManagerV3(QObject):
             results["error"] = str(e)
 
         return results
+
+    def _prune_missing_remote_notifications(
+        self, cursor, table_ref: str, remote_active_ids: set[str]
+    ) -> int:
+        """
+        Delta Sync alone cannot discover hard-deleted notification documents.
+        Use the current remote ids as the source of truth for synced local rows.
+        """
+        try:
+            cursor.execute(
+                f"""
+                SELECT id, _mongo_id
+                FROM {table_ref}
+                WHERE _mongo_id IS NOT NULL
+                  AND TRIM(_mongo_id) != ''
+                  AND COALESCE(sync_status, '') = 'synced'
+                  AND COALESCE(is_deleted, 0) = 0
+                """
+            )  # nosec B608
+            local_rows = cursor.fetchall() or []
+        except Exception:
+            return 0
+
+        stale_ids = [
+            int(row[0])
+            for row in local_rows
+            if str(row[1] or "").strip() and str(row[1]).strip() not in remote_active_ids
+        ]
+        if not stale_ids:
+            return 0
+
+        placeholders = ", ".join(["?" for _ in stale_ids])
+        delete_sql = f"DELETE FROM {table_ref} WHERE id IN ({placeholders})"  # nosec B608
+        cursor.execute(delete_sql, stale_ids)
+        return int(cursor.rowcount or 0)
 
     def pull_remote_changes(self) -> dict[str, Any]:
         """
@@ -3136,9 +3242,6 @@ class UnifiedSyncManagerV3(QObject):
                             # توافق مع Fakes قديمة في الاختبارات
                             remote_records = list(collection.find(query))
 
-                    if not remote_records:
-                        continue
-
                     # التحقق من وجود الجدول محلياً
                     if not self._sqlite_table_exists(cursor, table):
                         continue
@@ -3146,6 +3249,29 @@ class UnifiedSyncManagerV3(QObject):
                     # الحصول على أعمدة الجدول
                     table_columns = self._sqlite_table_columns(cursor, table)
                     table_ref = self._sqlite_table_ref(table)
+                    if table == "notifications":
+                        try:
+                            remote_active_records = list(
+                                collection.find(self._merge_query_with_notification_filter({}))
+                            )
+                            remote_active_ids = {
+                                str(item.get("_id"))
+                                for item in remote_active_records
+                                if item.get("_id") is not None
+                            }
+                            deleted_missing_count = self._prune_missing_remote_notifications(
+                                cursor, table_ref, remote_active_ids
+                            )
+                            if deleted_missing_count > 0:
+                                results["deleted"] += deleted_missing_count
+                        except Exception as prune_err:
+                            logger.debug(
+                                "تعذر تنظيف الإشعارات المحلية المحذوفة من السحابة: %s",
+                                prune_err,
+                            )
+
+                    if not remote_records:
+                        continue
 
                     logo_clients = 0
 

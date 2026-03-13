@@ -367,7 +367,7 @@ class ClientEditorDialog(QDialog):
         self.logo_path_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
 
         # زرار اختيار الصورة
-        select_logo_btn = QPushButton("اختيار...")
+        select_logo_btn = QPushButton("📷 اختيار الشعار")
         select_logo_btn.setStyleSheet(
             f"""
             QPushButton {{
@@ -386,7 +386,7 @@ class ClientEditorDialog(QDialog):
         select_logo_btn.clicked.connect(self.select_logo_file)
 
         # زرار حذف الصورة
-        self.delete_logo_btn = QPushButton("🗑️ حذف")
+        self.delete_logo_btn = QPushButton("🗑️ حذف الشعار")
         self.delete_logo_btn.setStyleSheet(
             """
             QPushButton {
@@ -435,15 +435,7 @@ class ClientEditorDialog(QDialog):
                 color: #fbbf24;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #fbbf24;
-                border: 2px solid #f59e0b;
-                border-radius: 4px;
+                spacing: 6px;
             }
         """
         )

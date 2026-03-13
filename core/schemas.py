@@ -6,6 +6,25 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .project_currency import normalize_currency_code, normalize_exchange_rate
+
+_DASHBOARD_MODELS = None
+
+
+def _get_dashboard_models():
+    global _DASHBOARD_MODELS
+    if _DASHBOARD_MODELS is None:
+        from . import dashboard_models as dashboard_models_module
+
+        _DASHBOARD_MODELS = dashboard_models_module
+    return _DASHBOARD_MODELS
+
+
+def __getattr__(name: str):
+    if name in {"CashFlowEntry", "DashboardSettings", "KPIData"}:
+        return getattr(_get_dashboard_models(), name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 class ClientStatus(str, Enum):
     ACTIVE = "نشط"
@@ -262,7 +281,8 @@ class Project(BaseSchema):
     tax_amount: float = 0.0
     total_amount: float = 0.0
 
-    currency: CurrencyCode = CurrencyCode.EGP
+    currency: CurrencyCode | str = CurrencyCode.EGP
+    exchange_rate_snapshot: float = 1.0
     project_notes: str | None = None
     invoice_number: str | None = None  # ⚡ رقم الفاتورة الثابت
 
@@ -299,6 +319,19 @@ class Project(BaseSchema):
         if v is None:
             return []
         return v
+
+    @model_validator(mode="after")
+    def _normalize_project_currency_snapshot(self):
+        normalized_currency = normalize_currency_code(getattr(self, "currency", None))
+        try:
+            self.currency = CurrencyCode(normalized_currency)
+        except ValueError:
+            self.currency = normalized_currency
+        self.exchange_rate_snapshot = normalize_exchange_rate(
+            getattr(self, "exchange_rate_snapshot", 1.0),
+            normalized_currency,
+        )
+        return self
 
 
 class Expense(BaseSchema):
@@ -520,6 +553,11 @@ class Notification(BaseSchema):
     related_entity_id: str | None = None  # معرف الكيان المرتبط
     action_url: str | None = None  # رابط الإجراء (اختياري)
     expires_at: datetime | None = None  # تاريخ انتهاء الصلاحية (للإشعارات المؤقتة)
+    action: str | None = None  # العملية المرتبطة (created/updated/deleted...)
+    operation_text: str | None = None  # النص المختصر للعرض في "آخر العمليات"
+    details: str | None = None  # تفاصيل إضافية للعملية
+    amount: float | None = None  # القيمة المالية المرتبطة إن وجدت
+    is_activity: bool = False  # هل هذا الإشعار يمثل عملية موثقة لآخر العمليات
 
 
 # ==================== نظام المهام (Tasks) ====================
@@ -556,79 +594,6 @@ class TaskCategory(str, Enum):
 
 
 # ==================== نماذج لوحة التحكم المحسّنة (Enhanced Dashboard) ====================
-
-
-class KPIData(BaseModel):
-    """
-    نموذج بيانات مؤشر الأداء الرئيسي (KPI)
-    يستخدم لعرض KPIs مع مؤشرات الاتجاه في لوحة التحكم
-    Requirements: 1.4, 1.5, 1.6, 1.7
-    """
-
-    name: str  # اسم المؤشر (مثل "إجمالي الإيرادات")
-    current_value: float  # القيمة الحالية
-    previous_value: float | None = None  # القيمة السابقة للمقارنة
-
-    @property
-    def change_percentage(self) -> float:
-        """
-        نسبة التغير بين القيمة الحالية والسابقة
-        Returns: النسبة المئوية للتغير
-        Validates: Requirements 1.4
-        """
-        if self.previous_value is None or self.previous_value == 0:
-            return 0.0
-        return ((self.current_value - self.previous_value) / self.previous_value) * 100
-
-    @property
-    def trend_direction(self) -> str:
-        """
-        اتجاه التغير: up (أخضر), down (أحمر), neutral (محايد)
-        Validates: Requirements 1.5, 1.6, 1.7
-        """
-        if self.previous_value is None:
-            return "neutral"
-        if self.current_value > self.previous_value:
-            return "up"
-        elif self.current_value < self.previous_value:
-            return "down"
-        return "neutral"
-
-
-class CashFlowEntry(BaseModel):
-    """
-    نموذج إدخال التدفق النقدي
-    يستخدم لتمثيل التدفقات النقدية الداخلة والخارجة في فترة زمنية
-    Requirements: 2.5
-    """
-
-    date: datetime  # تاريخ الإدخال
-    inflow: float = 0.0  # التدفق الداخل (الدفعات المحصلة)
-    outflow: float = 0.0  # التدفق الخارج (المصروفات)
-
-    @property
-    def net_flow(self) -> float:
-        """
-        صافي التدفق النقدي = التدفق الداخل - التدفق الخارج
-        Validates: Requirements 2.5
-        """
-        return self.inflow - self.outflow
-
-
-class DashboardSettings(BaseModel):
-    """
-    إعدادات لوحة التحكم
-    يستخدم لحفظ تفضيلات المستخدم للوحة التحكم
-    Requirements: 4.4
-    """
-
-    auto_refresh_enabled: bool = True  # هل التحديث التلقائي مفعل
-    auto_refresh_interval: int = 30  # فترة التحديث بالثواني
-    selected_period: str = (
-        "this_month"  # الفترة المحددة (today, this_week, this_month, this_year, custom)
-    )
-    custom_start_date: datetime | None = None  # تاريخ البداية للفترة المخصصة
-    custom_end_date: datetime | None = None  # تاريخ النهاية للفترة المخصصة
 
 
 class Task(BaseSchema):

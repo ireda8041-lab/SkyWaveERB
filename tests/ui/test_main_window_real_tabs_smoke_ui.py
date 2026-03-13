@@ -23,11 +23,6 @@ class _StubService:
 def test_main_window_instantiates_real_tabs_without_loading(monkeypatch, qapp):
     from ui import main_window as mw
 
-    class _StubTemplateService:
-        def __init__(self, repository, settings_service):
-            self.repository = repository
-            self.settings_service = settings_service
-
     class _StubStatusBarWidget(QWidget):
         logout_requested = pyqtSignal()
         full_sync_requested = pyqtSignal()
@@ -41,7 +36,6 @@ def test_main_window_instantiates_real_tabs_without_loading(monkeypatch, qapp):
         def update_sync_progress(self, progress):
             self._progress = progress
 
-    monkeypatch.setattr(mw, "TemplateService", _StubTemplateService, raising=True)
     monkeypatch.setattr(mw, "StatusBarWidget", _StubStatusBarWidget, raising=True)
 
     monkeypatch.setattr(mw.MainWindow, "setup_title_bar", lambda self: None, raising=True)
@@ -85,4 +79,9 @@ def test_main_window_instantiates_real_tabs_without_loading(monkeypatch, qapp):
     qapp.processEvents()
 
     assert window.tabs.count() >= 7
+    assert window.tabs.widget(0).property("_is_lazy_placeholder") is not True
+
+    accounting_index = window._find_tab_index_by_name(mw.ACCOUNTING_TAB_LABEL)
+    assert accounting_index >= 0
+    assert window.tabs.widget(accounting_index).property("_is_lazy_placeholder") is True
     assert window.tabs.tabText(0) == "🏠 الصفحة الرئيسية"

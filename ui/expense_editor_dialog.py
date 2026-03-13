@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core import schemas
+from core.account_filters import filter_operational_cashboxes
 from services.accounting_service import AccountingService
 from services.expense_service import ExpenseService
 from services.project_service import ProjectService
@@ -102,7 +103,7 @@ class ExpenseEditorDialog(QDialog):
     def load_data(self):
         """جلب الحسابات والمشاريع والفئات من قاعدة البيانات"""
         all_accounts = self.accounting_service.repo.get_all_accounts()
-        self.cash_accounts = [acc for acc in all_accounts if acc.code and acc.code.startswith("11")]
+        self.cash_accounts = filter_operational_cashboxes(all_accounts)
         self.projects_list = self.project_service.get_all_projects()
 
         # جلب فئات المصروفات من المصروفات السابقة
@@ -240,6 +241,7 @@ class ExpenseEditorDialog(QDialog):
         # SmartFilterComboBox مع فلترة ذكية
         self.account_combo = SmartFilterComboBox()
         self.account_combo.setStyleSheet(field_style)
+        self.account_combo.addItem("-- اختر حساب الدفع --", userData=None)
         for acc in self.cash_accounts:
             self.account_combo.addItem(acc.name, userData=acc.code)
         self.account_combo.lineEdit().setPlaceholderText("اكتب للبحث...")

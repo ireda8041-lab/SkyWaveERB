@@ -9,8 +9,9 @@ import os
 import shutil
 import sys
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QDate, Qt, pyqtSignal
+from PyQt6.QtCore import QDate, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
     QAbstractItemView,
@@ -31,32 +32,12 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from core.dashboard_models import DashboardSettings, KPIData
+from core.signals import app_signals
 from ui.styles import TABLE_STYLE_DARK, create_centered_item, get_cairo_font
 
-# ⚡ استيراد آمن لمكتبات الرسم البياني
-try:
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    FigureCanvas = None
-    Figure = None
-    MATPLOTLIB_AVAILABLE = False
-
-# ⚡ استيراد آمن لمكتبات معالجة النص العربي
-try:
-    import arabic_reshaper
-    from bidi.algorithm import get_display
-
-    ARABIC_RESHAPER_AVAILABLE = True
-except ImportError:
-    arabic_reshaper = None
-    get_display = None
-    ARABIC_RESHAPER_AVAILABLE = False
-
-from core.schemas import DashboardSettings, KPIData
-from services.accounting_service import AccountingService
+if TYPE_CHECKING:
+    from services.accounting_service import AccountingService
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -70,11 +51,45 @@ except ImportError:
             pass
 
 
+DASHBOARD_ENABLE_SOFT_SHADOWS = (
+    os.environ.get("SKYWAVE_ENABLE_DASHBOARD_SHADOWS", "").strip() == "1"
+)
+_PLOTTING_BACKEND: tuple[object | None, object | None] | None = None
+_ARABIC_TEXT_SUPPORT: tuple[object | None, object | None] | None = None
+
+
+def _get_plotting_backend() -> tuple[object | None, object | None]:
+    global _PLOTTING_BACKEND
+    if _PLOTTING_BACKEND is None:
+        try:
+            from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as figure_canvas
+            from matplotlib.figure import Figure as figure_class
+
+            _PLOTTING_BACKEND = (figure_canvas, figure_class)
+        except ImportError:
+            _PLOTTING_BACKEND = (None, None)
+    return _PLOTTING_BACKEND
+
+
+def _get_arabic_text_support() -> tuple[object | None, object | None]:
+    global _ARABIC_TEXT_SUPPORT
+    if _ARABIC_TEXT_SUPPORT is None:
+        try:
+            import arabic_reshaper
+            from bidi.algorithm import get_display
+
+            _ARABIC_TEXT_SUPPORT = (arabic_reshaper, get_display)
+        except ImportError:
+            _ARABIC_TEXT_SUPPORT = (None, None)
+    return _ARABIC_TEXT_SUPPORT
+
+
 def fix_text(text: str) -> str:
     """دالة لإصلاح النص العربي في الرسوم البيانية"""
     if not text:
         return ""
-    if not ARABIC_RESHAPER_AVAILABLE:
+    arabic_reshaper, get_display = _get_arabic_text_support()
+    if arabic_reshaper is None or get_display is None:
         return text
     try:
         reshaped_text = arabic_reshaper.reshape(text)
@@ -191,11 +206,12 @@ class StatCard(QFrame):
         layout.addWidget(lbl_icon)
         self.setLayout(layout)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(28)
-        shadow.setOffset(0, 10)
-        shadow.setColor(QColor(2, 12, 27, 120))
-        self.setGraphicsEffect(shadow)
+        if DASHBOARD_ENABLE_SOFT_SHADOWS:
+            shadow = QGraphicsDropShadowEffect(self)
+            shadow.setBlurRadius(28)
+            shadow.setOffset(0, 10)
+            shadow.setColor(QColor(2, 12, 27, 120))
+            self.setGraphicsEffect(shadow)
 
     def set_value(self, value: float):
         """تحديث قيمة الكارت"""
@@ -389,31 +405,56 @@ class EnhancedKPICard(QFrame):
         return self._previous_value
 
 
-# ⚡ إنشاء كلاس أساسي للرسوم البيانية
-if MATPLOTLIB_AVAILABLE and FigureCanvas is not None:
-    _ChartBase = FigureCanvas
-else:
-    _ChartBase = QWidget  # استخدام QWidget كبديل
+class _LazyMatplotlibChart(QWidget):
+    """غلاف QWidget يهيئ matplotlib فقط عند أول رسم فعلي."""
+
+    def __init__(self, parent=None, width: int = 5, height: int = 4, dpi: int = 100):
+        super().__init__(parent)
+        self._chart_width = width
+        self._chart_height = height
+        self._chart_dpi = dpi
+        self.fig = None
+        self.axes = None
+        self._canvas = None
+        self.setMinimumSize(width * 80, height * 80)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(0)
+
+    def _ensure_canvas(self) -> bool:
+        if self._canvas is not None:
+            return True
+
+        figure_canvas_class, figure_class = _get_plotting_backend()
+        if figure_canvas_class is None or figure_class is None:
+            return False
+
+        self.fig = figure_class(
+            figsize=(self._chart_width, self._chart_height),
+            dpi=self._chart_dpi,
+        )
+        self.axes = self.fig.add_subplot(111)
+        self.fig.patch.set_facecolor("#1e293b")
+        self._canvas = figure_canvas_class(self.fig)
+        self._layout.addWidget(self._canvas)
+        return True
+
+    def _draw_canvas(self) -> None:
+        if self.fig is None or self._canvas is None:
+            return
+        self.fig.tight_layout(pad=1.5)
+        self._canvas.draw()
 
 
-class FinancialChart(_ChartBase):
+class FinancialChart(_LazyMatplotlibChart):
     """رسم بياني يدعم العربية بالكامل"""
 
     def __init__(self, parent=None, width: int = 5, height: int = 4, dpi: int = 100):
-        if not MATPLOTLIB_AVAILABLE:
-            super().__init__(parent)
-            self.setMinimumSize(width * 80, height * 80)
-            return
-
-        self.fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = self.fig.add_subplot(111)
-        super().__init__(self.fig)
-        self.setParent(parent)
-        self.fig.patch.set_facecolor("#1e293b")
+        super().__init__(parent, width=width, height=height, dpi=dpi)
 
     def plot_data(self, sales: float, expenses: float, profit: float):
         """رسم البيانات مع دعم العربية"""
-        if not MATPLOTLIB_AVAILABLE:
+        if not self._ensure_canvas():
             return
 
         self.axes.clear()
@@ -457,11 +498,10 @@ class FinancialChart(_ChartBase):
                 fontsize=10,
             )
 
-        self.fig.tight_layout(pad=1.5)
-        self.draw()
+        self._draw_canvas()
 
 
-class CashFlowChart(_ChartBase):
+class CashFlowChart(_LazyMatplotlibChart):
     """
     مخطط التدفق النقدي
     يعرض التدفقات الداخلة (أخضر) والخارجة (أحمر) وصافي التدفق عبر الزمن
@@ -470,16 +510,7 @@ class CashFlowChart(_ChartBase):
     """
 
     def __init__(self, parent: QWidget = None, width: int = 6, height: int = 4, dpi: int = 100):
-        if not MATPLOTLIB_AVAILABLE:
-            super().__init__(parent)
-            self.setMinimumSize(width * 80, height * 80)
-            return
-
-        self.fig = Figure(figsize=(width, height), dpi=dpi)
-        self.axes = self.fig.add_subplot(111)
-        super().__init__(self.fig)
-        self.setParent(parent)
-        self.fig.patch.set_facecolor("#1e293b")
+        super().__init__(parent, width=width, height=height, dpi=dpi)
 
         # ألوان المخطط
         self.inflow_color = "#10b981"  # أخضر للدفعات الداخلة
@@ -502,6 +533,9 @@ class CashFlowChart(_ChartBase):
 
         Requirements: 2.1, 2.4, 2.5, 2.7
         """
+        if not self._ensure_canvas():
+            return
+
         self.axes.clear()
 
         # تجميع البيانات حسب الفترة
@@ -568,8 +602,7 @@ class CashFlowChart(_ChartBase):
             fontsize=9,
         )
 
-        self.fig.tight_layout(pad=1.5)
-        self.draw()
+        self._draw_canvas()
 
     def _aggregate_by_period(self, data: list[tuple[str, float]], period: str) -> dict[str, float]:
         """
@@ -657,6 +690,8 @@ class CashFlowChart(_ChartBase):
 
     def _draw_empty_chart(self):
         """رسم مخطط فارغ عند عدم وجود بيانات"""
+        if not self._ensure_canvas():
+            return
         self.axes.set_facecolor("#1e293b")
         self.axes.text(
             0.5,
@@ -672,8 +707,7 @@ class CashFlowChart(_ChartBase):
         self.axes.set_yticks([])
         for spine in self.axes.spines.values():
             spine.set_visible(False)
-        self.fig.tight_layout(pad=1.5)
-        self.draw()
+        self._draw_canvas()
 
 
 class PeriodSelector(QFrame):
@@ -724,8 +758,10 @@ class PeriodSelector(QFrame):
                     try:
                         shutil.copy2(legacy, self.settings_file)
                         break
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        safe_print(
+                            f"WARNING: [Dashboard] تعذر نسخ ملف الإعدادات القديم إلى AppData: {exc}"
+                        )
 
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setStyleSheet(
@@ -1053,19 +1089,36 @@ class FlowLayout(QVBoxLayout):
 class DashboardTab(QWidget):
     """لوحة التحكم الرئيسية - تصميم تلقائي متجاوب 100%"""
 
-    def __init__(self, accounting_service: AccountingService, parent=None):
+    def __init__(self, accounting_service: "AccountingService", parent=None):
         super().__init__(parent)
         self.accounting_service = accounting_service
 
         # ⚡ حماية من التحديث المتكرر
         self._last_refresh_time = 0
         self._is_refreshing = False
+        self._is_refreshing_recent_activity = False
         self._min_refresh_interval = 5  # 5 ثواني بين كل تحديث
         self._recent_current_page = 1
         self._recent_page_size = 10
         self._recent_items: list = []
         self._show_recent_activity = True
         self._load_recent_activity_data = True
+        self.chart: FinancialChart | None = None
+        self.chart_placeholder: QLabel | None = None
+        self._last_chart_signature: tuple[float, float, float] | None = None
+        self.bottom_splitter: QSplitter | None = None
+        self.chart_container: QFrame | None = None
+        self.table_container: QFrame | None = None
+        self.recent_hint_lbl: QLabel | None = None
+        self.recent_table: QTableWidget | None = None
+        self.recent_pagination_widget: QWidget | None = None
+        self.recent_prev_button: QPushButton | None = None
+        self.recent_next_button: QPushButton | None = None
+        self.recent_page_size_combo: QComboBox | None = None
+        self.recent_page_info_label: QLabel | None = None
+        self.recent_pagination_size_label: QLabel | None = None
+        self._bottom_section_ready = False
+        self._bottom_section_pending = False
 
         # سياسة التمدد الكامل
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1074,6 +1127,9 @@ class DashboardTab(QWidget):
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self.init_ui()
+        app_signals.safe_connect(
+            app_signals.notifications_changed, self._refresh_recent_activity_from_signal
+        )
 
     @staticmethod
     def _normalize_display_datetime(value: datetime | None) -> datetime | None:
@@ -1112,6 +1168,8 @@ class DashboardTab(QWidget):
 
     @staticmethod
     def _apply_soft_shadow(widget: QWidget, *, blur: int = 34, y_offset: int = 10) -> None:
+        if not DASHBOARD_ENABLE_SOFT_SHADOWS:
+            return
         shadow = QGraphicsDropShadowEffect(widget)
         shadow.setBlurRadius(blur)
         shadow.setOffset(0, y_offset)
@@ -1125,13 +1183,14 @@ class DashboardTab(QWidget):
 
         # === 1. الهيدر الرئيسي ===
         hero_frame = QFrame()
+        self.hero_frame = hero_frame
         hero_frame.setStyleSheet(
             """
             QFrame {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #132742, stop:0.5 #163154, stop:1 #1a365d);
-                border-radius: 24px;
-                border: 1px solid rgba(191, 219, 254, 0.09);
+                    stop:0 #132b49, stop:0.48 #17375a, stop:1 #1d4268);
+                border-radius: 26px;
+                border: 1px solid rgba(191, 219, 254, 0.11);
             }
             QLabel {
                 background: transparent;
@@ -1140,33 +1199,37 @@ class DashboardTab(QWidget):
             }
             QLabel#DashEyebrow {
                 color: #7dd3fc;
-                font-size: 11px;
-                font-weight: 700;
+                font-size: 10px;
+                font-weight: 800;
             }
             QLabel#DashTitle {
-                color: white;
-                font-size: 22px;
+                color: #f8fbff;
+                font-size: 20px;
                 font-weight: 800;
             }
             QLabel#DashSubtitle {
-                color: #b8cae3;
-                font-size: 11px;
+                color: #bfd0e7;
+                font-size: 10px;
             }
             QFrame#DashControlBox {
-                background-color: rgba(5, 18, 38, 0.26);
+                background-color: transparent;
                 border: none;
-                border-radius: 18px;
+                border-radius: 0px;
             }
             """
         )
         self._apply_soft_shadow(hero_frame, blur=38, y_offset=12)
-        hero_frame.setMaximumHeight(96)
+        hero_frame.setMinimumHeight(98)
+        hero_frame.setMaximumHeight(104)
         hero_layout = QHBoxLayout(hero_frame)
-        hero_layout.setContentsMargins(16, 10, 16, 10)
-        hero_layout.setSpacing(12)
+        hero_layout.setContentsMargins(18, 12, 18, 12)
+        hero_layout.setSpacing(14)
 
         title_layout = QVBoxLayout()
-        title_layout.setSpacing(2)
+        title_layout.setSpacing(1)
+
+        self.header_eyebrow = QLabel("لوحة التحكم التنفيذية")
+        self.header_eyebrow.setObjectName("DashEyebrow")
 
         header = QLabel("📊 لوحة القيادة والمؤشرات المالية")
         header.setObjectName("DashTitle")
@@ -1178,54 +1241,70 @@ class DashboardTab(QWidget):
         header_subtitle.setObjectName("DashSubtitle")
         header_subtitle.setWordWrap(False)
 
+        title_layout.addWidget(self.header_eyebrow)
         title_layout.addWidget(header)
         title_layout.addWidget(header_subtitle)
 
         control_box = QFrame()
+        self.control_box = control_box
         control_box.setObjectName("DashControlBox")
+        control_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        control_box.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         control_layout = QHBoxLayout(control_box)
-        control_layout.setContentsMargins(10, 8, 10, 8)
-        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(0, 0, 0, 0)
+        control_layout.setSpacing(10)
 
         self.refresh_btn = QPushButton("🔄 تحديث")
         self.refresh_btn.setStyleSheet(
             """
             QPushButton {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2563eb, stop:1 #4f8dfd);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #2f6eea, stop:1 #4b8cf6);
                 color: white;
-                padding: 9px 16px;
-                font-weight: bold;
-                border-radius: 12px;
-                border: 1px solid rgba(255,255,255,0.09);
+                padding: 0 18px;
+                font-weight: 800;
+                border-radius: 14px;
+                border: 1px solid rgba(191, 219, 254, 0.16);
                 font-size: 12px;
                 font-family: 'Cairo';
-                min-width: 116px;
+                min-width: 110px;
+                min-height: 46px;
             }
             QPushButton:hover {
-                background: #1d4ed8;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3a7af5, stop:1 #5a98ff);
+                border: 1px solid rgba(191, 219, 254, 0.22);
+            }
+            QPushButton:pressed {
+                background: #245fd1;
             }
             QPushButton:disabled {
                 background: #334155;
                 color: #cbd5e1;
+                border: 1px solid rgba(148, 163, 184, 0.10);
             }
         """
         )
+        self.refresh_btn.setFixedHeight(48)
         self.refresh_btn.clicked.connect(self.refresh_data)
 
         self.last_update_lbl = QLabel(self._format_datetime_badge(None, "آخر تحديث"))
         self.last_update_lbl.setStyleSheet(
             """
-            color: #dbeafe;
-            background-color: rgba(148, 163, 184, 0.10);
-            border: 1px solid rgba(148, 163, 184, 0.16);
-            border-radius: 10px;
-            padding: 7px 10px;
+            color: #e2ecff;
+            background-color: rgba(20, 41, 70, 0.74);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            border-radius: 14px;
+            padding: 0 14px;
             font-size: 10px;
             font-weight: 700;
             font-family: 'Cairo';
         """
         )
+        self.last_update_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.last_update_lbl.setFixedHeight(48)
+        self.last_update_lbl.setMinimumWidth(188)
+        self.last_update_lbl.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
         control_layout.addWidget(self.last_update_lbl)
         control_layout.addWidget(self.refresh_btn)
@@ -1264,7 +1343,51 @@ class DashboardTab(QWidget):
 
         main_layout.addWidget(self.cards_container)
 
-        # === 3. القسم السفلي - Splitter للتحكم التلقائي ===
+        # === 3. القسم السفلي - lazy حتى أول ظهور فعلي ===
+        self.bottom_section_host = QWidget()
+        self.bottom_section_host_layout = QVBoxLayout(self.bottom_section_host)
+        self.bottom_section_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.bottom_section_host_layout.setSpacing(0)
+        self.bottom_section_placeholder = QLabel("جاري تجهيز الملخص المالي وسجل العمليات…")
+        self.bottom_section_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.bottom_section_placeholder.setStyleSheet(
+            """
+            color: #9fb3ce;
+            font-size: 11px;
+            font-family: 'Cairo';
+            background: rgba(12, 25, 47, 0.22);
+            border: 1px dashed rgba(148, 163, 184, 0.14);
+            border-radius: 16px;
+            padding: 18px;
+            """
+        )
+        self.bottom_section_host_layout.addWidget(self.bottom_section_placeholder, 1)
+        main_layout.addWidget(self.bottom_section_host, 1)
+        self._rearrange_cards()
+
+    def resizeEvent(self, event):
+        """إعادة ترتيب الكروت تلقائياً حسب العرض"""
+        super().resizeEvent(event)
+        self._rearrange_cards()
+        self._rearrange_bottom_section()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_bottom_section_build()
+
+    def _schedule_bottom_section_build(self) -> None:
+        if self._bottom_section_ready or self._bottom_section_pending:
+            return
+        self._bottom_section_pending = True
+        QTimer.singleShot(0, self._ensure_bottom_section)
+
+    def _ensure_bottom_section(self) -> None:
+        if self._bottom_section_ready:
+            return
+        self._bottom_section_pending = False
+        if not hasattr(self, "bottom_section_host_layout"):
+            return
+
         self.bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.bottom_splitter.setChildrenCollapsible(False)
         self.bottom_splitter.setHandleWidth(8)
@@ -1288,7 +1411,27 @@ class DashboardTab(QWidget):
         """
         )
 
-        # أ) الرسم البياني
+        self._build_chart_panel()
+        self._build_recent_activity_panel()
+
+        self.bottom_splitter.addWidget(self.chart_container)
+        if self._show_recent_activity:
+            self.bottom_splitter.addWidget(self.table_container)
+            self.bottom_splitter.setStretchFactor(0, 3)
+            self.bottom_splitter.setStretchFactor(1, 2)
+        else:
+            self.table_container.hide()
+            self.bottom_splitter.setStretchFactor(0, 1)
+
+        if getattr(self, "bottom_section_placeholder", None) is not None:
+            self.bottom_section_placeholder.deleteLater()
+            self.bottom_section_placeholder = None
+        self.bottom_section_host_layout.addWidget(self.bottom_splitter, 1)
+        self._bottom_section_ready = True
+        self._rearrange_bottom_section()
+        self._update_recent_controls(self._get_recent_total_pages())
+
+    def _build_chart_panel(self) -> None:
         self.chart_container = QFrame()
         self.chart_container.setStyleSheet(
             f"""
@@ -1339,11 +1482,24 @@ class DashboardTab(QWidget):
         chart_header.addWidget(lbl_chart_meta)
         chart_layout.addLayout(chart_header)
 
-        self.chart = FinancialChart(self)
-        self.chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        chart_layout.addWidget(self.chart)
+        self.chart_content_layout = chart_layout
+        self.chart_placeholder = QLabel("سيظهر الرسم البياني بعد أول تحديث للداشبورد.")
+        self.chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chart_placeholder.setWordWrap(True)
+        self.chart_placeholder.setStyleSheet(
+            """
+            color: #9fb3ce;
+            font-size: 11px;
+            font-family: 'Cairo';
+            background: rgba(12, 25, 47, 0.28);
+            border: 1px dashed rgba(148, 163, 184, 0.16);
+            border-radius: 14px;
+            padding: 18px;
+            """
+        )
+        chart_layout.addWidget(self.chart_placeholder, 1)
 
-        # ب) جدول آخر العمليات
+    def _build_recent_activity_panel(self) -> None:
         self.table_container = QFrame()
         self.table_container.setStyleSheet(
             f"""
@@ -1428,10 +1584,23 @@ class DashboardTab(QWidget):
         from ui.styles import fix_table_rtl
 
         fix_table_rtl(self.recent_table)
-        self.recent_table.setStyleSheet(TABLE_STYLE_DARK)
+        self.recent_table.setStyleSheet(
+            TABLE_STYLE_DARK
+            + """
+            QTableWidget::item {
+                padding: 6px 6px;
+            }
+            QHeaderView::section {
+                padding: 7px 6px;
+                min-height: 18px;
+                max-height: 30px;
+            }
+            """
+        )
         self.recent_table.setShowGrid(False)
         self.recent_table.setFrameShape(QFrame.Shape.NoFrame)
-        self.recent_table.verticalHeader().setDefaultSectionSize(28)
+        header.setFixedHeight(30)
+        self.recent_table.verticalHeader().setDefaultSectionSize(32)
         table_layout.addWidget(self.recent_table, 1)
 
         pagination_layout = QHBoxLayout()
@@ -1511,6 +1680,9 @@ class DashboardTab(QWidget):
             border: 1px solid rgba(148, 163, 184, 0.10);
             """
         )
+        self.recent_page_info_label.setFixedHeight(32)
+        self.recent_page_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.recent_page_info_label.setMinimumWidth(74)
 
         self.recent_page_size_combo = QComboBox()
         self.recent_page_size_combo.addItems(["5", "10", "20", "كل"])
@@ -1552,148 +1724,37 @@ class DashboardTab(QWidget):
             background: transparent;
             """
         )
-
-        pagination_layout.addStretch(1)
-        pagination_center_layout.addWidget(self.recent_page_info_label)
-        pagination_center_layout.addWidget(pagination_size_label)
-        pagination_layout.addWidget(QLabel("حجم الصفحة:"))
-        pagination_center_layout.addWidget(self.recent_page_size_combo)
-        pagination_center_layout.addSpacing(8)
-        pagination_center_layout.addWidget(self.recent_prev_button)
-        pagination_center_layout.addWidget(self.recent_next_button)
-        pagination_layout.addLayout(pagination_center_layout)
-        legacy_size_label = pagination_layout.itemAt(1).widget()
-        if legacy_size_label is not None:
-            legacy_size_label.hide()
-            legacy_size_label.setFixedWidth(0)
-        pagination_layout.addStretch(1)
-        table_layout.addLayout(pagination_layout)
-
-        while pagination_layout.count():
-            stale_item = pagination_layout.takeAt(0)
-            stale_widget = stale_item.widget()
-            if stale_widget is not None:
-                stale_widget.hide()
-                stale_widget.setParent(None)
-
-        while pagination_center_layout.count():
-            stale_center_item = pagination_center_layout.takeAt(0)
-            stale_center_widget = stale_center_item.widget()
-            if stale_center_widget is not None:
-                stale_center_widget.hide()
-
-        self.recent_prev_button.show()
-        self.recent_next_button.show()
-        self.recent_page_size_combo.show()
-        self.recent_page_info_label.show()
-        pagination_size_label.show()
-
-        self.recent_pagination_meta_widget = QWidget()
-        self.recent_pagination_meta_widget.setStyleSheet("background: transparent; border: none;")
-        self.recent_pagination_meta_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        recent_meta_layout = QHBoxLayout(self.recent_pagination_meta_widget)
-        recent_meta_layout.setContentsMargins(0, 0, 0, 0)
-        recent_meta_layout.setSpacing(8)
-
-        self.recent_pagination_balance_widget = QWidget()
-        self.recent_pagination_balance_widget.setStyleSheet(
-            "background: transparent; border: none;"
-        )
-        self.recent_pagination_balance_widget.setSizePolicy(
-            QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed
-        )
-
-        pagination_center_layout.addWidget(self.recent_prev_button)
-        pagination_center_layout.addWidget(self.recent_next_button)
-
-        recent_meta_layout.addWidget(pagination_size_label)
-        recent_meta_layout.addWidget(self.recent_page_size_combo)
-        recent_meta_layout.addSpacing(12)
-        recent_meta_layout.addWidget(self.recent_page_info_label)
-
-        self.recent_pagination_meta_widget.adjustSize()
-        self.recent_pagination_balance_widget.setFixedWidth(
-            self.recent_pagination_meta_widget.sizeHint().width()
-        )
-
-        pagination_layout.addWidget(self.recent_pagination_balance_widget)
-        pagination_layout.addStretch(1)
-        pagination_layout.addWidget(self.recent_pagination_widget, 0, Qt.AlignmentFlag.AlignCenter)
-        pagination_layout.addStretch(1)
-        pagination_layout.addWidget(
-            self.recent_pagination_meta_widget, 0, Qt.AlignmentFlag.AlignRight
-        )
-
-        # إضافة للـ splitter
-        # Normalize the final pagination row into a single aligned strip.
-        while pagination_layout.count():
-            final_item = pagination_layout.takeAt(0)
-            final_widget = final_item.widget()
-            if final_widget is not None:
-                final_widget.hide()
-                final_widget.setParent(None)
-
-        self.recent_prev_button.setFixedHeight(32)
-        self.recent_next_button.setFixedHeight(32)
-        self.recent_page_size_combo.setFixedHeight(32)
-        self.recent_page_info_label.setFixedHeight(32)
-        self.recent_page_info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.recent_page_info_label.setMinimumWidth(74)
         pagination_size_label.setFixedHeight(32)
         pagination_size_label.setAlignment(
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight
         )
 
-        clean_pagination_widget = QWidget()
-        clean_pagination_widget.setStyleSheet("background: transparent; border: none;")
-        clean_pagination_widget.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        clean_pagination_layout = QHBoxLayout(clean_pagination_widget)
-        clean_pagination_layout.setContentsMargins(0, 0, 0, 0)
-        clean_pagination_layout.setSpacing(8)
-        clean_pagination_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        self.recent_prev_button.show()
-        self.recent_next_button.show()
-        self.recent_page_size_combo.show()
-        self.recent_page_info_label.show()
-        pagination_size_label.show()
-
-        clean_pagination_layout.addWidget(self.recent_prev_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        clean_pagination_layout.addWidget(self.recent_next_button, 0, Qt.AlignmentFlag.AlignVCenter)
-        clean_pagination_layout.addSpacing(10)
-        clean_pagination_layout.addWidget(pagination_size_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        clean_pagination_layout.addWidget(
+        pagination_center_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pagination_center_layout.addSpacing(10)
+        pagination_center_layout.addWidget(
+            self.recent_prev_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        pagination_center_layout.addWidget(
+            self.recent_next_button, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        pagination_center_layout.addSpacing(10)
+        pagination_center_layout.addWidget(pagination_size_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        pagination_center_layout.addWidget(
             self.recent_page_size_combo, 0, Qt.AlignmentFlag.AlignVCenter
         )
-        clean_pagination_layout.addSpacing(10)
-        clean_pagination_layout.addWidget(
+        pagination_center_layout.addSpacing(10)
+        pagination_center_layout.addWidget(
             self.recent_page_info_label, 0, Qt.AlignmentFlag.AlignVCenter
         )
 
-        self.recent_pagination_widget = clean_pagination_widget
         self.recent_pagination_size_label = pagination_size_label
+        self.recent_pagination_meta_widget = None
+        self.recent_pagination_balance_widget = None
+
         pagination_layout.addStretch(1)
         pagination_layout.addWidget(self.recent_pagination_widget, 0, Qt.AlignmentFlag.AlignCenter)
         pagination_layout.addStretch(1)
-
-        self.bottom_splitter.addWidget(self.chart_container)
-        if self._show_recent_activity:
-            self.bottom_splitter.addWidget(self.table_container)
-            self.bottom_splitter.setStretchFactor(0, 3)
-            self.bottom_splitter.setStretchFactor(1, 2)
-        else:
-            self.table_container.hide()
-            self.bottom_splitter.setStretchFactor(0, 1)
-
-        main_layout.addWidget(self.bottom_splitter, 1)
-        self._rearrange_cards()
-        self._rearrange_bottom_section()
-
-    def resizeEvent(self, event):
-        """إعادة ترتيب الكروت تلقائياً حسب العرض"""
-        super().resizeEvent(event)
-        self._rearrange_cards()
-        self._rearrange_bottom_section()
+        table_layout.addLayout(pagination_layout)
 
     def _rearrange_cards(self):
         """ترتيب الكروت تلقائياً حسب المساحة المتاحة"""
@@ -1729,6 +1790,8 @@ class DashboardTab(QWidget):
 
     def _rearrange_bottom_section(self):
         """تغيير اتجاه القسم السفلي حسب العرض"""
+        if self.bottom_splitter is None:
+            return
         width = self.width()
 
         if width < 760:
@@ -1736,9 +1799,71 @@ class DashboardTab(QWidget):
         else:
             self.bottom_splitter.setOrientation(Qt.Orientation.Horizontal)
 
+    def _refresh_recent_activity_from_signal(self):
+        if not self._show_recent_activity or not self._load_recent_activity_data:
+            return
+        if not self._bottom_section_ready:
+            self._schedule_bottom_section_build()
+            return
+        if self._is_refreshing or self._is_refreshing_recent_activity:
+            return
+
+        self._is_refreshing_recent_activity = True
+
+        from core.data_loader import get_data_loader
+
+        def fetch_recent():
+            try:
+                return self.accounting_service.get_recent_activity(8)
+            except Exception as e:
+                safe_print(f"ERROR: [Dashboard] فشل جلب آخر العمليات من الإشعارات: {e}")
+                return []
+
+        def on_recent_loaded(recent):
+            try:
+                self._recent_items = recent or []
+                self._render_recent_page()
+            finally:
+                self._is_refreshing_recent_activity = False
+
+        def on_recent_error(error_msg):
+            safe_print(f"ERROR: [Dashboard] {error_msg}")
+            self._is_refreshing_recent_activity = False
+
+        data_loader = get_data_loader()
+        data_loader.load_async(
+            operation_name="dashboard_recent_activity",
+            load_function=fetch_recent,
+            on_success=on_recent_loaded,
+            on_error=on_recent_error,
+            use_thread_pool=True,
+        )
+
+    def _ensure_chart_widget(self) -> FinancialChart:
+        if not self._bottom_section_ready:
+            self._ensure_bottom_section()
+        if self.chart is not None:
+            return self.chart
+
+        chart = FinancialChart(self.chart_container)
+        chart.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        if self.chart_placeholder is not None:
+            self.chart_placeholder.hide()
+            self.chart_content_layout.removeWidget(self.chart_placeholder)
+            self.chart_placeholder.deleteLater()
+            self.chart_placeholder = None
+        self.chart_content_layout.addWidget(chart, 1)
+        self.chart = chart
+        return chart
+
     def refresh_data(self):
         """تحديث البيانات من المصدر الموحد (مع حماية من التحديث المتكرر)"""
         import time
+
+        if not getattr(self, "_bottom_section_ready", True):
+            ensure_bottom_section = getattr(self, "_ensure_bottom_section", None)
+            if callable(ensure_bottom_section):
+                ensure_bottom_section()
 
         # ⚡ حماية من التحديث المتكرر
         current_time = time.time()
@@ -1790,8 +1915,15 @@ class DashboardTab(QWidget):
                 self.card_expenses.set_value(expenses)
                 self.card_net_profit.set_value(net_profit)
 
-                # تحديث الرسم البياني (نفس البيانات بالضبط)
-                self.chart.plot_data(sales, expenses, net_profit)
+                # تحديث الرسم البياني فقط عند تغيّر بياناته لتقليل الحمل الرسومي.
+                chart_signature = (
+                    round(float(sales or 0.0), 4),
+                    round(float(expenses or 0.0), 4),
+                    round(float(net_profit or 0.0), 4),
+                )
+                if chart_signature != self._last_chart_signature:
+                    self._ensure_chart_widget().plot_data(sales, expenses, net_profit)
+                    self._last_chart_signature = chart_signature
 
                 self._recent_items = recent
                 if self._show_recent_activity:
@@ -1838,6 +1970,10 @@ class DashboardTab(QWidget):
         return (total + self._recent_page_size - 1) // self._recent_page_size
 
     def _render_recent_page(self):
+        if not self._bottom_section_ready:
+            self._ensure_bottom_section()
+        if self.recent_table is None or self.recent_hint_lbl is None:
+            return
         total_pages = self._get_recent_total_pages()
         if self._recent_current_page > total_pages:
             self._recent_current_page = total_pages
@@ -1869,6 +2005,10 @@ class DashboardTab(QWidget):
         self._update_recent_controls(total_pages)
 
     def _populate_recent_table(self, items: list):
+        if not self._bottom_section_ready:
+            self._ensure_bottom_section()
+        if self.recent_table is None:
+            return
         prev_sorting = self.recent_table.isSortingEnabled()
         prev_block = self.recent_table.blockSignals(True)
         self.recent_table.setSortingEnabled(False)
@@ -1935,18 +2075,15 @@ class DashboardTab(QWidget):
             self.recent_table.blockSignals(prev_block)
 
     def _update_recent_controls(self, total_pages: int):
+        if not self._bottom_section_ready:
+            return
         self.recent_page_info_label.setText(f"صفحة {self._recent_current_page} / {total_pages}")
         self.recent_prev_button.setEnabled(self._recent_current_page > 1)
         self.recent_next_button.setEnabled(self._recent_current_page < total_pages)
         self._sync_recent_pagination_balance()
 
     def _sync_recent_pagination_balance(self):
-        meta_widget = getattr(self, "recent_pagination_meta_widget", None)
-        balance_widget = getattr(self, "recent_pagination_balance_widget", None)
-        if meta_widget is None or balance_widget is None:
-            return
-        meta_widget.adjustSize()
-        balance_widget.setFixedWidth(meta_widget.sizeHint().width())
+        return
 
     def _on_recent_page_size_changed(self, value: str):
         if value == "كل":

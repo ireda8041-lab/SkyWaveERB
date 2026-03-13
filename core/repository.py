@@ -5,6 +5,8 @@
 محسّن للسرعة القصوى مع نظام Cache ذكي
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
@@ -19,25 +21,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from PyQt6.QtCore import QTimer
-
-try:
-    from bson import ObjectId
-except ImportError:
-    ObjectId = None
-
-from core.auth_models import User, UserRole
-
-# ⚡ استيراد آمن لـ pymongo
-try:
-    import pymongo
-
-    PYMONGO_AVAILABLE = True
-except ImportError:
-    pymongo = None
-    PYMONGO_AVAILABLE = False
-
-from . import schemas
+from .project_currency import normalize_currency_code, normalize_exchange_rate
 from .sqlite_identifiers import quote_identifier
 from .text_utils import normalize_user_text
 
@@ -59,6 +43,97 @@ except ImportError:
                 pass  # تجاهل أي خطأ في الطباعة
 
 
+_PYMONGO_MODULE = None
+_PYMONGO_CHECKED = False
+_OBJECT_ID_CLASS = None
+_OBJECT_ID_CHECKED = False
+_AUTH_MODELS = None
+_AUTH_MODELS_CHECKED = False
+_SCHEMAS_MODULE = None
+_SCHEMAS_CHECKED = False
+
+
+def _get_pymongo_module():
+    global _PYMONGO_MODULE, _PYMONGO_CHECKED
+    if _PYMONGO_CHECKED:
+        return _PYMONGO_MODULE
+    _PYMONGO_CHECKED = True
+    try:
+        import pymongo as pymongo_module
+
+        _PYMONGO_MODULE = pymongo_module
+    except ImportError:
+        _PYMONGO_MODULE = None
+    return _PYMONGO_MODULE
+
+
+def _get_object_id_class():
+    global _OBJECT_ID_CLASS, _OBJECT_ID_CHECKED
+    if _OBJECT_ID_CHECKED:
+        return _OBJECT_ID_CLASS
+    _OBJECT_ID_CHECKED = True
+    try:
+        from bson import ObjectId as object_id_class
+
+        _OBJECT_ID_CLASS = object_id_class
+    except ImportError:
+        _OBJECT_ID_CLASS = None
+    return _OBJECT_ID_CLASS
+
+
+def _get_auth_models():
+    global _AUTH_MODELS, _AUTH_MODELS_CHECKED
+    if _AUTH_MODELS_CHECKED:
+        return _AUTH_MODELS
+    _AUTH_MODELS_CHECKED = True
+    try:
+        from core.auth_models import User as user_class
+        from core.auth_models import UserRole as user_role_class
+
+        _AUTH_MODELS = (user_class, user_role_class)
+    except ImportError:
+        _AUTH_MODELS = (None, None)
+    return _AUTH_MODELS
+
+
+def _get_schemas_module():
+    global _SCHEMAS_MODULE, _SCHEMAS_CHECKED
+    if _SCHEMAS_CHECKED:
+        return _SCHEMAS_MODULE
+    _SCHEMAS_CHECKED = True
+    from . import schemas as schemas_module
+
+    _SCHEMAS_MODULE = schemas_module
+    return _SCHEMAS_MODULE
+
+
+class _LazySchemasProxy:
+    def __getattr__(self, item: str):
+        return getattr(_get_schemas_module(), item)
+
+
+schemas = _LazySchemasProxy()
+
+
+def _schedule_delayed_callback(delay_ms: int, callback) -> None:
+    try:
+        from PyQt6.QtCore import QTimer as qt_timer
+
+        qt_timer.singleShot(delay_ms, callback)
+    except Exception:
+        timer = threading.Timer(max(delay_ms, 0) / 1000.0, callback)
+        timer.daemon = True
+        timer.start()
+
+
+class QTimer:
+    """طبقة توافق خفيفة للاختبارات والكود القديم بدون import بارد لـ PyQt."""
+
+    @staticmethod
+    def singleShot(delay_ms: int, callback) -> None:
+        _schedule_delayed_callback(delay_ms, callback)
+
+
 # ⚡ استيراد محسّن السرعة
 try:
     from .speed_optimizer import LRUCache, cached, invalidate_cache  # noqa: F401
@@ -68,14 +143,8 @@ except ImportError:
     CACHE_ENABLED = False
     safe_print("WARNING: speed_optimizer غير متوفر - الـ cache معطل")
 
-# ⚡ استيراد محسّن الأداء الجديد
-try:
-    from .performance_optimizer import PerformanceOptimizer  # noqa: F401
-
-    PERFORMANCE_OPTIMIZER_ENABLED = True
-except ImportError:
-    PERFORMANCE_OPTIMIZER_ENABLED = False
-    safe_print("WARNING: performance_optimizer غير متوفر")
+# ⚡ لا نحمّل performance_optimizer عند الاستيراد لأنه غير مستخدم runtime هنا.
+PERFORMANCE_OPTIMIZER_ENABLED = False
 
 # ⚡ استيراد إعدادات التكوين الآمنة
 try:
@@ -97,6 +166,9 @@ else:
     DB_NAME = os.environ.get("MONGO_DB_NAME", "skywave_erp_db")
     _PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
     LOCAL_DB_FILE = os.path.join(_PROJECT_DIR, "skywave_local.db")
+
+
+_SQLITE_BOOTSTRAP_VERSION = 1
 
 
 # ⚡ نسخ قاعدة البيانات من مجلد البرنامج لو مش موجودة في AppData
@@ -223,9 +295,13 @@ class Repository:
         self.online = False
         self.mongo_client = None
         self.mongo_db = None
+        self._closed = False
         self._lock = threading.RLock()
+        self._mongo_stop_event = threading.Event()
         self._mongo_connecting = False
         self._mongo_retry_thread_started = False
+        self._mongo_connection_thread = None
+        self._mongo_retry_thread = None
         self._mongo_indexes_initialized = False
         self._mongo_retry_interval_seconds = self._safe_int_env(
             "SKYWAVE_MONGO_RETRY_INTERVAL_SEC",
@@ -233,6 +309,7 @@ class Repository:
             minimum=5,
             maximum=120,
         )
+        self._sqlite_table_columns_cache: dict[str, set[str]] = {}
 
         # ⚡ Cache للبيانات المتكررة - TTL محسّن للسرعة
         if CACHE_ENABLED:
@@ -240,6 +317,7 @@ class Repository:
             self._projects_cache = LRUCache(maxsize=1000, ttl_seconds=300)  # ⚡ 5 دقائق
             self._services_cache = LRUCache(maxsize=500, ttl_seconds=600)  # ⚡ 10 دقائق
             self._accounts_cache = LRUCache(maxsize=500, ttl_seconds=600)  # ⚡ 10 دقائق
+            self._payments_cache = LRUCache(maxsize=500, ttl_seconds=180)  # ⚡ 3 دقائق
             self._expenses_cache = LRUCache(maxsize=500, ttl_seconds=180)  # ⚡ 3 دقائق
 
         # ⚡ 1. SQLite أولاً (سريع جداً) - لا ننتظر MongoDB
@@ -320,10 +398,18 @@ class Repository:
         }
 
     def _ensure_mongo_indexes_ready(self) -> None:
-        if not self.online or self.mongo_db is None or self._mongo_indexes_initialized:
-            return
+        with self._lock:
+            if (
+                self._closed
+                or not self.online
+                or self.mongo_db is None
+                or self._mongo_indexes_initialized
+            ):
+                return
         if self._init_mongo_indexes():
-            self._mongo_indexes_initialized = True
+            with self._lock:
+                if not self._closed:
+                    self._mongo_indexes_initialized = True
 
     def get_cursor(self):
         """
@@ -345,6 +431,48 @@ class Repository:
                 if "sqlite_closed" not in str(e).lower():
                     safe_print(f"ERROR: [Repository] فشل إنشاء cursor: {e}")
                 raise
+
+    def _account_has_children(self, account_code: str) -> bool:
+        if not account_code:
+            return False
+        try:
+            cursor = self.get_cursor()
+            try:
+                cursor.execute(
+                    """
+                    SELECT 1 FROM accounts
+                    WHERE parent_id = ?
+                    AND (sync_status != 'deleted' OR sync_status IS NULL)
+                    AND (is_deleted = 0 OR is_deleted IS NULL)
+                    LIMIT 1
+                    """,
+                    (account_code,),
+                )
+                return cursor.fetchone() is not None
+            finally:
+                cursor.close()
+        except Exception:
+            return False
+
+    def _account_group_codes_from_rows(self, rows) -> set[str]:
+        group_codes: set[str] = set()
+        for row in rows or []:
+            row_dict = dict(row)
+            parent_code = str(
+                row_dict.get("parent_id") or row_dict.get("parent_code") or ""
+            ).strip()
+            if parent_code:
+                group_codes.add(parent_code)
+        return group_codes
+
+    def _account_from_row(self, row, *, group_codes: set[str] | None = None) -> schemas.Account:
+        data = dict(row)
+        if "is_group" not in data:
+            code = str(data.get("code") or "").strip()
+            data["is_group"] = (
+                code in group_codes if group_codes is not None else self._account_has_children(code)
+            )
+        return schemas.Account(**data)
 
     def _table_exists(self, table_name: str) -> bool:
         if not table_name or self.sqlite_conn is None:
@@ -381,6 +509,175 @@ class Repository:
         except Exception:
             return ""
 
+    def _table_columns(self, table_name: str) -> set[str]:
+        if not table_name or self.sqlite_conn is None:
+            return set()
+
+        cached = self._sqlite_table_columns_cache.get(table_name)
+        if cached is not None:
+            return set(cached)
+
+        try:
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        f"PRAGMA table_info({self._quote_sqlite_identifier(table_name)})"
+                    )
+                    columns = {str(row[1] or "").strip() for row in cursor.fetchall() if row}
+                finally:
+                    cursor.close()
+        except Exception:
+            columns = set()
+
+        self._sqlite_table_columns_cache[table_name] = set(columns)
+        return columns
+
+    def _table_has_column(self, table_name: str, column_name: str) -> bool:
+        return bool(column_name and column_name in self._table_columns(table_name))
+
+    @staticmethod
+    def _sync_aware_tables() -> list[str]:
+        return [
+            "accounts",
+            "expenses",
+            "clients",
+            "services",
+            "invoices",
+            "projects",
+            "journal_entries",
+            "payments",
+            "currencies",
+            "notifications",
+            "users",
+            "employees",
+            "employee_loans",
+            "employee_salaries",
+            "employee_attendance",
+            "employee_leaves",
+            "loan_payments",
+            "quotations",
+            "tasks",
+        ]
+
+    def _get_sqlite_user_version(self) -> int:
+        if self.sqlite_conn is None:
+            return 0
+        try:
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute("PRAGMA user_version")
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
+            return int(row[0]) if row else 0
+        except Exception:
+            return 0
+
+    def _set_sqlite_user_version(self, version: int) -> None:
+        if self.sqlite_conn is None:
+            return
+        try:
+            with self._lock:
+                self.sqlite_cursor.execute(f"PRAGMA user_version = {int(version)}")
+                self.sqlite_conn.commit()
+        except Exception as e:
+            safe_print(f"WARNING: [Repository] فشل تحديث SQLite user_version: {e}")
+
+    def _sqlite_bootstrap_required(self) -> bool:
+        if self._get_sqlite_user_version() < _SQLITE_BOOTSTRAP_VERSION:
+            return True
+        required_tables = (
+            "accounts",
+            "clients",
+            "services",
+            "projects",
+            "invoices",
+            "payments",
+            "expenses",
+            "journal_entries",
+            "currencies",
+            "notifications",
+            "tasks",
+            "users",
+            "sync_queue",
+        )
+        return any(not self._table_exists(table) for table in required_tables)
+
+    def _run_sync_state_maintenance(self, sync_tables: list[str]) -> None:
+        safe_print("INFO: [Repository] 🔄 جاري تنشيط البيانات القديمة للمزامنة...")
+        allowed_sync_tables = {str(table).strip() for table in sync_tables}
+
+        for table in sync_tables:
+            try:
+                table_ref = self._quote_sqlite_identifier(table, allowed=allowed_sync_tables)
+                update_dirty_sql = f"""
+                    UPDATE {table_ref}
+                    SET dirty_flag = 1
+                    WHERE dirty_flag IS NULL
+                       OR (
+                            dirty_flag = 0
+                            AND (
+                                is_deleted = 1
+                                OR _mongo_id IS NULL
+                                OR sync_status IS NULL
+                                OR TRIM(sync_status) = ''
+                                OR sync_status IN ('new_offline', 'modified_offline', 'pending', 'deleted')
+                            )
+                        )
+                """  # nosec B608
+                self.sqlite_cursor.execute(update_dirty_sql)
+                updated_count = self.sqlite_cursor.rowcount
+                if updated_count > 0:
+                    safe_print(
+                        f"INFO: [Repository] ⚡ تم تنشيط {updated_count} سجل في {table} للمزامنة"
+                    )
+
+                clear_false_dirty_sql = f"""
+                    UPDATE {table_ref}
+                    SET dirty_flag = 0
+                    WHERE dirty_flag = 1
+                      AND (_mongo_id IS NOT NULL AND TRIM(_mongo_id) != '')
+                      AND COALESCE(sync_status, '') = 'synced'
+                      AND COALESCE(is_deleted, 0) = 0
+                """  # nosec B608
+                self.sqlite_cursor.execute(clear_false_dirty_sql)
+                cleaned_count = self.sqlite_cursor.rowcount
+                if cleaned_count > 0:
+                    safe_print(
+                        f"INFO: [Repository] 🧯 تم تنظيف {cleaned_count} سجل متزامن في {table}"
+                    )
+            except sqlite3.OperationalError as e:
+                safe_print(f"WARNING: [Repository] فشل تنشيط {table}: {e}")
+
+        self.sqlite_conn.commit()
+
+        safe_print("INFO: [Repository] 🧹 جاري تنظيف القيم الفارغة...")
+        now_iso = datetime.now().isoformat()
+        for table in sync_tables:
+            try:
+                table_ref = self._quote_sqlite_identifier(table, allowed=allowed_sync_tables)
+                self.sqlite_cursor.execute(
+                    f"""
+                    UPDATE {table_ref}
+                    SET is_deleted = COALESCE(is_deleted, 0),
+                        sync_status = CASE
+                            WHEN sync_status IS NULL THEN 'pending'
+                            ELSE sync_status
+                        END,
+                        last_modified = COALESCE(last_modified, ?)
+                    WHERE is_deleted IS NULL
+                       OR sync_status IS NULL
+                       OR last_modified IS NULL
+                    """,  # nosec B608
+                    (now_iso,),
+                )
+            except sqlite3.OperationalError as e:
+                safe_print(f"WARNING: [Repository] فشل تنظيف {table}: {e}")
+
+        self.sqlite_conn.commit()
+
     @staticmethod
     def _quote_sqlite_identifier(identifier: str, *, allowed: set[str] | None = None) -> str:
         return quote_identifier(identifier, allowed=allowed)
@@ -416,6 +713,7 @@ class Repository:
                     tax_amount REAL DEFAULT 0.0,
                     total_amount REAL DEFAULT 0.0,
                     currency TEXT,
+                    exchange_rate_snapshot REAL DEFAULT 1.0,
                     project_notes TEXT,
                     invoice_number TEXT,
                     project_code TEXT,
@@ -439,7 +737,7 @@ class Repository:
                     id, _mongo_id, sync_status, created_at, last_modified, name, client_id,
                     status, status_manually_set, description, start_date, end_date, items,
                     subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
-                    total_amount, currency, project_notes, invoice_number, project_code,
+                    total_amount, currency, exchange_rate_snapshot, project_notes, invoice_number, project_code,
                     sequence_number, cost_center_id, contract_type, is_retainer,
                     renewal_cycle, next_renewal_date, milestones, total_estimated_cost,
                     estimated_profit, profit_margin, project_manager_id
@@ -448,7 +746,7 @@ class Repository:
                     id, _mongo_id, sync_status, created_at, last_modified, name, client_id,
                     status, status_manually_set, description, start_date, end_date, items,
                     subtotal, discount_rate, discount_amount, tax_rate, tax_amount,
-                    total_amount, currency, project_notes, invoice_number, project_code,
+                    total_amount, currency, 1.0 AS exchange_rate_snapshot, project_notes, invoice_number, project_code,
                     sequence_number, cost_center_id, contract_type, is_retainer,
                     renewal_cycle, next_renewal_date, milestones, total_estimated_cost,
                     estimated_profit, profit_margin, project_manager_id
@@ -721,28 +1019,27 @@ class Repository:
 
     def invalidate_table_cache(self, table_name: str | None = None) -> None:
         """Invalidate repository caches for one table (or all tables when not provided)."""
-        if not CACHE_ENABLED:
-            return
-
         cache_map = {
             "clients": "_clients_cache",
             "projects": "_projects_cache",
             "services": "_services_cache",
             "accounts": "_accounts_cache",
+            "payments": "_payments_cache",
             "expenses": "_expenses_cache",
         }
 
         normalized = (table_name or "").strip().lower()
         keys = list(cache_map.keys()) if not normalized else [normalized]
 
-        for key in keys:
-            attr_name = cache_map.get(key)
-            if not attr_name or not hasattr(self, attr_name):
-                continue
-            try:
-                getattr(self, attr_name).invalidate()
-            except Exception:
-                pass
+        if CACHE_ENABLED:
+            for key in keys:
+                attr_name = cache_map.get(key)
+                if not attr_name or not hasattr(self, attr_name):
+                    continue
+                try:
+                    getattr(self, attr_name).invalidate()
+                except Exception:
+                    pass
 
         # Dashboard depends on accounting/projects/payments/expenses totals.
         if not normalized or normalized in {
@@ -758,38 +1055,69 @@ class Repository:
 
     def close(self):
         """⚡ إغلاق اتصالات قاعدة البيانات"""
+        connection_thread = None
+        retry_thread = None
         try:
-            try:
-                if self.sqlite_cursor is not None:
-                    self.sqlite_cursor.close()
-            except Exception:
-                pass
-            finally:
-                self.sqlite_cursor = None
+            with self._lock:
+                self._closed = True
+                self._mongo_stop_event.set()
+                connection_thread = self._mongo_connection_thread
+                retry_thread = self._mongo_retry_thread
 
-            try:
-                if self.sqlite_conn is not None:
-                    self.sqlite_conn.close()
-            except Exception:
-                pass
-            finally:
-                self.sqlite_conn = None
+                try:
+                    if self.sqlite_cursor is not None:
+                        self.sqlite_cursor.close()
+                except Exception:
+                    pass
+                finally:
+                    self.sqlite_cursor = None
 
-            try:
-                if self.mongo_client is not None:
-                    self.mongo_client.close()
-            except Exception:
-                pass
-            finally:
-                self.mongo_client = None
-                self.mongo_db = None
-                self.online = False
-                self._mongo_indexes_initialized = False
-                if Repository._active_instance is self:
-                    Repository._active_instance = None
+                try:
+                    if self.sqlite_conn is not None:
+                        self.sqlite_conn.close()
+                except Exception:
+                    pass
+                finally:
+                    self.sqlite_conn = None
+
+                try:
+                    if self.mongo_client is not None:
+                        self.mongo_client.close()
+                except Exception:
+                    pass
+                finally:
+                    self.mongo_client = None
+                    self.mongo_db = None
+                    self.online = False
+                    self._mongo_connecting = False
+                    self._mongo_indexes_initialized = False
+                    if Repository._active_instance is self:
+                        Repository._active_instance = None
+                    try:
+                        from services.notification_service import NotificationService
+
+                        active_notification_service = getattr(
+                            NotificationService, "_active_instance", None
+                        )
+                        if getattr(active_notification_service, "repo", None) is self:
+                            NotificationService._active_instance = None
+                    except Exception:
+                        pass
             safe_print("INFO: [Repository] تم إغلاق اتصالات قاعدة البيانات")
         except Exception as e:
             safe_print(f"WARNING: [Repository] خطأ عند إغلاق الاتصالات: {e}")
+        finally:
+            current_thread = threading.current_thread()
+            for thread in (connection_thread, retry_thread):
+                if thread is None or thread is current_thread:
+                    continue
+                try:
+                    if thread.is_alive():
+                        thread.join(timeout=1.0)
+                except Exception:
+                    pass
+            self._mongo_connection_thread = None
+            self._mongo_retry_thread = None
 
     @staticmethod
     def _parse_activity_log_timestamp(value):
@@ -921,43 +1249,55 @@ class Repository:
 
     def _start_mongo_connection(self):
         """⚡ الاتصال بـ MongoDB في Background Thread - محسّن ومحاول"""
-        global MONGO_URI, DB_NAME
+        if self._closed or self._mongo_stop_event.is_set():
+            self.online = False
+            return
 
         if os.environ.get("SKYWAVE_DISABLE_MONGO") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
             safe_print("INFO: MongoDB معطل في بيئة الاختبار")
             self.online = False
             return
 
-        try:
-            if CONFIG_LOADED:
-                MONGO_URI = Config.get_mongo_uri()
-                DB_NAME = Config.get_db_name()
-            else:
-                MONGO_URI = os.environ.get("MONGO_URI", MONGO_URI)
-                DB_NAME = os.environ.get("MONGO_DB_NAME", DB_NAME)
-        except Exception:
-            pass
-
-        # ⚡ فحص توفر pymongo أولاً
-        if not PYMONGO_AVAILABLE or pymongo is None:
-            safe_print("INFO: pymongo غير متاح - العمل بالبيانات المحلية فقط")
-            self.online = False
-            return
-
-        if self._mongo_connecting:
-            return
-        self._mongo_connecting = True
+        with self._lock:
+            if self._closed or self._mongo_connecting:
+                return
+            self._mongo_connecting = True
 
         def connect_mongo():
+            global MONGO_URI, DB_NAME
+
             max_retries = 3
             retry_delay = 2  # ثانيتين بين كل محاولة
 
+            try:
+                if CONFIG_LOADED:
+                    mongo_uri = Config.get_mongo_uri()
+                    db_name = Config.get_db_name()
+                else:
+                    mongo_uri = os.environ.get("MONGO_URI", MONGO_URI)
+                    db_name = os.environ.get("MONGO_DB_NAME", DB_NAME)
+                MONGO_URI = mongo_uri
+                DB_NAME = db_name
+            except Exception:
+                mongo_uri = MONGO_URI
+                db_name = DB_NAME
+
+            pymongo_module = _get_pymongo_module()
+            if pymongo_module is None:
+                safe_print("INFO: pymongo غير متاح - العمل بالبيانات المحلية فقط")
+                with self._lock:
+                    self.online = False
+                    self._mongo_connecting = False
+                return
+
             for attempt in range(max_retries):
+                if self._closed or self._mongo_stop_event.is_set():
+                    break
                 try:
                     safe_print(f"INFO: محاولة الاتصال بـ MongoDB ({attempt + 1}/{max_retries})...")
 
-                    self.mongo_client = pymongo.MongoClient(
-                        MONGO_URI,
+                    mongo_client = pymongo_module.MongoClient(
+                        mongo_uri,
                         serverSelectionTimeoutMS=5000,  # ⚡ 5 ثواني للاتصال
                         connectTimeoutMS=5000,
                         socketTimeoutMS=30000,  # ⚡ 30 ثانية للعمليات (زيادة لتجنب timeout)
@@ -965,37 +1305,61 @@ class Repository:
                     )
 
                     # اختبار الاتصال
-                    self.mongo_client.server_info()
-                    self.mongo_db = self.mongo_client[DB_NAME]
-                    self.online = True
-                    self._mongo_indexes_initialized = False
+                    mongo_client.server_info()
+                    mongo_db = mongo_client[db_name]
+                    with self._lock:
+                        if self._closed:
+                            try:
+                                mongo_client.close()
+                            except Exception:
+                                pass
+                            break
+                        self.mongo_client = mongo_client
+                        self.mongo_db = mongo_db
+                        self.online = True
+                        self._mongo_indexes_initialized = False
                     self._ensure_mongo_indexes_ready()
+                    if self._closed:
+                        break
                     safe_print("INFO: ✅ متصل بـ MongoDB بنجاح!")
                     break  # نجح الاتصال
 
                 except Exception as e:
                     safe_print(f"WARNING: فشلت محاولة {attempt + 1}: {e}")
                     if attempt < max_retries - 1:
+                        if self._closed:
+                            break
                         safe_print(f"INFO: إعادة المحاولة بعد {retry_delay} ثانية...")
-                        time.sleep(retry_delay)
+                        if self._mongo_stop_event.wait(retry_delay):
+                            break
                     else:
                         safe_print("WARNING: فشل الاتصال بـ MongoDB - العمل بالبيانات المحلية")
-                        self.online = False
+                        with self._lock:
+                            self.online = False
 
-            self._mongo_connecting = False
+            with self._lock:
+                self._mongo_connecting = False
 
         # تشغيل الاتصال في thread منفصل
-        thread = threading.Thread(target=connect_mongo, daemon=True)
+        thread = threading.Thread(
+            target=connect_mongo,
+            daemon=True,
+            name="repository-mongo-connect",
+        )
+        self._mongo_connection_thread = thread
         thread.start()
 
     def _start_mongo_retry_loop(self):
+        if os.environ.get("SKYWAVE_DISABLE_MONGO") == "1" or os.environ.get("PYTEST_CURRENT_TEST"):
+            return
         if self._mongo_retry_thread_started:
             return
         self._mongo_retry_thread_started = True
 
         def retry_loop():
-            while True:
-                time.sleep(self._mongo_retry_interval_seconds)
+            while not self._mongo_stop_event.wait(self._mongo_retry_interval_seconds):
+                if self._closed:
+                    return
                 if self.online:
                     continue
                 if self._mongo_connecting:
@@ -1005,12 +1369,28 @@ class Repository:
                 except Exception:
                     pass
 
-        thread = threading.Thread(target=retry_loop, daemon=True)
+        thread = threading.Thread(
+            target=retry_loop,
+            daemon=True,
+            name="repository-mongo-retry",
+        )
+        self._mongo_retry_thread = thread
         thread.start()
 
     def _init_local_db(self):
         """دالة داخلية تنشئ كل الجداول في ملف SQLite المحلي فقط إذا لم تكن موجودة."""
         safe_print("INFO: جاري فحص الجداول المحلية (SQLite)...")
+        sync_tables = self._sync_aware_tables()
+
+        if not self._sqlite_bootstrap_required():
+            safe_print(
+                "INFO: [Repository] SQLite bootstrap up-to-date - skipping heavy schema work."
+            )
+            self._run_sync_state_maintenance(sync_tables)
+            safe_print("INFO: الجداول المحلية جاهزة.")
+            if self.online:
+                self._ensure_mongo_indexes_ready()
+            return
 
         # جدول الحسابات (accounts)
         self.sqlite_cursor.execute(
@@ -1315,6 +1695,7 @@ class Repository:
             tax_amount REAL DEFAULT 0.0,
             total_amount REAL DEFAULT 0.0,
             currency TEXT,
+            exchange_rate_snapshot REAL DEFAULT 1.0,
             project_notes TEXT,
             invoice_number TEXT,
 
@@ -1334,6 +1715,12 @@ class Repository:
         )"""
         )
         self._migrate_projects_table_remove_global_name_unique()
+        if not self._table_has_column("projects", "exchange_rate_snapshot"):
+            self.sqlite_cursor.execute(
+                "ALTER TABLE projects ADD COLUMN exchange_rate_snapshot REAL DEFAULT 1.0"
+            )
+            self.sqlite_conn.commit()
+            self._sqlite_table_columns_cache.pop("projects", None)
 
         # جدول قيود اليومية (journal_entries)
         # (البنود 'lines' هتتخزن كـ JSON text)
@@ -1411,9 +1798,38 @@ class Repository:
             related_entity_type TEXT,
             related_entity_id TEXT,
             action_url TEXT,
-            expires_at TEXT
+            expires_at TEXT,
+            action TEXT,
+            operation_text TEXT,
+            details TEXT DEFAULT '',
+            amount REAL,
+            is_activity INTEGER DEFAULT 0
         )"""
         )
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE notifications ADD COLUMN action TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE notifications ADD COLUMN operation_text TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.sqlite_cursor.execute(
+                "ALTER TABLE notifications ADD COLUMN details TEXT DEFAULT ''"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.sqlite_cursor.execute("ALTER TABLE notifications ADD COLUMN amount REAL")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            self.sqlite_cursor.execute(
+                "ALTER TABLE notifications ADD COLUMN is_activity INTEGER DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
 
         # جدول سجل النشاطات (activity_logs)
         self.sqlite_cursor.execute(
@@ -1765,27 +2181,7 @@ class Repository:
         # dirty_flag: لتعقب التغييرات المحلية غير المتزامنة
         # last_modified: آخر تعديل للمزامنة
         # _mongo_id: معرف MongoDB
-        sync_tables = [
-            "accounts",
-            "expenses",
-            "clients",
-            "services",
-            "invoices",
-            "projects",
-            "journal_entries",
-            "payments",
-            "currencies",
-            "notifications",
-            "users",
-            "employees",
-            "employee_loans",
-            "employee_salaries",
-            "employee_attendance",
-            "employee_leaves",
-            "loan_payments",
-            "quotations",
-            "tasks",
-        ]
+        sync_tables = self._sync_aware_tables()
 
         for table in sync_tables:
             # 1. إضافة عمود is_deleted (للحذف الناعم)
@@ -1840,13 +2236,43 @@ class Repository:
         for table in sync_tables:
             try:
                 table_ref = self._quote_sqlite_identifier(table, allowed=allowed_sync_tables)
-                # تنشيط البيانات القديمة - وضع dirty_flag = 1 لكل الصفوف
-                update_dirty_sql = f"UPDATE {table_ref} SET dirty_flag = 1 WHERE dirty_flag IS NULL OR dirty_flag = 0"  # nosec B608
+                # أي صف متزامن فعليًا لا يجب إيقاظه من جديد وإلا سيُعاد رفعه إلى Mongo.
+                update_dirty_sql = f"""
+                    UPDATE {table_ref}
+                    SET dirty_flag = 1
+                    WHERE dirty_flag IS NULL
+                       OR (
+                            dirty_flag = 0
+                            AND (
+                                is_deleted = 1
+                                OR _mongo_id IS NULL
+                                OR sync_status IS NULL
+                                OR TRIM(sync_status) = ''
+                                OR sync_status IN ('new_offline', 'modified_offline', 'pending', 'deleted')
+                            )
+                        )
+                """  # nosec B608
                 self.sqlite_cursor.execute(update_dirty_sql)
                 updated_count = self.sqlite_cursor.rowcount
                 if updated_count > 0:
                     safe_print(
                         f"INFO: [Repository] ⚡ تم تنشيط {updated_count} سجل في {table} للمزامنة"
+                    )
+
+                # تنظيف dirty_flag الخاطئ الذي كانت تتركه wake-up القديمة على الصفوف المتزامنة.
+                clear_false_dirty_sql = f"""
+                    UPDATE {table_ref}
+                    SET dirty_flag = 0
+                    WHERE dirty_flag = 1
+                      AND (_mongo_id IS NOT NULL AND TRIM(_mongo_id) != '')
+                      AND COALESCE(sync_status, '') = 'synced'
+                      AND COALESCE(is_deleted, 0) = 0
+                """  # nosec B608
+                self.sqlite_cursor.execute(clear_false_dirty_sql)
+                cleaned_count = self.sqlite_cursor.rowcount
+                if cleaned_count > 0:
+                    safe_print(
+                        f"INFO: [Repository] 🧯 تم تنظيف {cleaned_count} سجل متزامن في {table}"
                     )
             except sqlite3.OperationalError as e:
                 safe_print(f"WARNING: [Repository] فشل تنشيط {table}: {e}")
@@ -1889,6 +2315,7 @@ class Repository:
 
         # ⚡ تحسين قاعدة البيانات للأداء
         self._optimize_sqlite_performance()
+        self._set_sqlite_user_version(_SQLITE_BOOTSTRAP_VERSION)
 
         # إنشاء collection و indexes في MongoDB إذا كان متصل
         if self.online:
@@ -2038,6 +2465,9 @@ class Repository:
                 "CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)"
             )
             self.sqlite_cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_notifications_activity_created ON notifications(is_activity, created_at)"
+            )
+            self.sqlite_cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON activity_logs(created_at)"
             )
             self.sqlite_cursor.execute(
@@ -2130,66 +2560,68 @@ class Repository:
         """
         إنشاء indexes في MongoDB لتحسين الأداء
         """
-        if self.mongo_db is None:
-            return False
+        with self._lock:
+            if self._closed or self.mongo_db is None:
+                return False
+            mongo_db = self.mongo_db
 
         try:
             safe_print("INFO: جاري إنشاء indexes في MongoDB...")
 
             # sync_queue
-            self.mongo_db.sync_queue.create_index([("status", 1)])
-            self.mongo_db.sync_queue.create_index([("priority", 1), ("status", 1)])
-            self.mongo_db.sync_queue.create_index([("entity_type", 1), ("entity_id", 1)])
-            self.mongo_db.sync_queue.create_index([("created_at", -1)])
-            self.mongo_db.sync_queue.create_index([("updated_at", -1)])
+            mongo_db.sync_queue.create_index([("status", 1)])
+            mongo_db.sync_queue.create_index([("priority", 1), ("status", 1)])
+            mongo_db.sync_queue.create_index([("entity_type", 1), ("entity_id", 1)])
+            mongo_db.sync_queue.create_index([("created_at", -1)])
+            mongo_db.sync_queue.create_index([("updated_at", -1)])
 
             # projects / clients
-            self.mongo_db.projects.create_index([("client_id", 1)])
-            self.mongo_db.projects.create_index([("status", 1)])
-            self.mongo_db.projects.create_index([("start_date", -1)])
-            self.mongo_db.projects.create_index([("last_modified", -1)])
-            self.mongo_db.clients.create_index([("name", 1)])
-            self.mongo_db.clients.create_index([("status", 1)])
-            self.mongo_db.clients.create_index([("phone", 1)])
-            self.mongo_db.clients.create_index([("last_modified", -1)])
+            mongo_db.projects.create_index([("client_id", 1)])
+            mongo_db.projects.create_index([("status", 1)])
+            mongo_db.projects.create_index([("start_date", -1)])
+            mongo_db.projects.create_index([("last_modified", -1)])
+            mongo_db.clients.create_index([("name", 1)])
+            mongo_db.clients.create_index([("status", 1)])
+            mongo_db.clients.create_index([("phone", 1)])
+            mongo_db.clients.create_index([("last_modified", -1)])
 
             # accounting collections
-            self.mongo_db.accounts.create_index([("code", 1)])
-            self.mongo_db.accounts.create_index([("type", 1)])
-            self.mongo_db.accounts.create_index([("last_modified", -1)])
-            self.mongo_db.invoices.create_index([("invoice_number", 1)])
-            self.mongo_db.invoices.create_index([("client_id", 1)])
-            self.mongo_db.invoices.create_index([("status", 1)])
-            self.mongo_db.invoices.create_index([("issue_date", -1)])
-            self.mongo_db.invoices.create_index([("last_modified", -1)])
-            self.mongo_db.payments.create_index([("project_id", 1)])
-            self.mongo_db.payments.create_index([("client_id", 1)])
-            self.mongo_db.payments.create_index([("invoice_number", 1)])
-            self.mongo_db.payments.create_index([("date", -1)])
-            self.mongo_db.payments.create_index([("account_id", 1)])
-            self.mongo_db.payments.create_index([("last_modified", -1)])
-            self.mongo_db.journal_entries.create_index([("date", -1)])
-            self.mongo_db.journal_entries.create_index([("related_document_id", 1)])
-            self.mongo_db.journal_entries.create_index([("last_modified", -1)])
-            self.mongo_db.expenses.create_index([("date", -1)])
-            self.mongo_db.expenses.create_index([("project_id", 1)])
-            self.mongo_db.expenses.create_index([("account_id", 1)])
-            self.mongo_db.expenses.create_index([("payment_account_id", 1)])
-            self.mongo_db.expenses.create_index([("last_modified", -1)])
+            mongo_db.accounts.create_index([("code", 1)])
+            mongo_db.accounts.create_index([("type", 1)])
+            mongo_db.accounts.create_index([("last_modified", -1)])
+            mongo_db.invoices.create_index([("invoice_number", 1)])
+            mongo_db.invoices.create_index([("client_id", 1)])
+            mongo_db.invoices.create_index([("status", 1)])
+            mongo_db.invoices.create_index([("issue_date", -1)])
+            mongo_db.invoices.create_index([("last_modified", -1)])
+            mongo_db.payments.create_index([("project_id", 1)])
+            mongo_db.payments.create_index([("client_id", 1)])
+            mongo_db.payments.create_index([("invoice_number", 1)])
+            mongo_db.payments.create_index([("date", -1)])
+            mongo_db.payments.create_index([("account_id", 1)])
+            mongo_db.payments.create_index([("last_modified", -1)])
+            mongo_db.journal_entries.create_index([("date", -1)])
+            mongo_db.journal_entries.create_index([("related_document_id", 1)])
+            mongo_db.journal_entries.create_index([("last_modified", -1)])
+            mongo_db.expenses.create_index([("date", -1)])
+            mongo_db.expenses.create_index([("project_id", 1)])
+            mongo_db.expenses.create_index([("account_id", 1)])
+            mongo_db.expenses.create_index([("payment_account_id", 1)])
+            mongo_db.expenses.create_index([("last_modified", -1)])
 
             # ui-driven collections
-            self.mongo_db.notifications.create_index([("is_read", 1)])
-            self.mongo_db.notifications.create_index([("type", 1)])
-            self.mongo_db.notifications.create_index([("created_at", -1)])
-            self.mongo_db.notifications.create_index([("expires_at", 1)])
-            self.mongo_db.notifications.create_index([("entity_type", 1), ("created_at", -1)])
-            self.mongo_db.tasks.create_index([("status", 1)])
-            self.mongo_db.tasks.create_index([("due_date", 1)])
-            self.mongo_db.tasks.create_index([("last_modified", -1)])
-            self.mongo_db.users.create_index([("username", 1)])
-            self.mongo_db.users.create_index([("last_modified", -1)])
-            self.mongo_db.currencies.create_index([("code", 1)])
-            self.mongo_db.currencies.create_index([("active", 1)])
+            mongo_db.notifications.create_index([("is_read", 1)])
+            mongo_db.notifications.create_index([("type", 1)])
+            mongo_db.notifications.create_index([("created_at", -1)])
+            mongo_db.notifications.create_index([("expires_at", 1)])
+            mongo_db.notifications.create_index([("entity_type", 1), ("created_at", -1)])
+            mongo_db.tasks.create_index([("status", 1)])
+            mongo_db.tasks.create_index([("due_date", 1)])
+            mongo_db.tasks.create_index([("last_modified", -1)])
+            mongo_db.users.create_index([("username", 1)])
+            mongo_db.users.create_index([("last_modified", -1)])
+            mongo_db.currencies.create_index([("code", 1)])
+            mongo_db.currencies.create_index([("active", 1)])
 
             safe_print("INFO: تم إنشاء indexes في MongoDB بنجاح.")
             return True
@@ -2588,11 +3020,16 @@ class Repository:
     def get_client_by_id(self, client_id: str) -> schemas.Client | None:
         """جلب عميل واحد بالـ ID (بذكاء)"""
         try:
-            self.sqlite_cursor.execute(
-                f"SELECT * {self._is_active_filter_sql('clients')} AND (id = ? OR _mongo_id = ? OR name = ?)",
-                (client_id, client_id, client_id),
-            )
-            row = self.sqlite_cursor.fetchone()
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(
+                        f"SELECT * {self._is_active_filter_sql('clients')} AND (id = ? OR _mongo_id = ? OR name = ?)",
+                        (client_id, client_id, client_id),
+                    )
+                    row = cursor.fetchone()
+                finally:
+                    cursor.close()
             if row:
                 client = schemas.Client(**dict(row))
                 safe_print(f"INFO: تم جلب العميل (ID: {client_id}) من المحلي.")
@@ -2727,8 +3164,9 @@ class Repository:
     def _to_objectid(self, item_id: str):
         """محاولة تحويل النص إلى ObjectId صالح لتجنب أخطاء InvalidId."""
         try:
-            if isinstance(item_id, str) and len(item_id) == 24:
-                return ObjectId(item_id)
+            object_id_class = _get_object_id_class()
+            if object_id_class is not None and isinstance(item_id, str) and len(item_id) == 24:
+                return object_id_class(item_id)
         except Exception:
             pass
         return item_id
@@ -3562,6 +4000,36 @@ class Repository:
         if not normalized_project_ref:
             return None
 
+        resolved_project, canonical_project_name, _aliases, _target_client_id = (
+            self._resolve_project_context(normalized_project_ref, client_id)
+        )
+        if resolved_project and canonical_project_name:
+            try:
+                existing_for_project = self.get_payments_for_project(
+                    normalized_project_ref,
+                    client_id=client_id,
+                )
+                target_date_short = self._date_key(
+                    date.isoformat() if hasattr(date, "isoformat") else date
+                )
+                target_amount = self._amount_key(amount)
+                for existing in existing_for_project:
+                    existing_id = getattr(existing, "id", None)
+                    if exclude_id and existing_id and int(existing_id) == int(exclude_id):
+                        continue
+                    existing_date = self._date_key(getattr(existing, "date", ""))
+                    existing_amount = self._amount_key(getattr(existing, "amount", 0.0))
+                    if (
+                        existing_date == target_date_short
+                        and abs(existing_amount - target_amount) <= 0.01
+                    ):
+                        return existing
+                # الفحص scoped هنا هو المرجع؛ لا نرجع إلى fallback الخام
+                # حتى لا نعامل النسخ الظلية لنفس الدفعة كأنها دفعة أخرى.
+                return None
+            except Exception:
+                pass
+
         try:
             existing_for_project = self.get_payments_for_project(
                 normalized_project_ref,
@@ -3679,6 +4147,87 @@ class Repository:
                 safe_print(f"WARNING: فشل البحث عن دفعة مكررة (Mongo): {e}")
 
         return None
+
+    def _cleanup_shadow_payment_duplicates(
+        self,
+        current_id: int,
+        project_id: str,
+        date,
+        amount: float,
+        *,
+        client_id: str | None = None,
+        account_id: str | None = None,
+        method: str | None = None,
+    ) -> int:
+        try:
+            resolved_project = self._resolve_project_target_row(project_id, client_id)
+            signature_seed = {
+                "project_id": self._stable_project_reference(resolved_project, project_id),
+                "date": date.isoformat() if hasattr(date, "isoformat") else str(date),
+                "amount": amount,
+                "client_id": client_id or "",
+                "account_id": account_id or "",
+                "method": method or "",
+            }
+            target_signature = self._payment_signature(signature_seed)
+
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    cursor.execute(f"SELECT * {self._is_active_filter_sql('payments')}")
+                    rows = [dict(row) for row in cursor.fetchall()]
+                finally:
+                    cursor.close()
+
+            matching_rows = [
+                row for row in rows if self._payment_signature(row) == target_signature
+            ]
+            if len(matching_rows) < 2:
+                return 0
+
+            current_row = next(
+                (row for row in matching_rows if int(row.get("id") or 0) == int(current_id)),
+                None,
+            )
+            if current_row is None:
+                return 0
+
+            preferred_row = current_row
+            for row in matching_rows:
+                if int(row.get("id") or 0) == int(current_id):
+                    continue
+                preferred_row = self._prefer_row(preferred_row, row)
+            if int(preferred_row.get("id") or 0) != int(current_id):
+                return 0
+
+            stale_ids = [
+                int(row["id"])
+                for row in matching_rows
+                if int(row.get("id") or 0) != int(current_id)
+            ]
+            if not stale_ids:
+                return 0
+
+            with self._lock:
+                cursor = self.sqlite_conn.cursor()
+                try:
+                    placeholders = ", ".join("?" for _ in stale_ids)
+                    cursor.execute(
+                        f"DELETE FROM payments WHERE id IN ({placeholders})",
+                        stale_ids,
+                    )
+                    deleted_count = int(cursor.rowcount or 0)
+                    self.sqlite_conn.commit()
+                finally:
+                    cursor.close()
+
+            if deleted_count > 0:
+                safe_print(
+                    f"INFO: [Repo] تم تنظيف {deleted_count} نسخة ظل مكررة لنفس الدفعة قبل التحديث"
+                )
+            return deleted_count
+        except Exception:
+            return 0
 
     def _get_similar_client(self, name: str) -> schemas.Client | None:
         """البحث عن عميل مشابه (case insensitive + تشابه جزئي)"""
@@ -4109,6 +4658,7 @@ class Repository:
 
             QTimer.singleShot(100, sync_to_mongo)
 
+        self.invalidate_table_cache("accounts")
         return account_data
 
     def get_account_by_code(self, code: str) -> schemas.Account | None:
@@ -4148,7 +4698,7 @@ class Repository:
             finally:
                 cursor.close()
             if row:
-                account = schemas.Account(**dict(row))
+                account = self._account_from_row(row)
                 safe_print(f"INFO: تم جلب الحساب (Code: {code}) من المحلي.")
                 return account
         except Exception as e:
@@ -4157,7 +4707,13 @@ class Repository:
         return None  # لو الحساب مش موجود خالص
 
     def get_all_accounts(self) -> list[schemas.Account]:
-        """⚡ جلب كل الحسابات (SQLite أولاً للسرعة) - يستخدم cursor منفصل"""
+        """⚡ جلب كل الحسابات (SQLite أولاً للسرعة) - مع cache ذكي"""
+        if CACHE_ENABLED and hasattr(self, "_accounts_cache"):
+            cached_result = self._accounts_cache.get("all_accounts")
+            if cached_result is not None:
+                safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} حساب من الـ Cache")
+                return cached_result
+
         # ⚡ جلب من SQLite أولاً (سريع جداً) - cursor منفصل لتجنب Recursive cursor
         try:
             with self._lock:
@@ -4174,7 +4730,12 @@ class Repository:
                 finally:
                     cursor.close()
             if rows:
-                accounts_list = [schemas.Account(**dict(row)) for row in rows]
+                group_codes = self._account_group_codes_from_rows(rows)
+                accounts_list = [
+                    self._account_from_row(row, group_codes=group_codes) for row in rows
+                ]
+                if CACHE_ENABLED and hasattr(self, "_accounts_cache"):
+                    self._accounts_cache.set("all_accounts", accounts_list)
                 safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من المحلي (SQLite).")
                 return accounts_list
         except Exception as e:
@@ -4193,6 +4754,8 @@ class Repository:
                         acc.pop("_mongo_id", None)
                         acc.pop("mongo_id", None)
                         accounts_list.append(schemas.Account(**acc, _mongo_id=mongo_id))
+                    if CACHE_ENABLED and hasattr(self, "_accounts_cache"):
+                        self._accounts_cache.set("all_accounts", accounts_list)
                     safe_print(f"INFO: تم جلب {len(accounts_list)} حساب من الأونلاين (MongoDB).")
                     return accounts_list
             except Exception as e:
@@ -4224,7 +4787,7 @@ class Repository:
             finally:
                 cursor.close()
             if row:
-                return schemas.Account(**dict(row))
+                return self._account_from_row(row)
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل جلب الحساب {account_id} (SQLite): {e}")
 
@@ -4382,9 +4945,69 @@ class Repository:
             safe_print(f"ERROR: [Repository] فشل إنشاء المستخدم: {e}")
             raise
 
+    def _build_user_model(self, raw_user_data: dict[str, Any], default_id: str | None = None):
+        user_class, user_role_class = _get_auth_models()
+        if user_class is None or user_role_class is None:
+            return None
+
+        from dataclasses import fields as dataclass_fields
+
+        user_data = dict(raw_user_data or {})
+        mongo_object_id = user_data.pop("_id", None)
+        mongo_id = user_data.pop("mongo_id", None)
+        legacy_mongo_id = user_data.pop("_mongo_id", None)
+        if mongo_object_id not in (None, ""):
+            mongo_id = str(mongo_object_id)
+        elif mongo_id not in (None, ""):
+            mongo_id = str(mongo_id)
+        elif legacy_mongo_id not in (None, ""):
+            mongo_id = str(legacy_mongo_id)
+        else:
+            mongo_id = None
+
+        if default_id is None:
+            default_id = user_data.get("id")
+        if default_id not in (None, ""):
+            default_id = str(default_id)
+        elif mongo_id:
+            default_id = mongo_id
+        else:
+            default_id = None
+
+        role_value = user_data.get("role", "sales")
+        if isinstance(role_value, str):
+            user_data["role"] = user_role_class(role_value)
+
+        for field_name in ("created_at", "last_modified", "last_login"):
+            field_value = user_data.get(field_name)
+            if field_value and hasattr(field_value, "isoformat"):
+                user_data[field_name] = field_value.isoformat()
+            elif field_value is not None and not isinstance(field_value, str):
+                user_data[field_name] = str(field_value)
+
+        custom_permissions = user_data.get("custom_permissions")
+        if isinstance(custom_permissions, str) and custom_permissions.strip():
+            try:
+                user_data["custom_permissions"] = json.loads(custom_permissions)
+            except (json.JSONDecodeError, TypeError):
+                user_data["custom_permissions"] = None
+
+        user_data["id"] = default_id
+        user_data["mongo_id"] = mongo_id
+        if "is_active" in user_data:
+            user_data["is_active"] = bool(user_data["is_active"])
+
+        allowed_fields = {field.name for field in dataclass_fields(user_class)}
+        filtered_data = {key: value for key, value in user_data.items() if key in allowed_fields}
+        return user_class(**filtered_data)
+
     def get_user_by_username(self, username: str):
         """جلب مستخدم بالاسم"""
         try:
+            user_class, user_role_class = _get_auth_models()
+            if user_class is None or user_role_class is None:
+                safe_print("ERROR: [Repository] auth_models غير متوفرة")
+                return None
             # البحث في MongoDB أولاً
             if self.online:
                 try:
@@ -4392,21 +5015,7 @@ class Repository:
                         self._merge_active_filter_mongo({"username": username})
                     )
                     if user_data:
-                        user_data["mongo_id"] = str(
-                            user_data["_id"]
-                        )  # استخدام mongo_id بدلاً من _mongo_id
-                        del user_data["_id"]  # حذف _id لتجنب التعارض
-                        user_data["role"] = UserRole(user_data["role"])
-                        # تحويل datetime إلى string
-                        if "created_at" in user_data and hasattr(
-                            user_data["created_at"], "isoformat"
-                        ):
-                            user_data["created_at"] = user_data["created_at"].isoformat()
-                        if "last_login" in user_data and hasattr(
-                            user_data["last_login"], "isoformat"
-                        ):
-                            user_data["last_login"] = user_data["last_login"].isoformat()
-                        return User(**user_data)
+                        return self._build_user_model(user_data)
                 except Exception as e:
                     safe_print(f"WARNING: [Repository] فشل جلب المستخدم من MongoDB: {e}")
 
@@ -4417,21 +5026,7 @@ class Repository:
             )
             row = self.sqlite_cursor.fetchone()
             if row:
-                user_data = dict(row)
-                user_data["id"] = str(user_data["id"])  # تحويل ID إلى string
-                user_data["role"] = UserRole(user_data["role"])
-                user_data["is_active"] = bool(user_data["is_active"])
-
-                # تحويل custom_permissions من JSON string إلى dict
-                if user_data.get("custom_permissions"):
-                    try:
-                        user_data["custom_permissions"] = json.loads(
-                            user_data["custom_permissions"]
-                        )
-                    except (json.JSONDecodeError, TypeError):
-                        user_data["custom_permissions"] = None
-
-                return User(**user_data)
+                return self._build_user_model(dict(row), default_id=str(row["id"]))
 
             return None
         except Exception as e:
@@ -4590,6 +5185,11 @@ class Repository:
     def get_all_users(self):
         """جلب جميع المستخدمين من MongoDB أو SQLite - محسّن للأداء"""
         try:
+            user_class, user_role_class = _get_auth_models()
+            if user_class is None or user_role_class is None:
+                safe_print("ERROR: [Repository] auth_models غير متوفرة")
+                return []
+
             users = []
             users_by_key = {}
 
@@ -4602,44 +5202,10 @@ class Repository:
                     users_data = list(self.mongo_db.users.find(self._merge_active_filter_mongo()))
                     for user_data in users_data:
                         try:
-                            mongo_id = str(user_data.pop("_id", ""))
-
-                            # تحويل datetime إلى string
-                            created_at = user_data.get("created_at")
-                            if created_at and hasattr(created_at, "isoformat"):
-                                created_at = created_at.isoformat()
-                            else:
-                                created_at = str(created_at) if created_at else None
-
-                            last_modified = user_data.get("last_modified")
-                            if last_modified and hasattr(last_modified, "isoformat"):
-                                last_modified = last_modified.isoformat()
-
-                            last_login = user_data.get("last_login")
-                            if last_login and hasattr(last_login, "isoformat"):
-                                last_login = last_login.isoformat()
-
-                            # تحويل role إلى enum
-                            role_value = user_data.get("role", "sales")
-                            if isinstance(role_value, str):
-                                role_enum = UserRole(role_value)
-                            else:
-                                role_enum = role_value
-
-                            user = User(
-                                id=mongo_id,
-                                mongo_id=mongo_id,
-                                username=user_data.get("username", ""),
-                                password_hash=user_data.get("password_hash", ""),
-                                role=role_enum,
-                                is_active=bool(user_data.get("is_active", True)),
-                                full_name=user_data.get("full_name"),
-                                email=user_data.get("email"),
-                                created_at=created_at,
-                                last_login=last_login,
-                                custom_permissions=user_data.get("custom_permissions"),
-                            )
-                            user_key = mongo_id or user.username
+                            user = self._build_user_model(user_data)
+                            if user is None:
+                                continue
+                            user_key = str(user.mongo_id or "").strip() or user.username
                             users_by_key[user_key] = user
                         except Exception as e:
                             safe_print(f"WARNING: [Repository] فشل تحويل مستخدم من MongoDB: {e}")
@@ -4659,35 +5225,9 @@ class Repository:
             for row in rows:
                 try:
                     row_dict = dict(row)
-
-                    # تحويل role إلى enum
-                    role_value = row_dict.get("role", "sales")
-                    if isinstance(role_value, str):
-                        role_enum = UserRole(role_value)
-                    else:
-                        role_enum = role_value
-
-                    # تحويل custom_permissions من JSON string إلى dict
-                    custom_perms = None
-                    if row_dict.get("custom_permissions"):
-                        try:
-                            custom_perms = json.loads(row_dict["custom_permissions"])
-                        except (json.JSONDecodeError, TypeError):
-                            custom_perms = None
-
-                    user = User(
-                        id=str(row_dict.get("id", "")),
-                        mongo_id=row_dict.get("_mongo_id"),
-                        username=row_dict.get("username", ""),
-                        password_hash=row_dict.get("password_hash", ""),
-                        role=role_enum,
-                        is_active=bool(row_dict.get("is_active", 1)),
-                        full_name=row_dict.get("full_name"),
-                        email=row_dict.get("email"),
-                        created_at=row_dict.get("created_at"),
-                        last_login=row_dict.get("last_login"),
-                        custom_permissions=custom_perms,
-                    )
+                    user = self._build_user_model(row_dict, default_id=str(row_dict.get("id", "")))
+                    if user is None:
+                        continue
                     user_key = str(row_dict.get("_mongo_id") or "").strip() or user.username
                     users_by_key[user_key] = user
                 except Exception as e:
@@ -4931,7 +5471,8 @@ class Repository:
             UPDATE accounts SET
                 name = ?, code = ?, type = ?, parent_id = ?, status = ?,
                 balance = ?, currency = ?, description = ?,
-                last_modified = ?, sync_status = 'modified_offline'
+                last_modified = ?, sync_status = 'modified_offline',
+                is_deleted = 0, dirty_flag = 1
             WHERE id = ? OR _mongo_id = ? OR code = ?
         """
         params = (
@@ -5021,6 +5562,7 @@ class Repository:
 
             QTimer.singleShot(100, sync_to_mongo)
 
+        self.invalidate_table_cache("accounts")
         return account_data
 
     def archive_account_by_id(self, account_id: str) -> bool:
@@ -5063,17 +5605,25 @@ class Repository:
             # مزامنة مع MongoDB
             if self.online and self.mongo_db is not None:
                 try:
-                    result = self.mongo_db.accounts.update_one(
-                        {"code": account_code},
-                        {
-                            "$set": {
-                                "balance": new_balance,
-                                "last_modified": now_dt,
-                                "sync_status": "synced",
-                                "is_deleted": False,
-                            }
-                        },
-                    )
+                    accounts_collection = self.mongo_db.accounts
+                    update_payload = {
+                        "$set": {
+                            "balance": new_balance,
+                            "last_modified": now_dt,
+                            "sync_status": "synced",
+                            "is_deleted": False,
+                        }
+                    }
+                    if hasattr(accounts_collection, "update_many"):
+                        result = accounts_collection.update_many(
+                            {"code": account_code},
+                            update_payload,
+                        )
+                    else:
+                        result = accounts_collection.update_one(
+                            {"code": account_code},
+                            update_payload,
+                        )
                     if result and (
                         getattr(result, "matched_count", 0) > 0
                         or getattr(result, "modified_count", 0) > 0
@@ -5095,6 +5645,7 @@ class Repository:
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل مزامنة الرصيد مع MongoDB: {e}")
 
+            self.invalidate_table_cache("accounts")
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل تحديث رصيد الحساب: {e}")
@@ -5151,6 +5702,7 @@ class Repository:
                             (local_id, mongo_id, account_code),
                         )
                         self.sqlite_conn.commit()
+                        self.invalidate_table_cache("accounts")
                         safe_print("INFO: [Repo] ✅ تم تعليم حذف الحساب ثم حذفه محلياً")
                         return True
                 except Exception as e:
@@ -5165,6 +5717,7 @@ class Repository:
                 (now_iso, local_id, mongo_id, account_code),
             )
             self.sqlite_conn.commit()
+            self.invalidate_table_cache("accounts")
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حذف الحساب: {e}")
@@ -5190,8 +5743,7 @@ class Repository:
                 except Exception as e:
                     safe_print(f"WARNING: [Repo] فشل حذف الحسابات/القيود من MongoDB: {e}")
 
-            Repository._dashboard_cache = None
-            Repository._dashboard_cache_time = 0
+            self.invalidate_table_cache("accounts")
             return True
         except Exception as e:
             safe_print(f"ERROR: [Repo] فشل حذف جميع الحسابات: {e}")
@@ -5352,8 +5904,10 @@ class Repository:
     def _client_reference_values(self, client_ref: Any) -> set[str]:
         references: set[str] = set()
         normalized_ref = normalize_user_text(client_ref)
-        if normalized_ref:
-            references.add(normalized_ref)
+        if not normalized_ref:
+            return references
+
+        references.add(normalized_ref)
 
         local_client = self._resolve_local_client_row(normalized_ref)
         if local_client is not None:
@@ -5788,9 +6342,7 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل مزامنة الدفعة الجديدة: {e}")
 
-        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
-        Repository._dashboard_cache = None
-        Repository._dashboard_cache_time = 0
+        self.invalidate_table_cache("payments")
 
         return payment_data
 
@@ -5875,7 +6427,13 @@ class Repository:
         return []
 
     def get_all_payments(self) -> list[schemas.Payment]:
-        """⚡ جلب كل الدفعات (SQLite أولاً للسرعة)"""
+        """⚡ جلب كل الدفعات (SQLite أولاً للسرعة) - مع cache ذكي"""
+        if CACHE_ENABLED and hasattr(self, "_payments_cache"):
+            cached_result = self._payments_cache.get("all_payments")
+            if cached_result is not None:
+                safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} دفعة من الـ Cache")
+                return cached_result
+
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
             cursor = self.get_cursor()
@@ -5897,6 +6455,8 @@ class Repository:
             )
             deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
             payments = [schemas.Payment(**row) for row in deduped_rows]
+            if CACHE_ENABLED and hasattr(self, "_payments_cache"):
+                self._payments_cache.set("all_payments", payments)
             safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من SQLite.")
             return payments
         except Exception as e:
@@ -5918,6 +6478,8 @@ class Repository:
                 deduped_rows = self._dedupe_rows_by_signature(rows, self._payment_signature)
                 deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
                 payments = [schemas.Payment(**row) for row in deduped_rows]
+                if CACHE_ENABLED and hasattr(self, "_payments_cache"):
+                    self._payments_cache.set("all_payments", payments)
                 safe_print(f"INFO: [Repo] تم جلب {len(payments)} دفعة من MongoDB.")
                 return payments
             except Exception as e:
@@ -6048,6 +6610,17 @@ class Repository:
                 except (TypeError, ValueError):
                     existing_local_id = None
 
+            if existing_local_id:
+                self._cleanup_shadow_payment_duplicates(
+                    existing_local_id,
+                    project_id,
+                    payment_data.date,
+                    payment_data.amount,
+                    client_id=client_id,
+                    account_id=payment_data.account_id,
+                    method=payment_data.method or "",
+                )
+
             duplicate_payment = self._get_duplicate_payment(
                 project_id,
                 payment_data.date,
@@ -6126,9 +6699,7 @@ class Repository:
                 except Exception:
                     pass  # Ignore sync errors
 
-            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
-            Repository._dashboard_cache = None
-            Repository._dashboard_cache_time = 0
+            self.invalidate_table_cache("payments")
 
             return True
         except ValueError:
@@ -6171,7 +6742,7 @@ class Repository:
             if self.online and mongo_id:
                 try:
                     result = self.mongo_db.payments.update_one(
-                        {"_id": ObjectId(mongo_id)},
+                        {"_id": self._to_objectid(mongo_id)},
                         {
                             "$set": {
                                 "is_deleted": True,
@@ -6219,9 +6790,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
 
-            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
-            Repository._dashboard_cache = None
-            Repository._dashboard_cache_time = 0
+            self.invalidate_table_cache("payments")
 
             return True
         except Exception as e:
@@ -6407,7 +6976,7 @@ class Repository:
         if self.online:
             try:
                 data = self.mongo_db.invoices.find_one(
-                    self._merge_active_filter_mongo({"_id": ObjectId(invoice_id)})
+                    self._merge_active_filter_mongo({"_id": self._to_objectid(invoice_id)})
                 )
                 if data:
                     mongo_id = str(data.pop("_id"))
@@ -6993,9 +7562,7 @@ class Repository:
             except Exception as e:
                 safe_print(f"ERROR: فشل مزامنة المصروف الجديد '{expense_data.category}': {e}")
 
-        # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
-        Repository._dashboard_cache = None
-        Repository._dashboard_cache_time = 0
+        self.invalidate_table_cache("expenses")
 
         return expense_data
 
@@ -7086,7 +7653,13 @@ class Repository:
         return None
 
     def get_all_expenses(self) -> list[schemas.Expense]:
-        """⚡ جلب كل المصروفات (SQLite أولاً للسرعة)"""
+        """⚡ جلب كل المصروفات (SQLite أولاً للسرعة) - مع cache ذكي"""
+        if CACHE_ENABLED and hasattr(self, "_expenses_cache"):
+            cached_result = self._expenses_cache.get("all_expenses")
+            if cached_result is not None:
+                safe_print(f"INFO: ⚡ تم جلب {len(cached_result)} مصروف من الـ Cache")
+                return cached_result
+
         # ⚡ جلب من SQLite أولاً (سريع جداً)
         try:
             cursor = self.get_cursor()
@@ -7108,6 +7681,8 @@ class Repository:
             )
             deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
             expenses_list = [schemas.Expense(**row) for row in deduped_rows]
+            if CACHE_ENABLED and hasattr(self, "_expenses_cache"):
+                self._expenses_cache.set("all_expenses", expenses_list)
             safe_print(f"INFO: تم جلب {len(expenses_list)} مصروف من المحلي (SQLite).")
             return expenses_list
         except Exception as e:
@@ -7127,6 +7702,8 @@ class Repository:
                 deduped_rows = self._dedupe_rows_by_signature(rows, self._expense_signature)
                 deduped_rows.sort(key=lambda row: str(row.get("date") or ""), reverse=True)
                 expenses_list = [schemas.Expense(**row) for row in deduped_rows]
+                if CACHE_ENABLED and hasattr(self, "_expenses_cache"):
+                    self._expenses_cache.set("all_expenses", expenses_list)
                 safe_print("INFO: تم جلب المصروفات من الأونلاين (MongoDB).")
                 return expenses_list
             except Exception as e:
@@ -7371,9 +7948,7 @@ class Repository:
                 except Exception:
                     pass  # Ignore sync errors
 
-            # ⚡ إبطال cache الداشبورد
-            Repository._dashboard_cache = None
-            Repository._dashboard_cache_time = 0
+            self.invalidate_table_cache("expenses")
 
             return True
         except ValueError:
@@ -7399,7 +7974,7 @@ class Repository:
             if self.online and mongo_id:
                 try:
                     result = self.mongo_db.expenses.update_one(
-                        {"_id": ObjectId(mongo_id)},
+                        {"_id": self._to_objectid(mongo_id)},
                         {
                             "$set": {
                                 "is_deleted": True,
@@ -7447,9 +8022,7 @@ class Repository:
                 )
                 self.sqlite_conn.commit()
 
-            # ⚡ إبطال cache الداشبورد لأن الأرقام تغيرت
-            Repository._dashboard_cache = None
-            Repository._dashboard_cache_time = 0
+            self.invalidate_table_cache("expenses")
 
             return True
         except Exception as e:
@@ -7528,14 +8101,21 @@ class Repository:
 
         # ⚡ جلب قيمة status_manually_set
         status_manually_set = 1 if getattr(project_data, "status_manually_set", False) else 0
+        currency_code = normalize_currency_code(getattr(project_data, "currency", None))
+        exchange_rate_snapshot = normalize_exchange_rate(
+            getattr(project_data, "exchange_rate_snapshot", 1.0),
+            currency_code,
+        )
+        project_data.currency = currency_code
+        project_data.exchange_rate_snapshot = exchange_rate_snapshot
 
         sql = """
             INSERT INTO projects (
                 sync_status, created_at, last_modified, name, client_id,
                 status, status_manually_set, description, start_date, end_date,
                 items, milestones, subtotal, discount_rate, discount_amount, tax_rate,
-                tax_amount, total_amount, currency, project_notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                tax_amount, total_amount, currency, exchange_rate_snapshot, project_notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
             project_data.sync_status,
@@ -7556,7 +8136,8 @@ class Repository:
             project_data.tax_rate,
             project_data.tax_amount,
             project_data.total_amount,
-            project_data.currency.value,
+            currency_code,
+            exchange_rate_snapshot,
             project_data.project_notes,
         )
 
@@ -7611,7 +8192,8 @@ class Repository:
                 )
                 project_dict["start_date"] = project_data.start_date
                 project_dict["end_date"] = project_data.end_date
-                project_dict["currency"] = project_data.currency.value
+                project_dict["currency"] = currency_code
+                project_dict["exchange_rate_snapshot"] = exchange_rate_snapshot
                 # ✅ تأكد من حفظ رقم الفاتورة
                 project_dict["invoice_number"] = invoice_number
 
@@ -7662,7 +8244,6 @@ class Repository:
                 return cached_result
 
         allowed_statuses = {s.value for s in schemas.ProjectStatus}
-        allowed_currencies = {c.value for c in schemas.CurrencyCode}
         now_iso = datetime.now().isoformat()
 
         def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -7709,10 +8290,15 @@ class Repository:
                 status_value = schemas.ProjectStatus.ACTIVE.value
             payload["status"] = status_value
 
-            currency_value = str(payload.get("currency") or schemas.CurrencyCode.EGP.value)
-            if currency_value not in allowed_currencies:
-                currency_value = schemas.CurrencyCode.EGP.value
+            currency_value = normalize_currency_code(
+                payload.get("currency"),
+                schemas.CurrencyCode.EGP.value,
+            )
             payload["currency"] = currency_value
+            payload["exchange_rate_snapshot"] = normalize_exchange_rate(
+                payload.get("exchange_rate_snapshot", 1.0),
+                currency_value,
+            )
 
             payload["created_at"] = str(payload.get("created_at") or now_iso)
             payload["last_modified"] = str(payload.get("last_modified") or now_iso)
@@ -7730,6 +8316,7 @@ class Repository:
                 "total_estimated_cost",
                 "estimated_profit",
                 "profit_margin",
+                "exchange_rate_snapshot",
             ]:
                 payload[numeric_field] = _safe_float(payload.get(numeric_field), 0.0)
 
@@ -7853,6 +8440,11 @@ class Repository:
             if not row:
                 return None
             row_dict = dict(row)
+            row_dict["currency"] = normalize_currency_code(row_dict.get("currency"))
+            row_dict["exchange_rate_snapshot"] = normalize_exchange_rate(
+                row_dict.get("exchange_rate_snapshot", 1.0),
+                row_dict.get("currency"),
+            )
             items_value = row_dict.get("items")
             if isinstance(items_value, str):
                 try:
@@ -7885,6 +8477,13 @@ class Repository:
         )
         if normalized_client_id:
             project_data.client_id = normalized_client_id
+        currency_code = normalize_currency_code(getattr(project_data, "currency", None))
+        exchange_rate_snapshot = normalize_exchange_rate(
+            getattr(project_data, "exchange_rate_snapshot", 1.0),
+            currency_code,
+        )
+        project_data.currency = currency_code
+        project_data.exchange_rate_snapshot = exchange_rate_snapshot
         items_json = json.dumps([item.model_dump() for item in project_data.items])
         milestones_json = json.dumps(
             [milestone.model_dump(mode="json") for milestone in project_data.milestones],
@@ -7927,7 +8526,7 @@ class Repository:
                 UPDATE projects SET
                     name = ?, client_id = ?, status = ?, status_manually_set = ?, description = ?, start_date = ?, end_date = ?,
                     items = ?, milestones = ?, subtotal = ?, discount_rate = ?, discount_amount = ?, tax_rate = ?,
-                    tax_amount = ?, total_amount = ?, currency = ?, project_notes = ?,
+                    tax_amount = ?, total_amount = ?, currency = ?, exchange_rate_snapshot = ?, project_notes = ?,
                     last_modified = ?, sync_status = 'modified_offline'
                 WHERE id = ?
             """
@@ -7947,7 +8546,8 @@ class Repository:
                 project_data.tax_rate,
                 project_data.tax_amount,
                 project_data.total_amount,
-                project_data.currency.value,
+                currency_code,
+                exchange_rate_snapshot,
                 project_data.project_notes,
                 now_iso,
                 target_local_id,
@@ -8008,14 +8608,17 @@ class Repository:
                 update_dict["status"] = project_data.status.value
                 update_dict["start_date"] = project_data.start_date
                 update_dict["end_date"] = project_data.end_date
-                update_dict["currency"] = project_data.currency.value
+                update_dict["currency"] = currency_code
+                update_dict["exchange_rate_snapshot"] = exchange_rate_snapshot
                 update_dict["last_modified"] = now_dt
                 update_dict["sync_status"] = "synced"
                 update_dict["is_deleted"] = False
 
                 if current_mongo_id:
                     try:
-                        project_filter: dict[str, Any] = {"_id": ObjectId(current_mongo_id)}
+                        project_filter: dict[str, Any] = {
+                            "_id": self._to_objectid(current_mongo_id)
+                        }
                     except Exception:
                         project_filter = {"_mongo_id": current_mongo_id}
                 else:
@@ -8110,7 +8713,7 @@ class Repository:
                     result = self.mongo_db.projects.update_one(
                         {
                             "$or": [
-                                {"_id": ObjectId(mongo_id)},
+                                {"_id": self._to_objectid(mongo_id)},
                                 {"_mongo_id": mongo_id},
                                 {"name": project_name},
                             ]
@@ -8432,6 +9035,7 @@ class Repository:
         try:
             payments = self.get_all_payments()
             expenses = self.get_all_expenses()
+            projects = self.get_all_projects()
             total_collected = sum(
                 float(getattr(payment, "amount", 0.0) or 0.0) for payment in payments
             )
@@ -8439,39 +9043,150 @@ class Repository:
                 float(getattr(expense, "amount", 0.0) or 0.0) for expense in expenses
             )
 
+            project_rows: list[dict[str, Any]] = []
+            exact_name_matches: dict[str, list[dict[str, Any]]] = {}
+            local_id_matches: dict[str, list[dict[str, Any]]] = {}
+            mongo_id_matches: dict[str, list[dict[str, Any]]] = {}
+            project_code_matches: dict[str, list[dict[str, Any]]] = {}
+            invoice_number_matches: dict[str, list[dict[str, Any]]] = {}
+            normalized_name_matches: dict[str, list[dict[str, Any]]] = {}
+
+            def _append_match(
+                index: dict[str, list[dict[str, Any]]], key: str, row: dict[str, Any]
+            ) -> None:
+                if not key:
+                    return
+                index.setdefault(key, []).append(row)
+
+            for project in projects:
+                row = {
+                    "id": str(getattr(project, "id", None) or "").strip(),
+                    "name": str(getattr(project, "name", "") or "").strip(),
+                    "client_id": str(getattr(project, "client_id", "") or "").strip(),
+                    "_mongo_id": str(getattr(project, "_mongo_id", None) or "").strip(),
+                    "project_code": str(getattr(project, "project_code", "") or "").strip(),
+                    "invoice_number": str(getattr(project, "invoice_number", "") or "").strip(),
+                    "status": getattr(project, "status", None),
+                    "total_amount": float(getattr(project, "total_amount", 0.0) or 0.0),
+                }
+                row["scope_key"] = self._project_scope_key(
+                    row["_mongo_id"] or row["id"] or row["name"],
+                    row["client_id"],
+                    project_row=row,
+                )
+                project_rows.append(row)
+                _append_match(exact_name_matches, row["name"], row)
+                _append_match(local_id_matches, row["id"], row)
+                _append_match(mongo_id_matches, row["_mongo_id"], row)
+                _append_match(
+                    project_code_matches, self._project_text_key(row["project_code"]), row
+                )
+                _append_match(
+                    invoice_number_matches, self._project_text_key(row["invoice_number"]), row
+                )
+                _append_match(normalized_name_matches, self._project_text_key(row["name"]), row)
+
+            client_keys_cache: dict[str, set[str]] = {}
+            project_resolution_cache: dict[tuple[str, str], dict[str, Any] | None] = {}
+
+            def _client_keys(client_id: Any) -> set[str]:
+                cache_key = normalize_user_text(client_id)
+                cached_keys = client_keys_cache.get(cache_key)
+                if cached_keys is not None:
+                    return cached_keys
+
+                client_keys = {
+                    self._project_text_key(reference)
+                    for reference in self._client_reference_values(client_id)
+                    if self._project_text_key(reference)
+                }
+                if not client_keys:
+                    normalized_client_key = self._project_text_key(client_id)
+                    if normalized_client_key:
+                        client_keys = {normalized_client_key}
+                client_keys_cache[cache_key] = client_keys
+                return client_keys
+
+            def _pick_project(
+                candidates: list[dict[str, Any]], client_id: Any
+            ) -> dict[str, Any] | None:
+                if not candidates:
+                    return None
+                if len(candidates) == 1:
+                    return candidates[0]
+
+                client_keys = _client_keys(client_id)
+                if client_keys:
+                    by_client = [
+                        row
+                        for row in candidates
+                        if self._project_text_key(row.get("client_id")) in client_keys
+                    ]
+                    if len(by_client) == 1:
+                        return by_client[0]
+                return None
+
+            def _resolve_project_row_fast(
+                project_ref: Any, client_id: Any
+            ) -> dict[str, Any] | None:
+                normalized_reference = normalize_user_text(project_ref)
+                normalized_client = normalize_user_text(client_id)
+                cache_key = (normalized_client, normalized_reference)
+                if cache_key in project_resolution_cache:
+                    return project_resolution_cache[cache_key]
+
+                if not normalized_reference:
+                    project_resolution_cache[cache_key] = None
+                    return None
+
+                reference_key = self._project_text_key(normalized_reference)
+                chosen = _pick_project(exact_name_matches.get(normalized_reference, []), client_id)
+                if chosen is None and normalized_reference.isdigit():
+                    chosen = _pick_project(
+                        local_id_matches.get(normalized_reference, []), client_id
+                    )
+                if chosen is None:
+                    chosen = _pick_project(
+                        mongo_id_matches.get(normalized_reference, []), client_id
+                    )
+                if chosen is None:
+                    for alias_index in (project_code_matches, invoice_number_matches):
+                        chosen = _pick_project(alias_index.get(reference_key, []), client_id)
+                        if chosen is not None:
+                            break
+                if chosen is None:
+                    chosen = _pick_project(
+                        normalized_name_matches.get(reference_key, []), client_id
+                    )
+
+                project_resolution_cache[cache_key] = chosen
+                return chosen
+
             paid_by_project: dict[tuple[str, str], float] = {}
             for payment in payments:
-                resolved_project = self._resolve_project_target_row(
-                    getattr(payment, "project_id", ""),
-                    getattr(payment, "client_id", ""),
-                )
-                project_key = self._project_scope_key(
-                    getattr(payment, "project_id", ""),
-                    getattr(payment, "client_id", ""),
-                    project_row=resolved_project,
-                )
+                payment_project_id = getattr(payment, "project_id", "")
+                payment_client_id = getattr(payment, "client_id", "")
+                resolved_project = _resolve_project_row_fast(payment_project_id, payment_client_id)
+                if resolved_project is not None:
+                    project_key = resolved_project["scope_key"]
+                else:
+                    project_key = self._project_scope_key(payment_project_id, payment_client_id)
                 if not project_key[1]:
                     continue
                 paid_by_project[project_key] = paid_by_project.get(project_key, 0.0) + float(
                     getattr(payment, "amount", 0.0) or 0.0
                 )
 
-            projects = self.get_all_projects()
             active_statuses = {
                 schemas.ProjectStatus.ACTIVE,
                 schemas.ProjectStatus.PLANNING,
                 schemas.ProjectStatus.ON_HOLD,
             }
-            for project in projects:
-                if getattr(project, "status", None) not in active_statuses:
+            for project_row in project_rows:
+                if project_row["status"] not in active_statuses:
                     continue
-                project_key = self._project_scope_key(
-                    getattr(project, "id", None)
-                    or getattr(project, "_mongo_id", None)
-                    or getattr(project, "name", ""),
-                    getattr(project, "client_id", ""),
-                )
-                project_total = float(getattr(project, "total_amount", 0.0) or 0.0)
+                project_key = project_row["scope_key"]
+                project_total = project_row["total_amount"]
                 project_paid = float(paid_by_project.get(project_key, 0.0))
                 project_remaining = project_total - project_paid
                 if project_remaining > 0:
@@ -8734,7 +9449,7 @@ class Repository:
     def fetch_live_exchange_rate(self, currency_code: str) -> float | None:
         """جلب سعر الصرف الحقيقي من الإنترنت"""
 
-        currency_code = currency_code.upper()
+        currency_code = normalize_currency_code(currency_code)
         if currency_code == "EGP":
             return 1.0
 
@@ -8819,11 +9534,12 @@ class Repository:
         results = {}
 
         for curr in currencies:
-            code = curr["code"]
-            if code == "EGP":
+            code = str(curr.get("code") or "").upper()
+            normalized_code = normalize_currency_code(code)
+            if normalized_code == "EGP":
                 continue
 
-            live_rate = self.fetch_live_exchange_rate(code)
+            live_rate = self.fetch_live_exchange_rate(normalized_code)
             if live_rate:
                 curr["rate"] = live_rate
                 self.save_currency(curr)
@@ -9153,6 +9869,12 @@ class Repository:
         تحديث علامة is_group للحسابات (الحسابات التي لها أطفال)
         """
         try:
+            if not self._table_has_column("accounts", "is_group"):
+                safe_print(
+                    "INFO: [Repo] تم تخطي تحديث is_group لأن العمود غير موجود في SQLite الحالية"
+                )
+                return
+
             # أولاً: تعيين كل الحسابات كـ is_group = False
             self.sqlite_cursor.execute("UPDATE accounts SET is_group = 0")
 

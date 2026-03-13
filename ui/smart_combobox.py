@@ -30,12 +30,27 @@ class SmartFilterComboBox(QComboBox):
         self._all_items = []
         self._is_filtering = False
         self._popup_visible = False
+        self._pending_focus_restore: tuple[str, int] | None = None
 
         # تايمر للفلترة المتأخرة
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(200)  # انتظر 200ms بعد آخر حرف
         self._filter_timer.timeout.connect(self._do_filter)
+
+        # مؤقتات مملوكة للمكون نفسه لتفادي أي callbacks متأخرة بعد الإخفاء أو التدمير
+        self._focus_restore_timer = QTimer(self)
+        self._focus_restore_timer.setSingleShot(True)
+        self._focus_restore_timer.timeout.connect(self._apply_pending_focus_restore)
+
+        self._restore_items_timer = QTimer(self)
+        self._restore_items_timer.setSingleShot(True)
+        self._restore_items_timer.setInterval(50)
+        self._restore_items_timer.timeout.connect(self._restore_all_items)
+
+        self._select_all_timer = QTimer(self)
+        self._select_all_timer.setSingleShot(True)
+        self._select_all_timer.timeout.connect(self._select_all_text)
 
         # ربط تغيير النص
         self.lineEdit().textEdited.connect(self._on_text_edited)
@@ -122,14 +137,24 @@ class SmartFilterComboBox(QComboBox):
         super().showPopup()
 
         # إعادة التركيز للـ LineEdit فوراً
-        QTimer.singleShot(0, lambda: self._restore_focus(text, cursor_pos))
+        self._pending_focus_restore = (text, cursor_pos)
+        self._focus_restore_timer.start(0)
+
+    def _apply_pending_focus_restore(self):
+        if self._pending_focus_restore is None:
+            return
+        text, cursor_pos = self._pending_focus_restore
+        self._pending_focus_restore = None
+        self._restore_focus(text, cursor_pos)
 
     def _restore_focus(self, text: str, cursor_pos: int):
         """إعادة التركيز والنص للـ LineEdit"""
-        if self.lineEdit():
-            self.lineEdit().setFocus()
-            self.lineEdit().setText(text)
-            self.lineEdit().setCursorPosition(cursor_pos)
+        line_edit = self.lineEdit()
+        if line_edit is None or not self.isVisible():
+            return
+        line_edit.setFocus()
+        line_edit.setText(text)
+        line_edit.setCursorPosition(cursor_pos)
 
     def hidePopup(self):
         """عند إغلاق القائمة"""
@@ -137,7 +162,7 @@ class SmartFilterComboBox(QComboBox):
         super().hidePopup()
 
         # استعادة كل العناصر بعد الإغلاق
-        QTimer.singleShot(50, self._restore_all_items)
+        self._restore_items_timer.start()
 
     def _restore_all_items(self):
         """استعادة كل العناصر الأصلية"""
@@ -164,12 +189,40 @@ class SmartFilterComboBox(QComboBox):
     def focusInEvent(self, event):
         """عند الحصول على التركيز - حدد كل النص"""
         super().focusInEvent(event)
-        QTimer.singleShot(0, self._select_all_text)
+        self._schedule_select_all()
 
     def _select_all_text(self):
         """تحديد كل النص"""
-        if self.lineEdit():
-            self.lineEdit().selectAll()
+        line_edit = self.lineEdit()
+        if line_edit and self.isVisible():
+            line_edit.selectAll()
+
+    def _schedule_select_all(self):
+        self._select_all_timer.start(0)
+
+    def shutdown(self):
+        """تنظيف أي حالة مؤجلة قبل إخفاء/إغلاق النافذة المالكة."""
+        self._popup_visible = False
+        self._pending_focus_restore = None
+        self._filter_timer.stop()
+        self._focus_restore_timer.stop()
+        self._restore_items_timer.stop()
+        self._select_all_timer.stop()
+        try:
+            view = self.view()
+            if view is not None and view.isVisible():
+                super().hidePopup()
+        except RuntimeError:
+            return
+        line_edit = self.lineEdit()
+        if line_edit:
+            line_edit.clearFocus()
+        self.clearFocus()
+
+    def hideEvent(self, event):
+        """إيقاف أي مؤقتات مؤجلة عند إخفاء الـ combo أو تدميره مع النافذة."""
+        self.shutdown()
+        super().hideEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent):
         """عند الضغط بالماوس"""
@@ -187,7 +240,7 @@ class SmartFilterComboBox(QComboBox):
 
             if is_text_area:
                 super().mousePressEvent(event)
-                QTimer.singleShot(0, self._select_all_text)
+                self._schedule_select_all()
                 return
 
         super().mousePressEvent(event)

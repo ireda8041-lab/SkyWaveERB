@@ -3,7 +3,9 @@
 إعدادات قوالب الفواتير في تاب الإعدادات
 """
 
-from PyQt6.QtCore import Qt
+from __future__ import annotations
+
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,10 +19,38 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from services.template_service import TemplateService
-from ui.invoice_preview_dialog import InvoicePreviewDialog
 from ui.styles import BUTTON_STYLES, get_cairo_font
-from ui.template_manager import TemplateManager
+
+TemplateService = None
+TemplateManager = None
+InvoicePreviewDialog = None
+
+
+def _get_template_service_class():
+    global TemplateService
+    if TemplateService is None:
+        from services.template_service import TemplateService as _TemplateService
+
+        TemplateService = _TemplateService
+    return TemplateService
+
+
+def _get_template_manager_class():
+    global TemplateManager
+    if TemplateManager is None:
+        from ui.template_manager import TemplateManager as _TemplateManager
+
+        TemplateManager = _TemplateManager
+    return TemplateManager
+
+
+def _get_invoice_preview_dialog_class():
+    global InvoicePreviewDialog
+    if InvoicePreviewDialog is None:
+        from ui.invoice_preview_dialog import InvoicePreviewDialog as _InvoicePreviewDialog
+
+        InvoicePreviewDialog = _InvoicePreviewDialog
+    return InvoicePreviewDialog
 
 
 class TemplateSettings(QWidget):
@@ -35,21 +65,50 @@ class TemplateSettings(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.settings_service = settings_service
-
-        # إنشاء خدمة القوالب
-        # نحتاج repository من settings_service
-        if hasattr(settings_service, "repo"):
-            repository = settings_service.repo
-        else:
-            # إنشاء repository مؤقت
-            from core.repository import Repository
-
-            repository = Repository()
-
-        self.template_service = TemplateService(repository, settings_service)
+        self.template_service = None
+        self.template_manager = None
+        self._template_tools_ready = False
+        self._template_init_requested = False
 
         self.setup_ui()
-        self.load_template_settings()
+
+    def _ensure_template_tools(self) -> bool:
+        if self._template_tools_ready:
+            return True
+
+        try:
+            if self.template_service is None:
+                if hasattr(self.settings_service, "repo"):
+                    repository = self.settings_service.repo
+                else:
+                    from core.repository import Repository
+
+                    repository = Repository()
+
+                template_service_class = _get_template_service_class()
+                self.template_service = template_service_class(repository, self.settings_service)
+
+            if self.template_manager is None:
+                template_manager_class = _get_template_manager_class()
+                self.template_manager = template_manager_class(self.template_service)
+                self.template_manager.template_changed.connect(self.load_template_settings)
+                if self.template_manager_hint is not None:
+                    self.template_manager_hint.deleteLater()
+                    self.template_manager_hint = None
+                self.template_manager_host_layout.addWidget(self.template_manager)
+
+            self._template_tools_ready = True
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "خطأ", f"فشل في تجهيز أدوات القوالب: {e}")
+            return False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._template_init_requested:
+            return
+        self._template_init_requested = True
+        QTimer.singleShot(0, self.load_template_settings)
 
     def setup_ui(self):
         """إعداد واجهة المستخدم"""
@@ -131,13 +190,20 @@ class TemplateSettings(QWidget):
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
-        # مدير القوالب المدمج
-        self.template_manager = TemplateManager(self.template_service)
-        self.template_manager.template_changed.connect(self.load_template_settings)
-        layout.addWidget(self.template_manager, 1)
+        self.template_manager_host = QWidget()
+        self.template_manager_host_layout = QVBoxLayout(self.template_manager_host)
+        self.template_manager_host_layout.setContentsMargins(0, 0, 0, 0)
+        self.template_manager_host_layout.setSpacing(0)
+        self.template_manager_hint = QLabel("سيتم تجهيز مدير القوالب عند فتح هذا القسم.")
+        self.template_manager_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.template_manager_hint.setStyleSheet("color: #94a3b8; padding: 24px;")
+        self.template_manager_host_layout.addWidget(self.template_manager_hint)
+        layout.addWidget(self.template_manager_host, 1)
 
     def load_template_settings(self):
         """تحميل إعدادات القوالب"""
+        if not self._ensure_template_tools():
+            return
         try:
             # تحديث عدد القوالب
             templates = self.template_service.get_all_templates()
@@ -175,6 +241,8 @@ class TemplateSettings(QWidget):
 
     def change_default_template(self):
         """تغيير القالب الافتراضي"""
+        if not self._ensure_template_tools():
+            return
         template_id = self.default_template_combo.currentData()
         if template_id:
             try:
@@ -190,6 +258,8 @@ class TemplateSettings(QWidget):
 
     def preview_default_template(self):
         """معاينة القالب الافتراضي"""
+        if not self._ensure_template_tools():
+            return
         try:
             default_template = self.template_service.get_default_template()
             if not default_template:
@@ -259,7 +329,8 @@ class TemplateSettings(QWidget):
             exports_dir = self.template_service.get_exports_dir()
             filename = self.template_service.build_export_basename(sample_project, sample_client)
 
-            dialog = InvoicePreviewDialog(
+            invoice_preview_dialog_class = _get_invoice_preview_dialog_class()
+            dialog = invoice_preview_dialog_class(
                 html_content=html_content,
                 title="معاينة القالب الافتراضي",
                 base_url=self.template_service.templates_dir,
@@ -275,6 +346,8 @@ class TemplateSettings(QWidget):
 
     def open_template_manager(self):
         """فتح مدير القوالب في نافذة منفصلة"""
+        if not self._ensure_template_tools():
+            return
         try:
             dialog = QDialog(self)
             dialog.setWindowTitle("إدارة قوالب الفواتير")
@@ -284,7 +357,8 @@ class TemplateSettings(QWidget):
             layout = QVBoxLayout(dialog)
 
             # إنشاء مدير قوالب جديد للنافذة
-            template_manager = TemplateManager(self.template_service)
+            template_manager_class = _get_template_manager_class()
+            template_manager = template_manager_class(self.template_service)
             template_manager.template_changed.connect(self.load_template_settings)
             layout.addWidget(template_manager)
 

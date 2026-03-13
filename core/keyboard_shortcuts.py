@@ -8,7 +8,7 @@
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QAbstractSpinBox, QApplication, QLineEdit, QPlainTextEdit, QTextEdit
 
 from core.logger import get_logger
 
@@ -39,6 +39,20 @@ class KeyboardShortcutManager(QObject):
     copy_selected = pyqtSignal()
     export_excel = pyqtSignal()
     print_current = pyqtSignal()
+    _TEXT_SELECTION_SHORTCUTS = {"copy_selected", "select_all"}
+    _TEXT_EDITING_DELETE_SHORTCUTS = {"delete_selected"}
+    _MODAL_SAFE_SHORTCUTS = {
+        "search",
+        "refresh",
+        "save",
+        "close",
+        "help",
+        "delete_selected",
+        "select_all",
+        "copy_selected",
+        "export_excel",
+        "print_current",
+    }
 
     def __init__(self, main_window):
         """
@@ -182,17 +196,78 @@ class KeyboardShortcutManager(QObject):
             shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
             shortcut.setAutoRepeat(False)  # منع التكرار التلقائي
 
-            # ربط الاختصار بالإجراء أو الإشارة
-            if "signal" in definition:
-                shortcut.activated.connect(definition["signal"].emit)
-            elif "action" in definition:
-                shortcut.activated.connect(definition["action"])
+            shortcut.activated.connect(
+                lambda _checked=False, shortcut_name=name: self._dispatch_shortcut(shortcut_name)
+            )
 
             self.shortcuts[name] = shortcut
             logger.debug("تم إنشاء اختصار: %s (%s)", name, definition["key"])
 
         except Exception as e:
             logger.error("فشل إنشاء اختصار %s: %s", name, e)
+
+    @staticmethod
+    def _is_text_selection_widget(widget) -> bool:
+        if widget is None:
+            return False
+        return isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit))
+
+    @staticmethod
+    def _is_text_editable_widget(widget) -> bool:
+        if widget is None:
+            return False
+        if isinstance(widget, QLineEdit):
+            return not widget.isReadOnly()
+        if isinstance(widget, (QTextEdit, QPlainTextEdit)):
+            return not widget.isReadOnly()
+        if isinstance(widget, QAbstractSpinBox):
+            line_edit = widget.lineEdit()
+            return bool(line_edit and not line_edit.isReadOnly())
+        return False
+
+    def _should_bypass_shortcut(self, shortcut_name: str | None) -> bool:
+        if not shortcut_name:
+            return False
+
+        active_window = QApplication.activeWindow()
+        if active_window is not None and active_window is not self.main_window:
+            return True
+
+        focus_widget = QApplication.focusWidget()
+        focus_window = focus_widget.window() if focus_widget is not None else None
+        if focus_window is not None and focus_window is not self.main_window:
+            return True
+
+        active_modal = QApplication.activeModalWidget()
+        if (
+            active_modal is not None
+            and active_modal is not self.main_window
+            and shortcut_name not in self._MODAL_SAFE_SHORTCUTS
+        ):
+            return True
+
+        if shortcut_name in self._TEXT_SELECTION_SHORTCUTS and self._is_text_selection_widget(
+            focus_widget
+        ):
+            return True
+        if shortcut_name in self._TEXT_EDITING_DELETE_SHORTCUTS and self._is_text_editable_widget(
+            focus_widget
+        ):
+            return True
+        return False
+
+    def _dispatch_shortcut(self, shortcut_name: str) -> bool:
+        definition = self.shortcut_definitions.get(shortcut_name)
+        if not definition or self._should_bypass_shortcut(shortcut_name):
+            return False
+
+        if "signal" in definition:
+            QTimer.singleShot(0, definition["signal"].emit)
+            return True
+        if "action" in definition:
+            QTimer.singleShot(0, definition["action"])
+            return True
+        return False
 
     def _switch_tab(self, index: int):
         """
@@ -282,9 +357,15 @@ class KeyboardShortcutManager(QObject):
         return self._trigger_sequence(event)
 
     def _match_sequence(self, event) -> bool:
+        shortcut_name = self._shortcut_name_for_event(event)
+        if self._should_bypass_shortcut(shortcut_name):
+            return False
+        return shortcut_name is not None
+
+    def _shortcut_name_for_event(self, event) -> str | None:
         key = event.key()
         if key == Qt.Key.Key_unknown:
-            return False
+            return None
 
         modifiers = event.modifiers() & (
             Qt.KeyboardModifier.ControlModifier
@@ -300,38 +381,14 @@ class KeyboardShortcutManager(QObject):
                 continue
             expected_text = expected.toString(QKeySequence.SequenceFormat.PortableText)
             if expected_text == sequence_text:
-                return True
-        return False
+                return name
+        return None
 
     def _trigger_sequence(self, event) -> bool:
-
-        key = event.key()
-        if key == Qt.Key.Key_unknown:
+        shortcut_name = self._shortcut_name_for_event(event)
+        if shortcut_name is None:
             return False
-
-        modifiers = event.modifiers() & (
-            Qt.KeyboardModifier.ControlModifier
-            | Qt.KeyboardModifier.ShiftModifier
-            | Qt.KeyboardModifier.AltModifier
-            | Qt.KeyboardModifier.MetaModifier
-        )
-        sequence = QKeySequence(int(modifiers.value) | key)
-        sequence_text = sequence.toString(QKeySequence.SequenceFormat.PortableText)
-        for name, definition in self.shortcut_definitions.items():
-            expected = self._sequence_map.get(name)
-            if not expected:
-                continue
-
-            expected_text = expected.toString(QKeySequence.SequenceFormat.PortableText)
-            if expected_text == sequence_text:
-                if "signal" in definition:
-                    QTimer.singleShot(0, definition["signal"].emit)
-                    return True
-                if "action" in definition:
-                    QTimer.singleShot(0, definition["action"])
-                    return True
-
-        return False
+        return self._dispatch_shortcut(shortcut_name)
 
     def get_shortcuts_by_category(self) -> dict[str, list]:
         """

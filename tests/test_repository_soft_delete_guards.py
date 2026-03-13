@@ -1145,6 +1145,40 @@ def test_get_user_by_username_ignores_deleted_cloud_row(repo):
     assert repo.get_user_by_username("deleted-cloud-user") is None
 
 
+def test_get_user_by_username_normalizes_cloud_sync_metadata(repo):
+    repo.online = True
+    cloud_users = _FakeMongoCollection(
+        [
+            {
+                "_id": "mongo-user-active-lookup-1",
+                "_mongo_id": "legacy-shadow-id",
+                "username": "active-cloud-user",
+                "password_hash": "hash-active-cloud",
+                "role": UserRole.ADMIN.value,
+                "is_active": True,
+                "full_name": "Active Cloud User",
+                "email": "active@example.com",
+                "sync_status": "synced",
+                "dirty_flag": 0,
+                "is_deleted": False,
+                "created_at": datetime(2026, 3, 12, 14, 0, 0),
+                "last_modified": datetime(2026, 3, 12, 14, 5, 0),
+                "last_login": datetime(2026, 3, 12, 14, 10, 0),
+            }
+        ]
+    )
+    repo.mongo_db = SimpleNamespace(users=cloud_users)
+
+    user = repo.get_user_by_username("active-cloud-user")
+
+    assert user is not None
+    assert user.username == "active-cloud-user"
+    assert user.mongo_id == "mongo-user-active-lookup-1"
+    assert user.id == "mongo-user-active-lookup-1"
+    assert user.last_modified == "2026-03-12T14:05:00"
+    assert user.last_login == "2026-03-12T14:10:00"
+
+
 def test_authenticate_ignores_deleted_user_lookup(repo):
     password = "DeletedUserPass123!"
     repo.create_user(

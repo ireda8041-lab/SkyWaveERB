@@ -631,9 +631,9 @@
                         <td>{{ loop.index }}</td>
                         <td style="color: var(--primary-blue);">{{ item.name }}</td>
                         <td>{{ item.qty }}</td>
-                        <td>{{ item.price }} ج.م</td>
+                        <td>{{ item.price }} {{ currency_suffix }}</td>
                         <td>{{ item.discount }}%</td>
-                        <td>{{ item.total }} ج.م</td>
+                        <td>{{ item.total }} {{ currency_suffix }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -647,7 +647,7 @@
                     <span class="payment-chip">
                         <span class="chip-date">{{ payment.date if payment.date else '-' }}</span>
                         <span class="chip-method">{{ payment.account_name if payment.account_name else payment.account_id }}</span>
-                        <span class="chip-amount">{{ "%.2f"|format(payment.amount|float) }}</span>
+                        <span class="chip-amount">{{ "%.2f"|format(payment.amount|float) }} {{ currency_suffix }}</span>
                     </span>
                     {% endfor %}
                 </div>
@@ -683,25 +683,25 @@
                 <div class="totals-container">
                     <div class="total-row bg-white">
                         <span class="total-label">الإجمالي الكلي:</span>
-                        <span class="total-value" style="color: var(--primary-blue);">{{ subtotal }} ج.م</span>
+                        <span class="total-value" style="color: var(--primary-blue);">{{ subtotal }} {{ currency_suffix }}</span>
                     </div>
                     {% if discount_amount_raw and discount_amount_raw > 0 %}
                     <div class="total-row bg-light-red">
                         <span class="total-label">الخصم:</span>
-                        <span class="total-value">- {{ discount_amount }} ج.م</span>
+                        <span class="total-value">- {{ discount_amount }} {{ currency_suffix }}</span>
                     </div>
                     {% endif %}
                     <div class="total-row bg-white">
                         <span class="total-label">الإجمالي الفرعي:</span>
-                        <span class="total-value" style="color: var(--primary-blue);">{{ grand_total }} ج.م</span>
+                        <span class="total-value" style="color: var(--primary-blue);">{{ grand_total }} {{ currency_suffix }}</span>
                     </div>
                     <div class="total-row bg-light-green">
                         <span class="total-label">المبلغ المدفوع:</span>
-                        <span class="total-value">{{ total_paid }} ج.م</span>
+                        <span class="total-value">{{ total_paid }} {{ currency_suffix }}</span>
                     </div>
                     <div class="total-row bg-blue">
                         <span class="total-label">المبلغ المتبقي:</span>
-                        <span class="total-value">{{ remaining_amount }} ج.م</span>
+                        <span class="total-value">{{ remaining_amount }} {{ currency_suffix }}</span>
                     </div>
                 </div>
             </div>

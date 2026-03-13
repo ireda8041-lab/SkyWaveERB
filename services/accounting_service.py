@@ -1,20 +1,25 @@
 # pylint: disable=too-many-lines,too-many-nested-blocks,too-many-positional-arguments,too-many-public-methods
 # الملف: services/accounting_service.py
 
+from __future__ import annotations
+
+import os
+import sys
 import threading
 import time
 import traceback
 from datetime import datetime, timedelta
-from typing import Any
+from heapq import heappush, heappushpop
+from typing import TYPE_CHECKING, Any
 
-from PyQt6.QtCore import QTimer
-
-from core import schemas
 from core.cache_manager import get_cache, invalidate_cache
-from core.event_bus import EventBus
 from core.logger import get_logger
-from core.repository import Repository
 from core.signals import app_signals
+from core.text_utils import normalize_user_text
+
+if TYPE_CHECKING:
+    from core.event_bus import EventBus
+    from core.repository import Repository
 
 # استيراد دالة الطباعة الآمنة
 try:
@@ -28,16 +33,60 @@ except ImportError:
             pass
 
 
-# إشعارات العمليات
-try:
-    from core.notification_bridge import notify_operation
-except ImportError:
-
-    def notify_operation(action, entity_type, entity_name):
-        pass
-
-
 logger = get_logger(__name__)
+
+_SCHEMAS_MODULE = None
+_QTIMER_CLASS = None
+_NOTIFY_OPERATION = None
+_CASH_ACCOUNT_TYPE_ALIASES = frozenset({"أصول نقدية", "cash", "CASH"})
+
+
+def _get_schemas_module():
+    global _SCHEMAS_MODULE
+    if _SCHEMAS_MODULE is None:
+        from core import schemas as schemas_module
+
+        _SCHEMAS_MODULE = schemas_module
+    return _SCHEMAS_MODULE
+
+
+class _SchemasProxy:
+    def __getattr__(self, name: str):
+        return getattr(_get_schemas_module(), name)
+
+
+def _get_qtimer_class():
+    global _QTIMER_CLASS
+    if _QTIMER_CLASS is None:
+        from PyQt6.QtCore import QTimer as qtimer_class
+
+        _QTIMER_CLASS = qtimer_class
+    return _QTIMER_CLASS
+
+
+def _qtimer_single_shot(timeout_ms: int, callback) -> None:
+    _get_qtimer_class().singleShot(timeout_ms, callback)
+
+
+def _get_notify_operation():
+    global _NOTIFY_OPERATION
+    if _NOTIFY_OPERATION is None:
+        try:
+            from core.notification_bridge import notify_operation as notify_operation_func
+        except ImportError:
+
+            def notify_operation_func(action, entity_type, entity_name):
+                return None
+
+        _NOTIFY_OPERATION = notify_operation_func
+    return _NOTIFY_OPERATION
+
+
+def _notify_operation(action, entity_type, entity_name) -> None:
+    _get_notify_operation()(action, entity_type, entity_name)
+
+
+schemas = _SchemasProxy()
 
 
 class AccountingService:
@@ -69,11 +118,38 @@ class AccountingService:
     OPEX_SALARIES_CODE = "620001"  # رواتب الموظفين
     OPEX_RENT_CODE = "620002"  # إيجار ومرافق
     OPEX_BANK_FEES_CODE = "630001"  # رسوم بنكية
+    DISABLED_INTERNAL_ACCOUNT_CODES = {
+        "111101",
+        "112100",
+        "212100",
+        "212200",
+        "410100",
+        "510001",
+        "510002",
+        "510003",
+        "610002",
+        "620001",
+        "620002",
+        "630001",
+    }
 
     # ⚡ Cache للشجرة المحاسبية
     _hierarchy_cache = None
     _hierarchy_cache_time = 0
     _HIERARCHY_CACHE_TTL = 300  # ⚡ 5 دقائق بدلاً من 60 ثانية
+
+    @staticmethod
+    def _has_qapplication() -> bool:
+        try:
+            from PyQt6.QtWidgets import QApplication
+
+            return QApplication.instance() is not None
+        except Exception:
+            return False
+
+    @staticmethod
+    def _can_defer_startup_cash_recalc() -> bool:
+        return not bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
     def __init__(self, repository: Repository, event_bus: EventBus):
         """
@@ -104,73 +180,393 @@ class AccountingService:
         cache.set("all", accounts)
         return accounts
 
-    def _ensure_default_accounts_exist(self) -> None:
-        """
-        ⚡ التحقق من وجود الحسابات المحاسبية الأساسية وإعادة حساب الأرصدة
-
-        الحسابات الضرورية للنظام:
-        - حساب العملاء (112100) - للقيود المحاسبية عند إنشاء مشروع
-        - حساب الإيرادات (410100) - للقيود المحاسبية عند إنشاء مشروع
-        - حسابات النقدية (111xxx) - للدفعات والمصروفات
-        """
+    @staticmethod
+    def _safe_amount(value: Any) -> float:
         try:
-            existing_accounts = self.repo.get_all_accounts()
-            existing_codes = {acc.code for acc in existing_accounts if acc.code}
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
 
-            required_accounts = {
-                "112100": {
-                    "name": "حساب العملاء",
-                    "type": schemas.AccountType.ASSET,
-                    "description": "حساب أصول (مدين) لتجميع مديونيات العملاء",
-                },
-                "410100": {
-                    "name": "إيرادات الخدمات",
-                    "type": schemas.AccountType.REVENUE,
-                    "description": "حساب إيرادات (دائن) لتجميع إيرادات الخدمات",
-                },
-            }
+    @staticmethod
+    def _is_leaf_account(account: schemas.Account) -> bool:
+        return not bool(getattr(account, "is_group", False))
 
-            missing = [code for code in required_accounts if code not in existing_codes]
-            if missing:
-                safe_print(f"WARNING: [AccountingService] ⚠️ حسابات مفقودة: {missing}")
-                for code in missing:
-                    try:
-                        meta = required_accounts[code]
-                        created = self.repo.create_account(
-                            schemas.Account(
-                                name=meta["name"],
-                                code=code,
-                                type=meta["type"],
-                                parent_code=None,
-                                is_group=False,
-                                balance=0.0,
-                                description=meta["description"],
-                            )
-                        )
-                        safe_print(
-                            f"INFO: [AccountingService] ✅ تم إنشاء الحساب الافتراضي: {created.code} - {created.name}"
-                        )
-                    except Exception as create_err:
-                        safe_print(
-                            f"WARNING: [AccountingService] فشل إنشاء الحساب الافتراضي {code}: {create_err}"
-                        )
+    def _is_cash_account_like(self, account: schemas.Account | None) -> bool:
+        """التحقق من أن الحساب يمثل خزنة/وسيلة تحصيل نقدية."""
+        if account is None:
+            return False
+        account_type = getattr(account, "type", None)
+        type_value = str(getattr(account_type, "value", account_type) or "").strip()
+        code = str(getattr(account, "code", "") or "")
+        return type_value in _CASH_ACCOUNT_TYPE_ALIASES or code.startswith("111")
 
-                existing_accounts = self.repo.get_all_accounts()
-                existing_codes = {acc.code for acc in existing_accounts if acc.code}
+    def _account_reference_keys(self, account: schemas.Account) -> set[str]:
+        """إنشاء جميع المفاتيح المحتملة المستخدمة كمرجع للحساب."""
+        keys: set[str] = set()
+        for value in (
+            getattr(account, "id", None),
+            getattr(account, "_mongo_id", None),
+            getattr(account, "mongo_id", None),
+            getattr(account, "code", None),
+        ):
+            raw = str(value or "").strip()
+            if not raw:
+                continue
+            keys.add(raw)
 
-            cash_count = sum(1 for acc in existing_accounts if acc.type == schemas.AccountType.CASH)
-            safe_print(
-                f"INFO: [AccountingService] ✅ تم العثور على {len(existing_codes)} حساب ({cash_count} نقدية)"
+        name = str(getattr(account, "name", "") or "").strip()
+        if name:
+            keys.add(name)
+            normalized_name = normalize_user_text(name).strip()
+            if normalized_name:
+                keys.add(normalized_name)
+        return keys
+
+    def _build_account_reference_map(
+        self, accounts: list[schemas.Account]
+    ) -> dict[str, schemas.Account]:
+        """بناء قاموس مطابقة سريع لمراجع الحسابات."""
+        reference_map: dict[str, schemas.Account] = {}
+        for account in accounts or []:
+            for key in self._account_reference_keys(account):
+                reference_map.setdefault(key, account)
+        return reference_map
+
+    def _resolve_account_reference(
+        self,
+        reference: str | None,
+        reference_map: dict[str, schemas.Account],
+        *,
+        cash_only: bool = False,
+    ) -> schemas.Account | None:
+        """حل أي مرجع قديم/حالي إلى الحساب المطابق."""
+        raw = str(reference or "").strip()
+        if not raw:
+            return None
+
+        candidates = [raw]
+        if any(ch.isalpha() for ch in raw):
+            normalized = normalize_user_text(raw).strip()
+            if normalized and normalized not in candidates:
+                candidates.append(normalized)
+
+        for candidate in candidates:
+            account = reference_map.get(candidate)
+            if account is None:
+                continue
+            if cash_only and not self._is_cash_account_like(account):
+                continue
+            return account
+        return None
+
+    def _resolve_expense_cash_account(
+        self, expense: schemas.Expense, reference_map: dict[str, schemas.Account]
+    ) -> tuple[schemas.Account | None, bool, bool]:
+        """
+        تحديد الخزنة المرتبطة بالمصروف.
+
+        returns:
+            account: الخزنة المحلولة
+            needs_repair: payment_account_id موجود لكنه قديم/خاطئ
+            needs_backfill: payment_account_id فارغ ويجب تعبئته من account_id القديم
+        """
+        explicit_ref = str(getattr(expense, "payment_account_id", "") or "").strip()
+        explicit_account = (
+            self._resolve_account_reference(explicit_ref, reference_map, cash_only=True)
+            if explicit_ref
+            else None
+        )
+        if explicit_account is not None:
+            return explicit_account, False, False
+
+        legacy_ref = str(getattr(expense, "account_id", "") or "").strip()
+        legacy_account = (
+            self._resolve_account_reference(legacy_ref, reference_map, cash_only=True)
+            if legacy_ref
+            else None
+        )
+        if legacy_account is None:
+            return None, False, False
+
+        return legacy_account, bool(explicit_ref), not bool(explicit_ref)
+
+    def _build_cash_flow_totals(
+        self,
+        accounts: list[schemas.Account] | None = None,
+        payments: list[schemas.Payment] | None = None,
+        expenses: list[schemas.Expense] | None = None,
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        """Ø§Ø´ØªÙ‚Ø§Ù‚ Ø¥Ø¬Ù…Ø§Ù„ÙŠØ§Øª Ø§Ù„ÙˆØ§Ø±Ø¯ ÙˆØ§Ù„ØµØ§Ø¯Ø± Ù„Ù„Ø®Ø²Ù† Ø¨Ø±Ø¨Ø· Ù…Ø±Ù† Ù„Ù„Ù…Ø±Ø§Ø¬Ø¹ Ø§Ù„Ù‚Ø¯ÙŠÙ…Ø© ÙˆØ§Ù„Ø­Ø§Ù„ÙŠØ©."""
+        accounts = accounts if accounts is not None else self._safe_repo_list("get_all_accounts")
+        payments = payments if payments is not None else self._safe_repo_list("get_all_payments")
+        expenses = expenses if expenses is not None else self._safe_repo_list("get_all_expenses")
+        reference_map = self._build_account_reference_map(accounts)
+
+        inflow_by_code: dict[str, float] = {}
+        outflow_by_code: dict[str, float] = {}
+
+        for payment in payments or []:
+            resolved_account = self._resolve_account_reference(
+                getattr(payment, "account_id", None),
+                reference_map,
+                cash_only=True,
+            )
+            if resolved_account is None or not self._is_leaf_account(resolved_account):
+                continue
+            code = str(getattr(resolved_account, "code", "") or "")
+            if not code or code.endswith("000"):
+                continue
+            inflow_by_code[code] = inflow_by_code.get(code, 0.0) + self._safe_amount(
+                getattr(payment, "amount", 0.0)
             )
 
-            # ⚡ إعادة حساب أرصدة الحسابات النقدية من الدفعات والمصروفات
-            self._recalculate_cash_balances()
+        for expense in expenses or []:
+            resolved_cash, _needs_repair, _needs_backfill = self._resolve_expense_cash_account(
+                expense, reference_map
+            )
+            if resolved_cash is None or not self._is_leaf_account(resolved_cash):
+                continue
+            code = str(getattr(resolved_cash, "code", "") or "")
+            if not code or code.endswith("000"):
+                continue
+            outflow_by_code[code] = outflow_by_code.get(code, 0.0) + self._safe_amount(
+                getattr(expense, "amount", 0.0)
+            )
 
-            # ⚠️ معطل: لا يتم إنشاء حسابات عملاء وإيرادات للمشاريع
-            # self._recalculate_project_accounts()
+        return inflow_by_code, outflow_by_code
+
+    def audit_cashbox_integrity(
+        self,
+        *,
+        apply_fixes: bool = False,
+        preloaded_accounts: list[schemas.Account] | None = None,
+        preloaded_payments: list[schemas.Payment] | None = None,
+        preloaded_expenses: list[schemas.Expense] | None = None,
+    ) -> dict[str, Any]:
+        """مراجعة تكامل الخزن وربط الدفعات والمصروفات بها."""
+        accounts = (
+            preloaded_accounts
+            if preloaded_accounts is not None
+            else self._safe_repo_list("get_all_accounts")
+        )
+        payments = (
+            preloaded_payments
+            if preloaded_payments is not None
+            else self._safe_repo_list("get_all_payments")
+        )
+        expenses = (
+            preloaded_expenses
+            if preloaded_expenses is not None
+            else self._safe_repo_list("get_all_expenses")
+        )
+        reference_map = self._build_account_reference_map(accounts)
+
+        parent_codes = {
+            str(
+                getattr(account, "parent_id", None) or getattr(account, "parent_code", None) or ""
+            ).strip()
+            for account in accounts
+        }
+        result: dict[str, Any] = {
+            "cashbox_count": sum(
+                1
+                for account in accounts
+                if self._is_cash_account_like(account)
+                and str(getattr(account, "code", "") or "") not in parent_codes
+                and not str(getattr(account, "code", "") or "").endswith("000")
+            ),
+            "payments_reviewed": len(payments),
+            "expenses_reviewed": len(expenses),
+            "unresolved_payment_account_refs": 0,
+            "unresolved_expense_payment_refs": 0,
+            "fixed_expense_payment_refs": 0,
+            "backfilled_expense_payment_refs": 0,
+            "stale_cash_balance_count": 0,
+            "stale_cash_balances": [],
+        }
+
+        for payment in payments:
+            resolved = self._resolve_account_reference(
+                getattr(payment, "account_id", None), reference_map, cash_only=True
+            )
+            if resolved is None:
+                result["unresolved_payment_account_refs"] += 1
+
+        for expense in expenses:
+            resolved_cash, needs_repair, needs_backfill = self._resolve_expense_cash_account(
+                expense, reference_map
+            )
+            if resolved_cash is None:
+                if str(getattr(expense, "payment_account_id", "") or "").strip():
+                    result["unresolved_expense_payment_refs"] += 1
+                continue
+
+            if not (needs_repair or needs_backfill):
+                continue
+
+            if not apply_fixes:
+                if needs_repair:
+                    result["fixed_expense_payment_refs"] += 1
+                else:
+                    result["backfilled_expense_payment_refs"] += 1
+                continue
+
+            try:
+                fixed_expense = expense.model_copy(
+                    update={"payment_account_id": resolved_cash.code}
+                )
+                expense_ref = getattr(expense, "_mongo_id", None) or str(
+                    getattr(expense, "id", "") or ""
+                )
+                if expense_ref and self.repo.update_expense(expense_ref, fixed_expense):
+                    if needs_repair:
+                        result["fixed_expense_payment_refs"] += 1
+                    else:
+                        result["backfilled_expense_payment_refs"] += 1
+            except Exception as exc:
+                safe_print(f"WARNING: [AccountingService] فشل إصلاح مرجع خزنة مصروف: {exc}")
+
+        try:
+            tree_map = self.get_hierarchy_with_balances(force_refresh=True)
+            for account in accounts:
+                if not self._is_cash_account_like(account):
+                    continue
+                if bool(getattr(account, "is_group", False)):
+                    continue
+                node = tree_map.get(str(getattr(account, "code", "") or ""))
+                if not isinstance(node, dict):
+                    continue
+                stored_balance = float(getattr(account, "balance", 0.0) or 0.0)
+                derived_balance = float(node.get("total", stored_balance) or 0.0)
+                if abs(stored_balance - derived_balance) < 0.009:
+                    continue
+                result["stale_cash_balances"].append(
+                    {
+                        "code": getattr(account, "code", ""),
+                        "name": getattr(account, "name", ""),
+                        "stored_balance": stored_balance,
+                        "derived_balance": derived_balance,
+                    }
+                )
+            result["stale_cash_balance_count"] = len(result["stale_cash_balances"])
+        except Exception as exc:
+            safe_print(f"WARNING: [AccountingService] فشل فحص أرصدة الخزن: {exc}")
+
+        if apply_fixes and (
+            result["fixed_expense_payment_refs"] or result["backfilled_expense_payment_refs"]
+        ):
+            invalidate_cache("expenses")
+            invalidate_cache("accounts")
+
+        return result
+
+    def _select_preferred_leaf_code(
+        self, candidate_codes: set[str], *preferred_codes: str
+    ) -> str | None:
+        for code in preferred_codes:
+            if code in candidate_codes:
+                return code
+        return sorted(candidate_codes)[0] if candidate_codes else None
+
+    def _build_operational_balance_overrides(
+        self, accounts: list[schemas.Account]
+    ) -> dict[str, float]:
+        """
+        اشتقاق أرصدة الخزن التشغيلية مباشرة من الدفعات والمصروفات.
+
+        بعد تعطيل طبقة القيود والحسابات الافتراضية، المطلوب هنا هو إبقاء
+        أرصدة الخزن فقط متسقة مع حركة التحصيل والصرف الفعلية.
+        """
+        accounts_by_code = {str(acc.code): acc for acc in accounts if getattr(acc, "code", None)}
+        if not accounts_by_code:
+            return {}
+
+        cash_leaf_codes = {
+            code
+            for code, acc in accounts_by_code.items()
+            if self._is_leaf_account(acc) and code.startswith("111")
+        }
+        if not cash_leaf_codes:
+            return {}
+
+        payments = self.repo.get_all_payments() if hasattr(self.repo, "get_all_payments") else []
+        expenses = self.repo.get_all_expenses() if hasattr(self.repo, "get_all_expenses") else []
+
+        overrides: dict[str, float] = {}
+
+        payments_by_cash, expenses_by_cash = self._build_cash_flow_totals(
+            list(accounts_by_code.values()),
+            payments,
+            expenses,
+        )
+
+        for code in cash_leaf_codes:
+            derived_balance = payments_by_cash.get(code, 0.0) - expenses_by_cash.get(code, 0.0)
+            stored_balance = self._safe_amount(getattr(accounts_by_code[code], "balance", 0.0))
+            if abs(stored_balance - derived_balance) > 0.01:
+                overrides[code] = derived_balance
+
+        return overrides
+
+    def _ensure_default_accounts_exist(self) -> None:
+        """
+        تنظيف أي حسابات افتراضية داخلية قديمة وإبقاء منطق التشغيل على الخزن فقط.
+        """
+        try:
+            codes = sorted(self.DISABLED_INTERNAL_ACCOUNT_CODES)
+            deleted_accounts = 0
+            deleted_entries = 0
+            placeholders = ",".join("?" for _ in codes)
+
+            conn = getattr(self.repo, "sqlite_conn", None)
+            if conn is not None and codes:
+                cursor = conn.cursor()
+                try:
+                    count_row = cursor.execute(
+                        f"SELECT COUNT(*) FROM accounts WHERE code IN ({placeholders})",
+                        tuple(codes),
+                    ).fetchone()
+                    deleted_accounts = int((count_row[0] if count_row else 0) or 0)
+                    if deleted_accounts:
+                        cursor.execute(
+                            f"DELETE FROM accounts WHERE code IN ({placeholders})",
+                            tuple(codes),
+                        )
+
+                    journal_row = cursor.execute("SELECT COUNT(*) FROM journal_entries").fetchone()
+                    deleted_entries = int((journal_row[0] if journal_row else 0) or 0)
+                    if deleted_entries:
+                        cursor.execute("DELETE FROM journal_entries")
+
+                    conn.commit()
+                finally:
+                    cursor.close()
+
+            if self.repo.online and getattr(self.repo, "mongo_db", None) is not None:
+                try:
+                    self.repo.mongo_db.accounts.delete_many({"code": {"$in": codes}})
+                    self.repo.mongo_db.journal_entries.delete_many({})
+                except Exception as remote_err:
+                    safe_print(
+                        f"WARNING: [AccountingService] فشل تنظيف الحسابات الداخلية من MongoDB: {remote_err}"
+                    )
+
+            if deleted_accounts or deleted_entries:
+                safe_print(
+                    f"INFO: [AccountingService] ✅ تم حذف الحسابات الداخلية ({deleted_accounts}) والقيود اليومية ({deleted_entries})"
+                )
+
+            invalidate_cache("accounts")
+            invalidate_cache("dashboard")
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            if self._can_defer_startup_cash_recalc():
+                self._schedule_cash_recalc(["accounts", "dashboard"])
+            else:
+                self._recalculate_cash_balances()
 
         except Exception as e:
-            safe_print(f"WARNING: [AccountingService] فشل التحقق من الحسابات: {e}")
+            safe_print(f"WARNING: [AccountingService] فشل تنظيف الحسابات الداخلية: {e}")
 
     def _schedule_cash_recalc(self, emit_types: list[str] | None = None) -> bool:
         with self._cash_recalc_lock:
@@ -190,7 +586,10 @@ class AccountingService:
                             app_signals.emit_data_changed(data_type)
 
                 try:
-                    QTimer.singleShot(0, finalize)
+                    if self._has_qapplication():
+                        _qtimer_single_shot(0, finalize)
+                    else:
+                        finalize()
                 except Exception:
                     self._cash_recalc_in_flight = False
 
@@ -199,122 +598,11 @@ class AccountingService:
 
     def _recalculate_project_accounts(self) -> None:
         """
-        ⚡ إعادة حساب أرصدة حسابات العملاء والإيرادات من إجمالي المشاريع
-        - حساب العملاء (112100) = إجمالي قيمة المشاريع
-        - حساب الإيرادات (410100) = إجمالي قيمة المشاريع
+        معطّل بعد إزالة المحاسبة الداخلية الافتراضية.
         """
-        try:
-            cursor = self.repo.sqlite_conn.cursor()
-            try:
-                # حساب إجمالي المشاريع
-                cursor.execute("SELECT COALESCE(SUM(total_amount), 0) FROM projects")
-                total_projects = cursor.fetchone()[0]
+        return
 
-                # تحديث حساب العملاء
-                cursor.execute(
-                    "UPDATE accounts SET balance = ? WHERE code = ?",
-                    (total_projects, self.ACC_RECEIVABLE_CODE),
-                )
-
-                # تحديث حساب الإيرادات
-                cursor.execute(
-                    "UPDATE accounts SET balance = ? WHERE code = ?",
-                    (total_projects, self.SERVICE_REVENUE_CODE),
-                )
-
-                self.repo.sqlite_conn.commit()
-                safe_print(
-                    f"INFO: [AccountingService] ✅ تم تحديث حسابات المشاريع: {total_projects}"
-                )
-            finally:
-                cursor.close()
-        except Exception as e:
-            safe_print(f"WARNING: [AccountingService] فشل تحديث حسابات المشاريع: {e}")
-
-    def _recalculate_cash_balances(self) -> None:
-        """
-        ⚡ إعادة حساب أرصدة الحسابات النقدية من الدفعات والمصروفات
-        الرصيد = إجمالي الدفعات المستلمة - إجمالي المصروفات المدفوعة
-
-        ⚠️ هذه الدالة تُستدعى فقط عند بدء البرنامج لضمان صحة الأرصدة
-        ⚡ محسّنة: تستخدم cursor منفصل لتجنب Recursive cursor error
-        """
-        try:
-            # ⚡ استخدام cursor منفصل
-            cursor = self.repo.sqlite_conn.cursor()
-            cursor.row_factory = self.repo.sqlite_conn.row_factory
-
-            try:
-                # ⚡ جلب الحسابات النقدية (الأوراق فقط - ليس المجموعات)
-                # المجموعات تنتهي بـ 000 (مثل 111000)
-                # نوع الحساب قد يكون 'cash' أو 'أصول نقدية'
-                cursor.execute(
-                    """
-                    SELECT code, name, balance FROM accounts
-                    WHERE (type = 'cash' OR type = 'أصول نقدية' OR code LIKE '111%')
-                    AND code NOT LIKE '%000'
-                    AND code IS NOT NULL
-                """
-                )
-                cash_accounts = cursor.fetchall()
-
-                if not cash_accounts:
-                    return
-
-                # ⚡ حساب إجمالي الدفعات لكل حساب باستخدام SQL
-                cursor.execute(
-                    """
-                    SELECT account_id, COALESCE(SUM(amount), 0) as total
-                    FROM payments
-                    WHERE account_id IS NOT NULL
-                    GROUP BY account_id
-                """
-                )
-                payments_by_account = {row[0]: row[1] for row in cursor.fetchall()}
-
-                # ⚡ حساب إجمالي المصروفات لكل حساب باستخدام SQL
-                cursor.execute(
-                    """
-                    SELECT account_id, COALESCE(SUM(amount), 0) as total
-                    FROM expenses
-                    WHERE account_id IS NOT NULL
-                    GROUP BY account_id
-                """
-                )
-                expenses_by_account = {row[0]: row[1] for row in cursor.fetchall()}
-            finally:
-                cursor.close()
-
-            # تحديث أرصدة الحسابات النقدية
-            updated_count = 0
-            for acc_code, acc_name, current_balance in cash_accounts:
-                payments_total = payments_by_account.get(acc_code, 0)
-                expenses_total = expenses_by_account.get(acc_code, 0)
-                new_balance = payments_total - expenses_total
-
-                # تحديث الرصيد إذا تغير
-                if abs((current_balance or 0) - new_balance) > 0.01:
-                    safe_print(
-                        f"INFO: [AccountingService] تحديث رصيد {acc_code} ({acc_name}): {current_balance} -> {new_balance}"
-                    )
-                    self.repo.update_account_balance(acc_code, new_balance)
-                    updated_count += 1
-
-            # تحديث أرصدة المجموعات (مجموع الأبناء)
-            self._update_parent_balances()
-
-            if updated_count > 0:
-                safe_print(f"INFO: [AccountingService] ✅ تم تحديث {updated_count} رصيد حساب نقدي")
-                # ⚡ إبطال الـ cache بعد التحديث
-                AccountingService._hierarchy_cache = None
-                AccountingService._hierarchy_cache_time = 0
-
-        except Exception as e:
-            safe_print(f"WARNING: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
-
-            traceback.print_exc()
-
-    def recalculate_account_balance(self, account_code: str) -> float:
+    def _legacy_recalculate_account_balance_sql(self, account_code: str) -> float:
         """
         ⚡ إعادة حساب رصيد حساب نقدي واحد من الدفعات والمصروفات
         يُستخدم بعد إضافة/تعديل/حذف دفعة أو مصروف
@@ -445,6 +733,115 @@ class AccountingService:
             safe_print(f"INFO: [AccountingService] ✅ تم إعادة حساب {len(results)} رصيد")
             return results
 
+        except Exception as e:
+            safe_print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            return results
+
+    def _recalculate_cash_balances(self) -> None:
+        """
+        إعادة حساب أرصدة الخزن من الحركة الفعلية للدفعات والمصروفات.
+        """
+        try:
+            accounts = self._safe_repo_list("get_all_accounts")
+            if not accounts:
+                return
+
+            inflow_by_code, outflow_by_code = self._build_cash_flow_totals(
+                accounts,
+                self._safe_repo_list("get_all_payments"),
+                self._safe_repo_list("get_all_expenses"),
+            )
+
+            updated_count = 0
+            for account in accounts:
+                code = str(getattr(account, "code", "") or "")
+                if not code or code.endswith("000"):
+                    continue
+                if not self._is_cash_account_like(account) or not self._is_leaf_account(account):
+                    continue
+
+                current_balance = self._safe_amount(getattr(account, "balance", 0.0))
+                new_balance = inflow_by_code.get(code, 0.0) - outflow_by_code.get(code, 0.0)
+                if abs(current_balance - new_balance) <= 0.01:
+                    continue
+
+                safe_print(
+                    f"INFO: [AccountingService] تحديث رصيد {code} ({account.name}): {current_balance} -> {new_balance}"
+                )
+                self.repo.update_account_balance(code, new_balance)
+                updated_count += 1
+
+            self._update_parent_balances()
+
+            if updated_count > 0:
+                safe_print(f"INFO: [AccountingService] ✅ تم تحديث {updated_count} رصيد حساب نقدي")
+                AccountingService._hierarchy_cache = None
+                AccountingService._hierarchy_cache_time = 0
+        except Exception as e:
+            safe_print(f"WARNING: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
+            traceback.print_exc()
+
+    def recalculate_account_balance(self, account_code: str) -> float:
+        """
+        إعادة حساب رصيد خزنة واحدة من الوارد والصادر الفعليين.
+        """
+        try:
+            inflow_by_code, outflow_by_code = self._build_cash_flow_totals(
+                self._safe_repo_list("get_all_accounts"),
+                self._safe_repo_list("get_all_payments"),
+                self._safe_repo_list("get_all_expenses"),
+            )
+            new_balance = inflow_by_code.get(account_code, 0.0) - outflow_by_code.get(
+                account_code, 0.0
+            )
+            self.repo.update_account_balance(account_code, new_balance)
+            safe_print(
+                f"SUCCESS: [AccountingService] ✅ تم تحديث رصيد {account_code} = {new_balance}"
+            )
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            return new_balance
+        except Exception as e:
+            safe_print(f"ERROR: [AccountingService] فشل إعادة حساب رصيد {account_code}: {e}")
+            return 0.0
+
+    def _legacy_recalculate_cash_balances_sql(self) -> dict[str, float]:
+        """
+        إعادة حساب أرصدة جميع الخزن وإرجاعها كقاموس.
+        """
+        results: dict[str, float] = {}
+        try:
+            safe_print("INFO: [AccountingService] 🔄 جاري إعادة حساب الأرصدة النقدية...")
+            accounts = self._safe_repo_list("get_all_accounts")
+            inflow_by_code, outflow_by_code = self._build_cash_flow_totals(
+                accounts,
+                self._safe_repo_list("get_all_payments"),
+                self._safe_repo_list("get_all_expenses"),
+            )
+
+            for account in accounts:
+                code = str(getattr(account, "code", "") or "")
+                if (
+                    not code
+                    or code.endswith("000")
+                    or not self._is_cash_account_like(account)
+                    or not self._is_leaf_account(account)
+                ):
+                    continue
+
+                new_balance = inflow_by_code.get(code, 0.0) - outflow_by_code.get(code, 0.0)
+                if abs(self._safe_amount(getattr(account, "balance", 0.0)) - new_balance) > 0.01:
+                    safe_print(
+                        f"INFO: [AccountingService] تصحيح {code} ({account.name}): {account.balance} -> {new_balance}"
+                    )
+                    self.repo.update_account_balance(code, new_balance)
+                results[code] = new_balance
+
+            self._update_parent_balances()
+            AccountingService._hierarchy_cache = None
+            AccountingService._hierarchy_cache_time = 0
+            safe_print(f"INFO: [AccountingService] ✅ تم إعادة حساب {len(results)} رصيد")
+            return results
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل إعادة حساب الأرصدة: {e}")
             return results
@@ -659,6 +1056,11 @@ class AccountingService:
                         "is_group": getattr(acc, "is_group", False),
                     }
 
+            operational_overrides = self._build_operational_balance_overrides(accounts)
+            for code, balance in operational_overrides.items():
+                if code in tree_map:
+                    tree_map[code]["total"] = float(balance)
+
             # ⚡ دالة استنتاج كود الأب
             def get_parent_code_from_code(code: str) -> str | None:
                 if not code:
@@ -726,98 +1128,54 @@ class AccountingService:
 
     def get_financial_summary(self) -> dict[str, float]:
         """
-        جلب ملخص مالي سريع (الأصول، الخصوم، الإيرادات، المصروفات، صافي الربح)
+        جلب ملخص تشغيلي مبسّط بعد تعطيل المحاسبة الداخلية.
 
-        ⚡ محسّن:
-        - يحسب الإيرادات من الدفعات المستلمة من المشاريع
-        - يحسب المصروفات من جدول expenses
-
-        Returns:
-            Dict مع المفاتيح: assets, liabilities, equity, revenue, expenses, cogs, opex, gross_profit, net_profit
+        القيم الآن مبنية على الخزن الفعلية وحركة الدفعات والمصروفات فقط.
         """
         try:
-            tree_map = self.get_hierarchy_with_balances()
-
-            # استخراج الأرصدة من الحسابات الرئيسية (يدعم 4 و 6 أرقام)
-            assets = tree_map.get("100000", {}).get("total", 0.0) or tree_map.get("1000", {}).get(
-                "total", 0.0
+            accounts = (
+                self.repo.get_all_accounts() if hasattr(self.repo, "get_all_accounts") else []
             )
-            liabilities = tree_map.get("200000", {}).get("total", 0.0) or tree_map.get(
-                "2000", {}
-            ).get("total", 0.0)
-            equity = tree_map.get("300000", {}).get("total", 0.0) or tree_map.get("3000", {}).get(
-                "total", 0.0
+            payments = (
+                self.repo.get_all_payments() if hasattr(self.repo, "get_all_payments") else []
+            )
+            expenses = (
+                self.repo.get_all_expenses() if hasattr(self.repo, "get_all_expenses") else []
             )
 
-            # ⚡ حساب الإيرادات من حسابات الإيرادات أو من الدفعات
-            revenue = tree_map.get("400000", {}).get("total", 0.0) or tree_map.get("4000", {}).get(
-                "total", 0.0
+            cash_accounts = [
+                account
+                for account in accounts
+                if self._is_leaf_account(account) and self._is_cash_account_like(account)
+            ]
+
+            revenue = sum(
+                self._safe_amount(getattr(payment, "amount", 0.0)) for payment in payments
             )
+            opex = sum(self._safe_amount(getattr(expense, "amount", 0.0)) for expense in expenses)
+            payments_by_cash, expenses_by_cash = self._build_cash_flow_totals(
+                cash_accounts,
+                payments,
+                expenses,
+            )
+            assets = 0.0
+            for account in cash_accounts:
+                code = str(getattr(account, "code", "") or "")
+                derived_balance = payments_by_cash.get(code, 0.0) - expenses_by_cash.get(code, 0.0)
+                if abs(derived_balance) > 0.01:
+                    assets += derived_balance
+                else:
+                    assets += self._safe_amount(getattr(account, "balance", 0.0))
 
-            # ⚡ إذا لم توجد حسابات إيرادات، احسب من الدفعات المستلمة باستخدام SQL
-            if revenue == 0:
-                try:
-                    # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
-                    cursor = self.repo.sqlite_conn.cursor()
-                    try:
-                        cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM payments")
-                        revenue = cursor.fetchone()[0]
-                        safe_print(f"INFO: [AccountingService] الإيرادات من الدفعات: {revenue}")
-                    finally:
-                        cursor.close()
-                except Exception as e:
-                    safe_print(f"WARNING: [AccountingService] فشل جلب الدفعات: {e}")
-
-            # ⚡ Enterprise: فصل COGS عن OPEX
-            cogs = tree_map.get("500000", {}).get("total", 0.0)
-            opex = tree_map.get("600000", {}).get("total", 0.0)
-
-            # للتوافق مع النظام القديم (4 أرقام)
-            if cogs == 0 and opex == 0:
-                expenses_from_accounts = tree_map.get("5000", {}).get("total", 0.0)
-                cogs = expenses_from_accounts
-                opex = 0
-
-            # إجمالي المصروفات من الحسابات
-            total_expenses = cogs + opex
-
-            # ⚡ إذا لم توجد حسابات مصروفات، احسب من جدول expenses مباشرة باستخدام SQL
-            if total_expenses == 0:
-                try:
-                    # ⚡ استخدام cursor منفصل لتجنب Recursive cursor error
-                    cursor = self.repo.sqlite_conn.cursor()
-                    try:
-                        cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM expenses")
-                        total_expenses = cursor.fetchone()[0]
-                        safe_print(
-                            f"INFO: [AccountingService] المصروفات من جدول expenses: {total_expenses}"
-                        )
-                    finally:
-                        cursor.close()
-                except Exception as e:
-                    safe_print(f"WARNING: [AccountingService] فشل جلب المصروفات: {e}")
-
-            # ⚡ حساب الأصول من الحسابات النقدية إذا لم توجد حسابات أصول رئيسية
-            if assets == 0:
-                for code, node in tree_map.items():
-                    if code.startswith("11") and not node.get("children"):
-                        assets += node.get("total", 0.0)
-                if assets == 0:
-                    for code, node in tree_map.items():
-                        if code.startswith("111") and node.get("children"):
-                            assets = node.get("total", 0.0)
-                            break
-
-            # ⚡ هامش الربح الإجمالي
-            gross_profit = revenue - cogs
-
-            # ⚡ صافي الربح = الإيرادات (الدفعات) - المصروفات
+            cogs = 0.0
+            total_expenses = opex
+            gross_profit = revenue
             net_profit = revenue - total_expenses
 
             return {
                 "assets": assets,
-                "liabilities": liabilities,
-                "equity": equity,
+                "liabilities": 0.0,
+                "equity": assets,
                 "revenue": revenue,
                 "cogs": cogs,
                 "opex": opex,
@@ -842,51 +1200,13 @@ class AccountingService:
 
     def handle_new_invoice(self, data: dict):
         """
-        معالج إنشاء فاتورة جديدة - ينشئ قيد يومية تلقائياً
-
-        القيد المحاسبي للفاتورة:
-        - مدين: حساب العملاء (1140) - يزيد المستحقات
-        - دائن: حساب الإيرادات (4110) - يزيد الإيرادات
+        معطّل بعد إزالة طبقة القيود المحاسبية الداخلية.
         """
         invoice: schemas.Invoice = data["invoice"]
         safe_print(
-            f"INFO: [AccountingService] تم استقبال حدث فاتورة جديدة: {invoice.invoice_number}"
+            f"INFO: [AccountingService] تم تجاهل قيد الفاتورة {invoice.invoice_number} لأن المحاسبة الداخلية معطلة"
         )
-
-        try:
-            # إنشاء معرف الفاتورة
-            invoice_id = (
-                getattr(invoice, "_mongo_id", None)
-                or str(getattr(invoice, "id", ""))
-                or invoice.invoice_number
-            )
-
-            # إنشاء القيد المحاسبي الرئيسي (العملاء مدين، الإيرادات دائن)
-            success = self.post_journal_entry(
-                date=invoice.issue_date or datetime.now(),
-                description=f"فاتورة مبيعات: {invoice.invoice_number}",
-                ref_type="invoice",
-                ref_id=invoice_id,
-                debit_account_code=self.ACC_RECEIVABLE_CODE,  # حساب العملاء (مدين)
-                credit_account_code=self.SERVICE_REVENUE_CODE,  # حساب الإيرادات (دائن)
-                amount=invoice.total_amount,
-            )
-
-            if success:
-                safe_print(
-                    f"SUCCESS: [AccountingService] تم إنشاء قيد اليومية للفاتورة {invoice.invoice_number}"
-                )
-            else:
-                safe_print(
-                    f"ERROR: [AccountingService] فشل إنشاء قيد اليومية للفاتورة {invoice.invoice_number}"
-                )
-
-        except Exception as e:
-            safe_print(
-                f"ERROR: [AccountingService] فشل معالجة الفاتورة {invoice.invoice_number}: {e}"
-            )
-
-            traceback.print_exc()
+        return
 
     def handle_new_project(self, data: dict):
         """
@@ -1194,12 +1514,13 @@ class AccountingService:
 
     def handle_edited_invoice(self, data: dict):
         """
-        (معدلة) تعديل القيد الأصلي للفاتورة (باللوجيك الرباعي).
+        معطّل بعد إزالة طبقة القيود المحاسبية الداخلية.
         """
         invoice: schemas.Invoice = data["invoice"]
         safe_print(
-            f"INFO: [AccountingService] تم استقبال حدث تعديل فاتورة: {invoice.invoice_number}"
+            f"INFO: [AccountingService] تم تجاهل تعديل قيد الفاتورة {invoice.invoice_number} لأن المحاسبة الداخلية معطلة"
         )
+        return
 
         try:
             ar_account = self.repo.get_account_by_code(self.ACC_RECEIVABLE_CODE)
@@ -1304,18 +1625,15 @@ class AccountingService:
         """
         safe_print("INFO: [AccountingService] جاري حساب إحصائيات الداشبورد الموحدة...")
         try:
-            # جلب الملخص المالي من الحسابات
-            summary = self.get_financial_summary()
-
-            # جلب KPIs من المشاريع والدفعات
             kpis = self.repo.get_dashboard_kpis()
 
-            # توحيد البيانات
-            total_sales = summary.get("revenue", 0)  # إجمالي الإيرادات من الحسابات
-            cash_collected = kpis.get("total_collected", 0)  # النقدية المحصلة من الدفعات
-            receivables = kpis.get("total_outstanding", 0)  # المستحقات المتبقية
-            expenses = kpis.get("total_expenses", 0)  # المصروفات
-            net_profit = cash_collected - expenses  # صافي الربح النقدي
+            # بعد تعطيل المحاسبة الداخلية، revenue في الملخص المالي يساوي إجمالي الدفعات نفسها.
+            # لذلك لا نعيد تحميل الحسابات/الدفعات/المصروفات مرة أخرى من get_financial_summary.
+            cash_collected = self._safe_amount(kpis.get("total_collected", 0))
+            receivables = self._safe_amount(kpis.get("total_outstanding", 0))
+            expenses = self._safe_amount(kpis.get("total_expenses", 0))
+            net_profit = self._safe_amount(kpis.get("net_profit_cash", cash_collected - expenses))
+            total_sales = cash_collected
 
             return {
                 "total_sales": total_sales,
@@ -1519,16 +1837,65 @@ class AccountingService:
             "amount": amount,
         }
 
+    def _notification_activity_to_entry(self, notification) -> dict | None:
+        timestamp = self._resolve_activity_timestamp(notification, "created_at", "last_modified")
+        if timestamp is None:
+            return None
+        operation = self._clean_activity_text(
+            self._activity_attr(notification, "operation_text", "")
+        )
+        if not operation:
+            operation = self._clean_activity_text(self._activity_attr(notification, "title", ""))
+        description = self._clean_activity_text(self._activity_attr(notification, "message", ""))
+        if not description:
+            description = self._clean_activity_text(self._activity_attr(notification, "title", ""))
+        details = self._clean_activity_text(self._activity_attr(notification, "details", ""))
+        amount = self._activity_attr(notification, "amount", None)
+        return self._compose_activity_entry(
+            timestamp=timestamp,
+            operation=operation or "عملية",
+            description=description or "بدون وصف",
+            details=details,
+            amount=amount,
+        )
+
     def get_recent_activity(self, limit: int = 8) -> list[dict]:
         """
         جلب آخر العمليات الموثقة لعرضها في لوحة التحكم.
 
-        الأولوية لسجل النشاطات الحقيقي القادم من العمليات نفسها
-        (إضافة/تعديل/حذف/تحصيل...). وإذا لم توجد سجلات نشاط بعد،
-        نعود مؤقتًا إلى الحركات المالية الموثقة ثم القيود اليومية
-        كـ fallback آمن للبيانات القديمة.
+        إذا كانت خدمة الإشعارات المزامنة متاحة فهي المصدر المعتمد لهذا القسم،
+        حتى لا تعود العمليات المحذوفة من السيرفر للظهور من مخازن محلية بديلة.
+        أما الفallback المحلي فيُستخدم فقط عند غياب خدمة الإشعارات أو تعذرها.
         """
         try:
+            if limit <= 0:
+                return []
+
+            try:
+                notification_module = sys.modules.get("services.notification_service")
+                notification_service_cls = getattr(notification_module, "NotificationService", None)
+                notification_service = (
+                    notification_service_cls.get_active_instance(self.repo)
+                    if notification_service_cls is not None
+                    else None
+                )
+                if notification_service is not None:
+                    recent_notifications = notification_service.get_recent_activity_notifications(
+                        limit
+                    )
+                    filtered_entries: list[dict] = []
+                    for notification in recent_notifications or []:
+                        entry = self._notification_activity_to_entry(notification)
+                        if entry:
+                            filtered_entries.append(entry)
+                            if len(filtered_entries) >= limit:
+                                break
+                    return filtered_entries
+            except Exception as notification_err:
+                safe_print(
+                    f"WARNING: [AccountingService] فشل جلب آخر العمليات من الإشعارات المزامنة: {notification_err}"
+                )
+
             activity_logs_getter = getattr(self.repo, "get_recent_activity_logs", None)
             if callable(activity_logs_getter):
                 try:
@@ -1540,39 +1907,150 @@ class AccountingService:
                         f"WARNING: [AccountingService] فشل جلب سجل النشاطات الموثقة: {log_err}"
                     )
 
-            recent_items: list[tuple[datetime, dict]] = []
+            recent_candidates: list[tuple[datetime, int, str, Any]] = []
+            client_name_cache: dict[str, str] = {}
+            project_name_cache: dict[tuple[str, str], str] = {}
+            client_lookup: dict[str, str] | None = None
+            project_lookup_by_client: dict[tuple[str, str], str] | None = None
+            project_lookup_generic: dict[str, str] | None = None
 
+            def push_recent_candidate(
+                timestamp: datetime, sequence: int, kind: str, item: Any
+            ) -> int:
+                candidate = (timestamp, -sequence, kind, item)
+                if len(recent_candidates) < limit:
+                    heappush(recent_candidates, candidate)
+                elif candidate > recent_candidates[0]:
+                    heappushpop(recent_candidates, candidate)
+                return sequence + 1
+
+            def resolve_client_name_cached(client_ref) -> str:
+                nonlocal client_lookup
+                ref = str(client_ref or "").strip()
+                if not ref:
+                    return ""
+                cached_name = client_name_cache.get(ref)
+                if cached_name is not None:
+                    return cached_name
+
+                name = ""
+                getter = getattr(self.repo, "get_client_by_id", None)
+                if callable(getter):
+                    try:
+                        client = getter(ref)
+                        name = self._clean_activity_text(self._activity_attr(client, "name", ""))
+                    except Exception:
+                        pass
+
+                if not name:
+                    if client_lookup is None:
+                        client_lookup = {}
+                        for client in self._safe_repo_list("get_all_clients"):
+                            resolved_name = self._clean_activity_text(
+                                self._activity_attr(client, "name", "")
+                            )
+                            if not resolved_name:
+                                continue
+                            for candidate in {
+                                str(self._activity_attr(client, "id", "") or "").strip(),
+                                str(self._activity_attr(client, "_mongo_id", "") or "").strip(),
+                                str(self._activity_attr(client, "mongo_id", "") or "").strip(),
+                                resolved_name,
+                            }:
+                                if candidate:
+                                    client_lookup[candidate] = resolved_name
+                    name = client_lookup.get(ref, ref)
+
+                client_name_cache[ref] = name
+                return name
+
+            def resolve_project_name_cached(project_ref, client_ref=None) -> str:
+                nonlocal project_lookup_by_client, project_lookup_generic
+                ref = str(project_ref or "").strip()
+                if not ref:
+                    return ""
+
+                client_key = str(client_ref or "").strip()
+                cache_key = (ref, client_key)
+                cached_name = project_name_cache.get(cache_key)
+                if cached_name is not None:
+                    return cached_name
+
+                name = ""
+                getter = getattr(self.repo, "get_project_by_number", None)
+                if callable(getter):
+                    try:
+                        project = getter(ref, client_key or None)
+                        name = self._clean_activity_text(self._activity_attr(project, "name", ""))
+                    except Exception:
+                        pass
+
+                if not name:
+                    getter = getattr(self.repo, "get_project_by_id", None)
+                    if callable(getter):
+                        try:
+                            project = getter(ref)
+                            name = self._clean_activity_text(
+                                self._activity_attr(project, "name", "")
+                            )
+                        except Exception:
+                            pass
+
+                if not name:
+                    if project_lookup_by_client is None or project_lookup_generic is None:
+                        project_lookup_by_client = {}
+                        project_lookup_generic = {}
+                        ambiguous_generic_refs: set[str] = set()
+
+                        for project in self._safe_repo_list("get_all_projects"):
+                            resolved_name = self._clean_activity_text(
+                                self._activity_attr(project, "name", "")
+                            )
+                            if not resolved_name:
+                                continue
+                            project_client = str(
+                                self._activity_attr(project, "client_id", "") or ""
+                            ).strip()
+
+                            candidates = {
+                                str(self._activity_attr(project, "id", "") or "").strip(),
+                                str(self._activity_attr(project, "_mongo_id", "") or "").strip(),
+                                str(self._activity_attr(project, "mongo_id", "") or "").strip(),
+                                resolved_name,
+                                str(
+                                    self._activity_attr(project, "invoice_number", "") or ""
+                                ).strip(),
+                            }
+                            for candidate in {value for value in candidates if value}:
+                                project_lookup_by_client[(candidate, project_client)] = (
+                                    resolved_name
+                                )
+                                existing_generic = project_lookup_generic.get(candidate)
+                                if existing_generic is None:
+                                    project_lookup_generic[candidate] = resolved_name
+                                elif existing_generic != resolved_name:
+                                    ambiguous_generic_refs.add(candidate)
+
+                        for candidate in ambiguous_generic_refs:
+                            project_lookup_generic.pop(candidate, None)
+
+                    if client_key:
+                        name = project_lookup_by_client.get((ref, client_key), "")
+                    if not name:
+                        name = project_lookup_generic.get(ref, "")
+
+                resolved = name or ref
+                project_name_cache[cache_key] = resolved
+                return resolved
+
+            sequence = 0
             for payment in self._safe_repo_list("get_all_payments"):
                 timestamp = self._resolve_activity_timestamp(
                     payment, "last_modified", "date", "created_at"
                 )
                 if timestamp is None:
                     continue
-                client_name = self._resolve_client_name(
-                    self._activity_attr(payment, "client_id", "")
-                )
-                project_name = self._resolve_project_name(
-                    self._activity_attr(payment, "project_id", ""),
-                    self._activity_attr(payment, "client_id", ""),
-                )
-                details_parts = []
-                if client_name:
-                    details_parts.append(f"العميل: {client_name}")
-                method = str(self._activity_attr(payment, "method", "") or "").strip()
-                if method:
-                    details_parts.append(f"الطريقة: {method}")
-                recent_items.append(
-                    (
-                        timestamp,
-                        self._compose_activity_entry(
-                            timestamp=timestamp,
-                            operation="تحصيل دفعة",
-                            description=project_name or client_name or "دفعة محصلة",
-                            details=" • ".join(details_parts),
-                            amount=float(self._activity_attr(payment, "amount", 0) or 0),
-                        ),
-                    )
-                )
+                sequence = push_recent_candidate(timestamp, sequence, "payment", payment)
 
             for expense in self._safe_repo_list("get_all_expenses"):
                 timestamp = self._resolve_activity_timestamp(
@@ -1580,33 +2058,58 @@ class AccountingService:
                 )
                 if timestamp is None:
                     continue
-                category = str(self._activity_attr(expense, "category", "") or "").strip()
-                expense_desc = str(self._activity_attr(expense, "description", "") or "").strip()
-                project_name = self._resolve_project_name(
-                    self._activity_attr(expense, "project_id", ""),
-                    None,
-                )
-                details_parts = []
-                if project_name:
-                    details_parts.append(f"المشروع: {project_name}")
-                if expense_desc:
-                    details_parts.append(expense_desc)
-                recent_items.append(
-                    (
-                        timestamp,
+                sequence = push_recent_candidate(timestamp, sequence, "expense", expense)
+
+            if recent_candidates:
+                recent_candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+                recent_items: list[dict] = []
+                for timestamp, _neg_sequence, kind, item in recent_candidates:
+                    if kind == "payment":
+                        client_id = self._activity_attr(item, "client_id", "")
+                        client_name = resolve_client_name_cached(client_id)
+                        project_name = resolve_project_name_cached(
+                            self._activity_attr(item, "project_id", ""),
+                            client_id,
+                        )
+                        details_parts = []
+                        if client_name:
+                            details_parts.append(f"العميل: {client_name}")
+                        method = str(self._activity_attr(item, "method", "") or "").strip()
+                        if method:
+                            details_parts.append(f"الطريقة: {method}")
+                        recent_items.append(
+                            self._compose_activity_entry(
+                                timestamp=timestamp,
+                                operation="تحصيل دفعة",
+                                description=project_name or client_name or "دفعة محصلة",
+                                details=" • ".join(details_parts),
+                                amount=float(self._activity_attr(item, "amount", 0) or 0),
+                            )
+                        )
+                        continue
+
+                    category = str(self._activity_attr(item, "category", "") or "").strip()
+                    expense_desc = str(self._activity_attr(item, "description", "") or "").strip()
+                    project_name = resolve_project_name_cached(
+                        self._activity_attr(item, "project_id", ""),
+                        None,
+                    )
+                    details_parts = []
+                    if project_name:
+                        details_parts.append(f"المشروع: {project_name}")
+                    if expense_desc:
+                        details_parts.append(expense_desc)
+                    recent_items.append(
                         self._compose_activity_entry(
                             timestamp=timestamp,
                             operation="تسجيل مصروف",
                             description=category or "مصروف",
                             details=" • ".join(details_parts),
-                            amount=-float(self._activity_attr(expense, "amount", 0) or 0),
-                        ),
+                            amount=-float(self._activity_attr(item, "amount", 0) or 0),
+                        )
                     )
-                )
 
-            if recent_items:
-                recent_items.sort(key=lambda item: item[0], reverse=True)
-                return [item for _, item in recent_items[:limit]]
+                return recent_items
 
             journal = self.get_recent_journal_entries(limit)
             if journal:
@@ -1639,7 +2142,7 @@ class AccountingService:
             invalidate_cache("accounts")
 
             # 🔔 إشعار
-            notify_operation(
+            _notify_operation(
                 "created", "account", f"{created_account.code} - {created_account.name}"
             )
 
@@ -1715,7 +2218,7 @@ class AccountingService:
                 app_signals.emit_data_changed("accounts")
                 invalidate_cache("accounts")
                 # 🔔 إشعار
-                notify_operation(
+                _notify_operation(
                     "updated", "account", f"{saved_account.code} - {saved_account.name}"
                 )
                 safe_print(
@@ -1762,7 +2265,7 @@ class AccountingService:
                 app_signals.emit_data_changed("accounts")
                 invalidate_cache("accounts")
                 # 🔔 إشعار
-                notify_operation("deleted", "account", account_name)
+                _notify_operation("deleted", "account", account_name)
             return result
         except Exception as e:
             safe_print(f"ERROR: [AccountingService] فشل حذف الحساب: {e}")
@@ -2253,30 +2756,114 @@ class AccountingService:
                 }
 
             type_str = _account_type_str(account)
+            is_cash_account = self._is_cash_account_like(account)
             identifiers = {
                 str(getattr(account, "_mongo_id", "") or ""),
                 str(getattr(account, "id", "") or ""),
                 str(getattr(account, "code", "") or ""),
             }
             identifiers = {x for x in identifiers if x}
+            all_accounts: list[schemas.Account] | None = None
+            account_reference_map: dict[str, schemas.Account] | None = None
+
+            def _ensure_account_reference_map() -> dict[str, schemas.Account]:
+                nonlocal all_accounts, account_reference_map
+                if account_reference_map is not None:
+                    return account_reference_map
+
+                all_accounts = self._safe_repo_list("get_all_accounts")
+                if account and not any(
+                    str(getattr(existing, "code", "") or "")
+                    == str(getattr(account, "code", "") or "")
+                    for existing in all_accounts
+                ):
+                    all_accounts = [*all_accounts, account]
+                account_reference_map = self._build_account_reference_map(all_accounts)
+                return account_reference_map
+
+            def _matches_cash_account_reference(reference: Any) -> bool:
+                raw = str(reference or "").strip()
+                if not raw:
+                    return False
+                if raw in identifiers:
+                    return True
+
+                normalized = (
+                    normalize_user_text(raw).strip() if any(ch.isalpha() for ch in raw) else ""
+                )
+                if normalized and normalized in identifiers:
+                    return True
+
+                resolved_account = self._resolve_account_reference(
+                    raw,
+                    _ensure_account_reference_map(),
+                    cash_only=True,
+                )
+                return bool(
+                    resolved_account
+                    and str(getattr(resolved_account, "code", "") or "") == account.code
+                )
+
+            def _expense_matches_cash_account(expense: schemas.Expense) -> bool:
+                explicit_ref = getattr(expense, "payment_account_id", None)
+                if explicit_ref and _matches_cash_account_reference(explicit_ref):
+                    return True
+                legacy_ref = getattr(expense, "account_id", None)
+                if legacy_ref and _matches_cash_account_reference(legacy_ref):
+                    return True
+
+                if not explicit_ref and not legacy_ref:
+                    return False
+
+                resolved_cash, _needs_repair, _needs_backfill = self._resolve_expense_cash_account(
+                    expense,
+                    _ensure_account_reference_map(),
+                )
+                return bool(
+                    resolved_cash and str(getattr(resolved_cash, "code", "")) == account.code
+                )
 
             start_iso = start_date.isoformat()
             end_iso = end_date.isoformat()
 
             opening_balance = 0.0
 
-            opening_payments = float(self.repo.sum_payments_before(account.code, start_iso) or 0.0)
-            opening_balance += _delta(type_str, opening_payments, 0.0)
+            all_payments = self._safe_repo_list("get_all_payments") if is_cash_account else []
+            all_expenses = self._safe_repo_list("get_all_expenses") if is_cash_account else []
 
-            opening_exp_paid = float(
-                self.repo.sum_expenses_paid_before(account.code, start_iso) or 0.0
-            )
-            opening_balance += _delta(type_str, 0.0, opening_exp_paid)
+            if is_cash_account:
+                for payment in all_payments:
+                    payment_date = getattr(payment, "date", None)
+                    if not payment_date or payment_date >= start_date:
+                        continue
+                    if _matches_cash_account_reference(getattr(payment, "account_id", None)):
+                        opening_balance += _delta(
+                            type_str, float(getattr(payment, "amount", 0) or 0), 0.0
+                        )
 
-            opening_exp_charged = float(
-                self.repo.sum_expenses_charged_before(account.code, start_iso) or 0.0
-            )
-            opening_balance += _delta(type_str, opening_exp_charged, 0.0)
+                for expense in all_expenses:
+                    expense_date = getattr(expense, "date", None)
+                    if not expense_date or expense_date >= start_date:
+                        continue
+                    if _expense_matches_cash_account(expense):
+                        opening_balance += _delta(
+                            type_str, 0.0, float(getattr(expense, "amount", 0) or 0)
+                        )
+            else:
+                opening_payments = float(
+                    self.repo.sum_payments_before(account.code, start_iso) or 0.0
+                )
+                opening_balance += _delta(type_str, opening_payments, 0.0)
+
+                opening_exp_paid = float(
+                    self.repo.sum_expenses_paid_before(account.code, start_iso) or 0.0
+                )
+                opening_balance += _delta(type_str, 0.0, opening_exp_paid)
+
+                opening_exp_charged = float(
+                    self.repo.sum_expenses_charged_before(account.code, start_iso) or 0.0
+                )
+                opening_balance += _delta(type_str, opening_exp_charged, 0.0)
 
             try:
                 entries_before = self.repo.get_journal_entries_before(start_iso) or []
@@ -2331,57 +2918,96 @@ class AccountingService:
                         }
                     )
 
-            for p in self.repo.get_payments_by_account(account.code, start_iso, end_iso) or []:
-                raw_movements.append(
-                    {
-                        "date": getattr(p, "date", None),
-                        "description": f"تحصيل ({getattr(p, 'method', '') or 'تحصيل'}): {getattr(p, 'client_id', '') or ''}",
-                        "reference": getattr(p, "_mongo_id", None)
-                        or str(getattr(p, "id", "") or ""),
-                        "debit": float(getattr(p, "amount", 0) or 0),
-                        "credit": 0.0,
-                    }
-                )
+            if is_cash_account:
+                for payment in all_payments:
+                    payment_date = getattr(payment, "date", None)
+                    if not payment_date or not (start_date <= payment_date <= end_date):
+                        continue
+                    if not _matches_cash_account_reference(getattr(payment, "account_id", None)):
+                        continue
+                    raw_movements.append(
+                        {
+                            "date": payment_date,
+                            "description": f"تحصيل ({getattr(payment, 'method', '') or 'تحصيل'}): {getattr(payment, 'client_id', '') or ''}",
+                            "reference": getattr(payment, "_mongo_id", None)
+                            or str(getattr(payment, "id", "") or ""),
+                            "debit": float(getattr(payment, "amount", 0) or 0),
+                            "credit": 0.0,
+                        }
+                    )
 
-            for exp in (
-                self.repo.get_expenses_paid_from_account(account.code, start_iso, end_iso) or []
-            ):
-                exp_date = getattr(exp, "date", None)
-                if not exp_date:
-                    continue
-                desc_parts = [f"مصروف: {getattr(exp, 'category', '') or ''}"]
-                if exp.description:
-                    desc_parts.append(str(exp.description))
-                raw_movements.append(
-                    {
-                        "date": exp_date,
-                        "description": " - ".join([p for p in desc_parts if p]),
-                        "reference": getattr(exp, "_mongo_id", None)
-                        or str(getattr(exp, "id", "") or ""),
-                        "debit": 0.0,
-                        "credit": float(getattr(exp, "amount", 0) or 0),
-                    }
-                )
+                for expense in all_expenses:
+                    expense_date = getattr(expense, "date", None)
+                    if not expense_date or not (start_date <= expense_date <= end_date):
+                        continue
+                    if not _expense_matches_cash_account(expense):
+                        continue
+                    desc_parts = [f"مصروف: {getattr(expense, 'category', '') or ''}"]
+                    if expense.description:
+                        desc_parts.append(str(expense.description))
+                    raw_movements.append(
+                        {
+                            "date": expense_date,
+                            "description": " - ".join([part for part in desc_parts if part]),
+                            "reference": getattr(expense, "_mongo_id", None)
+                            or str(getattr(expense, "id", "") or ""),
+                            "debit": 0.0,
+                            "credit": float(getattr(expense, "amount", 0) or 0),
+                        }
+                    )
+            else:
+                for p in self.repo.get_payments_by_account(account.code, start_iso, end_iso) or []:
+                    raw_movements.append(
+                        {
+                            "date": getattr(p, "date", None),
+                            "description": f"تحصيل ({getattr(p, 'method', '') or 'تحصيل'}): {getattr(p, 'client_id', '') or ''}",
+                            "reference": getattr(p, "_mongo_id", None)
+                            or str(getattr(p, "id", "") or ""),
+                            "debit": float(getattr(p, "amount", 0) or 0),
+                            "credit": 0.0,
+                        }
+                    )
 
-            for exp in (
-                self.repo.get_expenses_charged_to_account(account.code, start_iso, end_iso) or []
-            ):
-                exp_date = getattr(exp, "date", None)
-                if not exp_date:
-                    continue
-                desc_parts = [f"مصروف: {getattr(exp, 'category', '') or ''}"]
-                if exp.description:
-                    desc_parts.append(str(exp.description))
-                raw_movements.append(
-                    {
-                        "date": exp_date,
-                        "description": " - ".join([p for p in desc_parts if p]),
-                        "reference": getattr(exp, "_mongo_id", None)
-                        or str(getattr(exp, "id", "") or ""),
-                        "debit": float(getattr(exp, "amount", 0) or 0),
-                        "credit": 0.0,
-                    }
-                )
+                for exp in (
+                    self.repo.get_expenses_paid_from_account(account.code, start_iso, end_iso) or []
+                ):
+                    exp_date = getattr(exp, "date", None)
+                    if not exp_date:
+                        continue
+                    desc_parts = [f"مصروف: {getattr(exp, 'category', '') or ''}"]
+                    if exp.description:
+                        desc_parts.append(str(exp.description))
+                    raw_movements.append(
+                        {
+                            "date": exp_date,
+                            "description": " - ".join([p for p in desc_parts if p]),
+                            "reference": getattr(exp, "_mongo_id", None)
+                            or str(getattr(exp, "id", "") or ""),
+                            "debit": 0.0,
+                            "credit": float(getattr(exp, "amount", 0) or 0),
+                        }
+                    )
+
+                for exp in (
+                    self.repo.get_expenses_charged_to_account(account.code, start_iso, end_iso)
+                    or []
+                ):
+                    exp_date = getattr(exp, "date", None)
+                    if not exp_date:
+                        continue
+                    desc_parts = [f"مصروف: {getattr(exp, 'category', '') or ''}"]
+                    if exp.description:
+                        desc_parts.append(str(exp.description))
+                    raw_movements.append(
+                        {
+                            "date": exp_date,
+                            "description": " - ".join([p for p in desc_parts if p]),
+                            "reference": getattr(exp, "_mongo_id", None)
+                            or str(getattr(exp, "id", "") or ""),
+                            "debit": float(getattr(exp, "amount", 0) or 0),
+                            "credit": 0.0,
+                        }
+                    )
 
             raw_movements = [m for m in raw_movements if m.get("date")]
             raw_movements.sort(key=lambda x: x["date"])
@@ -2625,47 +3251,18 @@ class AccountingService:
 
     def reset_and_seed_agency_accounts(self) -> dict:
         """
-        RESET & SEED: Wipe existing accounts and create fresh Digital Marketing Agency structure
-
-        WARNING: This will delete ALL existing accounts and journal entries!
-        Use only for initial setup or complete reset.
+        معطّل بعد إزالة الحسابات الافتراضية الداخلية.
         """
-        safe_print("=" * 60)
-        safe_print("⚠️  WARNING: RESETTING ALL ACCOUNTING DATA!")
-        safe_print("=" * 60)
-
-        try:
-            # 1. Delete all existing accounts (if method exists)
-            if hasattr(self.repo, "delete_all_accounts"):
-                self.repo.delete_all_accounts()
-                safe_print("✅ Deleted all existing accounts")
-
-            # 2. Seed new accounts
-            result = self.seed_default_accounts()
-
-            safe_print("=" * 60)
-            safe_print("✅ RESET COMPLETE - Fresh Agency Accounts Created!")
-            safe_print("=" * 60)
-
-            return result
-
-        except Exception as e:
-            safe_print(f"ERROR: Failed to reset accounts: {e}")
-
-            traceback.print_exc()
-            return {"success": False, "created": 0, "errors": [str(e)], "message": "Reset failed"}
+        safe_print("INFO: [AccountingService] تم تعطيل إعادة إنشاء الحسابات الافتراضية.")
+        self._ensure_default_accounts_exist()
+        return {"success": True, "created": 0, "failed": 0, "message": "disabled"}
 
     def seed_default_accounts(self) -> dict:
         """
-        🏢 إنشاء شجرة حسابات Enterprise Level لـ SkyWave
-
-        ✅ نظام 6 أرقام (Scalability) - يدعم 999 حساب فرعي تحت كل بند
-        ✅ فصل COGS (5xxxxx) عن OPEX (6xxxxx) لتحليل الربحية
-        ✅ دفعات مقدمة من العملاء (Unearned Revenue)
+        معطّل بعد إزالة شجرة الحسابات الافتراضية.
         """
-        safe_print("=" * 60)
-        safe_print("INFO: [AccountingService] 🏢 إنشاء شجرة حسابات Enterprise Level...")
-        safe_print("=" * 60)
+        safe_print("INFO: [AccountingService] إنشاء الحسابات الافتراضية معطّل.")
+        return {"success": True, "created": 0, "failed": 0}
 
         # ==================== شجرة الحسابات الاحترافية (6 أرقام) ====================
         ENTERPRISE_ACCOUNTS: list[dict[str, Any]] = [  # pylint: disable=invalid-name

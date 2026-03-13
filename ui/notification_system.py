@@ -6,7 +6,9 @@
 - مزامنة الإشعارات بين الأجهزة عبر MongoDB
 """
 
+import atexit
 import json
+import os
 import queue
 import threading
 import time
@@ -27,6 +29,7 @@ from PyQt6.QtCore import (
     QThread,
     QTimer,
     pyqtSignal,
+    pyqtSlot,
 )
 from PyQt6.QtGui import QColor, QCursor
 from PyQt6.QtWidgets import (
@@ -1367,7 +1370,14 @@ class NotificationSyncWorker(QThread):
             # Adaptive idle backoff to reduce background load and UI event pressure.
             backoff_factor = 1 + min(4, idle_streak // 2)
             sleep_ms = int(self._check_interval * backoff_factor)
-            self.msleep(max(300, min(5000, sleep_ms)))
+            self._sleep_with_shutdown_checks(max(300, min(5000, sleep_ms)))
+
+    def _sleep_with_shutdown_checks(self, total_ms: int) -> None:
+        remaining_ms = max(0, int(total_ms))
+        while remaining_ms > 0 and self.is_running and not self.isInterruptionRequested():
+            chunk_ms = min(200, remaining_ms)
+            self.msleep(chunk_ms)
+            remaining_ms -= chunk_ms
 
     def _check_new_notifications(self):
         try:
@@ -1440,7 +1450,11 @@ class NotificationSyncWorker(QThread):
                     action_value = str(notif.get("action") or "").strip().lower()
                     title_text = str(notif.get("title") or "").strip()
                     message_text = str(notif.get("message") or "").strip()
-                    silent = bool(notif.get("silent")) or action_value == "sync_ping"
+                    silent = (
+                        bool(notif.get("silent"))
+                        or action_value == "sync_ping"
+                        or bool(notif.get("is_activity"))
+                    )
                     persistent_notification = self._is_persistent_remote_notification(notif)
                     if entity_key in {"system_settings", "settings"}:
                         # system_settings notifications are operational signals, not user toasts.
@@ -1519,9 +1533,9 @@ class NotificationSyncWorker(QThread):
         """إيقاف آمن للـ worker"""
         self.is_running = False
         try:
+            self.requestInterruption()
             self.quit()
-            if not self.wait(500):  # انتظر نصف ثانية فقط
-                self.terminate()  # إجبار الإيقاف إذا لم يستجب
+            self.wait(1500)
         except RuntimeError:
             # Qt object already deleted
             pass
@@ -1577,6 +1591,26 @@ class NotificationSyncWorker(QThread):
             syncer.instant_sync(table)
 
 
+class _NotificationUiBridge(QObject):
+    """Queues toast presentation onto the Qt GUI thread."""
+
+    present_requested = pyqtSignal(object)
+
+    def __init__(self):
+        super().__init__()
+        self.present_requested.connect(
+            self._deliver_payload,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+    @pyqtSlot(object)
+    def _deliver_payload(self, payload) -> None:
+        try:
+            NotificationManager._present_payload_from_bridge(payload)
+        except Exception as exc:
+            safe_print(f"ERROR: [NotificationManager] UI bridge failed: {exc}")
+
+
 class NotificationManager(QObject):
     """مدير الإشعارات - Singleton"""
 
@@ -1601,6 +1635,8 @@ class NotificationManager(QObject):
     _remote_duration_ms = 10000
     _dedupe_window_seconds = 8.0
     _max_recent_fingerprints = 400
+    _ui_bridge = None
+    _atexit_registered = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -1616,20 +1652,21 @@ class NotificationManager(QObject):
         self._notifications = []
         self._pending_notifications = deque()
         self._recent_fingerprints: dict[str, float] = {}
+        background_sync_enabled = not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        if background_sync_enabled:
+            self._sync_worker = NotificationSyncWorker()
+            self._sync_worker.new_notification.connect(self._handle_remote_notification_signal)
+            self._sync_worker.start()
 
-        self._sync_worker = NotificationSyncWorker()
-        self._sync_worker.new_notification.connect(self._on_remote_notification)
-        self._sync_worker.start()
-
-        # Async writer for cloud notification documents to keep UI saves responsive.
-        self._sync_write_queue = queue.Queue(maxsize=300)
-        self._sync_write_running = True
-        self._sync_write_thread = threading.Thread(
-            target=self._run_sync_write_worker,
-            daemon=True,
-            name="notification-sync-writer",
-        )
-        self._sync_write_thread.start()
+            # Async writer for cloud notification documents to keep UI saves responsive.
+            self._sync_write_queue = queue.Queue(maxsize=300)
+            self._sync_write_running = True
+            self._sync_write_thread = threading.Thread(
+                target=self._run_sync_write_worker,
+                daemon=True,
+                name="notification-sync-writer",
+            )
+            self._sync_write_thread.start()
 
         app = QApplication.instance()
         if app is not None:
@@ -1641,6 +1678,12 @@ class NotificationManager(QObject):
                 app.installEventFilter(self)
             except Exception:
                 pass
+        if not self.__class__._atexit_registered:
+            atexit.register(self.__class__.shutdown)
+            self.__class__._atexit_registered = True
+
+    def _handle_remote_notification_signal(self, data: dict) -> None:
+        self.__class__._on_remote_notification(data)
 
     @staticmethod
     def _find_toast_owner(widget) -> QMainWindow | None:
@@ -1785,8 +1828,9 @@ class NotificationManager(QObject):
         }
         return type_map.get(normalized, NotificationType.INFO)
 
+    @classmethod
     def _build_payload(
-        self,
+        cls,
         *,
         message: str,
         notification_type: NotificationType | str = NotificationType.INFO,
@@ -1806,7 +1850,7 @@ class NotificationManager(QObject):
             safe_duration = None
         return NotificationToastPayload(
             message=str(message or "").strip(),
-            notification_type=self._notification_type_from_value(notification_type),
+            notification_type=cls._notification_type_from_value(notification_type),
             title=str(title or "").strip() or None,
             duration=safe_duration,
             sync=bool(sync),
@@ -1817,6 +1861,78 @@ class NotificationManager(QObject):
             silent=bool(silent),
             persistent=bool(persistent),
         )
+
+    @classmethod
+    def _application_thread(cls):
+        app = QApplication.instance()
+        if app is None:
+            return None
+        thread_getter = getattr(app, "thread", None)
+        if not callable(thread_getter):
+            return None
+        try:
+            return thread_getter()
+        except Exception:
+            return None
+
+    @classmethod
+    def _is_ui_thread(cls) -> bool:
+        app_thread = cls._application_thread()
+        if app_thread is None:
+            return True
+        try:
+            return QThread.currentThread() is app_thread
+        except Exception:
+            return True
+
+    @classmethod
+    def _ensure_ui_bridge(cls):
+        app = QApplication.instance()
+        if app is None:
+            return None
+        bridge = getattr(cls, "_ui_bridge", None)
+        if bridge is None:
+            bridge = _NotificationUiBridge()
+            cls._ui_bridge = bridge
+
+        app_thread = cls._application_thread()
+        if app_thread is not None:
+            try:
+                if bridge.thread() is not app_thread:
+                    bridge.moveToThread(app_thread)
+            except Exception:
+                pass
+        return bridge
+
+    @classmethod
+    def _present_payload_from_bridge(cls, payload: NotificationToastPayload) -> bool:
+        if cls._app_is_quitting:
+            return False
+        manager = cls()
+        return manager._present_payload(payload)
+
+    @classmethod
+    def _submit_payload(cls, payload: NotificationToastPayload) -> bool:
+        if cls._app_is_quitting:
+            return False
+
+        app = QApplication.instance()
+        if app is None:
+            manager = getattr(cls, "_instance", None)
+            if manager is None:
+                return False
+            return manager._present_payload(payload)
+
+        if cls._is_ui_thread():
+            manager = cls()
+            return manager._present_payload(payload)
+
+        bridge = cls._ensure_ui_bridge()
+        if bridge is None:
+            return False
+
+        bridge.present_requested.emit(payload)
+        return True
 
     def _recent_fingerprint_cache(self) -> dict[str, float]:
         cache = self.__dict__.get("_recent_fingerprints")
@@ -1979,10 +2095,8 @@ class NotificationManager(QObject):
 
     @classmethod
     def _on_remote_notification(cls, data: dict):
-        manager = cls()
-
         try:
-            payload = manager._build_payload(
+            payload = cls._build_payload(
                 message=data.get("message", ""),
                 notification_type=data.get("type"),
                 title=data.get("title"),
@@ -1992,7 +2106,7 @@ class NotificationManager(QObject):
                 action=data.get("action"),
                 source_device=data.get("device_id"),
             )
-            manager._present_payload(payload)
+            cls._submit_payload(payload)
         except Exception as e:
             safe_print(f"ERROR: [NotificationManager] Remote notification failed: {e}")
 
@@ -2008,10 +2122,9 @@ class NotificationManager(QObject):
         action: str | None = None,
         persistent: bool = False,
     ):
-        manager = cls()
         try:
-            duration, sync = manager._coerce_legacy_duration_sync(duration, sync)
-            payload = manager._build_payload(
+            duration, sync = cls._coerce_legacy_duration_sync(duration, sync)
+            payload = cls._build_payload(
                 message=message,
                 notification_type=notification_type,
                 title=title,
@@ -2022,7 +2135,7 @@ class NotificationManager(QObject):
                 source_device=DEVICE_ID,
                 persistent=persistent,
             )
-            manager._present_payload(payload)
+            cls._submit_payload(payload)
         except Exception as e:
             safe_print(f"ERROR: [NotificationManager] Show failed: {e}")
 
@@ -2206,8 +2319,10 @@ class NotificationManager(QObject):
 
     @classmethod
     def shutdown(cls):
-        manager = cls()
         cls._app_is_quitting = True
+        manager = getattr(cls, "_instance", None)
+        if manager is None:
+            return
         app = QApplication.instance()
         if app is not None:
             try:
@@ -2234,6 +2349,16 @@ class NotificationManager(QObject):
         if manager._sync_write_thread and manager._sync_write_thread.is_alive():
             manager._sync_write_thread.join(timeout=1.0)
         manager._recent_fingerprints = {}
+        manager._sync_worker = None
+        manager._sync_write_thread = None
+        manager._sync_write_queue = None
+        bridge = getattr(cls, "_ui_bridge", None)
+        cls._ui_bridge = None
+        if bridge is not None:
+            try:
+                bridge.deleteLater()
+            except Exception:
+                pass
         for notification in list(manager._notifications):
             try:
                 notification.close_notification(reason="shutdown")
@@ -2241,6 +2366,7 @@ class NotificationManager(QObject):
                 pass
         manager._notifications.clear()
         manager._pending_notifications.clear()
+        cls._instance = None
 
 
 def notify_success(

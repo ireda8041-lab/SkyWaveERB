@@ -69,29 +69,15 @@ def test_preview_invoice_template_uses_selected_project_identity_for_payments(qa
         "_TemplateService",
         (),
         {
-            "templates_dir": "templates",
-            "generate_invoice_html": staticmethod(
-                lambda *, project, client_info, payments: captured.update(
+            "preview_template": staticmethod(
+                lambda *, project, client_info, payments, use_pdf=True: captured.update(
                     {"project": project, "client_info": client_info, "payments": payments}
                 )
-                or "<html></html>"
-            ),
-            "get_exports_dir": staticmethod(lambda: "exports"),
-            "build_export_basename": staticmethod(lambda project, client_info: "preview-file"),
+                or True
+            )
         },
     )()
     tab._get_payments_list = MagicMock(return_value=[{"amount": 250.0, "date": "2026-03-01"}])
-
-    created_dialogs: list[dict[str, object]] = []
-
-    class _PreviewDialog:
-        def __init__(self, **kwargs):
-            created_dialogs.append(kwargs)
-
-        def exec(self):
-            return None
-
-    monkeypatch.setattr("ui.project_manager.InvoicePreviewDialog", _PreviewDialog)
     monkeypatch.setattr("ui.project_manager.QMessageBox.warning", lambda *args, **kwargs: None)
 
     tab.preview_invoice_template()
@@ -99,7 +85,70 @@ def test_preview_invoice_template_uses_selected_project_identity_for_payments(qa
     tab._get_payments_list.assert_called_once_with(project)
     assert captured["project"] is project
     assert captured["payments"] == [{"amount": 250.0, "date": "2026-03-01"}]
-    assert created_dialogs
+
+
+def test_print_invoice_with_template_service_saves_invoice_without_preview_dialog(
+    qapp, monkeypatch
+):
+    tab = ProjectManagerTab.__new__(ProjectManagerTab)
+    project = schemas.Project(
+        id=9, name="Template Print Project", client_id="CLIENT-9", total_amount=1200.0
+    )
+    client = schemas.Client(
+        name="Template Client", phone="0111", email="template@example.com", address="Giza"
+    )
+    client.id = 9
+
+    captured: dict[str, object] = {}
+
+    tab.selected_project = project
+    tab.client_service = type(
+        "_ClientService",
+        (),
+        {
+            "get_client_by_id": staticmethod(
+                lambda client_id: client if client_id == project.client_id else None
+            )
+        },
+    )()
+    tab.template_service = type(
+        "_TemplateService",
+        (),
+        {
+            "export_invoice_document": staticmethod(
+                lambda *, project, client_info, payments, use_pdf=True, open_file=False: captured.update(
+                    {
+                        "project": project,
+                        "client_info": client_info,
+                        "payments": payments,
+                        "use_pdf": use_pdf,
+                        "open_file": open_file,
+                    }
+                )
+                or "exports/template-project.pdf"
+            )
+        },
+    )()
+    tab._get_payments_list = MagicMock(return_value=[{"amount": 300.0, "date": "2026-03-01"}])
+    tab.project_service = MagicMock()
+    tab.service_service = None
+
+    info_messages: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        "ui.project_manager.QMessageBox.information",
+        lambda *args, **kwargs: info_messages.append((args, kwargs)),
+    )
+    monkeypatch.setattr("ui.project_manager.QMessageBox.warning", lambda *args, **kwargs: None)
+    monkeypatch.setattr("ui.project_manager.QMessageBox.critical", lambda *args, **kwargs: None)
+
+    tab.print_invoice()
+
+    tab._get_payments_list.assert_called_once_with(project)
+    assert captured["project"] is project
+    assert captured["payments"] == [{"amount": 300.0, "date": "2026-03-01"}]
+    assert captured["use_pdf"] is True
+    assert captured["open_file"] is False
+    assert info_messages
 
 
 def test_context_menu_print_invoice_delegates_to_full_print_flow(qapp, monkeypatch):
@@ -177,8 +226,9 @@ def test_print_invoice_fallback_uses_repository_invoice_number(qapp, monkeypatch
         def __init__(self, settings_service=None):
             captured["settings_service"] = settings_service
 
-        def print_invoice(self, invoice_data):
+        def print_invoice(self, invoice_data, *, auto_open=True):
             captured["invoice_data"] = invoice_data
+            captured["auto_open"] = auto_open
             return "fallback.pdf"
 
     monkeypatch.setattr("ui.project_manager.InvoicePrintingService", _InvoicePrintingService)
@@ -191,3 +241,4 @@ def test_print_invoice_fallback_uses_repository_invoice_number(qapp, monkeypatch
     assert repo.calls == [("15", "CLIENT-15")]
     assert project.invoice_number == "SW-55555"
     assert captured["invoice_data"]["invoice_number"] == "SW-55555"
+    assert captured["auto_open"] is False

@@ -8,6 +8,20 @@ import os
 import sys
 
 
+def normalize_windows_path(path: str) -> str:
+    """Strip the Windows extended-path prefix because some GUI libraries reject it."""
+    if not isinstance(path, str):
+        return path
+
+    normalized = os.path.abspath(path)
+    if os.name == "nt":
+        if normalized.startswith("\\\\?\\UNC\\"):
+            normalized = "\\\\" + normalized[8:]
+        elif normalized.startswith("\\\\?\\"):
+            normalized = normalized[4:]
+    return os.path.normpath(normalized)
+
+
 def get_base_path():
     """
     الحصول على المسار الأساسي للتطبيق
@@ -18,12 +32,12 @@ def get_base_path():
         # في onedir: المسار هو مجلد الـ EXE
         # في onefile: المسار هو _MEIPASS
         if hasattr(sys, "_MEIPASS"):
-            return sys._MEIPASS
+            return normalize_windows_path(sys._MEIPASS)
         else:
-            return os.path.dirname(sys.executable)
+            return normalize_windows_path(os.path.dirname(sys.executable))
     else:
         # التطبيق يعمل كـ Python script
-        return os.path.abspath(".")
+        return normalize_windows_path(os.path.abspath("."))
 
 
 def get_resource_path(relative_path):
@@ -47,11 +61,12 @@ def get_resource_path(relative_path):
     ]
 
     for path in possible_paths:
-        if os.path.exists(path):
-            return path
+        normalized_path = normalize_windows_path(path)
+        if os.path.exists(normalized_path):
+            return normalized_path
 
     # إرجاع المسار الافتراضي
-    return os.path.join(base_path, relative_path)
+    return normalize_windows_path(os.path.join(base_path, relative_path))
 
 
 def get_asset_path(filename):

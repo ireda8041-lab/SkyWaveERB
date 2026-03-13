@@ -164,17 +164,21 @@ class SmartCache(Generic[T]):
         self.set(key, value, ttl_seconds)
         return value
 
-    def invalidate(self, key: str) -> bool:
+    def invalidate(self, key: str | None = None) -> bool:
         """
-        إبطال قيمة معينة
+        إبطال قيمة معينة أو مسح الـ cache بالكامل عند عدم تمرير مفتاح.
 
         Args:
-            key: مفتاح القيمة
+            key: مفتاح القيمة، أو None لمسح كل العناصر
 
         Returns:
             True إذا تم الإبطال
         """
         with self._lock:
+            if key is None:
+                had_items = bool(self._cache)
+                self._cache.clear()
+                return had_items
             if key in self._cache:
                 del self._cache[key]
                 return True

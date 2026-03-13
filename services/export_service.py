@@ -68,8 +68,10 @@ class ExportService:
             client = self.repo.get_client_by_id(client_text)
             if client and getattr(client, "name", None):
                 return str(client.name)
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(
+                f"WARNING: [ExportService] تعذر حل اسم العميل المرجعي '{client_text}': {exc}"
+            )
 
         return client_text
 
@@ -82,8 +84,10 @@ class ExportService:
             project = self.repo.get_project_by_number(project_text)
             if project and getattr(project, "name", None):
                 return str(project.name)
-        except Exception:
-            pass
+        except Exception as exc:
+            safe_print(
+                f"WARNING: [ExportService] تعذر حل اسم المشروع المرجعي '{project_text}': {exc}"
+            )
 
         return project_text
 

@@ -62,3 +62,11 @@ def test_login_accepts_valid_credentials_after_delay(qapp):
 
     wait_until(lambda: dialog.result() == dialog.DialogCode.Accepted, timeout_ms=2500)
     assert dialog.get_authenticated_user() is not None
+
+
+def test_login_styles_keep_labels_transparent(qapp):
+    dialog = LoginWindow(_FakeAuthService())
+    styles = dialog._get_styles()
+
+    assert "QLabel {" in styles
+    assert "background: transparent;" in styles

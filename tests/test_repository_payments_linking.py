@@ -324,6 +324,70 @@ def test_update_payment_rejects_duplicate_signature(repo):
     assert repo.get_total_paid_for_project(project.name) == pytest.approx(110.0)
 
 
+def test_update_payment_ignores_shadow_duplicate_of_same_payment(repo):
+    project = _create_project(repo, "Shadow Duplicate Payment", client_id="CLIENT-44")
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO payments (
+            _mongo_id, sync_status, created_at, last_modified, project_id, client_id,
+            date, amount, account_id, method, dirty_flag, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-payment-shadow-1",
+            "synced",
+            "2026-03-09T05:00:00",
+            "2026-03-09T05:00:00",
+            project.name,
+            project.client_id,
+            "2026-03-09T00:00:00",
+            500.0,
+            "1101",
+            "Cash",
+            0,
+            0,
+        ),
+    )
+    current_payment_id = cursor.lastrowid
+    cursor.execute(
+        """
+        INSERT INTO payments (
+            _mongo_id, sync_status, created_at, last_modified, project_id, client_id,
+            date, amount, account_id, method, dirty_flag, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "modified_offline",
+            "2026-03-09T05:00:01",
+            "2026-03-09T05:00:01",
+            str(project.id),
+            project.client_id,
+            "2026-03-09T00:00:00",
+            500.0,
+            "1101",
+            "Cash",
+            1,
+            0,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    current = repo.get_payment_by_id(current_payment_id)
+    assert current is not None
+
+    assert repo.update_payment(current_payment_id, current) is True
+
+    refreshed = repo.get_payment_by_id(current_payment_id)
+    assert refreshed is not None
+    assert float(refreshed.amount) == pytest.approx(500.0)
+    assert refreshed.project_id == str(project.id)
+    remaining_rows = repo.sqlite_conn.execute("SELECT COUNT(*) FROM payments").fetchone()[0]
+    assert remaining_rows == 1
+
+
 def test_get_total_paid_for_project_uses_aliases(repo):
     project = _create_project(repo, "مشروع مجموع المدفوعات", client_id="CLIENT-33")
 
@@ -1453,6 +1517,71 @@ def test_dashboard_outstanding_uses_project_identity_for_duplicate_names(repo):
         100.0
     )
     assert repo.get_total_paid_for_project(str(p2.id), client_id=p2.client_id) == pytest.approx(0.0)
+
+
+def test_dashboard_outstanding_resolves_project_aliases_with_client_scope(repo):
+    p1 = repo.create_project(
+        schemas.Project(
+            name="Shared KPI Alias",
+            client_id="CLIENT-KPI-1",
+            total_amount=900.0,
+            status=schemas.ProjectStatus.ACTIVE,
+        )
+    )
+    p2 = repo.create_project(
+        schemas.Project(
+            name="Shared KPI Alias",
+            client_id="CLIENT-KPI-2",
+            total_amount=1400.0,
+            status=schemas.ProjectStatus.ACTIVE,
+        )
+    )
+
+    cursor = repo.sqlite_conn.cursor()
+    try:
+        cursor.execute(
+            "UPDATE projects SET project_code = ?, invoice_number = ? WHERE id = ?",
+            ("KPI-CODE-001", "INV-KPI-001", p1.id),
+        )
+        cursor.execute(
+            "UPDATE projects SET project_code = ?, invoice_number = ? WHERE id = ?",
+            ("KPI-CODE-002", "INV-KPI-002", p2.id),
+        )
+        repo.sqlite_conn.commit()
+    finally:
+        cursor.close()
+
+    repo.create_payment(
+        schemas.Payment(
+            project_id="KPI-CODE-001",
+            client_id=p1.client_id,
+            date=datetime(2026, 2, 27, 10, 0, 0),
+            amount=150.0,
+            account_id="1101",
+            method="Cash",
+        )
+    )
+    repo.create_payment(
+        schemas.Payment(
+            project_id="INV-KPI-002",
+            client_id=p2.client_id,
+            date=datetime(2026, 2, 27, 11, 0, 0),
+            amount=200.0,
+            account_id="1101",
+            method="Cash",
+        )
+    )
+
+    kpis = repo.get_dashboard_kpis(force_refresh=True)
+
+    assert kpis["total_collected"] == pytest.approx(350.0)
+    assert kpis["total_outstanding"] == pytest.approx(1950.0)
+    assert repo.get_total_paid_for_project(str(p1.id), client_id=p1.client_id) == pytest.approx(
+        150.0
+    )
+    assert repo.get_total_paid_for_project(str(p2.id), client_id=p2.client_id) == pytest.approx(
+        200.0
+    )
 
 
 def test_duplicate_project_names_keep_tasks_scoped_to_stable_reference(repo):

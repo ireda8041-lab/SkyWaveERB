@@ -250,17 +250,6 @@ class ServiceEditorDialog(QDialog):
                 font-size: 11px;
                 spacing: 6px;
             }}
-            QCheckBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border-radius: 4px;
-                border: 1px solid {COLORS['border']};
-                background-color: {COLORS['bg_medium']};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {COLORS['primary']};
-                border-color: {COLORS['primary']};
-            }}
         """
         )
         layout.addWidget(self.status_checkbox)

@@ -1,0 +1,70 @@
+{
+  "generated_at": "2026-03-12T04:09:35.991760",
+  "samples": [
+    {
+      "name": "Repository()",
+      "ms": 604.1096999979345,
+      "peak_kb": 10560,
+      "extra": {
+        "runs": 1
+      }
+    },
+    {
+      "name": "repo.get_all_accounts()",
+      "ms": 0.38579999818466604,
+      "peak_kb": 19,
+      "extra": {
+        "result_size": 7
+      }
+    },
+    {
+      "name": "repo.get_all_payments()",
+      "ms": 16.50439998775255,
+      "peak_kb": 2531,
+      "extra": {
+        "result_size": 11
+      }
+    },
+    {
+      "name": "repo.get_all_expenses()",
+      "ms": 1.4005999983055517,
+      "peak_kb": 16,
+      "extra": {
+        "result_size": 5
+      }
+    },
+    {
+      "name": "repo.get_all_journal_entries()",
+      "ms": 0.11500000255182385,
+      "peak_kb": 1,
+      "extra": {
+        "result_size": 0
+      }
+    },
+    {
+      "name": "svc.get_dashboard_stats()",
+      "ms": 35.22780000639614,
+      "peak_kb": 2549,
+      "extra": {
+        "result_size": 5
+      }
+    },
+    {
+      "name": "svc.get_recent_activity(8)",
+      "ms": 4.083500010892749,
+      "peak_kb": 257,
+      "extra": {
+        "result_size": 8
+      }
+    },
+    {
+      "name": "svc.get_account_ledger_report(60d)",
+      "ms": 21.43459999933839,
+      "peak_kb": 2555,
+      "extra": {
+        "account_code": "111001",
+        "result_size": 7
+      }
+    }
+  ]
+}

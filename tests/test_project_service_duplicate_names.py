@@ -402,3 +402,44 @@ def test_print_project_invoice_accepts_client_scoped_duplicate_name(service_bund
     assert captured["payments"][0]["amount"] == pytest.approx(300.0)
     assert captured["background_image_path"] == "bg.png"
     assert captured["auto_open"] is False
+
+
+def test_project_service_delays_printing_service_until_needed(tmp_path, monkeypatch):
+    import core.repository as repo_mod
+    import services.project_service as project_service_mod
+
+    db_path = tmp_path / "project_service_lazy_printing.db"
+    monkeypatch.setenv("SKYWAVE_DISABLE_MONGO", "1")
+    monkeypatch.setattr(repo_mod, "LOCAL_DB_FILE", str(db_path), raising=True)
+    monkeypatch.setattr(
+        repo_mod.Repository, "_start_mongo_connection", lambda self: None, raising=True
+    )
+    monkeypatch.setattr(
+        repo_mod.Repository, "_start_mongo_retry_loop", lambda self: None, raising=True
+    )
+
+    created: list[object] = []
+
+    class _PrintingStub:
+        def __init__(self, settings_service):
+            created.append(settings_service)
+
+    monkeypatch.setattr(project_service_mod, "PRINTING_AVAILABLE", True, raising=True)
+    monkeypatch.setattr(project_service_mod, "ProjectPrintingService", _PrintingStub, raising=True)
+
+    repo = repo_mod.Repository()
+    try:
+        bus = EventBus()
+        accounting = AccountingService(repo, bus)
+        service = ProjectService(repo, bus, accounting, settings_service="settings")
+
+        assert service.printing_service is None
+        assert created == []
+
+        loaded = service._ensure_printing_service()
+
+        assert isinstance(loaded, _PrintingStub)
+        assert service.printing_service is loaded
+        assert created == ["settings"]
+    finally:
+        repo.close()

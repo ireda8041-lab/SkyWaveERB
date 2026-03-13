@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 
 from core import schemas
+from core.account_filters import infer_payment_method_from_account
 from core.event_bus import EventBus
 from core.repository import Repository
 from core.signals import app_signals
@@ -71,10 +72,8 @@ class ProjectService:
         # ⚡ Cache للأرقام التسلسلية
         self._sequence_cache: dict[str, int] = {}
 
-        # خدمة الطباعة
+        # خدمة الطباعة تُنشأ عند أول استخدام فعلي لتخفيف حمل بدء التشغيل.
         self.printing_service: ProjectPrintingService | None = None
-        if PRINTING_AVAILABLE:
-            self.printing_service = ProjectPrintingService(settings_service)
 
         self.bus.subscribe("CONVERT_TO_INVOICE", self.handle_convert_to_project)
         safe_print("INFO: 🏢 قسم المشاريع Enterprise (ProjectService) جاهز")
@@ -116,6 +115,18 @@ class ProjectService:
                 if text:
                     return text
         return reference
+
+    def _ensure_printing_service(self) -> ProjectPrintingService | None:
+        if self.printing_service is not None:
+            return self.printing_service
+        if not PRINTING_AVAILABLE:
+            return None
+        try:
+            self.printing_service = ProjectPrintingService(self.settings_service)
+        except Exception as e:
+            safe_print(f"WARNING: [ProjectService] فشل تهيئة خدمة الطباعة عند الطلب: {e}")
+            self.printing_service = None
+        return self.printing_service
 
     # ==================== Smart Coding Engine ====================
     def generate_smart_project_code(self, client_name: str, service_type: str | None = None) -> str:
@@ -833,33 +844,7 @@ class ProjectService:
             account = self.repo.get_account_by_code(account_code)
             if not account:
                 return "Other"
-
-            name = (account.name or "").lower()
-            code = account_code
-
-            # ⚡ البحث بالاسم أولاً (الأكثر دقة)
-            if "vodafone" in name or "فودافون" in name or "v/f" in name or "vf" in name:
-                return "Vodafone Cash"
-            elif "instapay" in name or "انستاباي" in name:
-                return "InstaPay"
-            elif "كاش" in name or "cash" in name or "خزينة" in name or "صندوق" in name:
-                return "Cash"
-            elif "بنك" in name or "bank" in name:
-                return "Bank Transfer"
-            elif "شيك" in name or "check" in name:
-                return "Check"
-
-            # ⚡ البحث بالكود (يدعم نظام 4 و 6 أرقام)
-            # نظام 4 أرقام: 1103 = Vodafone, 1104 = InstaPay, 1101 = Cash, 1102 = Bank
-            # نظام 6 أرقام: 111000 = Vodafone Cash, 111001 = V/F, 111101 = Cash
-            if code in ["1103", "111000"] or code.startswith("1110"):
-                return "Vodafone Cash"
-            elif code in ["1104"] or "instapay" in code.lower():
-                return "InstaPay"
-            elif code in ["1101", "111101"] or code.startswith("1111"):
-                return "Cash"
-            elif code.startswith("1102") or code.startswith("1112"):
-                return "Bank Transfer"
+            return infer_payment_method_from_account(account)
 
         except Exception as e:
             safe_print(f"WARNING: [ProjectService] فشل تحديد طريقة الدفع: {e}")
@@ -1279,7 +1264,8 @@ class ProjectService:
         client_id: str | None = None,
     ) -> str | None:
         """طباعة فاتورة المشروع مع خلفية مخصصة"""
-        if not self.printing_service:
+        printing_service = self._ensure_printing_service()
+        if not printing_service:
             safe_print("ERROR: [ProjectService] خدمة الطباعة غير متوفرة")
             return None
 
@@ -1314,7 +1300,7 @@ class ProjectService:
                 )
 
             # طباعة الفاتورة
-            return self.printing_service.print_project_invoice(
+            return printing_service.print_project_invoice(
                 project=project,
                 client_info=client_info,
                 payments=payments_data,

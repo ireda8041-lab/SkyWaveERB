@@ -84,12 +84,18 @@ class InvoicePrintingService:
         safe_print(f"INFO: [InvoicePrintingService] Templates directory: {self.templates_dir}")
         safe_print(f"INFO: [InvoicePrintingService] Exports directory: {self.exports_dir}")
 
-    def print_invoice(self, invoice_data: dict[str, Any]) -> str | None:
+    def print_invoice(
+        self,
+        invoice_data: dict[str, Any],
+        *,
+        auto_open: bool = True,
+    ) -> str | None:
         """
-        طباعة الفاتورة - توليد PDF وفتحه تلقائياً
+        طباعة الفاتورة - توليد PDF مع فتح اختياري للملف
 
         Args:
             invoice_data: بيانات الفاتورة (رقم الفاتورة، العميل، البنود، الإجماليات)
+            auto_open: فتح الملف الناتج مباشرة بعد إنشائه
 
         Returns:
             مسار ملف PDF إذا نجح، None إذا فشل
@@ -122,8 +128,8 @@ class InvoicePrintingService:
             pdf_path = self._generate_pdf(html_content, filename)
 
             if pdf_path and os.path.exists(pdf_path):
-                # Step 5: فتح PDF تلقائياً
-                self._open_file(pdf_path)
+                if auto_open:
+                    self._open_file(pdf_path)
                 safe_print(f"✅ [InvoicePrintingService] تم إنشاء الفاتورة بنجاح: {pdf_path}")
                 return pdf_path
             else:
@@ -247,6 +253,8 @@ class InvoicePrintingService:
         context.setdefault("client_phone", "---")
         context.setdefault("client_address", "---")
         context.setdefault("project_name", "---")
+        context.setdefault("currency_code", "EGP")
+        context.setdefault("currency_suffix", "ج.م")
         context.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
         context.setdefault("items", [])
         context.setdefault("grand_total", "0.00")

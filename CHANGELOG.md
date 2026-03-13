@@ -1,4 +1,17 @@
-﻿## [2.2.9] - 2026-03-03
+﻿## [2.2.11] - 2026-03-13
+
+### Fixed
+- Hardened account filtering and account/project linkage paths to reduce edge-case mismatches in accounting flows.
+- Improved notification and settings lifecycle handling to avoid unstable runtime behavior during sync-driven updates.
+- Tightened template/PDF export service behavior and fallback paths for safer document generation.
+
+### Changed
+- Refined toolbar/dialog responsiveness and dashboard navigation behavior for smoother daily usage.
+- Added/updated broad automated tests for startup, repository links, keyboard shortcuts, services, and UI smoke coverage.
+- Updated release metadata and installer package targets for v2.2.11.
+
+---
+## [2.2.9] - 2026-03-03
 
 ### Fixed
 - Prevented sync-related UI freezes by moving connectivity probes off the main thread.
@@ -267,3 +280,5 @@
 - Rebuilt the Windows release package and installer for the updated version.
 
 ---
+
+

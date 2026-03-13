@@ -322,7 +322,7 @@ class PaymentDialog(QDialog):
 
         buttons_layout.addStretch()
 
-        self.save_btn = QPushButton("💾 تسجيل الدفعة")
+        self.save_btn = QPushButton("💾 حفظ الدفعة")
         self.save_btn.setStyleSheet(BUTTON_STYLES["primary"])
         self.save_btn.setFixedHeight(28)
         self.save_btn.clicked.connect(self.save_payment)

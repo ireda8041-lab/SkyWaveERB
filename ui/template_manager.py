@@ -348,7 +348,7 @@ class TemplateManager(QWidget):
         # أزرار التحكم
         buttons_layout = QHBoxLayout()
 
-        self.add_btn = QPushButton("➕ إضافة قالب جديد")
+        self.add_btn = QPushButton("➕ إضافة قالب")
         self.add_btn.clicked.connect(self.add_template)
         buttons_layout.addWidget(self.add_btn)
 
@@ -357,17 +357,17 @@ class TemplateManager(QWidget):
         self.edit_btn.setEnabled(False)
         buttons_layout.addWidget(self.edit_btn)
 
-        self.preview_btn = QPushButton("👁️ معاينة")
+        self.preview_btn = QPushButton("👁️ معاينة القالب")
         self.preview_btn.clicked.connect(self.preview_template)
         self.preview_btn.setEnabled(False)
         buttons_layout.addWidget(self.preview_btn)
 
-        self.set_default_btn = QPushButton("⭐ تعيين كافتراضي")
+        self.set_default_btn = QPushButton("⭐ تعيين كقالب افتراضي")
         self.set_default_btn.clicked.connect(self.set_default_template)
         self.set_default_btn.setEnabled(False)
         buttons_layout.addWidget(self.set_default_btn)
 
-        self.delete_btn = QPushButton("🗑️ حذف")
+        self.delete_btn = QPushButton("🗑️ حذف القالب")
         self.delete_btn.clicked.connect(self.delete_template)
         self.delete_btn.setEnabled(False)
         buttons_layout.addWidget(self.delete_btn)

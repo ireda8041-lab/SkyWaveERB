@@ -765,7 +765,7 @@ class RealtimeSyncManager(QObject):
         # انتظار انتهاء الـ thread
         try:
             if self._watcher_thread and self._watcher_thread.is_alive():
-                self._watcher_thread.join(timeout=2)
+                self._watcher_thread.join(timeout=0.35)
         except Exception:
             pass
 

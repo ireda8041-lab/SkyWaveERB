@@ -60,6 +60,28 @@ class _FakeCollection:
         self.deleted.append(dict(filter_doc))
 
 
+class _MutableFakeCollection(_FakeCollection):
+    def update_one(self, filter_doc: dict, update_doc: dict, upsert: bool = False):
+        self.updated.append((dict(filter_doc), dict(update_doc), bool(upsert)))
+        for index, document in enumerate(self._records):
+            if _matches_mongo_query(document, filter_doc):
+                updated = dict(document)
+                updated.update(update_doc.get("$set", {}))
+                self._records[index] = updated
+                return SimpleNamespace(matched_count=1, modified_count=1, upserted_id=None)
+
+        if upsert:
+            self._seq += 1
+            doc = dict(update_doc.get("$set", {}))
+            doc_id = filter_doc.get("_id") or f"fake-{self._seq}"
+            doc["_id"] = doc_id
+            self._records.append(doc)
+            self.inserted.append(dict(doc))
+            return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=doc_id)
+
+        return SimpleNamespace(matched_count=0, modified_count=0, upserted_id=None)
+
+
 class _FakeMongoDB(dict):
     def __getitem__(self, key):
         if key not in self:
@@ -1143,6 +1165,53 @@ def test_push_local_changes_includes_modified_offline_without_dirty_flag(tmp_pat
     assert len(repo.mongo_db["clients"].inserted) == 1
 
 
+def test_push_local_changes_updates_legacy_string_mongo_id_without_duplicate_insert(tmp_path):
+    repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_push_legacy_id.db", remote_clients=[])
+    legacy_mongo_id = "4e5698e95aa84b5e9847f1fa"
+    repo.mongo_db["clients"] = _MutableFakeCollection(
+        [
+            {
+                "_id": legacy_mongo_id,
+                "name": "Legacy Client",
+                "created_at": "2026-02-09T10:00:00",
+                "last_modified": "2026-02-09T10:00:00",
+                "sync_status": "synced",
+                "is_deleted": False,
+            }
+        ]
+    )
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["clients"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO clients (_mongo_id, name, created_at, last_modified, sync_status, dirty_flag, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            legacy_mongo_id,
+            "Legacy Client Updated",
+            "2026-02-09T10:00:00",
+            "2026-02-09T10:05:00",
+            "modified_offline",
+            1,
+            0,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    result = manager.push_local_changes()
+
+    assert result["success"] is True
+    assert result["pushed"] == 1
+    assert result["errors"] == 0
+    assert len(repo.mongo_db["clients"]._records) == 1
+    assert len(repo.mongo_db["clients"].inserted) == 0
+    assert repo.mongo_db["clients"]._records[0]["_id"] == legacy_mongo_id
+    assert repo.mongo_db["clients"]._records[0]["name"] == "Legacy Client Updated"
+
+
 def test_push_local_changes_handles_deleted_status_without_dirty_flag(tmp_path):
     repo = _FakeRepoWithSqlite(db_path=tmp_path / "sync_push_deleted.db", remote_clients=[])
     manager = UnifiedSyncManagerV3(repo)
@@ -1991,6 +2060,74 @@ def test_find_local_record_for_notifications_ignores_local_id_collisions(tmp_pat
     )
 
     assert local_id is None
+
+
+def test_pull_remote_notifications_prunes_locally_stale_rows_after_hard_delete(tmp_path):
+    repo = _FakeNotificationRepoWithSqlite(tmp_path / "notifications_hard_delete.db")
+    manager = UnifiedSyncManagerV3(repo)
+    manager.TABLES = ["notifications"]
+
+    cursor = repo.sqlite_conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO notifications (
+            _mongo_id, title, message, type, priority, is_read,
+            created_at, last_modified, sync_status, dirty_flag, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "mongo-deleted-1",
+            "Deleted remotely",
+            "Should disappear locally",
+            "معلومة",
+            "متوسطة",
+            0,
+            "2026-03-08T08:00:00",
+            "2026-03-08T08:05:00",
+            "synced",
+            0,
+            0,
+        ),
+    )
+    cursor.execute(
+        """
+        INSERT INTO notifications (
+            _mongo_id, title, message, type, priority, is_read,
+            created_at, last_modified, sync_status, dirty_flag, is_deleted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            None,
+            "Pending local",
+            "Unsynced local row",
+            "معلومة",
+            "متوسطة",
+            0,
+            "2026-03-08T09:00:00",
+            "2026-03-08T09:05:00",
+            "new_offline",
+            1,
+            0,
+        ),
+    )
+    repo.sqlite_conn.commit()
+
+    result = manager.pull_remote_changes()
+
+    rows = repo.sqlite_conn.execute(
+        """
+        SELECT _mongo_id, title, sync_status, dirty_flag
+        FROM notifications
+        ORDER BY id ASC
+        """
+    ).fetchall()
+
+    assert result["success"] is True
+    assert result["deleted"] == 1
+    assert len(rows) == 1
+    assert rows[0]["title"] == "Pending local"
+    assert rows[0]["sync_status"] == "new_offline"
+    assert rows[0]["dirty_flag"] == 1
 
 
 def test_realtime_queue_change_dedupes_burst(monkeypatch):

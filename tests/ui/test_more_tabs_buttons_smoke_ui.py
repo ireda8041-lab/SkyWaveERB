@@ -4,7 +4,7 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QHeaderView, QLabel, QMessageBox
 
 from core import schemas
 
@@ -100,6 +100,12 @@ def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
         lambda *args, **kwargs: None,
         raising=True,
     )
+    monkeypatch.setattr(
+        project_manager.ProjectManagerTab,
+        "_refresh_currency_rates_for_projects",
+        lambda *args, **kwargs: None,
+        raising=True,
+    )
 
     tab = project_manager.ProjectManagerTab(
         project_service=_NoopService(),
@@ -112,6 +118,16 @@ def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
     )
     tab.show()
     qapp.processEvents()
+
+    assert tab.add_button.text() == "➕ إضافة مشروع"
+    assert tab.edit_button.text() == "✏️ تعديل المشروع"
+    assert tab.payment_button.text() == "💰 تسجيل دفعة"
+    assert tab.profit_button.text() == "📊 ربحية المشروع"
+    assert tab.print_button.text() == "💾 حفظ الفاتورة"
+    assert tab.delete_button.text() == "🗑️ حذف المشروع"
+    assert tab.preview_template_button.text() == "📂 فتح الفاتورة"
+
+    assert tab.refresh_currency_rates_button.text() == "🌐 تحديث الأسعار من الإنترنت"
 
     for btn_name in (
         "edit_button",
@@ -131,6 +147,7 @@ def test_projects_tab_buttons_click_without_crash(monkeypatch, qapp):
     QTest.mouseClick(tab.print_button, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.preview_template_button, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.refresh_button, Qt.MouseButton.LeftButton)
+    QTest.mouseClick(tab.refresh_currency_rates_button, Qt.MouseButton.LeftButton)
 
 
 def test_projects_tab_splitter_orientation_stays_horizontal(qapp):
@@ -309,7 +326,24 @@ def test_project_editor_save_uses_client_id_and_mongo_project_reference():
     dialog.name_input = _TextInput("Edited Shared Project")
     dialog.start_date_input = _DateInput(now)
     dialog.end_date_input = _DateInput(now)
-    dialog.project_items = []
+    dialog.project_items = [
+        schemas.ProjectItem(
+            service_id="svc-1",
+            description="USD Service",
+            quantity=1.0,
+            unit_price=100.0,
+            total=100.0,
+        )
+    ]
+    dialog._selected_currency_code = "USD"
+    dialog._selected_exchange_rate = 50.0
+    dialog._load_currencies_catalog = lambda: {
+        "USD": {"code": "USD", "rate": 50.0, "symbol": "USD"}
+    }
+    dialog._resolve_currency_snapshot = lambda code, fallback_rate=None: 50.0
+    dialog._current_currency_code = lambda: "USD"
+    dialog._current_exchange_rate = lambda: 50.0
+    dialog._current_currency_suffix = lambda: "USD"
     dialog.discount_type_combo = _Combo("percentage")
     dialog.discount_rate_input = _ValueInput(0.0)
     dialog.tax_rate_input = _ValueInput(0.0)
@@ -325,6 +359,10 @@ def test_project_editor_save_uses_client_id_and_mongo_project_reference():
     project_ref, payload = dialog.project_service.calls[0]
     assert project_ref == "mongo-project-19"
     assert payload["client_id"] == "19"
+    assert payload["currency"] == "USD"
+    assert payload["exchange_rate_snapshot"] == 50.0
+    assert payload["items"][0].unit_price == 5000.0
+    assert payload["items"][0].total == 5000.0
 
 
 def test_project_editor_ignores_reentrant_save_request():
@@ -344,6 +382,344 @@ def test_project_editor_ignores_reentrant_save_request():
     dialog._save_project_impl(should_close=True)
 
     assert dialog.project_service.called is False
+
+
+def test_project_editor_reload_payment_methods_does_not_duplicate_items():
+    from ui.project_manager import ProjectEditorDialog
+
+    class _SettingsService:
+        def get_setting(self, key):
+            assert key == "payment_methods"
+            return [
+                {"name": "Cash", "active": True},
+                {"name": "Bank", "active": True},
+                {"name": "Cash", "active": True},
+                {"name": "Disabled", "active": False},
+            ]
+
+    class _Combo:
+        def __init__(self):
+            self.items: list[tuple[str, object]] = []
+            self.current_index = -1
+            self.blocked = False
+
+        def blockSignals(self, value):
+            self.blocked = bool(value)
+
+        def clear(self):
+            self.items.clear()
+            self.current_index = -1
+
+        def addItem(self, text, userData=None):
+            self.items.append((text, userData))
+            if self.current_index == -1:
+                self.current_index = 0
+
+        def currentData(self):
+            if 0 <= self.current_index < len(self.items):
+                return self.items[self.current_index][1]
+            return None
+
+        def currentText(self):
+            if 0 <= self.current_index < len(self.items):
+                return self.items[self.current_index][0]
+            return ""
+
+        def count(self):
+            return len(self.items)
+
+        def itemData(self, index):
+            return self.items[index][1]
+
+        def itemText(self, index):
+            return self.items[index][0]
+
+        def setCurrentIndex(self, index):
+            self.current_index = index
+
+    dialog = ProjectEditorDialog.__new__(ProjectEditorDialog)
+    dialog.settings_service = _SettingsService()
+    dialog.payment_method_combo = _Combo()
+
+    dialog._load_payment_methods_for_combo()
+    dialog.payment_method_combo.setCurrentIndex(2)
+    dialog._load_payment_methods_for_combo()
+
+    assert dialog.payment_method_combo.items == [
+        ("تلقائي حسب الحساب", None),
+        ("Cash", "Cash"),
+        ("Bank", "Bank"),
+    ]
+    assert dialog.payment_method_combo.currentData() == "Bank"
+
+
+def test_project_editor_dialog_builds_currency_controls_without_crash(qapp):
+    from ui.project_manager import ProjectEditorDialog
+
+    class _ClientService:
+        def get_all_clients(self):
+            return []
+
+    class _ServiceService:
+        settings_service = None
+
+        def get_all_services(self):
+            return []
+
+    class _Repo:
+        def get_all_accounts(self):
+            return []
+
+        def get_all_currencies(self):
+            return [
+                {
+                    "code": "EGP",
+                    "name": "جنيه مصري",
+                    "symbol": "ج.م",
+                    "rate": 1.0,
+                    "is_base": True,
+                    "active": True,
+                },
+                {
+                    "code": "USD",
+                    "name": "دولار أمريكي",
+                    "symbol": "USD",
+                    "rate": 50.0,
+                    "active": True,
+                },
+            ]
+
+    class _AccountingService:
+        def __init__(self):
+            self.repo = _Repo()
+
+    dialog = ProjectEditorDialog(
+        project_service=_NoopService(),
+        client_service=_ClientService(),
+        service_service=_ServiceService(),
+        accounting_service=_AccountingService(),
+        project_to_edit=None,
+        parent=None,
+    )
+    qapp.processEvents()
+
+    assert dialog.currency_label.text() == "العملة:"
+    assert dialog.exchange_rate_label.text() == "السعر الفوري:"
+    assert dialog.currency_combo.count() == 2
+    assert dialog.currency_combo.currentData() == "EGP"
+    assert "العملة الأساسية" in dialog.exchange_rate_value_label.text()
+    assert dialog.add_item_button.text() == "إضافة بند"
+    assert dialog.refresh_currency_rates_button.text() == "🌐 تحديث الأسعار من الإنترنت"
+
+    dialog.close()
+
+
+def test_project_editor_refresh_currency_rates_updates_snapshot_without_touching_values(
+    monkeypatch, qapp
+):
+    from ui import project_manager
+    from ui.project_manager import ProjectEditorDialog
+
+    class _ClientService:
+        def get_all_clients(self):
+            return []
+
+    class _ServiceService:
+        settings_service = None
+
+        def get_all_services(self):
+            return []
+
+    class _Repo:
+        def __init__(self):
+            self.current_rate = 50.0
+            self.updated = False
+
+        def get_all_accounts(self):
+            return []
+
+        def get_all_currencies(self):
+            return [
+                {
+                    "code": "EGP",
+                    "name": "جنيه مصري",
+                    "symbol": "ج.م",
+                    "rate": 1.0,
+                    "is_base": True,
+                    "active": True,
+                },
+                {
+                    "code": "USD",
+                    "name": "دولار أمريكي",
+                    "symbol": "USD",
+                    "rate": self.current_rate,
+                    "active": True,
+                },
+            ]
+
+        def update_all_exchange_rates(self):
+            self.updated = True
+            self.current_rate = 55.5
+            return {
+                "updated": 1,
+                "failed": 0,
+                "results": {"USD": {"success": True, "rate": 55.5}},
+            }
+
+    class _AccountingService:
+        def __init__(self, repo):
+            self.repo = repo
+
+    class _ImmediateLoader:
+        def load_async(self, load_function, on_success=None, on_error=None, **kwargs):
+            _ = kwargs
+            try:
+                result = load_function()
+            except Exception as exc:  # pragma: no cover - defensive
+                if on_error:
+                    on_error(str(exc))
+                return
+            if on_success:
+                on_success(result)
+
+    repo = _Repo()
+    monkeypatch.setattr(
+        project_manager, "get_data_loader", lambda: _ImmediateLoader(), raising=True
+    )
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **kwargs: None, raising=False)
+
+    dialog = ProjectEditorDialog(
+        project_service=_NoopService(),
+        client_service=_ClientService(),
+        service_service=_ServiceService(),
+        accounting_service=_AccountingService(repo),
+        project_to_edit=None,
+        parent=None,
+    )
+    dialog.show()
+    qapp.processEvents()
+
+    dialog._refresh_currency_combo("USD", 50.0)
+    dialog.item_price_input.setValue(100.0)
+
+    dialog._refresh_currency_rates_for_editor()
+    qapp.processEvents()
+
+    assert repo.updated is True
+    assert dialog._current_currency_code() == "USD"
+    assert dialog.item_price_input.value() == 100.0
+    assert "55.5000" in dialog.exchange_rate_value_label.text()
+
+    dialog.close()
+
+
+def test_project_editor_reset_form_restores_default_tax_rate():
+    from PyQt6.QtCore import QDate
+
+    from ui.project_manager import ProjectEditorDialog
+
+    class _SettingsService:
+        def get_setting(self, key):
+            assert key == "default_tax_rate"
+            return 14.0
+
+    class _ServiceService:
+        def __init__(self):
+            self.settings_service = _SettingsService()
+
+    class _LineEdit:
+        def __init__(self, text="value"):
+            self._text = text
+
+        def clear(self):
+            self._text = ""
+
+    class _ComboText:
+        def __init__(self):
+            self.value = None
+
+        def setCurrentText(self, value):
+            self.value = value
+
+    class _ComboIndex:
+        def __init__(self):
+            self.index = None
+
+        def setCurrentIndex(self, value):
+            self.index = value
+
+    class _DateEdit:
+        def __init__(self):
+            self.value = None
+
+        def setDate(self, value):
+            self.value = value
+
+    class _Table:
+        def __init__(self):
+            self.rows = None
+
+        def setRowCount(self, value):
+            self.rows = value
+
+    class _Spin:
+        def __init__(self, value=0.0):
+            self._value = value
+
+        def value(self):
+            return self._value
+
+        def setValue(self, value):
+            self._value = value
+
+    title_holder: list[str] = []
+    flags = {"notes_reset": False, "totals_updated": False}
+
+    dialog = ProjectEditorDialog.__new__(ProjectEditorDialog)
+    dialog.service_service = _ServiceService()
+    dialog.project_to_edit = object()
+    dialog.is_editing = True
+    dialog.project_items = [object()]
+    dialog.setWindowTitle = lambda value: title_holder.append(value)
+    dialog.name_input = _LineEdit("Project Name")
+    dialog.status_combo = _ComboText()
+    dialog.start_date_input = _DateEdit()
+    dialog.end_date_input = _DateEdit()
+    dialog.items_table = _Table()
+    dialog.service_combo = _ComboIndex()
+    dialog.item_price_input = _Spin(50.0)
+    dialog.item_quantity_input = _Spin(2.0)
+    dialog.discount_type_combo = _ComboIndex()
+    dialog.discount_rate_input = _Spin(10.0)
+    dialog.tax_rate_input = _Spin(5.0)
+    dialog._reset_notes_template = lambda: flags.__setitem__("notes_reset", True)
+    dialog.payment_amount_input = _Spin(99.0)
+    dialog.payment_date_input = _DateEdit()
+    dialog.payment_account_combo = _ComboIndex()
+    dialog.update_totals = lambda: flags.__setitem__("totals_updated", True)
+
+    dialog._reset_form()
+
+    assert dialog.project_to_edit is None
+    assert dialog.is_editing is False
+    assert dialog.project_items == []
+    assert title_holder[-1] == "مشروع جديد"
+    assert dialog.name_input._text == ""
+    assert dialog.status_combo.value == schemas.ProjectStatus.ACTIVE.value
+    assert isinstance(dialog.start_date_input.value, QDate)
+    assert isinstance(dialog.end_date_input.value, QDate)
+    assert dialog.items_table.rows == 0
+    assert dialog.service_combo.index == 0
+    assert dialog.item_price_input._value == 0.0
+    assert dialog.item_quantity_input._value == 1.0
+    assert dialog.discount_type_combo.index == 0
+    assert dialog.discount_rate_input._value == 0.0
+    assert dialog.tax_rate_input._value == 14.0
+    assert flags["notes_reset"] is True
+    assert dialog.payment_amount_input._value == 0.0
+    assert isinstance(dialog.payment_date_input.value, QDate)
+    assert dialog.payment_account_combo.index == 0
+    assert flags["totals_updated"] is True
 
 
 def test_projects_table_shows_client_name_not_raw_id(monkeypatch, qapp):
@@ -585,6 +961,10 @@ def test_expenses_tab_buttons_click_without_crash(monkeypatch, qapp):
     tab.show()
     qapp.processEvents()
 
+    assert tab.add_button.text() == "➕ إضافة مصروف"
+    assert tab.edit_button.text() == "✏️ تعديل المصروف"
+    assert tab.delete_button.text() == "🗑️ حذف المصروف"
+
     QTest.mouseClick(tab.add_button, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.edit_button, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.delete_button, Qt.MouseButton.LeftButton)
@@ -592,6 +972,7 @@ def test_expenses_tab_buttons_click_without_crash(monkeypatch, qapp):
 
 
 def test_accounting_tab_buttons_click_without_crash(monkeypatch, qapp):
+    from core import schemas
     from ui import accounting_manager
 
     monkeypatch.setattr(
@@ -633,7 +1014,103 @@ def test_accounting_tab_buttons_click_without_crash(monkeypatch, qapp):
     tab.show()
     qapp.processEvents()
 
+    assert tab.hero_title_label.text() == "إدارة الخزن"
+    assert tab.summary_title_label.text() == "ملخص الخزن"
+    assert tab.accounts_panel_title.text() == "قائمة الخزن"
+    assert tab.summary_refresh_btn.text() == "🔄 تحديث الملخص"
+    assert tab.accounts_count_badge.text() == "0 خزنة"
+    assert tab.hero_frame.height() <= 120
+    assert tab.hero_badge_label.minimumWidth() >= 158
+    assert tab.hero_badge_label.height() >= 24
+    assert tab.summary_panel.minimumWidth() >= 348
+    assert tab.summary_refresh_btn.minimumWidth() >= 122
+    assert tab.accounts_count_badge.minimumWidth() >= 68
+    assert tab.assets_label.minimumHeight() >= 84
+    assert tab.net_profit_summary_label.minimumHeight() >= 94
+    assert tab.add_account_btn.text() == "➕ إضافة خزنة"
+    assert tab.edit_account_btn.text() == "✏️ تعديل الخزنة"
+    assert tab.delete_account_btn.text() == "⛔ تعطيل الخزنة"
+
+    summary_metric_title = tab.assets_label.findChild(QLabel, "MetricTitleV2")
+    assert summary_metric_title is not None
+    assert summary_metric_title.width() >= 180
+    assert tab.liabilities_label.y() > tab.assets_label.y()
+    assert tab.equity_label.y() == tab.liabilities_label.y()
+    assert tab.liabilities_label.x() != tab.equity_label.x()
+
+    account = schemas.Account(
+        name="خزنة اختبارية",
+        code="111000",
+        type=schemas.AccountType.CASH,
+    )
+    tab._render_accounts_tree({"111000": {"obj": account, "total": 100.0, "children": []}})
+    qapp.processEvents()
+    assert tab.hero_badge_label.text() == "مرتبطة بالتحصيل والصرف"
+    assert tab.accounts_model.item(0, 0).textAlignment() == int(
+        Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+    )
+    assert tab.accounts_model.item(0, 6).text() == "جاهزة"
+    assert tab.accounts_model.item(0, 0).data(Qt.ItemDataRole.UserRole).balance == 100.0
+    assert tab.assets_label.findChild(QLabel, "value_label").text() == "100.00 جنيه"
+    assert tab.accounts_tree.indentation() == 0
+    assert tab.accounts_tree.header().sectionResizeMode(0) == QHeaderView.ResizeMode.Stretch
+
+    negative_account = schemas.Account(
+        name="خزنة مدينة",
+        code="111199",
+        type=schemas.AccountType.CASH,
+    )
+    tab._render_accounts_tree(
+        {"111199": {"obj": negative_account, "total": -125.5, "children": []}}
+    )
+    qapp.processEvents()
+    assert tab.accounts_model.item(0, 5).text().startswith("-")
+
     QTest.mouseClick(tab.add_account_btn, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.edit_account_btn, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.delete_account_btn, Qt.MouseButton.LeftButton)
     QTest.mouseClick(tab.refresh_btn, Qt.MouseButton.LeftButton)
+
+
+def test_accounting_cashbox_summary_uses_operational_totals():
+    from ui import accounting_manager
+
+    first = schemas.Account(
+        name="خزنة أولى",
+        code="111001",
+        type=schemas.AccountType.CASH,
+        status=schemas.AccountStatus.ACTIVE,
+    )
+    second = schemas.Account(
+        name="خزنة ثانية",
+        code="111002",
+        type=schemas.AccountType.CASH,
+        status=schemas.AccountStatus.ARCHIVED,
+    )
+
+    summary = accounting_manager.AccountingManagerTab._cashbox_summary(
+        [
+            {
+                "account": first,
+                "category": "محفظة إلكترونية",
+                "inflow": 1500.0,
+                "outflow": 300.0,
+                "balance": 1200.0,
+            },
+            {
+                "account": second,
+                "category": "خزنة نقدية",
+                "inflow": 200.0,
+                "outflow": 450.0,
+                "balance": -250.0,
+            },
+        ]
+    )
+
+    assert summary["total_cashboxes"] == 2
+    assert summary["active_cashboxes"] == 1
+    assert summary["category_count"] == 2
+    assert summary["total_balance"] == 950.0
+    assert summary["total_inflow"] == 1700.0
+    assert summary["total_outflow"] == 750.0
+    assert summary["net_flow"] == 950.0
